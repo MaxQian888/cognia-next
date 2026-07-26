@@ -42,6 +42,7 @@ The six new manifest blocks:
 | `ocrProviders`      | OCR registry contributions          | `network:fetch` |
 | `workspaceBackends` | Issue-loop / sandbox runners        | `process:spawn` |
 | `messageRenderers`  | Custom `part.type` React components | `extension:ui`  |
+| `toolRenderers`     | Result cards for the plugin's own tools | `extension:ui` |
 | `aiProviders`       | Plugin-internal LLM / embedding     | `network:fetch` |
 | `modalMounts`       | Declarative modal pre-registration  | `extension:ui`  |
 | `chatMiddlewares`   | Around-style chat pipeline          | `agent:control` |
@@ -109,6 +110,39 @@ Or declaratively via `manifest.messageRenderers[]`:
 ```jsonc
 { "partType": "x-my-block", "entry": "renderer.js", "export": "MyBlockRenderer" }
 ```
+
+## ctx.toolResult — result card for your own tool
+
+`registerPartRenderer` cannot render a tool call: `tool-*` and `dynamic-tool`
+are host-owned part types, routed to the host's tool renderer before the
+part registry is ever consulted. So a plugin that ships an MCP tool uses this
+separate seam instead — otherwise its result falls through to the generic
+content-blocks card.
+
+```ts
+ctx.toolResult.registerToolResultRenderer("my_tool", MyToolCard)
+```
+
+Or declaratively via `manifest.toolRenderers[]`:
+
+```jsonc
+{ "toolName": "my_tool", "entry": "card.js", "export": "MyToolCard" }
+```
+
+Register the **bare** tool name. The host folds the namespaced provider form
+(`mcp__cognia-plugin-tools__my_tool`) onto it, so one registration covers
+every execution path.
+
+The card receives `{ part, sessionId }`. `part` is the whole tool part —
+including `mcpContent` when the result carried structured MCP blocks, so an
+image- or resource-returning tool can render them directly.
+
+There is no reserved-name list: the host's built-in card table (`Read`,
+`Grep`, `WebSearch`, …) is consulted **first**, so registering one of those
+names is harmless but inert. The host owns the tool chrome (header, status,
+timing, collapse); the plugin contributes only the result body, and a card
+that throws is contained by an error boundary rather than taking down the
+message.
 
 ## ctx.ai — plugin-internal LLM / embedding
 
@@ -480,7 +514,8 @@ the host renderer / consumer exists, not just the registry:
 
 > **Builtin limitation.** Import-based fields (those with an `entry` /
 > `export` module — `ocrProviders`, `workspaceBackends`, `messageRenderers`,
-> `aiProviders`, `modalMounts`, `chatMiddlewares`, `configComponent`,
+> `toolRenderers`, `aiProviders`, `modalMounts`, `chatMiddlewares`,
+> `configComponent`,
 > `contextPanels`) resolve their module only for **disk / marketplace-installed**
 > plugins, where the install path is a real fetchable directory. Built-in plugins
 > (`builtin://…`) cannot fetch a separate entry file, so they must register

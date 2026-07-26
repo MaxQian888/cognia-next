@@ -1,0 +1,97 @@
+---
+title: Pro IDE
+description: code-server embedded as a real editor pane — a loopback TCP control channel to a companion VS Code extension so agents can apply undo-able edits, plus the theme and locale plumbing that makes the embedded workbench actually look and speak like the app.
+---
+
+# Pro IDE
+
+<Status variant="beta">Beta · ADR-0088 · disk + settings.json (no Dexie)</Status>
+
+<TLDR>
+  The Pro IDE is a real code-server instance in a webview, driven by the app. Opening a file is easy —
+  code-server's own CLI does `--reuse-window <file>:<line>:<col>`. Everything past that is not: the CLI
+  can **only** open and reveal, so an undo-able edit or a read of the *active editor* has to run inside
+  the VS Code extension host. That is what the companion extension
+  (`sidecar/codeserver-agent-ext/`) and the loopback control channel
+  (`src-tauri/src/codeserver/agent_channel.rs`) exist for. The channel is newline-delimited JSON over a
+  **TCP socket on `127.0.0.1`, not a WebSocket**, and it is hosted in the `codeserver` module rather than
+  the opt-in companion API — so a core editor feature never depends on remote access being turned on.
+</TLDR>
+
+<StatGrid>
+  <Stat label="Rust modules" value="6" hint="src-tauri/src/codeserver" />
+  <Stat label="Frontend modules" value="6" hint="lib/codeserver incl. theme/" />
+  <Stat label="React hooks" value="5" hint="hooks/codeserver" />
+  <Stat label="Control transport" value="TCP" hint="newline-delimited JSON on 127.0.0.1" />
+  <Stat label="Persistence" value="none" hint="disk + settings.json — no Dexie tables" />
+</StatGrid>
+
+Design rationale: [ADR-0088](../adr/0088-pro-ide-code-server).
+
+## Why a dedicated channel, and why TCP
+
+Both ends of this channel are ours, and neither crosses a proxy or a browser. WebSocket's handshake,
+framing and client-side masking would be pure ceremony, so the channel is plain newline-delimited JSON
+over loopback TCP.
+
+Its **hosting** is the more interesting decision. It lives in the `codeserver` module, not in the opt-in
+`companion_api` server, so it comes up and tears down with the code-server processes it drives. A user who
+has never enabled remote access still gets a fully working editor — the agent↔IDE path is not gated behind
+a remote-access toggle it has nothing to do with.
+
+## Where it lives
+
+```
+src-tauri/src/codeserver/
+  process.rs         # spawn / supervise the code-server instance
+  download.rs        # fetch the code-server distribution
+  webview.rs         # the embedded webview host
+  agent_channel.rs   # loopback TCP control channel ↔ companion extension
+  commands.rs        # the Tauri command surface
+  PHASE2_AGENT_DRIVE.md   # the Phase 2 agent↔IDE design note
+
+lib/codeserver/
+  client.ts              # renderer-side channel client
+  pane-manager.ts        # the editor pane inside the app layout
+  open-file-queue.ts     # opens requested before the instance is ready
+  locale.ts              # display language ↔ argv.json
+  theme/vscode-chrome-map.ts   # app palette → VS Code Theme Colors
+  theme/build-settings.ts      # emits the settings.json the instance reads
+
+hooks/codeserver/       # pane · editor events · locale sync · settings sync · supported
+components/settings/pro-ide/pro-ide-section.tsx
+sidecar/codeserver-agent-ext/    # the companion VS Code extension
+```
+
+`open-file-queue.ts` exists because open requests can arrive before the instance is up; queueing them is
+what stops an early "open file" from being silently dropped.
+
+## Theme: not the importer's table reversed
+
+<Callout type="warn">
+  `lib/appearance/vscode-theme/token-mapping.ts` maps the other direction — it *reads* an arbitrary
+  third-party VS Code theme into cognia's 27 `ThemeColors` slots, and it is a **sampling** table: per slot
+  it lists a few keys popular themes are likely to define and takes the first hit. Inverting it yields
+  only ~30 keys, because that is all sampling ever needed. Everything else in the workbench —
+  `titleBar.*`, `statusBar.*`, `tab.inactiveBackground`, `terminal.*`, `menu.*`, `notifications.*` —
+  comes out unpainted.
+</Callout>
+
+`theme/vscode-chrome-map.ts` is therefore its own forward table: app palette → VS Code Theme Color, written
+to cover the whole workbench chrome rather than the subset the importer happened to sample.
+
+## Locale lives in `argv.json`, not `settings.json`
+
+VS Code's display language is a **runtime argument**, not a setting. The "Configure Display Language"
+command writes `{"locale": "…"}` into `argv.json` in the user-data folder, and the workbench reads it only
+at startup. `lib/codeserver/locale.ts` owns that file — which is why a locale change requires restarting
+the instance while a theme change requires neither a restart nor a file this module owns.
+
+## Related
+
+<Cards>
+  <Card title="ADR-0088" href="../adr/0088-pro-ide-code-server" description="The Pro IDE decision record" />
+  <Card title="Source Control" href="./source-control" description="The app's own Git panel" />
+  <Card title="Integrated Terminal" href="./integrated-terminal" description="The other developer surface" />
+  <Card title="Theming & i18n" href="../ui/theming-and-i18n" description="Where the app palette the theme map consumes is defined" />
+</Cards>

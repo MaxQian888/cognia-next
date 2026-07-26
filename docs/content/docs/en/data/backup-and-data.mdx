@@ -250,16 +250,67 @@ The migration is **idempotent**: running it twice on a v1 file produces the same
 
 ## Scheduled backups
 
-`BackupSchedulerProvider` (mounted in `app/layout.tsx`) drives encrypted auto-key writes every `intervalDays` to the user's configured folder.
+`BackupSchedulerProvider` drives encrypted auto-key writes every `intervalDays` to the user's configured folder. The cron scheduler offers the same package builder with exact domain selections: settings only, sessions only, plugins only, everything, or a custom full backup.
 
 **Tauri only.** Web users see a reminder banner instead because the browser can't write to a fixed folder unattended.
 
 The scheduler:
 
-1. Reads `settings.backupSchedule` — `{ enabled, intervalDays, folder }`.
+1. Reads `settings.backupAutoSchedule` — `{ enabled, intervalDays, retainCount, dirPath }`.
 2. Computes the next run from `lastSuccessfulBackup`.
-3. On wakeup (every 30 min), if `now ≥ nextRun`, builds a snapshot, encrypts with the auto-key, writes `cognia-backup-<ISO>.cgnbk` to the folder, and records to `backupHistory`.
-4. On failure, logs to `backupHistory` with `status: "failed"` and the error message; retries on the next wakeup.
+3. On wakeup (every 30 min), if `now ≥ nextRun`, builds a snapshot, encrypts with the auto-key, writes `cognia-backup-YYYY-MM-DD.enc.cbk` to the folder, and appends a success row to `backupHistory`.
+4. On failure, appends a failure row with the error message; the next eligible wakeup retries.
+
+Custom cron selections are enforced by the package builder:
+
+| Selection | Included payload |
+| --- | --- |
+| Settings only | `AppSettings` plus non-artifact persisted settings; never the API key |
+| Sessions only | exposed sessions, their messages, and session state |
+| Plugins only | non-builtin plugin catalog, permissions, reviews, and analytics |
+| Everything | every portable domain above, including plugins and artifacts |
+| Full backup | only the checked sessions, settings, artifacts, and other database-content groups |
+
+## Cloud destinations and provider support
+
+There are two supported cloud models:
+
+1. **WebDAV snapshot sync** — Cognia encrypts with a user sync passphrase and uploads directly.
+2. **Desktop-synced folder** — Cognia writes an auto-key-encrypted local file; the provider's official desktop client uploads it.
+
+### WebDAV providers
+
+| Provider | Endpoint / rule | Authentication | Official guide |
+| --- | --- | --- | --- |
+| Nextcloud | `https://HOST/remote.php/dav/files/USERNAME` | Password; app password for 2FA or OIDC | [Nextcloud WebDAV](https://docs.nextcloud.com/server/stable/developer_manual/client_apis/WebDAV/basic.html) |
+| ownCloud | `https://HOST/remote.php/dav/files/USERNAME` (legacy `/remote.php/webdav` is also documented) | Password or app password per server policy | [ownCloud WebDAV](https://doc.owncloud.com/server/next/classic_ui/files/access_webdav.html) |
+| Nutstore / Jianguoyun | `https://dav.jianguoyun.com/dav` | Account email plus app password | [Nutstore WebDAV](https://help.jianguoyun.com/?tag=webdav) |
+| Koofr | `https://app.koofr.net/dav/Koofr` | Account email plus application-specific password | [Koofr WebDAV](https://koofr.eu/help/koofr_with_webdav/how-do-i-connect-a-service-to-koofr-through-webdav/) |
+| pCloud US | `https://webdav.pcloud.com` | pCloud credentials and required 2FA confirmation | [pCloud WebDAV](https://help.pcloud.com/article/webdav) |
+| pCloud EU | `https://ewebdav.pcloud.com` | pCloud credentials and required 2FA confirmation | [pCloud WebDAV](https://help.pcloud.com/article/webdav) |
+| Yandex Disk | `https://webdav.yandex.ru` | Username plus app password; Yandex 360 plan required from 2026-06-22 | [Yandex Disk WebDAV](https://yandex.com/support/yandex-360/customers/disk/web/en/webdav) |
+| Other / self-hosted | Use the exact collection root supplied by the server | Password or app password | [WebDAV RFC 4918](https://www.rfc-editor.org/rfc/rfc4918) |
+
+The desktop connector supports the WebDAV contract methods `PROPFIND` and `MKCOL`, so connection testing, directory listing, restore, and first-time folder creation work through Tauri. TLS verification is strict by default. “Allow an invalid or self-signed certificate” is an explicit per-endpoint opt-in intended only for a server you control; it disables certificate verification for that endpoint.
+
+<Callout type="warning" title="Keep secrets out of chat">
+Enter server passwords, app passwords, private server URLs, and sync passphrases only in the local settings controls. The sync passphrase is separate from the server credential and provides zero-knowledge encryption before upload.
+</Callout>
+
+### Google Drive, Dropbox, OneDrive, and iCloud Drive
+
+These providers are supported through their locally synced folders rather than unofficial WebDAV adapters:
+
+| Provider | Supported setup |
+| --- | --- |
+| Google Drive | Install Drive for desktop, choose a mirrored or streamed location, then select a dedicated Cognia backup folder. [Official guide](https://support.google.com/drive/answer/13401938?hl=en) |
+| Dropbox | Install and sign in to the Dropbox desktop app, then select a folder inside Dropbox. [Official guide](https://help.dropbox.com/installs/download-dropbox) |
+| OneDrive | Enable OneDrive desktop sync, then select a folder inside OneDrive. [Official guide](https://support.microsoft.com/en-us/onedrive/sync-your-computer-s-files-and-folders-with-onedrive) |
+| iCloud Drive | Enable iCloud Drive in Finder, then select a folder inside iCloud Drive. [Official guide](https://support.apple.com/en-us/102314) |
+
+### Configure with AI
+
+Both provider selectors include an AI configuration button. It creates a new chat session, queues a five-minute, session-scoped prompt, navigates to chat, and submits it through the normal sender so chat persistence, tools, skills, and privacy gates remain active. The prompt contains the provider name and public official guide only; it never copies the current URL, path, username, password, or encryption passphrase.
 
 ## Backup history
 

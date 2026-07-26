@@ -1,0 +1,156 @@
+---
+title: Long-term Memory
+description: Durable personal recall — how a fact gets extracted from a conversation, governed by evidence and provenance, retrieved back into a turn, and exposed to plugins, MCP and the companion API without ever letting third-party content rewrite the agent's behavior.
+---
+
+# Long-term Memory
+
+<Status variant="beta">Beta · memories schema v65 → governance v118 → v122</Status>
+
+<TLDR>
+  A **learned memory** is a durable fact inferred from a conversation or deliberately saved by the user. Write
+  goes through one funnel — `storeMemoryCore()` (`lib/memory/api/store-memory.ts:78`) — and read through
+  another — `retrieveMemories()` (`packages/memory/src/retrieve/retriever.ts:266`), which
+  `applyMemoryContext()` (`packages/memory/src/runtime/apply-memory-context.ts:102`) folds into the turn.
+  What keeps it safe is **provenance**: only `user` / `explicit` memories may ever be `procedural`, so an
+  inbound connector message cannot silently rewrite how the agent behaves. Everything durable lives in
+  four Dexie tables — `memories` plus the immutable `memoryEvidence`, the durable `memoryJobs` queue, and
+  the content-free `memoryAuditEvents` — introduced together at **schema v118**.
+</TLDR>
+
+<StatGrid>
+  <Stat label="Core modules" value="28" hint="lib/memory — non-test .ts" />
+  <Stat label="Extracted core" value="20" hint="packages/memory/src — zero app imports" />
+  <Stat label="UI components" value="9" hint="components/memory" />
+  <Stat label="Dexie tables" value="4" hint="memories · memoryEvidence · memoryJobs · memoryAuditEvents" />
+  <Stat label="Memory types" value="3" hint="semantic · episodic · procedural" />
+  <Stat label="Scopes" value="4" hint="global · workspace · character · agent" />
+</StatGrid>
+
+The design rationale is in [ADR-0069](../adr/0069-long-term-memory-external-api-surfaces). This page
+documents the current implementation. The domain vocabulary — and the distinctions the product deliberately
+keeps separate — is maintained in `lib/memory/CONTEXT.md`.
+
+## What is and isn't a memory
+
+The subsystem is strict about this, because collapsing these categories is how a recall system turns into an
+unaccountable policy engine:
+
+| Concept | Owned by | Becomes learned memory? |
+| --- | --- | --- |
+| **Learned memory** | this subsystem | it *is* one — recall context, not enforced policy |
+| **Human instruction** | user / team / admin, with an explicit author and precedence | no |
+| **Task checkpoint** | a task or conversation lifecycle | only by explicit promotion |
+| **Procedure** | a Skill or Workflow | no — procedures load on demand |
+| **Team blackboard** | agents coordinating on one run | no — short-lived run state |
+| **External context** | tools, MCP, web search, connectors, screen capture | no — it is *evidence*, with its own trust level |
+
+A turn whose answer depended on external context is a **contaminated turn**. It may *use* learned memory, but
+it does not *create* it automatically — reviewed evidence still has to be promoted explicitly.
+
+## Where it lives
+
+```
+lib/memory/
+  api/            store-memory · search-memory · mutate-memory · wire   # the write funnel
+  retrieve/       retriever                                             # scope-union read
+  extract/        extractor · salience                                  # conversation → candidate facts
+  write/          run-memory-extraction · run-episodic-distill          # background write jobs
+  consolidate/    consolidator                                          # merge near-duplicates
+  forget/         decay                                                 # importance decay + eviction
+  lifecycle/      job-worker · maintenance · enqueue-reconcile          # the memoryJobs queue
+  control-plane/  policy · manage · contamination                       # governance decisions
+  runtime/        apply-memory-context · build-deps                     # injection into a turn
+  external/       providers (claude-code · codex) · discover · edit     # foreign memory files
+  CONTEXT.md                                                            # domain glossary
+
+packages/memory/src/            # the extracted core — zero `@/` imports
+lib/db/memories.ts              # Dexie CRUD: create/get/update/invalidate/touch/pin/list
+lib/plugin/api/memory-api.ts    # plugin-facing ctx.memory
+lib/external-bridge/handlers/memory.ts   # MCP tools
+components/memory/              # console · detail panel · conflict resolver · bulk toolbar
+app/memory/                     # the management route
+```
+
+The core was extracted into `@cognia/memory` so it builds standalone; `types/memory/memory.ts` is a
+boundary shim re-exporting `@cognia/memory/types/memory`, which keeps ~80 existing importers unchanged.
+
+## The type model
+
+```ts
+type MemoryType   = "semantic" | "episodic" | "procedural"
+type MemoryScope  = "global" | "workspace" | "character" | "agent"
+type MemoryStatus = "active" | "invalidated"
+```
+
+`active` rows are retrievable; `invalidated` rows are soft-deleted — kept for history and temporal
+reasoning, excluded from retrieval. Scope resolution is a union read: `character` memories are an override
+layer over `global`, and character wins on a key/text collision. `agent` is a private namespace — those rows
+are invisible without the same agent id.
+
+Governance adds four more axes, all introduced at v118:
+
+```ts
+type MemoryEvidenceState      = "legacy" | "supported"
+type MemoryReviewStatus       = "unreviewed" | "verified" | "conflict"
+type MemoryContaminationState = "clean" | "external-context" | "unknown"
+type MemorySensitivity        = "normal" | "sensitive"
+```
+
+Memories created before evidence tracking are marked `legacy` rather than backfilled with invented sources —
+they stay usable, but the UI must not present their origin or confidence as known.
+
+## Provenance is the trust boundary
+
+`provenance` records where a memory came from, and it gates what that memory is allowed to be:
+
+| Provenance | Source | Restriction |
+| --- | --- | --- |
+| `user` | auto-extracted from a local, user-authored session | — |
+| `explicit` | the user deliberately captured it (`/remember`, "记住 …") | — |
+| `inbound` | derived from connector-inbound (third-party) content | never `global` scope, never `procedural` |
+| `system` | created by the app itself (migrations, seeds) | — |
+| `external` | written through an API surface — plugin `ctx.memory`, MCP bridge tool, companion RPC | always PII-gated at write, never `procedural` |
+
+Only `user` and `explicit` provenance may yield a `procedural` memory. That single rule is what stops a
+message arriving over a connector from rewriting the agent's long-term behavior.
+
+## Storage
+
+`memories` arrives at **schema v65**, indexed for the reads the panel and the retriever actually perform —
+`scope` / `type` / `characterId` for panel grouping and scope-union retrieval, `status` because retrieval
+filters to `active` only, `lastAccessedAt` for the recency factor and access-time expiry, `vectorDocId` for
+reverse lookup during vector cleanup, `sourceSessionId` for "jump to source", `pinned` for eviction
+exemption, plus the `[scope+type]`, `[scope+status]` and `[type+status]` composites.
+
+**v118** is the governance migration. It widens `memories` with `projectId` / `agentId` / `reviewStatus`
+indexes and adds three tables that deliberately do not live inside the memory row:
+
+- `memoryEvidence` — immutable references to the source that supports a memory
+- `memoryJobs` — the durable extraction queue (`dedupeKey`, `nextAttemptAt`, `[status+queuedAt]`)
+- `memoryAuditEvents` — content-free audit trail
+
+**v122** adds a `sourceMessageId` index so the chat surface can find the memories a given message produced.
+
+## External surfaces
+
+Three surfaces can reach memory from outside the app, and all of them write through the same
+`storeExternalMemory()` path (`lib/memory/api/store-memory.ts:314`) — which is why the PII gate and the
+`external` provenance restriction cannot be bypassed by picking a different door:
+
+- **MCP tools** (`lib/external-bridge/handlers/memory.ts`) — `memory_search` / `memory_list` under the
+  `memory:read` scope, `memory_store` / `memory_update` / `memory_forget` under `memory:write`. Both scopes
+  default to **OFF**: this is distilled personal content, so exposure is opt-in.
+- **Plugins** — `ctx.memory`, built per-plugin by `createMemoryAPI(pluginId)`
+  (`lib/plugin/api/memory-api.ts:112`).
+- **Companion RPC** — the mobile/remote surface, over the transport described in
+  [Companion API](./companion-api).
+
+## Related
+
+<Cards>
+  <Card title="ADR-0069" href="../adr/0069-long-term-memory-external-api-surfaces" description="The decision record behind the subsystem" />
+  <Card title="External Bridge" href="./external-bridge" description="The MCP server that hosts the memory tools" />
+  <Card title="Plugin System" href="./plugin-system" description="How ctx.memory is granted and permissioned" />
+  <Card title="Storage" href="../data/storage" description="The Dexie schema these tables live in" />
+</Cards>

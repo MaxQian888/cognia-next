@@ -1,0 +1,106 @@
+---
+title: Embedded Browser
+description: A real webview inside the app plus a remote Chromium for public pages — one engine-agnostic tool surface, a fail-closed trust tier that decides which backend a URL may touch, flow recording and replay, and Chromium cookie import.
+---
+
+# Embedded Browser
+
+<Status variant="beta">Beta · ADR-0055 → 0072 → 0073</Status>
+
+<TLDR>
+  Two backends sit behind one interface. `BrowserEngine` (`lib/browser/agent-engine.ts:28`) is implemented
+  by `EmbeddedEngine` — the native Tauri webview — and by a remote Chromium engine, so the model's tool
+  surface stays engine-agnostic. Which one a URL reaches is not a preference but a security decision:
+  `resolveTrustTier()` (`lib/browser/protocol.ts`) classifies loopback hosts as `trusted` (dev preview →
+  embedded webview) and **everything else** as `public`, failing closed — an unparseable URL is treated as
+  public. An `EngineRoute` carries that verdict alongside the engine, including an explicit `untrusted`
+  flag meaning "page content must be treated as untrusted".
+</TLDR>
+
+<StatGrid>
+  <Stat label="Core modules" value="14" hint="lib/browser — non-test .ts, incl. recording/" />
+  <Stat label="UI components" value="12" hint="components/browser" />
+  <Stat label="React hooks" value="8" hint="hooks/browser" />
+  <Stat label="Rust modules" value="5" hint="src-tauri/src/browser" />
+  <Stat label="Trust tiers" value="2" hint="trusted (loopback) · public (everything else)" />
+</StatGrid>
+
+Design rationale: [ADR-0055](../adr/0055-agent-browser-loop) for the agent loop,
+[ADR-0072](../adr/0072-browser-action-recording) for recording, and
+[ADR-0073](../adr/0073-chromium-cookie-import) for cookie import.
+
+## The trust tier decides the backend
+
+```ts
+type TrustTier = "trusted" | "public"
+```
+
+`localhost`, `127.0.0.1` and `::1` are the trusted dev-preview tier and route to the embedded webview.
+Everything else is `public`. The classifier is deliberately fail-closed: if `new URL(...)` throws, the
+result is `public`, not an error the caller might ignore.
+
+That verdict travels with the engine rather than being recomputed:
+
+```ts
+interface EngineRoute {
+  engine: BrowserEngine
+  backend: "embedded" | "remote-chromium"
+  tier: TrustTier
+  /** Page content must be treated as untrusted (public origin). */
+  untrusted: boolean
+}
+```
+
+Because `untrusted` is part of the route, a caller cannot end up holding a public-origin page while
+believing it is looking at a local dev preview.
+
+## One tool surface, two engines
+
+`BrowserEngine` is the canonical interface both engines implement, so the agent's tools do not branch on
+backend. Around it sit the shared page-interaction contracts in `lib/browser/protocol.ts` — `ElementRect`,
+`ViewportSize`, `ContentArea`, `BrowserSelection`, the navigation/load signals, and `SnapshotNode`, which
+is one ref'd node in an agent snapshot of the page's accessibility tree. Agents read structure from that
+tree rather than from pixels.
+
+`OutputDetailLevel` (`"compact" | "standard" | "detailed" | "forensic"`) controls how much of a page a tool
+call returns — the lever that keeps a page snapshot from swamping a context window.
+
+## Where it lives
+
+```
+lib/browser/
+  agent-engine.ts          # BrowserEngine interface · EmbeddedEngine · EngineRoute
+  remote-chromium-engine.ts  # the public-tier backend
+  remote-stream.ts         # frame streaming from the remote backend
+  protocol.ts              # shared contracts + resolveTrustTier + SnapshotNode
+  client.ts                # renderer-side client
+  agent-activity.ts        # activity events surfaced in chat
+  annotation-queue.ts      # overlay annotations
+  pane-rect.ts             # webview geometry inside the app layout
+  cookie-import.ts         # Chromium cookie import (ADR-0073)
+  session-types.ts
+  recording/
+    recorder.ts · replayer.ts · protocol.ts · exporters.ts   # ADR-0072
+
+src-tauri/src/browser/
+  embedded.rs · overlay.rs · commands.rs · cookie_import/
+
+components/browser/     # 12 components — chrome, address bar, overlays
+hooks/browser/          # pane webview, history, loading, element selection,
+                        # region visibility, flow recorder, selection→chat
+```
+
+## Recording and replay
+
+`FlowRecorder` (`lib/browser/recording/recorder.ts:38`) captures a browsing flow; `replayer.ts` plays it
+back and `exporters.ts` converts it into a durable artifact. The recording protocol is kept separate from
+the live browsing protocol so a recorded flow does not silently depend on transient engine state.
+
+## Related
+
+<Cards>
+  <Card title="ADR-0055" href="../adr/0055-agent-browser-loop" description="The agent browsing loop and engine-agnostic tools" />
+  <Card title="ADR-0072" href="../adr/0072-browser-action-recording" description="Action recording" />
+  <Card title="ADR-0073" href="../adr/0073-chromium-cookie-import" description="Chromium cookie import" />
+  <Card title="Sandbox" href="./sandbox" description="Where the remote Chromium backend is isolated" />
+</Cards>

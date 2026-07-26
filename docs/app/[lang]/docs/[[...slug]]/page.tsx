@@ -4,7 +4,11 @@ import { DocsPage, DocsBody, DocsTitle, DocsDescription } from "fumadocs-ui/page
 import { source } from "@/lib/source"
 import { getMDXComponents } from "@/components/mdx-components"
 import { PageFooter } from "@/components/page-footer"
-import { getDocsLastModified } from "@/lib/last-modified"
+import { PageActions } from "@/components/page-actions"
+import { markdownHref } from "@/lib/llms-format"
+import { docsSourcePath, getDocsLastModified } from "@/lib/last-modified"
+import { metadataAlternates } from "@/lib/alternates"
+import { SITE_NAME, absoluteUrl } from "@/lib/site"
 
 type Props = {
   params: Promise<{ lang: string; slug?: string[] }>
@@ -17,15 +21,17 @@ export default async function Page({ params }: Props) {
 
   const MDX = page.data.body
   const footerSlug = [lang, ...(slug ?? [])]
-  const lastModified = getDocsLastModified(lang, slug)
+  const sourcePath = docsSourcePath(page.path)
+  const lastModified = getDocsLastModified(page.path)
 
   return (
     <DocsPage toc={page.data.toc} full={page.data.full}>
       <DocsTitle>{page.data.title}</DocsTitle>
       <DocsDescription>{page.data.description}</DocsDescription>
       <DocsBody>
+        <PageActions markdownHref={markdownHref(lang, page.slugs)} />
         <MDX components={getMDXComponents()} />
-        <PageFooter slug={footerSlug} lastModified={lastModified} />
+        <PageFooter slug={footerSlug} sourcePath={sourcePath} lastModified={lastModified} />
       </DocsBody>
     </DocsPage>
   )
@@ -40,8 +46,21 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const page = source.getPage(slug, lang)
   if (!page) notFound()
 
+  const { title, description } = page.data
+  const canonical = absoluteUrl(page.url)
+
   return {
-    title: page.data.title,
-    description: page.data.description,
+    title,
+    description,
+    alternates: metadataAlternates(canonical, slug),
+    openGraph: {
+      type: "article",
+      siteName: SITE_NAME,
+      locale: lang,
+      title,
+      description,
+      url: canonical,
+    },
+    twitter: { card: "summary_large_image", title, description },
   }
 }

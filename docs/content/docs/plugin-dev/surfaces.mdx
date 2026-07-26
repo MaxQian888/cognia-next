@@ -1,80 +1,216 @@
 ---
 title: Surfaces
-description: UI extension points — how to mount plugin components into chat header, sidebar, toolbar, canvas, panel, and settings.
+description: UI extension points — mounting React components into host slots, and the styling, layout and motion contracts that come with them.
 ---
 
 # Surfaces
 
-Surfaces are UI slots where plugins can inject React components. Declare them in `cognia-plugin.json` under `surfaces[]`, then use `ctx.api.extension.mount()` in `onActivate()` to render content.
+A surface is a named region of the host UI a plugin can render into. There are
+57 of them, enumerated as `CanonicalExtensionPoint` in
+`lib/plugin/contracts/plugin-points.ts`.
 
-## Surface kinds
+You render React. The host resolves React for you at load time — see
+[Sharing the host's React](#sharing-the-hosts-react), which you must get right
+or your first hook will throw.
 
-| Kind             | ID pattern                                             | Where it appears                                               |
-| ---------------- | ------------------------------------------------------ | -------------------------------------------------------------- |
-| `panel`          | Any string                                             | A dedicated tab in the left/right panel area                   |
-| `chat-action`    | Any string                                             | A button in the message action bar (hover a message to see it) |
-| `chat-header`    | Any string                                             | A button group in the ChatHeader toolbar                       |
-| `sidebar`        | `left.top`, `left.bottom`, `right.top`, `right.bottom` | Sections within the main sidebar                               |
-| `toolbar`        | `left`, `right`, `center`                              | The top application toolbar                                    |
-| `statusbar`      | `left`, `center`, `right`                              | The bottom status bar                                          |
-| `canvas-toolbar` | Any string                                             | Buttons in the canvas editor toolbar                           |
-| `settings`       | `general`, `appearance`, `data`, …                     | A section inside Settings                                      |
+## Mounting a component
 
-## Declaring surfaces
+Register in `activate()`. The call returns a disposer; the host also drops every
+registration automatically when your plugin is disabled.
 
-```json title="cognia-plugin.json"
-{
-  "surfaces": [
-    { "kind": "panel", "id": "my-panel", "title": "My Plugin" },
-    { "kind": "chat-action", "id": "summarize", "label": "Summarize" },
-    { "kind": "chat-header", "id": "export-btn", "label": "Export" },
-    { "kind": "settings", "id": "my-settings", "label": "My Plugin", "section": "general" }
-  ]
+```tsx title="src/index.tsx"
+import { definePlugin, type FullPluginContext, type PluginContext } from "@cognia/plugin-sdk"
+import { Button } from "@cognia/plugin-ui"
+
+export default definePlugin({
+  manifest: {
+    /* … */
+  },
+  activate: async (base: PluginContext) => {
+    const ctx = base as unknown as FullPluginContext
+
+    ctx.extensions.registerExtension(
+      "chat.input.actions",
+      ({ formFactor }) => <Button size="sm">Summarize</Button>,
+      { priority: 10, when: "chat.active && !chat.streaming" }
+    )
+  },
+})
+```
+
+<Callout>
+  `activate` is declared against the narrow `PluginContext`, but the host always
+  passes a `FullPluginContext` — that is where `extensions`, `theme` and the
+  other v2 namespaces live. Narrow once at the top of `activate` rather than
+  reaching for optional chaining at every call site.
+</Callout>
+
+`extensions.registerExtension(point, component, options?)`:
+
+| Argument    | Meaning                                                                                                    |
+| ----------- | ---------------------------------------------------------------------------------------------------------- |
+| `point`     | One of the 57 canonical ids. An unknown id is rejected (or warned, per governance mode).                    |
+| `component` | A React component. Receives `pluginId`, `extensionId`, `formFactor`, and a slot-specific `context` bag.     |
+| `priority`  | Higher sorts first within the slot. Default `0`.                                                            |
+| `when`      | Declarative visibility clause over the context-key store, e.g. `"chat.active"`. Re-evaluated automatically. |
+| `condition` | Imperative predicate. Prefer `when` — it re-renders on state change without your own subscription.          |
+
+Your component is wrapped in an error boundary: if it throws, it is removed from
+the slot and the rest of the UI is unaffected.
+
+## Form factors
+
+Slots differ enormously in size — `statusbar.right` is a ~28px strip,
+`sidebar.right.top` is a scrollable column. Each point declares the shape it
+expects, delivered to your component as the `formFactor` prop and readable at
+authoring time via `getExtensionPointFormFactor(point)`.
+
+| Form factor | Expect                                        | Example points                                             |
+| ----------- | --------------------------------------------- | ---------------------------------------------------------- |
+| `icon`      | One square control, ~24-32px. No room for text | `statusbar.*`, `toolbar.*`, `sidebar.left.*`               |
+| `row`       | One item in a horizontal action row            | `chat.input.actions`, `chat.message.actions`, `panel.header` |
+| `block`     | A full-width band, any height                  | `chat.header`, `settings.*`, `inbox.sidebar.section`        |
+| `panel`     | An owned region with its own scroll            | `sidebar.right.*`, `perf.panel`, `agent.team.panel`         |
+
+Render differently rather than assuming:
+
+```tsx
+export function Panel({ formFactor }) {
+  if (formFactor === "icon") return <Button size="icon-sm">★</Button>
+  return <Button size="sm">Summarize this thread</Button>
 }
 ```
 
-## Mounting a surface
+## Sharing the host's React
 
-```ts title="main.js"
-export async function onActivate(ctx) {
-  // Mount a panel
-  ctx.api.extension.mount("panel", "my-panel", () => {
-    const root = document.createElement("div")
-    root.textContent = "Hello from my plugin!"
-    return root
-  })
+Your bundle must **not** contain React. Two React instances in one page do not
+share a hook dispatcher, so a component built against its own copy throws
+`Invalid hook call` the moment the host renders it.
 
-  // Mount a chat action
-  ctx.api.extension.mount("chat-action", "summarize", (message) => {
-    return {
-      label: "Summarize",
-      icon: "✨",
-      onClick: async () => {
-        const summary = await summarize(message.content)
-        await ctx.api.session.sendMessage(message.sessionId, { content: summary })
-      },
-    }
-  })
-}
-```
+`cognia plugin build` handles this — it marks these specifiers external, and the
+host resolves them from its own module graph at load:
 
-## Surface lifecycle
+- `react`, `react/jsx-runtime`, `react/jsx-dev-runtime`
+- `@cognia/plugin-sdk`
+- `@cognia/plugin-ui`
 
-- **Mount** — Called when the UI slot becomes visible. Return a DOM node or React component descriptor.
-- **Update** — The host may call your factory again with new props; clean up the previous rendering.
-- **Unmount** — When the plugin is disabled or the user navigates away, the host removes your DOM tree.
+If you run esbuild yourself, pass the same `--external:` flags. `--external:react`
+alone is **not** enough: esbuild matches import paths literally, so the jsx
+runtime its own automatic transform emits would still be inlined.
+
+Anything else is bundled normally. `react-dom` is deliberately *not* shared —
+`createPortal` would let a contribution render outside the slot it was mounted
+into, escaping both the error boundary and the style bound below. A `require` for
+an unshared specifier fails at load with a message naming it.
+
+### Components
+
+`@cognia/plugin-ui` is the component surface: `Button`, `Badge`, `Card`,
+`Input`, `Label`, `Checkbox`, `Select`, `Tabs`, `Tooltip`, `Alert`, plus `cn`.
+They carry no literal colors, so they follow the user's theme, density and
+motion settings with no work from you.
+
+## Design tokens
+
+The host publishes its design system as CSS custom properties on `:root`. React
+contributions inherit them through the cascade — just use them.
+
+| Group      | Tokens                                                                                                  |
+| ---------- | ------------------------------------------------------------------------------------------------------- |
+| Surfaces   | `--background` `--foreground` `--card` `--card-foreground` `--popover` `--popover-foreground` `--muted` `--muted-foreground` |
+| Intent     | `--primary` `--secondary` `--accent` `--destructive` `--success` (each with a `-foreground` pair)         |
+| Chrome     | `--border` `--input` `--ring` `--radius`                                                                 |
+| Density    | `--density-spacing` `--density-gap` `--density-row-padding` `--density-input-height` `--density-line-height` |
+| Typography | `--line-height-scale` `--letter-spacing-em`                                                              |
+| Motion     | `--motion-duration-scale`                                                                                |
+
+These names are a stable contract; a regression test pins them against
+`app/globals.css`. Webviews get the same set injected into the frame, since an
+iframe inherits nothing from the host document.
 
 ## Styling
 
-Plugin surfaces inherit the host's CSS variables (`--color-background`, `--color-foreground`, etc.). Use these variables for theming instead of hard-coded colors. The host switches between light and dark mode automatically.
+Declare a stylesheet with `manifest.styles`. It is plain CSS — nothing compiles
+it, so ship it from wherever it lives and list it in `bundle_include`.
 
-```css
-.my-plugin-root {
-  background: var(--color-background);
-  color: var(--color-foreground);
-  padding: var(--spacing-4);
+```json title="plugin.json"
+{
+  "styles": "src/panel.css",
+  "bundle_include": ["src/panel.css"]
 }
 ```
+
+The host wraps the whole file in `@scope ([data-plugin-root="<your-id>"])` before
+injecting it, and stamps that attribute on every wrapper it renders you into. So
+your rules can only match inside your own subtree — writing `.badge { … }` cannot
+repaint the app's badges, and two plugins cannot reach each other.
+
+<Callout type="warn">
+  At-rules that bind a **name** rather than style an element — `@keyframes`,
+  `@font-face`, `@property`, `@counter-style` — are invalid inside `@scope`, so
+  the host hoists them back out to the top level. That makes those names
+  **global**: prefix them with your plugin id or you will collide with another
+  plugin.
+</Callout>
+
+```css title="src/panel.css"
+.panel {
+  gap: var(--density-gap);
+  border-radius: var(--radius);
+  color: var(--foreground);
+  background: var(--card);
+}
+
+/* Hoisted out of the scope block — hence the prefix. */
+@keyframes my-plugin-fade {
+  from {
+    opacity: 0;
+  }
+}
+```
+
+### Responding to width
+
+Slot wrappers are query containers (`container-type: inline-size`), so use
+`@container` rather than measuring:
+
+```css
+@container (max-width: 20rem) {
+  .panel {
+    flex-direction: column;
+  }
+}
+```
+
+Context panels are sized by the workbench instead; read
+`ctx.contextPanels.getState()` for its narrow/wide/focus mode.
+
+## Motion
+
+CSS animation follows the user automatically: `--motion-duration-scale` tracks
+their speed setting, and the host's reduce-motion reset collapses animations when
+they ask for it.
+
+**JavaScript-driven animation does not.** The Web Animations API,
+`requestAnimationFrame` and bundled animation libraries cannot see either signal,
+so check before you animate:
+
+```tsx
+// `ctx` is the narrowed FullPluginContext from activate(), above.
+const { motion } = ctx.theme.getTheme()
+if (!motion.reduced) {
+  node.animate([{ opacity: 0.4 }, { opacity: 1 }], {
+    duration: 600 * motion.durationScale,
+  })
+}
+```
+
+`motion.reduced` covers both the in-app toggle and the OS-level
+`prefers-reduced-motion`, so it is the only check you need.
+
+`ctx.theme.getTheme()` also returns `density`, `typography` and `radius` in the
+same applied-value form, for the cases where you genuinely need the numbers in
+JS rather than the variables in CSS.
 
 ## Related
 
@@ -82,7 +218,8 @@ Plugin surfaces inherit the host's CSS variables (`--color-background`, `--color
   <Card
     title="API Overview"
     href="./api-overview"
-    description="The extension.* namespace in detail."
+    description="The ctx.* namespaces in detail."
   />
+  <Card title="Packaging" href="./packaging" description="Building, signing and installing bundles." />
   <Card title="Lifecycle Hooks" href="./lifecycle-hooks" description="Responding to host events." />
 </Cards>

@@ -1,0 +1,111 @@
+---
+title: Integrated Terminal
+description: A real PTY inside the app — transport selection across desktop, mobile and remote hosts, nonce-validated OSC 633 shell integration, SSH sessions, headless exec for agents, and the trust gate an agent must pass before it can type into your shell.
+---
+
+# Integrated Terminal
+
+<Status variant="stable">Stable · ADR-0031 → 0033</Status>
+
+<TLDR>
+  The terminal is a real PTY, not an emulator over a command runner. Which pipe carries it is decided by
+  `selectTerminalTransport()` (`lib/terminal/pick-transport.ts:31`): a Tauri desktop gets the in-process
+  `tauri-channel`, Capacitor mobile gets `ws` over LAN/mDNS, and a desktop driving a remote Cognia host
+  retargets to the host's `/ws/v1/terminal`. Prompt boundaries, exit codes and cwd changes come from
+  **OSC 633** shell-integration sequences parsed in Rust (`crates/cognia-terminal/src/osc633.rs`), which
+  validates a per-spawn nonce so a hostile process inside the terminal can't fabricate prompt decorations.
+  Agents get their own door — `headless-exec` plus a per-tab trust gate (`lib/terminal/agent-trust.ts`).
+</TLDR>
+
+<StatGrid>
+  <Stat label="Core modules" value="30" hint="lib/terminal — non-test .ts" />
+  <Stat label="UI components" value="17" hint="components/terminal" />
+  <Stat label="Rust modules" value="11" hint="crates/cognia-terminal/src" />
+  <Stat label="Tauri commands" value="9" hint="crates/cognia-terminal/src/commands.rs" />
+  <Stat label="Transports" value="3 + 1" hint="tauri-channel · ws · webrtc (planned) · unsupported" />
+</StatGrid>
+
+Design rationale: [ADR-0031](../adr/0031-integrated-terminal) and
+[ADR-0033](../adr/0033-integrated-terminal-phase-3). This page documents the current implementation.
+
+## Transport selection
+
+```ts
+type TerminalTransportKind = "tauri-channel" | "ws" | "webrtc" | "unsupported"
+```
+
+Two entry points, deliberately separate. `selectTerminalTransport()` returns the single highest-priority
+transport for callers that don't want fallback logic — the dock's "+ New" button on desktop.
+`selectTerminalTransportChain()` returns an ordered list the spawn orchestrator walks, trying the next
+transport when the previous one returned `null` or threw.
+
+| Shell | Transport | Notes |
+| --- | --- | --- |
+| Tauri desktop | `tauri-channel` | in-process PTY, no remote ambiguity |
+| Desktop → remote host | `ws` | targets the host's `/ws/v1/terminal` ([ADR-0082](../adr/0082-remote-development-remote-host)); inert until a remote host is activated, so a plain desktop is unaffected |
+| Capacitor mobile | `ws` | LAN / mDNS |
+| Browser | `unsupported` | the chain returns `[]` and the dock does not mount |
+
+`webrtc` is declared in the union but is **planned, not wired** — the chain extends to `["ws", "webrtc"]`
+once the Rust desktop peer and the TS client are connected through the rendezvous. `terminalAvailable()`
+(`lib/terminal/pick-transport.ts:66`) is what components use to decide whether to mount the dock at all.
+
+## Shell integration is nonce-validated
+
+VS Code's `ESC ] 633 ; <C> ; <args> BEL` family is what turns a dumb byte stream into a structured session:
+prompt boundaries, command pre/post-exec, and cwd changes. PTY output streams through
+`Osc633Parser::feed`, which yields the raw bytes back **unchanged** — the terminal still needs them in
+scrollback for fonts and colours — and separately surfaces a typed `IntegrationEvent` when a complete
+sequence is recognised.
+
+The security property is the per-spawn nonce stamped into `$COGNIA_TERM_NONCE`. The parser validates it, so
+a hostile process running *inside* the terminal cannot emit its own OSC 633 sequences to fake prompt
+decorations. Unrecognised sequences are dropped rather than guessed at.
+
+## Where it lives
+
+```
+lib/terminal/
+  pick-transport.ts       # transport selection + fallback chain
+  spawn-orchestrator.ts   # walks the chain, owns retry
+  session.ts              # foreground session; base-session.ts is the shared core
+  session-registry.ts     # live sessions; headless-session-registry.ts for agent runs
+  transport-ws.ts         # the ws client
+  command-markers.ts      # OSC 633 consumption on the TS side
+  command-output.ts       # per-command output capture (feeds quick-fix + agent reads)
+  headless-exec.ts        # non-interactive exec surface for agents
+  agent-trust.ts          # per-tab trust gate before an agent may type
+  ssh-session.ts · ssh-connect.ts · ssh-profiles.ts · ssh-credentials.ts
+  shell-detect.ts · profiles.ts · color-schemes.ts
+  completion/ · quick-fix/    # ghost text, completion popup, error quick-fixes
+  sticky-scroll.ts · terminal-links.ts · stack-trace.ts
+  backpressure.ts         # flow control on a fast-writing process
+  rehydrate.ts            # restore tabs across reloads
+
+crates/cognia-terminal/src/
+  osc633.rs      # the sequence parser + nonce validation
+  session.rs · exec.rs · headless.rs · replay.rs
+  ssh.rs · complete.rs · path_scan.rs · integration.rs
+  commands.rs    # 9 Tauri commands
+
+components/terminal/    # dock · tab strip · instance · search · quick-fix · completion · file viewer
+stores/terminal/        # terminal-store · file-viewer-store
+```
+
+## Agents don't get a free shell
+
+An agent reaching the terminal passes two gates. `headless-exec.ts` is a separate, non-interactive surface
+with its own registry (`headless-session-registry.ts`), so an agent run never silently inherits an
+interactive tab. To drive an *interactive* tab it must first clear `requestAgentTrust()`
+(`lib/terminal/agent-trust.ts:50`), which is keyed per chat session **and** per tab —
+`agentTrustPluginId(chatSessionId, tabId)` — so trust granted in one tab does not leak into another.
+`isAgentTrusted()` is the read side of that gate.
+
+## Related
+
+<Cards>
+  <Card title="ADR-0031" href="../adr/0031-integrated-terminal" description="The original terminal decision record" />
+  <Card title="ADR-0033" href="../adr/0033-integrated-terminal-phase-3" description="Phase 3 — completion, quick-fix, sticky scroll" />
+  <Card title="CLI ↔ App Bridge" href="./cli-app-bridge" description="The other place a shell and the app meet" />
+  <Card title="Companion API" href="./companion-api" description="The ws transport the mobile and remote paths ride" />
+</Cards>

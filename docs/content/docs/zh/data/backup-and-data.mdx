@@ -259,16 +259,67 @@ flowchart TB
 
 ## 定时备份
 
-`BackupSchedulerProvider`（挂载在 `app/layout.tsx`）按 `intervalDays` 间隔向用户配置的文件夹写加密的自动密钥备份。
+`BackupSchedulerProvider` 按 `intervalDays` 间隔向用户配置的文件夹写加密的自动密钥备份。Cron 调度器复用同一套备份包构建器，支持设置、会话、插件、全部内容，以及按勾选项组成的完整备份。
 
 **仅 Tauri**。Web 用户看到的是提醒横幅，因为浏览器无法在无人值守时往固定文件夹写入。
 
 调度器流程：
 
-1. 读取 `settings.backupSchedule` —— `{ enabled, intervalDays, folder }`。
+1. 读取 `settings.backupAutoSchedule` —— `{ enabled, intervalDays, retainCount, dirPath }`。
 2. 根据 `lastSuccessfulBackup` 计算下次运行。
-3. 每 30 分钟唤醒一次：若 `now ≥ nextRun`，则构建快照、用自动密钥加密、写入 `cognia-backup-<ISO>.cgnbk`，并记录到 `backupHistory`。
-4. 失败时记录 `status: "failed"` 与错误，下次唤醒重试。
+3. 每 30 分钟唤醒一次：若 `now ≥ nextRun`，则构建快照、用自动密钥加密、写入 `cognia-backup-YYYY-MM-DD.enc.cbk`，并向 `backupHistory` 追加成功记录。
+4. 失败时追加带错误信息的失败记录；下一个符合条件的唤醒周期会重试。
+
+Cron 备份的内容选择会由备份包构建器严格执行：
+
+| 选择 | 包含内容 |
+| --- | --- |
+| 仅设置 | `AppSettings` 与非 Artifact 的持久化设置；始终排除 API Key |
+| 仅会话 | 可导出的会话、对应消息与会话状态 |
+| 仅插件 | 非内置插件目录、权限、评价与统计 |
+| 全部内容 | 上述所有可移植域，包含插件与 Artifact |
+| 完整备份 | 只包含已勾选的会话、设置、Artifact 与其他数据库内容 |
+
+## 云端目标与服务商支持
+
+当前支持两种云端模式：
+
+1. **WebDAV 快照同步**：Cognia 先使用用户同步口令加密，再直接上传。
+2. **桌面同步文件夹**：Cognia 在本地写入自动密钥加密文件，由服务商官方桌面客户端上传。
+
+### WebDAV 服务商
+
+| 服务商 | 地址 / 规则 | 认证 | 官方指南 |
+| --- | --- | --- | --- |
+| Nextcloud | `https://HOST/remote.php/dav/files/USERNAME` | 密码；启用 2FA 或 OIDC 时使用应用专用密码 | [Nextcloud WebDAV](https://docs.nextcloud.com/server/stable/developer_manual/client_apis/WebDAV/basic.html) |
+| ownCloud | `https://HOST/remote.php/dav/files/USERNAME`（官方也记录了旧地址 `/remote.php/webdav`） | 按服务器策略使用密码或应用专用密码 | [ownCloud WebDAV](https://doc.owncloud.com/server/next/classic_ui/files/access_webdav.html) |
+| 坚果云 | `https://dav.jianguoyun.com/dav` | 账户邮箱与应用专用密码 | [坚果云 WebDAV](https://help.jianguoyun.com/?tag=webdav) |
+| Koofr | `https://app.koofr.net/dav/Koofr` | 账户邮箱与应用专用密码 | [Koofr WebDAV](https://koofr.eu/help/koofr_with_webdav/how-do-i-connect-a-service-to-koofr-through-webdav/) |
+| pCloud 美国区 | `https://webdav.pcloud.com` | pCloud 凭据，并按要求完成 2FA 确认 | [pCloud WebDAV](https://help.pcloud.com/article/webdav) |
+| pCloud 欧盟区 | `https://ewebdav.pcloud.com` | pCloud 凭据，并按要求完成 2FA 确认 | [pCloud WebDAV](https://help.pcloud.com/article/webdav) |
+| Yandex Disk | `https://webdav.yandex.ru` | 用户名与应用专用密码；自 2026-06-22 起需要 Yandex 360 套餐 | [Yandex Disk WebDAV](https://yandex.com/support/yandex-360/customers/disk/web/en/webdav) |
+| 其他 / 自托管 | 使用服务器提供的准确 collection 根地址 | 密码或应用专用密码 | [WebDAV RFC 4918](https://www.rfc-editor.org/rfc/rfc4918) |
+
+桌面连接器支持 WebDAV 所需的 `PROPFIND` 与 `MKCOL` 方法，因此 Tauri 中的测试连接、目录列举、恢复和首次创建目录均可工作。TLS 默认严格校验证书。“允许无效或自签名证书”必须按目标地址显式开启，并且只应用于你自行控制的服务器；开启后会跳过该地址的证书验证。
+
+<Callout type="warning" title="不要把秘密发到对话">
+服务器密码、应用专用密码、私有服务器地址与同步口令只能填入本地设置控件。同步口令独立于服务器凭据，用于在上传前完成零知识加密。
+</Callout>
+
+### Google Drive、Dropbox、OneDrive 与 iCloud Drive
+
+这些服务商通过官方桌面客户端的本地同步文件夹支持，不依赖非官方 WebDAV 适配：
+
+| 服务商 | 支持方式 |
+| --- | --- |
+| Google Drive | 安装 Google Drive 桌面版，选择镜像或串流位置，然后选择专用于 Cognia 的备份文件夹。[官方指南](https://support.google.com/drive/answer/13401938?hl=en) |
+| Dropbox | 安装并登录 Dropbox 桌面客户端，然后选择 Dropbox 内的文件夹。[官方指南](https://help.dropbox.com/installs/download-dropbox) |
+| OneDrive | 启用 OneDrive 桌面同步，然后选择 OneDrive 内的文件夹。[官方指南](https://support.microsoft.com/en-us/onedrive/sync-your-computer-s-files-and-folders-with-onedrive) |
+| iCloud Drive | 在 Finder 中启用 iCloud Drive，然后选择其中的文件夹。[官方指南](https://support.apple.com/en-us/102314) |
+
+### 使用 AI 配置
+
+两类服务商选择器都提供 AI 配置按钮。按钮会新建对话，把一个五分钟有效、按会话隔离的提示词加入队列，跳转到对话页，并经由正常发送链路提交，因此对话持久化、工具、skills 与隐私检查仍然生效。提示词只包含服务商名称和公开官方指南，不会复制当前地址、本地路径、用户名、密码或加密口令。
 
 ## 备份历史
 

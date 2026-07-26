@@ -1,10 +1,15 @@
 const REPO = "MaxQian888/cognia-next"
 const BRANCH = "master"
-const DOCS_ROOT = "docs/content/docs"
 
 type Props = {
   /** Page slug, e.g. ["en", "getting-started"]. May be empty for the index. */
   slug: string[]
+  /**
+   * Repo-relative path of the page's source file. Comes from fumadocs'
+   * `page.path`, so locale-shared pages (`content/docs/plugin-dev/**`) link
+   * to the file that actually exists rather than a guessed `{lang}/` path.
+   */
+  sourcePath: string
   /** Build-time last-modified ISO string (or null). */
   lastModified?: string | null
 }
@@ -15,10 +20,8 @@ function detectLocale(slug: string[]): "en" | "zh" | null {
   return null
 }
 
-function buildEditPath(slug: string[]): string {
-  // Treat root index specially — it lives at content/docs/index.mdx.
-  const path = slug.length === 0 ? "index.mdx" : `${slug.join("/")}.mdx`
-  return `https://github.com/${REPO}/edit/${BRANCH}/${DOCS_ROOT}/${path}`
+export function buildEditPath(sourcePath: string): string {
+  return `https://github.com/${REPO}/edit/${BRANCH}/${sourcePath}`
 }
 
 function buildAlternateHref(slug: string[]): string | null {
@@ -29,12 +32,12 @@ function buildAlternateHref(slug: string[]): string | null {
   return rest ? `/docs/${target}/${rest}` : `/docs/${target}`
 }
 
-export function buildFeedbackHref(slug: string[], helpful: boolean): string {
+export function buildFeedbackHref(slug: string[], sourcePath: string, helpful: boolean): string {
   const path = slug.length > 0 ? slug.join("/") : "index"
   const sentiment = helpful ? "Helpful" : "Needs improvement"
   const title = `[Docs feedback] ${sentiment}: ${path}`
   const body = [
-    `Page: https://github.com/${REPO}/blob/${BRANCH}/${DOCS_ROOT}/${path}.mdx`,
+    `Page: https://github.com/${REPO}/blob/${BRANCH}/${sourcePath}`,
     "",
     helpful ? "What was especially useful?" : "What should we improve?",
     "",
@@ -42,8 +45,8 @@ export function buildFeedbackHref(slug: string[], helpful: boolean): string {
   return `https://github.com/${REPO}/issues/new?title=${encodeURIComponent(title)}&body=${encodeURIComponent(body)}&labels=documentation`
 }
 
-export function PageFooter({ slug, lastModified }: Props) {
-  const editHref = buildEditPath(slug)
+export function PageFooter({ slug, sourcePath, lastModified }: Props) {
+  const editHref = buildEditPath(sourcePath)
   const altHref = buildAlternateHref(slug)
   const locale = detectLocale(slug)
   const altLabel = locale === "en" ? "中文版本" : locale === "zh" ? "English version" : null
@@ -112,7 +115,7 @@ export function PageFooter({ slug, lastModified }: Props) {
         </span>
         <div className="flex gap-2">
           <a
-            href={buildFeedbackHref(slug, true)}
+            href={buildFeedbackHref(slug, sourcePath, true)}
             target="_blank"
             rel="noopener noreferrer"
             aria-label={locale === "zh" ? "有帮助" : "Helpful"}
@@ -121,7 +124,7 @@ export function PageFooter({ slug, lastModified }: Props) {
             👍
           </a>
           <a
-            href={buildFeedbackHref(slug, false)}
+            href={buildFeedbackHref(slug, sourcePath, false)}
             target="_blank"
             rel="noopener noreferrer"
             aria-label={locale === "zh" ? "没有帮助" : "Not helpful"}

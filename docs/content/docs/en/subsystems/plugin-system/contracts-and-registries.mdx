@@ -12,11 +12,11 @@ description: The declarative truth layer that states what a plugin may contribut
 </TLDR>
 
 <StatGrid>
-  <Stat label="Capability contracts" value="59" />
+  <Stat label="Capability contracts" value="66" />
   <Stat label="UI slots / hooks / activations" value="49 / ~150 / 26" />
   <Stat label="Runtime points" value="11" />
   <Stat label="Sync overlay capabilities" value="16" />
-  <Stat label="Async module bridges" value="20" />
+  <Stat label="Async module bridges" value="23" />
   <Stat label="SDK define*() helpers" value="44" />
 </StatGrid>
 
@@ -25,7 +25,7 @@ description: The declarative truth layer that states what a plugin may contribut
 `lib/plugin/contracts/` is the **declarative truth layer**: it states what a plugin may contribute and whether each declared surface is actually wired. Two canonical catalogs anchor it:
 
 - `plugin-points.ts` — every UI-slot / hook / activation / runtime extension point, each carrying `binding`, `docs`, and `requiredTests` proof fields.
-- `plugin-capabilities.ts` — the 59 `PluginCapability` contracts.
+- `plugin-capabilities.ts` — the 66 `PluginCapability` contracts.
 
 `capability-contributions.ts:79` maps a plugin's capability tags to concrete manifest entries for UI summaries. Two wiring maps connect manifest fields to runtime stores: `capability-bridge-map.ts` for synchronous overlay-registry dispatch, and `module-bridge-map.ts` for asynchronous module-loading bridges. Provability is enforced by `runtime-proof-audit.ts`, `conflict-reporter.ts`, and `diagnostics-store.ts`, which prove every "implemented" surface has evidence and report conflicts and diagnostics.
 

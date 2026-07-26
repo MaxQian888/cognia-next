@@ -1,0 +1,101 @@
+---
+title: Personal Knowledge Capture
+description: The three modules ADR-0060 introduced together — capture (fingerprint-deduped clippings enriched by the web reader or OCR), the web reader itself (bespoke scrapers ahead of generic extraction), and Attention Radar (a periodic LLM report over what you captured).
+---
+
+# Personal Knowledge Capture
+
+<Status variant="beta">Beta · ADR-0060 · capturedItems v97 · radarReports v96</Status>
+
+<TLDR>
+  Three modules that only make sense together. **Capture** turns a confirmed candidate into a persisted
+  item — dedup by fingerprint, enrich, save (`lib/capture/capture-manager.ts`). **The web reader** is what
+  enrichment calls for a URL, and it tries a bespoke scraper *before* generic extraction, because for a
+  handful of sites a purpose-built scraper beats extraction outright. **Attention Radar** then runs
+  `collect → generate → persist` over the accumulated items on an interval, producing an LLM report — with
+  guards that skip the run entirely when there isn't enough new material to be worth the tokens.
+</TLDR>
+
+<StatGrid>
+  <Stat label="Dexie tables" value="2" hint="capturedItems v97 · radarReports v96" />
+  <Stat label="Platform scrapers" value="3" hint="WeChat · X/Twitter · YouTube" />
+  <Stat label="Radar stages" value="3" hint="collect → generate → persist" />
+  <Stat label="Enrichment paths" value="2" hint="URL reader · OCR" />
+</StatGrid>
+
+Design rationale: [ADR-0060](../adr/0060-personal-knowledge-capture-and-insights), which introduced all
+three in one decision.
+
+## Capture: fingerprint, enrich, save
+
+`captureManager` takes a confirmed `CaptureCandidate` and produces a persisted `CapturedItem`. The
+fingerprint index on the table (`capturedItems: "&id, capturedAt, kind, sourceApp, fingerprint"`) is what
+makes dedup a lookup rather than a scan — clipping the same passage twice does not create two items.
+
+Enrichment is where a clipping stops being a bare string: a URL goes through the web reader, an image
+through OCR. `enrich.ts` takes its dependencies as an injected `EnrichDeps`, with `buildEnrichDeps()` as
+the production wiring — so the manager is testable without a network or an OCR engine.
+
+```
+lib/capture/
+  capture-manager.ts   # dedup → enrich → save
+  detect.ts            # detectKind · buildTextCandidate
+  enrich.ts            # enrichCandidate · buildEnrichDeps
+lib/db/captured-items.ts · types/capture/ · stores/capture/ · hooks/capture/
+components/capture/ · src-tauri/src/capture/
+```
+
+## Web reader: bespoke scrapers come first
+
+`scrapePlatform` (`lib/web/reader/dispatch.ts`) is tried **before** the generic fetch-and-extract path in
+`web_fetch`. For WeChat articles, X/Twitter threads and YouTube pages a purpose-built scraper returns clean
+Markdown that generic extraction cannot match. For everything else it returns `null` and the caller falls
+through to local extraction — and if that comes back too thin, to the Jina fallback.
+
+That ordering is the whole routing rule: bespoke → local generic → remote fallback, each step only reached
+because the previous one declined.
+
+```
+lib/web/reader/
+  dispatch.ts      # hostname → scraper routing
+  jina.ts          # the remote fallback
+  types.ts
+  platform-scrapers/  wechat.ts · x-twitter.ts · youtube.ts
+lib/web/web-tools-core.ts
+packages/document/.../html-parser.ts
+```
+
+## Attention Radar: guarded, not scheduled-blindly
+
+`radar-runner.ts` orchestrates `collect → generate → persist`, and it declines to run more often than it
+should. Two guards mirror the OpenWiki behaviour: skip when fewer than `RADAR_MIN_ITEMS` items are
+available, and skip when the last report is newer than `intervalDays` — unless the caller passes `force`.
+It resolves its model the same way the conversation-title generator does, through
+`buildUtilityLlmClient()`, so a background report never silently consumes the main chat provider.
+
+`prefilter.ts` is the part worth reading: `computeImportance()` scores items, `ngrams()` + `jaccard()`
+drive `dedupeSimilar()`, and `smartPreFilter()` trims to `maxItems` — near-duplicate captures are collapsed
+*before* anything reaches the model rather than after.
+
+```
+lib/radar/
+  radar-runner.ts     # collect → generate → persist, with the guards
+  collect.ts          # gather items + computeHeatmap
+  prefilter.ts        # importance · n-grams · jaccard · dedupe · trim
+  generate.ts  prompts.ts
+  radar-cron-bridge.ts   # what the scheduler calls
+lib/db/radar-reports.ts · types/radar/
+components/pet/console/radar-panel.tsx · hooks/pet/use-pet-insight.ts
+```
+
+The report surfaces in the pet console, which is why `use-pet-insight.ts` lives on the pet side rather than
+in `lib/radar`.
+
+## Related
+
+<Cards>
+  <Card title="ADR-0060" href="../adr/0060-personal-knowledge-capture-and-insights" description="The decision record covering all three modules" />
+  <Card title="OCR" href="./ocr" description="The other enrichment path" />
+  <Card title="Desktop Pet" href="./desktop-pet" description="Where the radar report is surfaced" />
+  <Card title="Scheduler" href="./scheduler" description="What drives the radar cron bridge" />
+</Cards>
