@@ -30,6 +30,24 @@ test("isGatedTsSource covers the documented roots", () => {
   }
 })
 
+test("isGatedTsSource covers the marketing workspace's three roots", () => {
+  for (const f of ["web/components/site-nav.tsx", "web/hooks/use-rail.ts", "web/lib/locale.ts"]) {
+    assert.ok(isGatedTsSource(f), `${f} should be gated`)
+  }
+})
+
+test("isGatedTsSource leaves the other workspaces alone", () => {
+  for (const f of [
+    "web/app/page.tsx", // route files follow the product `app/` precedent
+    "web/content/en.ts", // data — en/zh parity is a typecheck concern
+    "docs/components/kbd.tsx", // the docs workspace is not gated by this rule
+    "docs/lib/site.ts",
+    "mobile/lib/thing.ts",
+  ]) {
+    assert.ok(!isGatedTsSource(f), `${f} should NOT be gated`)
+  }
+})
+
 test("isGatedTsSource honours the rule's carve-outs and non-source shapes", () => {
   for (const f of [
     "components/ui/button.tsx", // shadcn — excluded by the rule

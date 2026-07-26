@@ -37,8 +37,20 @@ import { dirname, join } from "node:path"
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..")
 export const BASELINE_FILE = join(REPO_ROOT, "scripts", "gates", "colocated-test-baseline.json")
 
-/** Roots the rule covers, verbatim from CLAUDE.md hard rule 3. */
-export const TS_ROOTS = ["components/", "hooks/", "lib/"]
+/**
+ * Roots the rule covers, verbatim from CLAUDE.md hard rule 3, plus the same
+ * three roots inside the marketing workspace (ADR-0092 §11). `web/app/` follows
+ * the product `app/` precedent — tests are written, but page files are not
+ * gated — and `web/content/` is data whose en/zh parity `tsc` already proves.
+ */
+export const TS_ROOTS = [
+  "components/",
+  "hooks/",
+  "lib/",
+  "web/components/",
+  "web/hooks/",
+  "web/lib/",
+]
 /** Carve-outs the rule names explicitly. */
 export const TS_EXCLUDED = ["components/ui/", "components/ai-elements/"]
 export const RUST_ROOT = "src-tauri/src/"

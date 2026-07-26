@@ -97,6 +97,10 @@ const REGISTRY = [
   { script: "plugin-node:check", group: "artifacts" },
   { script: "plugin-convert:check", group: "artifacts" },
   { script: "plugin:contract:check", group: "artifacts" },
+  // The declarations `cognia plugin new` vendors must match the packages they
+  // came from; a stale bundle ships authors a type surface the host no longer
+  // has. Shares `package-build` because it rebuilds the same packages.
+  { script: "author-types:check", group: "artifacts", resource: "package-build" },
 
   // Repo-specific structural audits (see the ADRs each one cites).
   { script: "audit:slots", group: "audit" },

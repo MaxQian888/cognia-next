@@ -45,6 +45,7 @@ on:
           - signaling-fly
           - share-fly
           - docs
+          - web
         default: all
   workflow_call:
     inputs:
@@ -225,6 +226,12 @@ jobs:
       - name: Build static export
         run: pnpm build
         working-directory: docs
+        env:
+          # Bakes the canonical origin into sitemap.xml, robots.txt, hreflang
+          # alternates, OpenGraph tags and the /llms.txt family — a static
+          # export has no request to infer an origin from. Unset falls back to
+          # Cloudflare's own CF_PAGES_URL, then to the dev origin.
+          NEXT_PUBLIC_DOCS_SITE_URL: ${{ vars.DOCS_SITE_URL }}
 
       - name: Guard Pages project variable
         env:
@@ -244,6 +251,67 @@ jobs:
             pages deploy docs/out --project-name "${{ vars.CF_DOCS_PAGES_PROJECT }}"
             --branch "${{ inputs.environment == 'production' && 'main' || 'staging' }}"
 
+  deploy-web:
+    name: Pages — website
+    needs: gate
+    # ADR-0092: the marketing site is a static export (web/out) on its own
+    # Cloudflare Pages project, separate from docs so the two can ship
+    # independently. Requires a Pages project named by CF_WEB_PAGES_PROJECT
+    # (create once with `wrangler pages project create <name>`).
+    if: >
+      needs.gate.outputs.enabled == 'true' && needs.gate.outputs.has_cf == 'true' &&
+      contains(fromJSON('["all","web"]'), inputs.target)
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          # `build-evidence.mjs` dates each changelog entry from the commit that
+          # added it, so the changelog is only as complete as the clone's history.
+          fetch-depth: 0
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 26
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Build static export
+        run: pnpm --filter web build
+        env:
+          # Baked into canonical URLs, hreflang alternates, OpenGraph tags and
+          # the sitemap — a static export has no request to infer an origin
+          # from. Unset falls back to Cloudflare's CF_PAGES_URL.
+          NEXT_PUBLIC_WEB_SITE_URL: ${{ vars.WEB_SITE_URL }}
+          # The docs site lives on another hostname; every `Docs` link reads this.
+          NEXT_PUBLIC_DOCS_SITE_URL: ${{ vars.DOCS_SITE_URL }}
+          # Lifts the anonymous GitHub API rate limit for the evidence pipeline.
+          # Without it the build keeps the committed snapshot and labels it as a
+          # stale read rather than failing.
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Guard Pages project variable
+        env:
+          PROJECT: ${{ vars.CF_WEB_PAGES_PROJECT }}
+        run: |
+          if [ -z "$PROJECT" ]; then
+            echo "::error::CF_WEB_PAGES_PROJECT environment variable is not set"
+            exit 1
+          fi
+
+      - name: Deploy
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          command: >
+            pages deploy web/out --project-name "${{ vars.CF_WEB_PAGES_PROJECT }}"
+            --branch "${{ inputs.environment == 'production' && 'main' || 'staging' }}"
+
   summary:
     name: Summary
     needs:
@@ -254,6 +322,7 @@ jobs:
         deploy-signaling-fly,
         deploy-share-fly,
         deploy-docs,
+        deploy-web,
       ]
     if: always()
     runs-on: ubuntu-latest
@@ -270,6 +339,7 @@ jobs:
             echo "| Fly — signaling | ${{ needs.deploy-signaling-fly.result }} |"
             echo "| Fly — share | ${{ needs.deploy-share-fly.result }} |"
             echo "| Pages — docs | ${{ needs.deploy-docs.result }} |"
+            echo "| Pages — website | ${{ needs.deploy-web.result }} |"
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Fail on any failed deploy
