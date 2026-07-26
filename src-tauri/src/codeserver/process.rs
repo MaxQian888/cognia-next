@@ -157,14 +157,29 @@ impl CodeServerState {
         // only degrades the Pro IDE agent-drive features, never the spawn itself.
         install_agent_extension(app, &info.binary_path, &extensions_dir, &user_data_dir).await;
 
+        // Same deal for the display-language pack: VS Code ships English only, so a
+        // non-English `locale` in argv.json needs the matching MS-CEINTL pack present
+        // at startup. Read from disk rather than taken as an argument because the
+        // locale is written by the renderer's sync and must survive an app restart
+        // that never touches it again. Best-effort; failure just leaves the UI English.
+        let locale = tokio::fs::read_to_string(runtime_args_path(app)?)
+            .await
+            .ok()
+            .and_then(|raw| locale_from_runtime_args(&raw));
+        if let Some(locale) = locale.as_deref() {
+            install_language_pack(&info.binary_path, &extensions_dir, &user_data_dir, locale).await;
+        }
+
         // Register this instance with the agent control channel BEFORE spawn so the
         // agent-channel port + per-instance token can be injected into the child's
         // env — the companion extension reads them on activate to dial back. Any
         // failure after this must deregister so a leaked token can't address a dead
         // editor.
-        let (agent_port, agent_token) = super::agent_channel::global()
-            .register_instance(&canonical)
-            .await?;
+        let channel = super::agent_channel::global();
+        // Hand over the app handle before the extension can connect, so the very
+        // first pushed editor event has somewhere to go.
+        channel.attach_app(app);
+        let (agent_port, agent_token) = channel.register_instance(&canonical).await?;
         let agent_envs = [
             ("COGNIA_CS_AGENT_PORT", agent_port.to_string()),
             ("COGNIA_CS_AGENT_TOKEN", agent_token),
@@ -332,6 +347,76 @@ impl CodeServerState {
             .await
     }
 
+    /// Flush dirty editor buffers to disk, optionally just one absolute `path`.
+    ///
+    /// The agent's file tools read the filesystem, not the editor, so an unsaved
+    /// buffer is invisible to them: without this a turn reads stale content and then
+    /// overwrites the user's unsaved work. Returns the extension's
+    /// `{ saved, failed }` report so the caller can tell the user which files it
+    /// could not make trustworthy.
+    pub async fn agent_save_all(&self, root: &str, path: Option<&str>) -> Result<Value, String> {
+        let canonical = canonicalize_root(root)?;
+        super::agent_channel::global()
+            .send(&canonical, "saveAll", json!({ "path": path }))
+            .await
+    }
+
+    /// Show a native diff between `path` on disk and a proposed revision, so a
+    /// change can be reviewed before it lands. The proposal never touches disk.
+    pub async fn agent_show_diff(
+        &self,
+        root: &str,
+        path: &str,
+        content: &str,
+        title: Option<&str>,
+    ) -> Result<Value, String> {
+        let canonical = canonicalize_root(root)?;
+        let params = json!({ "path": path, "content": content, "title": title });
+        super::agent_channel::global()
+            .send(&canonical, "showDiff", params)
+            .await
+    }
+
+    /// Reveal an absolute path in the editor's file explorer.
+    pub async fn agent_reveal(&self, root: &str, path: &str) -> Result<Value, String> {
+        let canonical = canonicalize_root(root)?;
+        super::agent_channel::global()
+            .send(&canonical, "revealInExplorer", json!({ "path": path }))
+            .await
+    }
+
+    /// Run a command in the editor's integrated terminal.
+    ///
+    /// Show-the-user, not collect-the-output: the extension host cannot read a
+    /// terminal's output back, and the agent has its own shell tool for that.
+    pub async fn agent_run_in_terminal(
+        &self,
+        root: &str,
+        command: &str,
+        cwd: Option<&str>,
+        name: Option<&str>,
+    ) -> Result<Value, String> {
+        let canonical = canonicalize_root(root)?;
+        let params = json!({ "command": command, "cwd": cwd, "name": name });
+        super::agent_channel::global()
+            .send(&canonical, "runInTerminal", params)
+            .await
+    }
+
+    /// Surface an app-side message inside the editor.
+    pub async fn agent_notify(
+        &self,
+        root: &str,
+        message: &str,
+        kind: Option<&str>,
+    ) -> Result<Value, String> {
+        let canonical = canonicalize_root(root)?;
+        let params = json!({ "message": message, "kind": kind });
+        super::agent_channel::global()
+            .send(&canonical, "notify", params)
+            .await
+    }
+
     /// Open and reveal a project-relative file in this root's existing browser
     /// VS Code window through code-server's own session-socket CLI bridge.
     pub async fn open_file(
@@ -451,6 +536,122 @@ pub fn user_settings_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     Ok(dir.join("settings.json"))
 }
 
+/// `<user-data>/User/argv.json` — VS Code's *runtime* configuration file, which
+/// is where the display language lives (`{"locale": "zh-cn"}`). Deliberately not
+/// `settings.json`: VS Code reads `locale` from argv.json only, and only at
+/// startup, so changing it also requires restarting the instance.
+///
+/// Same directory as {@link user_settings_path}, which is the one
+/// `--user-data-dir` points code-server at.
+pub fn runtime_args_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    let dir = state_subdir(app, "user-data")?.join("User");
+    std::fs::create_dir_all(&dir).map_err(|e| format!("create {}: {e}", dir.display()))?;
+    Ok(dir.join("argv.json"))
+}
+
+/// Read the `locale` out of an `argv.json` document.
+///
+/// Tolerates the JSONC that VS Code's own "Configure Runtime Arguments" command
+/// writes (the file it generates is comment-heavy), and a blank / absent locale,
+/// both of which mean "no display-language pack needed".
+pub fn locale_from_runtime_args(raw: &str) -> Option<String> {
+    let cleaned = crate::agents::io::strip_jsonc(raw);
+    let value: serde_json::Value = serde_json::from_str(&cleaned).ok()?;
+    let locale = value.get("locale")?.as_str()?.trim();
+    if locale.is_empty() {
+        return None;
+    }
+    Some(locale.to_string())
+}
+
+/// The Open VSX extension id of the MS-CEINTL language pack for a VS Code locale.
+///
+/// VS Code ships English only; every other display language needs a language-pack
+/// extension, and code-server resolves `--install-extension <id>` against Open VSX
+/// (which carries the MS-CEINTL packs). `None` means "no pack needed or none
+/// published" — English, and any locale we have not verified is available. Pure so
+/// the mapping is unit-tested without a network.
+pub fn language_pack_extension_id(locale: &str) -> Option<&'static str> {
+    match locale.trim().to_ascii_lowercase().as_str() {
+        // English is the built-in display language; installing a pack for it is a
+        // pointless download.
+        "" | "en" | "en-us" | "en-gb" => None,
+        "zh-cn" | "zh-hans" => Some("MS-CEINTL.vscode-language-pack-zh-hans"),
+        "zh-tw" | "zh-hant" => Some("MS-CEINTL.vscode-language-pack-zh-hant"),
+        "ja" => Some("MS-CEINTL.vscode-language-pack-ja"),
+        "ko" => Some("MS-CEINTL.vscode-language-pack-ko"),
+        "fr" => Some("MS-CEINTL.vscode-language-pack-fr"),
+        "de" => Some("MS-CEINTL.vscode-language-pack-de"),
+        "es" => Some("MS-CEINTL.vscode-language-pack-es"),
+        "pt-br" => Some("MS-CEINTL.vscode-language-pack-pt-BR"),
+        "ru" => Some("MS-CEINTL.vscode-language-pack-ru"),
+        "it" => Some("MS-CEINTL.vscode-language-pack-it"),
+        "tr" => Some("MS-CEINTL.vscode-language-pack-tr"),
+        "pl" => Some("MS-CEINTL.vscode-language-pack-pl"),
+        "cs" => Some("MS-CEINTL.vscode-language-pack-cs"),
+        _ => None,
+    }
+}
+
+/// Install the display-language pack for `locale`, at most once per locale.
+///
+/// Best-effort in exactly the way {@link install_agent_extension} is: the display
+/// language is a nicety, and a failed or unavailable pack must never stop a
+/// code-server from spawning. Returns whether a pack is now believed installed, so
+/// the caller can tell the user why the UI is still English.
+pub async fn install_language_pack(
+    binary: &str,
+    extensions_dir: &Path,
+    user_data_dir: &Path,
+    locale: &str,
+) -> bool {
+    let Some(extension_id) = language_pack_extension_id(locale) else {
+        return false;
+    };
+    let marker = extensions_dir.join(".cognia-language-pack");
+    if tokio::fs::read_to_string(&marker).await.ok().as_deref() == Some(extension_id) {
+        return true;
+    }
+
+    let mut command = Command::new(binary);
+    command
+        .arg("--install-extension")
+        .arg(extension_id)
+        .arg("--extensions-dir")
+        .arg(extensions_dir)
+        .arg("--user-data-dir")
+        .arg(user_data_dir)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .kill_on_drop(true);
+
+    // Longer than the bundled-vsix install: this one reaches Open VSX.
+    match tokio::time::timeout(Duration::from_secs(120), command.output()).await {
+        Ok(Ok(output)) if output.status.success() => {
+            if let Err(e) = tokio::fs::write(&marker, extension_id).await {
+                log::warn!("code-server language pack: write install marker: {e}");
+            }
+            true
+        }
+        Ok(Ok(output)) => {
+            log::warn!(
+                "code-server language pack {extension_id} install failed: {}",
+                String::from_utf8_lossy(&output.stderr).trim()
+            );
+            false
+        }
+        Ok(Err(e)) => {
+            log::warn!("code-server language pack {extension_id} install: {e}");
+            false
+        }
+        Err(_) => {
+            log::warn!("code-server language pack {extension_id} install timed out");
+            false
+        }
+    }
+}
+
 /// Build the code-server argv. Pure so the flag set is unit-tested. Loopback
 /// bind + `--auth none` keep it reachable only from this machine; workspace
 /// trust and telemetry are disabled so the agent isn't blocked by prompts.
@@ -538,7 +739,7 @@ fn pick_free_loopback_port() -> Result<u16, String> {
 /// Version of the bundled agent-bridge extension. Bump in lockstep with
 /// `sidecar/codeserver-agent-ext/package.json` `version` so an upgrade triggers a
 /// reinstall (the marker below stores the installed version).
-const AGENT_EXT_VERSION: &str = "0.1.0";
+const AGENT_EXT_VERSION: &str = "0.2.0";
 /// Stable filename of the bundled `.vsix` (see the extension's `build.mjs`).
 const AGENT_EXT_VSIX: &str = "cognia-agent-bridge.vsix";
 
@@ -730,6 +931,83 @@ async fn wait_healthy(port: u16, budget: Duration) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn locale_is_read_out_of_argv_json() {
+        assert_eq!(
+            locale_from_runtime_args(r#"{"locale":"zh-cn"}"#).as_deref(),
+            Some("zh-cn")
+        );
+    }
+
+    #[test]
+    fn locale_tolerates_the_jsonc_vs_code_writes() {
+        // This is close to what "Configure Runtime Arguments" actually generates.
+        let raw = r#"
+        // This configuration file allows you to pass permanent command line
+        // arguments to VS Code.
+        {
+            // Display language
+            "locale": "ja",
+            /* trailing comma below is legal here */
+            "enable-crash-reporter": false,
+        }
+        "#;
+        assert_eq!(locale_from_runtime_args(raw).as_deref(), Some("ja"));
+    }
+
+    #[test]
+    fn locale_is_absent_for_missing_blank_or_broken_documents() {
+        assert_eq!(locale_from_runtime_args(""), None);
+        assert_eq!(locale_from_runtime_args("{}"), None);
+        assert_eq!(locale_from_runtime_args(r#"{"locale":""}"#), None);
+        assert_eq!(locale_from_runtime_args(r#"{"locale":"  "}"#), None);
+        // Wrong type, and outright malformed — both mean "no pack", not a panic.
+        assert_eq!(locale_from_runtime_args(r#"{"locale":42}"#), None);
+        assert_eq!(locale_from_runtime_args("{ not json"), None);
+    }
+
+    #[test]
+    fn english_needs_no_language_pack() {
+        // Installing a pack for the built-in display language is a pointless
+        // download, so this must stay None.
+        for locale in ["en", "en-US", "EN-gb", ""] {
+            assert_eq!(language_pack_extension_id(locale), None, "{locale}");
+        }
+    }
+
+    #[test]
+    fn language_pack_ids_use_the_published_open_vsx_names() {
+        assert_eq!(
+            language_pack_extension_id("zh-cn"),
+            Some("MS-CEINTL.vscode-language-pack-zh-hans")
+        );
+        // The app's own tag spelling and VS Code's differ in case; both resolve.
+        assert_eq!(
+            language_pack_extension_id("zh-CN"),
+            Some("MS-CEINTL.vscode-language-pack-zh-hans")
+        );
+        assert_eq!(
+            language_pack_extension_id("zh-hant"),
+            Some("MS-CEINTL.vscode-language-pack-zh-hant")
+        );
+        // Open VSX publishes pt-BR with that exact casing in the extension name.
+        assert_eq!(
+            language_pack_extension_id("pt-br"),
+            Some("MS-CEINTL.vscode-language-pack-pt-BR")
+        );
+        assert_eq!(
+            language_pack_extension_id("  ja  "),
+            Some("MS-CEINTL.vscode-language-pack-ja")
+        );
+    }
+
+    #[test]
+    fn unknown_locales_report_no_pack_rather_than_guessing_an_id() {
+        // Guessing would produce a 120s Open VSX round-trip that always fails.
+        assert_eq!(language_pack_extension_id("kl-GL"), None);
+        assert_eq!(language_pack_extension_id("nonsense"), None);
+    }
 
     #[test]
     fn args_bind_loopback_and_disable_prompts() {

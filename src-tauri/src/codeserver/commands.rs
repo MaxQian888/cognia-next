@@ -4,6 +4,7 @@
 //! errors on unsupported hosts (Windows / exotic arch), and `codeserver_supported`
 //! lets the frontend gate the toggle before attempting a spawn.
 
+use std::io::Write as _;
 use std::path::Path;
 use std::time::Duration;
 
@@ -16,6 +17,33 @@ use crate::cli_bridge::detect;
 /// The VS Code launcher on PATH. Probed through the shared binary detector so
 /// an app-managed copy and the cache are reused.
 const LOCAL_VSCODE_BIN: &str = "code";
+
+fn read_text_or_empty(path: &Path) -> Result<String, String> {
+    match std::fs::read_to_string(path) {
+        Ok(text) => Ok(text),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(String::new()),
+        Err(error) => Err(format!("read {}: {error}", path.display())),
+    }
+}
+
+fn atomic_write_text(path: &Path, contents: &str) -> Result<(), String> {
+    let parent = path
+        .parent()
+        .ok_or_else(|| format!("write {}: path has no parent", path.display()))?;
+    let mut staged = tempfile::Builder::new()
+        .prefix(".cognia-code-server-")
+        .suffix(".tmp")
+        .tempfile_in(parent)
+        .map_err(|error| format!("write {}: {error}", path.display()))?;
+    staged
+        .write_all(contents.as_bytes())
+        .and_then(|()| staged.as_file().sync_all())
+        .map_err(|error| format!("write {}: {error}", staged.path().display()))?;
+    staged
+        .persist(path)
+        .map(|_| ())
+        .map_err(|error| format!("replace {}: {}", path.display(), error.error))
+}
 
 /// Whether this host has a prebuilt code-server standalone binary (macOS/Linux
 /// on amd64/arm64). The frontend disables the Pro IDE toggle when false.
@@ -170,11 +198,7 @@ pub async fn codeserver_agent_read_active(
 pub async fn codeserver_read_user_settings(app: tauri::AppHandle) -> Result<String, String> {
     tokio::task::spawn_blocking(move || {
         let path = process::user_settings_path(&app)?;
-        match std::fs::read_to_string(&path) {
-            Ok(text) => Ok(text),
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(String::new()),
-            Err(e) => Err(format!("read {}: {e}", path.display())),
-        }
+        read_text_or_empty(&path)
     })
     .await
     .map_err(|e| format!("read code-server settings task: {e}"))?
@@ -189,12 +213,110 @@ pub async fn codeserver_write_user_settings(
 ) -> Result<(), String> {
     tokio::task::spawn_blocking(move || {
         let path = process::user_settings_path(&app)?;
-        let tmp = path.with_extension("json.tmp");
-        std::fs::write(&tmp, contents).map_err(|e| format!("write {}: {e}", tmp.display()))?;
-        std::fs::rename(&tmp, &path).map_err(|e| format!("replace {}: {e}", path.display()))
+        atomic_write_text(&path, &contents)
     })
     .await
     .map_err(|e| format!("write code-server settings task: {e}"))?
+}
+
+/// Flush dirty editor buffers to disk so the agent's file tools read what the user
+/// is actually looking at. `path` narrows it to one absolute file.
+#[tauri::command]
+pub async fn codeserver_agent_save_all(
+    state: State<'_, CodeServerState>,
+    root: String,
+    path: Option<String>,
+) -> Result<serde_json::Value, String> {
+    state.agent_save_all(&root, path.as_deref()).await
+}
+
+/// Show `content` beside `path` in the editor's native diff view, for review before
+/// an agent change is written. The proposal is served from memory, never disk.
+#[tauri::command]
+pub async fn codeserver_agent_show_diff(
+    state: State<'_, CodeServerState>,
+    root: String,
+    path: String,
+    content: String,
+    title: Option<String>,
+) -> Result<serde_json::Value, String> {
+    state
+        .agent_show_diff(&root, &path, &content, title.as_deref())
+        .await
+}
+
+/// Reveal an absolute path in the editor's file explorer.
+#[tauri::command]
+pub async fn codeserver_agent_reveal(
+    state: State<'_, CodeServerState>,
+    root: String,
+    path: String,
+) -> Result<serde_json::Value, String> {
+    state.agent_reveal(&root, &path).await
+}
+
+/// Run a command in the editor's integrated terminal (visible to the user; output
+/// is not readable back — the agent's own shell tool covers that).
+#[tauri::command]
+pub async fn codeserver_agent_run_in_terminal(
+    state: State<'_, CodeServerState>,
+    root: String,
+    command: String,
+    cwd: Option<String>,
+    name: Option<String>,
+) -> Result<serde_json::Value, String> {
+    state
+        .agent_run_in_terminal(&root, &command, cwd.as_deref(), name.as_deref())
+        .await
+}
+
+/// Surface an app-side notification inside the editor.
+#[tauri::command]
+pub async fn codeserver_agent_notify(
+    state: State<'_, CodeServerState>,
+    root: String,
+    message: String,
+    kind: Option<String>,
+) -> Result<serde_json::Value, String> {
+    state.agent_notify(&root, &message, kind.as_deref()).await
+}
+
+/// Current contents of code-server's `argv.json` (runtime arguments — where the
+/// display language lives), or an empty string when it does not exist yet.
+#[tauri::command]
+pub async fn codeserver_read_runtime_args(app: tauri::AppHandle) -> Result<String, String> {
+    tokio::task::spawn_blocking(move || {
+        let path = process::runtime_args_path(&app)?;
+        read_text_or_empty(&path)
+    })
+    .await
+    .map_err(|e| format!("read code-server runtime args task: {e}"))?
+}
+
+/// Replace code-server's `argv.json`. Written to a sibling temp file and renamed,
+/// like the settings writer, so a partially-written document is never observable.
+///
+/// Unlike `settings.json`, VS Code reads this only at startup: the caller must
+/// restart the instance for a locale change to take effect.
+#[tauri::command]
+pub async fn codeserver_write_runtime_args(
+    app: tauri::AppHandle,
+    contents: String,
+) -> Result<(), String> {
+    tokio::task::spawn_blocking(move || {
+        let path = process::runtime_args_path(&app)?;
+        atomic_write_text(&path, &contents)
+    })
+    .await
+    .map_err(|e| format!("write code-server runtime args task: {e}"))?
+}
+
+/// Whether a display-language pack is published for `locale` (and therefore
+/// whether asking for it can do anything). Lets the UI say "Chinese isn't
+/// available for the editor" instead of silently leaving it in English.
+#[tauri::command]
+pub fn codeserver_language_pack_available(locale: String) -> bool {
+    process::language_pack_extension_id(&locale).is_some()
 }
 
 /// Whether a local VS Code launcher is on PATH. Backs the fallback offered
@@ -299,5 +421,60 @@ mod tests {
             local_vscode_args("/a.ts", Some(0), Some(0)),
             vec!["--goto", "/a.ts:1:1"]
         );
+    }
+
+    #[test]
+    fn text_file_helpers_read_missing_as_empty_and_replace_atomically() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+
+        assert_eq!(read_text_or_empty(&path).unwrap(), "");
+
+        atomic_write_text(&path, "first").unwrap();
+        atomic_write_text(&path, "second").unwrap();
+
+        assert_eq!(read_text_or_empty(&path).unwrap(), "second");
+        assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 1);
+    }
+
+    #[test]
+    fn atomic_text_writes_use_independent_staging_files() {
+        const WRITERS: usize = 16;
+        let dir = tempfile::tempdir().unwrap();
+        let path = std::sync::Arc::new(dir.path().join("settings.json"));
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(WRITERS));
+        let payloads: Vec<String> = (0..WRITERS)
+            .map(|index| format!("writer-{index}-{}", "x".repeat(1024)))
+            .collect();
+
+        let handles: Vec<_> = payloads
+            .iter()
+            .cloned()
+            .map(|payload| {
+                let path = path.clone();
+                let barrier = barrier.clone();
+                std::thread::spawn(move || {
+                    barrier.wait();
+                    atomic_write_text(&path, &payload)
+                })
+            })
+            .collect();
+
+        for handle in handles {
+            handle.join().unwrap().unwrap();
+        }
+
+        let final_contents = read_text_or_empty(&path).unwrap();
+        assert!(payloads.contains(&final_contents));
+        assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 1);
+    }
+
+    #[test]
+    fn language_pack_availability_matches_supported_locales() {
+        assert!(codeserver_language_pack_available("zh-CN".to_string()));
+        assert!(codeserver_language_pack_available("  ja  ".to_string()));
+        assert!(!codeserver_language_pack_available(
+            "xx-unknown".to_string()
+        ));
     }
 }

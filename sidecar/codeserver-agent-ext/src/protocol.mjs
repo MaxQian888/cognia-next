@@ -49,6 +49,18 @@ export function helloFrame(token) {
 }
 
 /**
+ * Build an unsolicited event frame (extension → app, no correlation id).
+ *
+ * The request/response pair only lets the app *ask*, which forces it to poll for
+ * "what is the user looking at now". Events invert that: the extension reports
+ * editor changes as they happen, and the app's active-editor subscribers refresh
+ * off the signal instead of on a timer.
+ */
+export function eventFrame(name, payload) {
+  return JSON.stringify({ type: "evt", name, payload: payload ?? null }) + "\n"
+}
+
+/**
  * Build a response frame correlated to a request `id`. `outcome` is either
  * `{ ok: true, result }` or `{ ok: false, error }`.
  */
@@ -88,6 +100,15 @@ export function shouldReflectEdit(diskText, openText) {
 export function editReflectionAction(diskText, openText, isDirty) {
   if (openText != null && isDirty && openText !== diskText) return "conflict"
   return shouldReflectEdit(diskText, openText) ? "reflect" : "reveal"
+}
+
+/**
+ * Narrow an app-supplied notification kind to one this extension can show.
+ * Anything unrecognised (including undefined) reads as informational — a message
+ * the app wanted surfaced must never be dropped because its kind was misspelled.
+ */
+export function notificationKind(value) {
+  return value === "error" || value === "warning" ? value : "info"
 }
 
 /**

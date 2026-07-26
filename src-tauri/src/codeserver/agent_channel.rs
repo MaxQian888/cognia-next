@@ -39,10 +39,18 @@
 //! // extension → app
 //! { "type": "res", "id": 1, "ok": true, "result": { … } }
 //! { "type": "res", "id": 1, "ok": false, "error": "…" }
+//! // extension → app, unsolicited
+//! { "type": "evt", "name": "activeEditorChanged", "payload": { … } }
 //! ```
 //!
-//! The envelope is method-generic: `openFile`, `applyEdit` and `readActive` all ride
-//! the same frames, so new editor-control methods slot in without a protocol change.
+//! The envelope is method-generic: `openFile`, `applyEdit`, `readActive`, `saveAll`,
+//! `showDiff`, `revealInExplorer`, `runInTerminal` and `notify` all ride the same
+//! frames, so new editor-control methods slot in without a protocol change.
+//!
+//! `evt` is the reverse direction and carries no id: the extension reports editor
+//! changes as they happen (active editor, selection, save, diagnostics) and the app
+//! re-reads off the signal instead of polling `readActive` on a timer. Events are
+//! re-emitted to the renderer as [`CODESERVER_EDITOR_EVENT`].
 //!
 //! # Auth
 //!
@@ -75,6 +83,9 @@ const AGENT_REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
 /// backpressure rather than growing without limit.
 const OUTBOUND_CHANNEL_CAPACITY: usize = 32;
 
+/// Renderer event carrying an editor change pushed by the companion extension.
+pub const CODESERVER_EDITOR_EVENT: &str = "codeserver://editor-event";
+
 // ── Wire frames ──────────────────────────────────────────────────────────────
 
 /// A frame received from the companion extension.
@@ -93,6 +104,22 @@ enum InboundFrame {
         #[serde(default)]
         error: Option<String>,
     },
+    /// Unsolicited editor-state change. No id — nothing correlates to it.
+    Evt {
+        name: String,
+        #[serde(default)]
+        payload: Option<Value>,
+    },
+}
+
+/// Payload of [`CODESERVER_EDITOR_EVENT`]. `root` is the canonical project root the
+/// reporting instance serves, so a renderer hosting two panes can tell them apart.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CodeServerEditorEvent {
+    pub root: String,
+    pub name: String,
+    pub payload: Value,
 }
 
 /// A frame sent to the companion extension.
@@ -136,6 +163,10 @@ pub struct AgentChannel {
     pending: Mutex<HashMap<u64, PendingRequest>>,
     next_request_id: AtomicU64,
     next_conn_id: AtomicU64,
+    /// Set on the first `register_instance`, so pushed editor events can be
+    /// re-emitted to the renderer. `None` in unit tests (and before any spawn),
+    /// where an event simply has nowhere to go.
+    app: Mutex<Option<tauri::AppHandle>>,
 }
 
 impl AgentChannel {
@@ -146,6 +177,7 @@ impl AgentChannel {
             pending: Mutex::new(HashMap::new()),
             next_request_id: AtomicU64::new(1),
             next_conn_id: AtomicU64::new(1),
+            app: Mutex::new(None),
         }
     }
 
@@ -166,6 +198,20 @@ impl AgentChannel {
             reg.tokens.insert(token.clone(), root.to_string());
         }
         Ok((port, token))
+    }
+
+    /// Give the channel the handle it needs to re-emit pushed editor events to the
+    /// renderer. Called from the spawn path; first caller wins, and subsequent
+    /// calls are no-ops.
+    ///
+    /// Separate from [`Self::register_instance`] rather than a parameter of it so the
+    /// registry, framing and correlation logic stay drivable from unit tests, which
+    /// have no `AppHandle` to hand over.
+    pub fn attach_app(&self, app: &tauri::AppHandle) {
+        let mut slot = self.app.lock().unwrap_or_else(|p| p.into_inner());
+        if slot.is_none() {
+            *slot = Some(app.clone());
+        }
     }
 
     /// Forget an instance (explicit stop / kill-switch): drop its token(s) and any
@@ -304,6 +350,28 @@ impl AgentChannel {
         }
     }
 
+    /// Re-emit a pushed editor event to the renderer.
+    ///
+    /// Best-effort and silent: an event describes current state, so a drop (no app
+    /// handle yet, no listener, a closing window) is superseded by the next one and
+    /// is never worth failing the connection over.
+    fn forward_event(&self, root: &str, name: String, payload: Option<Value>) {
+        use tauri::Emitter as _;
+        let app = {
+            let slot = self.app.lock().unwrap_or_else(|p| p.into_inner());
+            slot.clone()
+        };
+        let Some(app) = app else { return };
+        let _ = app.emit(
+            CODESERVER_EDITOR_EVENT,
+            CodeServerEditorEvent {
+                root: root.to_string(),
+                name,
+                payload: payload.unwrap_or(Value::Null),
+            },
+        );
+    }
+
     fn lock_registry(&self) -> std::sync::MutexGuard<'_, Registry> {
         self.registry.lock().unwrap_or_else(|p| p.into_inner())
     }
@@ -397,6 +465,15 @@ async fn handle_conn(stream: TcpStream, channel: Arc<AgentChannel>) {
                         };
                         channel.resolve(root, *conn_id, id, outcome);
                     }
+                    Ok(InboundFrame::Evt { name, payload }) => {
+                        // Same authentication requirement as a response: an
+                        // unauthenticated socket may not inject editor events that the
+                        // renderer would treat as coming from a trusted editor.
+                        let Some((root, _)) = bound.as_ref() else {
+                            break;
+                        };
+                        channel.forward_event(root, name, payload);
+                    }
                     Err(reason) => {
                         log::warn!("codeserver agent_channel: bad frame: {reason}");
                     }
@@ -465,6 +542,73 @@ mod tests {
     #[test]
     fn unknown_frame_type_is_rejected() {
         assert!(serde_json::from_str::<InboundFrame>(r#"{"type":"bogus"}"#).is_err());
+    }
+
+    #[test]
+    fn evt_frame_parses_with_and_without_a_payload() {
+        let with: InboundFrame = serde_json::from_str(
+            r#"{"type":"evt","name":"activeEditorChanged","payload":{"path":"/a.ts"}}"#,
+        )
+        .unwrap();
+        match with {
+            InboundFrame::Evt { name, payload } => {
+                assert_eq!(name, "activeEditorChanged");
+                assert_eq!(payload.unwrap()["path"], "/a.ts");
+            }
+            _ => panic!("expected evt"),
+        }
+
+        // No payload is legal — some events are pure signals.
+        let without: InboundFrame =
+            serde_json::from_str(r#"{"type":"evt","name":"documentSaved"}"#).unwrap();
+        match without {
+            InboundFrame::Evt { name, payload } => {
+                assert_eq!(name, "documentSaved");
+                assert!(payload.is_none());
+            }
+            _ => panic!("expected evt"),
+        }
+    }
+
+    #[test]
+    fn evt_frame_carries_no_request_id_to_correlate() {
+        // Proves the event path can never consume a pending request: the frame has
+        // no id to match one with.
+        let raw = r#"{"type":"evt","name":"x","payload":null,"id":7}"#;
+        let frame: InboundFrame = serde_json::from_str(raw).unwrap();
+        assert!(matches!(frame, InboundFrame::Evt { .. }));
+    }
+
+    #[test]
+    fn forwarding_an_event_without_an_app_handle_is_a_silent_no_op() {
+        // Unit tests (and the window between process start and the first spawn) have
+        // no AppHandle; a pushed event must not panic there.
+        let channel = AgentChannel::new();
+        channel.forward_event("/work/a", "activeEditorChanged".to_string(), None);
+    }
+
+    #[tokio::test]
+    async fn an_unauthenticated_socket_cannot_inject_editor_events() {
+        // An event the renderer trusts as "the editor said so" must come from a
+        // socket that proved it is that editor.
+        let channel = Arc::new(AgentChannel::new());
+        let (port, _token) = channel.register_instance("/work/evt").await.unwrap();
+
+        let mut stream = TcpStream::connect(("127.0.0.1", port)).await.unwrap();
+        stream
+            .write_all(b"{\"type\":\"evt\",\"name\":\"activeEditorChanged\"}\n")
+            .await
+            .unwrap();
+
+        // The server drops the connection on an unauthenticated evt, so the read half
+        // reaches EOF instead of staying open.
+        let mut lines = BufReader::new(stream).lines();
+        let next = tokio::time::timeout(Duration::from_secs(2), lines.next_line())
+            .await
+            .expect("connection should have been closed promptly")
+            .unwrap();
+        assert!(next.is_none());
+        assert!(!is_connected(&channel, "/work/evt"));
     }
 
     #[test]

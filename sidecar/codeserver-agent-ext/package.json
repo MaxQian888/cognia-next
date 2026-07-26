@@ -1,8 +1,8 @@
 {
   "name": "cognia-agent-bridge",
   "displayName": "Cognia Agent Bridge",
-  "description": "Bridges the Cognia agent to the live code-server editor (open/reveal, apply-edit, read-active). Side-loaded by Cognia; dormant outside it.",
-  "version": "0.1.0",
+  "description": "Bridges the Cognia agent to the live code-server editor (open/reveal, apply-edit, read-active, save, diff preview, reveal-in-explorer, terminal, notifications) and pushes editor-state changes back. Side-loaded by Cognia; dormant outside it.",
+  "version": "0.2.0",
   "publisher": "cognia",
   "private": true,
   "license": "SEE LICENSE IN ../../LICENSE",

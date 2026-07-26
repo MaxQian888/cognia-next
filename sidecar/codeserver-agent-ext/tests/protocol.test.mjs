@@ -4,7 +4,9 @@ import { test } from "node:test"
 import {
   diagnosticSeverityName,
   editReflectionAction,
+  eventFrame,
   helloFrame,
+  notificationKind,
   parseRequest,
   responseFrame,
   shouldReflectEdit,
@@ -98,4 +100,49 @@ test("diagnosticSeverityName maps VS Code severities and defaults to info", () =
   assert.equal(diagnosticSeverityName(2), "info")
   assert.equal(diagnosticSeverityName(3), "hint")
   assert.equal(diagnosticSeverityName(99), "info")
+})
+
+test("eventFrame is newline-terminated JSON with no correlation id", () => {
+  const frame = eventFrame("activeEditorChanged", { path: "/a.ts" })
+  assert.ok(frame.endsWith("\n"))
+  const parsed = JSON.parse(frame)
+  assert.deepEqual(parsed, {
+    type: "evt",
+    name: "activeEditorChanged",
+    payload: { path: "/a.ts" },
+  })
+  // No id: an event must never be able to satisfy a pending request.
+  assert.equal("id" in parsed, false)
+})
+
+test("eventFrame normalises a missing payload to null", () => {
+  // undefined would be dropped by JSON.stringify, leaving the key absent and the
+  // Rust `Option<Value>` unable to distinguish it from a malformed frame.
+  assert.equal(JSON.parse(eventFrame("documentSaved")).payload, null)
+  assert.equal(JSON.parse(eventFrame("documentSaved", undefined)).payload, null)
+})
+
+test("eventFrame survives a round-trip through splitFrames", () => {
+  const { lines, rest } = splitFrames(eventFrame("a", { n: 1 }) + eventFrame("b", { n: 2 }))
+  assert.equal(rest, "")
+  assert.deepEqual(
+    lines.map((l) => JSON.parse(l).name),
+    ["a", "b"]
+  )
+})
+
+test("parseRequest ignores an event frame", () => {
+  // The two directions share a socket; a request parser must not claim events.
+  assert.equal(parseRequest(eventFrame("activeEditorChanged", {}).trim()), null)
+})
+
+test("notificationKind narrows to what the editor can show", () => {
+  assert.equal(notificationKind("error"), "error")
+  assert.equal(notificationKind("warning"), "warning")
+  assert.equal(notificationKind("info"), "info")
+  // Anything unrecognised still shows, as info — a message the app wanted
+  // surfaced must not be dropped over a misspelled kind.
+  assert.equal(notificationKind(undefined), "info")
+  assert.equal(notificationKind("critical"), "info")
+  assert.equal(notificationKind(7), "info")
 })

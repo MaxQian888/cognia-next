@@ -33,6 +33,21 @@ fn validate_loopback_url(raw: &str) -> Result<url::Url, String> {
     }
 }
 
+/// Resolve the optional pane background hex the renderer sent.
+///
+/// `None` means "leave the platform default", which is what a pre-appearance-sync
+/// claim passes. A *present but malformed* value is an error rather than a silent
+/// fallback: falling back would reintroduce the white flash this parameter exists
+/// to remove, with nothing to tell anyone why.
+fn resolve_pane_background(hex: Option<&str>) -> Result<Option<tauri::window::Color>, String> {
+    match hex {
+        Some(raw) => crate::commands::parse_hex_color(raw)
+            .map(Some)
+            .map_err(|e| e.to_string()),
+        None => Ok(None),
+    }
+}
+
 #[cfg(desktop)]
 fn logical_rect(x: f64, y: f64, width: f64, height: f64) -> tauri::Rect {
     tauri::Rect {
@@ -42,6 +57,12 @@ fn logical_rect(x: f64, y: f64, width: f64, height: f64) -> tauri::Rect {
 }
 
 /// Create (or re-navigate) the code-server pane at the given logical bounds.
+///
+/// `background` is the app's resolved `--background` token as `#RRGGBB`. A native
+/// webview paints its own background before the page it is loading has any, and
+/// the platform default is white — so on the first spawn (and on every navigate)
+/// the pane flashed a white rectangle over a dark app. Painting it in the app
+/// background instead makes the load invisible.
 #[tauri::command]
 pub async fn codeserver_embed_create(
     app: AppHandle,
@@ -50,14 +71,21 @@ pub async fn codeserver_embed_create(
     y: f64,
     width: f64,
     height: f64,
+    background: Option<String>,
 ) -> Result<String, String> {
     let parsed = validate_loopback_url(&url)?;
+    // Parsed up front so a malformed hex is reported rather than silently
+    // falling back to the platform's white.
+    let color = resolve_pane_background(background.as_deref())?;
     #[cfg(desktop)]
     {
         use tauri::webview::WebviewBuilder;
         use tauri::{LogicalPosition, LogicalSize, Manager, WebviewUrl};
 
         if let Some(wv) = app.get_webview(CODESERVER_EMBED_LABEL) {
+            if let Some(color) = color {
+                let _ = wv.set_background_color(Some(color));
+            }
             wv.navigate(parsed).map_err(|e| e.to_string())?;
             return Ok(CODESERVER_EMBED_LABEL.to_string());
         }
@@ -67,7 +95,10 @@ pub async fn codeserver_embed_create(
         // No overlay init script and no on_navigation interception: code-server
         // is our own trusted loopback app, not a remote page to be visually
         // edited.
-        let builder = WebviewBuilder::new(CODESERVER_EMBED_LABEL, WebviewUrl::External(parsed));
+        let mut builder = WebviewBuilder::new(CODESERVER_EMBED_LABEL, WebviewUrl::External(parsed));
+        if let Some(color) = color {
+            builder = builder.background_color(color);
+        }
         let webview = window
             .add_child(
                 builder,
@@ -81,8 +112,34 @@ pub async fn codeserver_embed_create(
     }
     #[cfg(not(desktop))]
     {
-        let _ = (parsed, x, y, width, height);
+        let _ = (parsed, x, y, width, height, color);
         Err("code-server pane is only available on desktop".to_string())
+    }
+}
+
+/// Repaint the pane's own background without navigating.
+///
+/// Called on a theme flip: code-server repaints itself from `settings.json`, but
+/// the *webview's* background is what shows through during a reload and in any
+/// gap around the workbench, so it has to follow the app too.
+#[tauri::command]
+pub async fn codeserver_embed_set_background(app: AppHandle, hex: String) -> Result<(), String> {
+    let color = resolve_pane_background(Some(&hex))?.expect("Some input yields Some color");
+    #[cfg(desktop)]
+    {
+        use tauri::Manager;
+        // Not an error when the pane is closed: the theme sync fires on every
+        // palette change, most of which happen with no Pro IDE open.
+        if let Some(wv) = app.get_webview(CODESERVER_EMBED_LABEL) {
+            wv.set_background_color(Some(color))
+                .map_err(|e| e.to_string())?;
+        }
+        Ok(())
+    }
+    #[cfg(not(desktop))]
+    {
+        let _ = (app, color);
+        Ok(())
     }
 }
 
@@ -206,5 +263,28 @@ mod tests {
     #[test]
     fn rejects_malformed() {
         assert!(validate_loopback_url("not a url").is_err());
+    }
+
+    #[test]
+    fn pane_background_is_optional() {
+        // A claim that lands before the appearance sync has run passes nothing,
+        // and must not be treated as an error.
+        assert_eq!(resolve_pane_background(None).unwrap(), None);
+    }
+
+    #[test]
+    fn pane_background_parses_the_app_background_hex() {
+        let color = resolve_pane_background(Some("#0b1220")).unwrap().unwrap();
+        assert_eq!(
+            (color.0, color.1, color.2, color.3),
+            (0x0b, 0x12, 0x20, 255)
+        );
+    }
+
+    #[test]
+    fn pane_background_rejects_a_malformed_value_instead_of_flashing_white() {
+        assert!(resolve_pane_background(Some("rebeccapurple")).is_err());
+        assert!(resolve_pane_background(Some("#fff")).is_err());
+        assert!(resolve_pane_background(Some("")).is_err());
     }
 }
