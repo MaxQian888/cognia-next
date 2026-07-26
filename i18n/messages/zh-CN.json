@@ -4744,6 +4744,9 @@
       "plan": {
         "title": "计划"
       },
+      "read": {
+        "title": "读取"
+      },
       "webFetch": {
         "empty": "无返回内容"
       },

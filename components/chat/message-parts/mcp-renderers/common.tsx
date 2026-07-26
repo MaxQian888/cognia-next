@@ -14,6 +14,7 @@
 import { useMemo, type ReactNode } from "react"
 import { Badge } from "@/components/ui/badge"
 import { cn } from "@/lib/utils"
+import type { McpResultBlock } from "@/lib/claude/parts-extensions"
 
 export function parseOutputJson(output: unknown): unknown | null {
   if (output === null || output === undefined) return null
@@ -84,6 +85,31 @@ export function languageFromPath(path: string | undefined): string {
   if (!path) return "text"
   const ext = path.toLowerCase().split(".").pop() ?? ""
   return LANGUAGE_BY_EXT[ext] ?? "text"
+}
+
+/**
+ * Build a usable `src` (data URL) from an image/audio block in either wire
+ * shape — MCP's `{ data, mimeType }` or Anthropic's
+ * `{ source: { data, media_type } }`. Returns null when the block carries no
+ * payload. Shared by the generic blocks card and the Read card, which both
+ * render images off `part.mcpContent`.
+ */
+export function blockMediaSrc(block: McpResultBlock, fallbackMime: string): string | null {
+  const b = block as {
+    data?: unknown
+    mimeType?: unknown
+    source?: { data?: unknown; media_type?: unknown }
+  }
+  if (typeof b.data === "string" && b.data.length > 0) {
+    const mime = typeof b.mimeType === "string" ? b.mimeType : fallbackMime
+    return b.data.startsWith("data:") ? b.data : `data:${mime};base64,${b.data}`
+  }
+  const src = b.source
+  if (src && typeof src.data === "string" && src.data.length > 0) {
+    const mime = typeof src.media_type === "string" ? src.media_type : fallbackMime
+    return src.data.startsWith("data:") ? src.data : `data:${mime};base64,${src.data}`
+  }
+  return null
 }
 
 export function McpCardShell({

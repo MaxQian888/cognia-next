@@ -19,6 +19,8 @@ import { getDb } from "@/lib/db/schema"
 import { useChatStore } from "@/stores/chat"
 import { useSettingsStore } from "@/stores/settings"
 import { ConversationTimeline } from "./minimap/conversation-timeline"
+import { ActiveTurnPublisher } from "./active-turn-publisher"
+import { useChatViewportStore } from "@/stores/chat/chat-viewport-store"
 import { MessageSearchBar } from "./message-search-bar"
 import type { MessageSearchHit } from "@/lib/chat/message-search"
 import { useAppShortcut } from "@/hooks/shortcuts/use-app-shortcut"
@@ -345,24 +347,43 @@ export function MessageList({
     el.scrollTo({ top: el.scrollHeight, behavior: "smooth" })
   }, [])
 
-  // ── Find-in-conversation ────────────────────────────────────────────────
+  // ── Jump to a message ───────────────────────────────────────────────────
   // The list owns this because jumping needs the scroll container and the
-  // virtualizer, exactly like the timeline's jumpTo.
+  // virtualizer. It had been written twice — once here for the find bar, once
+  // in the timeline minimap — and exposed nowhere, so "go to the message that
+  // produced this artifact" had nothing to call. One implementation now, and
+  // it is published on `chatViewportStore` for surfaces outside the list.
+  const jumpToMessage = useCallback(
+    (messageId: string, index?: number) => {
+      const resolvedIndex = index ?? messages.findIndex((message) => message.id === messageId)
+      if (virtualize && resolvedIndex >= 0) {
+        rowVirtualizer.scrollToIndex(resolvedIndex, { align: "center" })
+        return
+      }
+      const selector = `[data-msg-id="${messageId.replace(/["\\]/g, "\\$&")}"]`
+      scrollParentRef.current
+        ?.querySelector<HTMLElement>(selector)
+        ?.scrollIntoView({ behavior: "smooth", block: "center" })
+    },
+    [messages, virtualize, rowVirtualizer]
+  )
+
+  // Only the primary list publishes: the dock hosts its own per-resource chat
+  // pane, and letting that register would point every jump at the wrong list.
+  const registerJumpToMessage = useChatViewportStore((s) => s.registerJumpToMessage)
+  useEffect(() => {
+    if (!ownsShortcuts) return
+    registerJumpToMessage(jumpToMessage)
+    return () => registerJumpToMessage(null)
+  }, [jumpToMessage, ownsShortcuts, registerJumpToMessage])
+
+  // ── Find-in-conversation ────────────────────────────────────────────────
   const [searchOpen, setSearchOpen] = useState(false)
   const [activeHitId, setActiveHitId] = useState<string | null>(null)
 
   const jumpToHit = useCallback(
-    (hit: MessageSearchHit) => {
-      if (virtualize) {
-        rowVirtualizer.scrollToIndex(hit.index, { align: "center" })
-        return
-      }
-      const sel = `[data-msg-id="${hit.id.replace(/["\\]/g, "\\$&")}"]`
-      scrollParentRef.current
-        ?.querySelector<HTMLElement>(sel)
-        ?.scrollIntoView({ behavior: "smooth", block: "center" })
-    },
-    [virtualize, rowVirtualizer]
+    (hit: MessageSearchHit) => jumpToMessage(hit.id, hit.index),
+    [jumpToMessage]
   )
 
   const closeSearch = useCallback(() => {
@@ -468,7 +489,11 @@ export function MessageList({
             role="log"
             onScroll={handleScroll}
           >
-            <div ref={contentRef}>
+            <div
+              ref={contentRef}
+              className="mx-auto w-full max-w-[52rem] py-5 sm:py-7"
+              data-slot="conversation-reading-column"
+            >
               {virtualize ? (
                 <div style={{ height: totalSize, position: "relative" }}>
                   {virtualItems.map((virtualItem) => {
@@ -479,13 +504,13 @@ export function MessageList({
                           key="thinking"
                           data-index={virtualItem.index}
                           ref={rowVirtualizer.measureElement}
+                          className="px-5"
                           style={{
                             position: "absolute",
                             top: 0,
                             left: 0,
                             width: "100%",
                             transform: `translateY(${virtualItem.start}px)`,
-                            padding: "0 1rem",
                           }}
                         >
                           <ChatThinkingIndicator
@@ -511,6 +536,7 @@ export function MessageList({
                         data-search-hit={m.id === activeHitId ? "" : undefined}
                         ref={isStreamingMeasureSkip ? undefined : rowVirtualizer.measureElement}
                         className={cn(
+                          "px-5",
                           m.id === activeHitId &&
                             "rounded-md ring-2 ring-primary/60 ring-offset-2 ring-offset-background"
                         )}
@@ -520,7 +546,6 @@ export function MessageList({
                           left: 0,
                           width: "100%",
                           transform: `translateY(${virtualItem.start}px)`,
-                          padding: "0 1rem",
                         }}
                       >
                         {renderRow(m, isStreaming)}
@@ -544,17 +569,17 @@ export function MessageList({
                         data-msg-id={m.id}
                         data-search-hit={m.id === activeHitId ? "" : undefined}
                         className={cn(
+                          "px-5",
                           m.id === activeHitId &&
                             "rounded-md ring-2 ring-primary/60 ring-offset-2 ring-offset-background"
                         )}
-                        style={{ padding: "0 1rem" }}
                       >
                         {renderRow(m, isStreaming)}
                       </div>
                     )
                   })}
                   {showThinking && (
-                    <div key="thinking" style={{ padding: "0 1rem" }}>
+                    <div key="thinking" className="px-5">
                       <ChatThinkingIndicator
                         directCharacter={directCharacter}
                         onPhaseChange={pinToBottom}
@@ -578,6 +603,18 @@ export function MessageList({
               </Button>
             )}
           </div>
+          {/* Renders nothing — it exists to absorb the per-frame scroll sync
+              and publish only the turn changes. Unconditional (unlike the
+              minimap): the artifact dock's tab highlight is not a desktop-only
+              or long-conversation-only feature. */}
+          {ownsShortcuts && (
+            <ActiveTurnPublisher
+              messages={timelineMessages}
+              scrollRef={scrollParentRef}
+              virtualizer={rowVirtualizer}
+              virtualize={virtualize}
+            />
+          )}
           {!isMobile &&
             isTimelineViewport &&
             timelineEnabled !== false &&

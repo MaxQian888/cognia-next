@@ -19,6 +19,7 @@
 import { memo, useMemo, useState } from "react"
 import { Block, parseMarkdownIntoBlocks, type BlockProps } from "streamdown"
 import { MessageResponse, type MessageResponseProps } from "@/components/ai-elements/message"
+import { createSharedMarkdownComponents } from "@/components/chat/markdown/shared-components"
 import { useFlowMotion } from "@/components/chat/motion/motion-reveal"
 import { ProjectFileLink } from "@/components/chat/project-file-link"
 import { ExternalLink } from "@/components/shared/external-link"
@@ -47,6 +48,19 @@ type StreamdownComponents = NonNullable<MessageResponseProps["components"]>
 
 function createStreamingComponents(projectRoot?: string | null): StreamdownComponents {
   return {
+    // Shared with `MarkdownRenderer` so images, tables, GitHub alerts,
+    // `<details>`, `<kbd>` and task lists don't visually re-lay-out the moment
+    // the turn finalises and the renderer swaps branches.
+    //
+    // Two deliberate omissions:
+    //   - `code` / `pre` stay with `@streamdown/code` (theme-aligned in
+    //     `ai-elements/streamdown-plugins.ts`) so incremental highlighting
+    //     survives.
+    //   - No `rehype-raw` runs here, so `<details>` / `<kbd>` written as raw
+    //     HTML only pick these up once the message finalises. Markdown-syntax
+    //     nodes hit them immediately. Keeping raw-HTML parsing off the
+    //     per-token path is a cost/attack-surface choice, not an oversight.
+    ...createSharedMarkdownComponents(),
     a({ href, children, node: _node, ...props }) {
       const target = href ? parseProjectFileReference(href, projectRoot) : null
       if (target) {

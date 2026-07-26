@@ -1,6 +1,6 @@
 "use client"
 
-import { useRef, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { useTranslations } from "next-intl"
 import { motion, useReducedMotion } from "motion/react"
 import { Maximize2Icon } from "lucide-react"
@@ -9,6 +9,7 @@ import { mobileTransition } from "@/lib/ui/motion"
 import { cn } from "@/lib/utils"
 
 import { ImageLightbox, type ImageLightboxItem } from "./image-lightbox"
+import { useMessageImageCollection } from "./message-image-collection"
 
 export interface MessageImageGalleryProps {
   items: ImageLightboxItem[]
@@ -22,10 +23,23 @@ export function MessageImageGallery({ items, className }: MessageImageGalleryPro
   const [activeIndex, setActiveIndex] = useState(0)
   const returnFocusRef = useRef<HTMLElement | null>(null)
 
+  // Attachment images join the message-wide set so paging crosses freely
+  // between them and any markdown / tool-result images in the same turn.
+  const collection = useMessageImageCollection()
+  useEffect(() => {
+    if (!collection) return
+    const unregister = items.map((item) => collection.register(item))
+    return () => unregister.forEach((fn) => fn())
+  }, [collection, items])
+
   if (items.length === 0) return null
   const multiple = items.length > 1
 
   const openAt = (index: number, trigger: HTMLElement) => {
+    if (collection) {
+      collection.open(items[index].src, trigger)
+      return
+    }
     returnFocusRef.current = trigger
     setActiveIndex(index)
     setOpen(true)
@@ -80,14 +94,16 @@ export function MessageImageGallery({ items, className }: MessageImageGalleryPro
         })}
       </div>
 
-      <ImageLightbox
-        items={items}
-        open={open}
-        activeIndex={activeIndex}
-        returnFocusRef={returnFocusRef}
-        onActiveIndexChange={setActiveIndex}
-        onOpenChange={setOpen}
-      />
+      {collection ? null : (
+        <ImageLightbox
+          items={items}
+          open={open}
+          activeIndex={activeIndex}
+          returnFocusRef={returnFocusRef}
+          onActiveIndexChange={setActiveIndex}
+          onOpenChange={setOpen}
+        />
+      )}
     </>
   )
 }

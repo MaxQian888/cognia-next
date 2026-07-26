@@ -770,6 +770,9 @@
     "plan": {
       "title": "Plan"
     },
+    "read": {
+      "title": "Read"
+    },
     "webFetch": {
       "empty": "No content returned"
     },

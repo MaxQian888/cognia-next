@@ -1,6 +1,6 @@
 "use client"
 
-import { memo, useCallback, useMemo, useRef, useState } from "react"
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useTranslations } from "next-intl"
 import {
   CheckIcon,
@@ -11,6 +11,7 @@ import {
   Maximize2Icon,
 } from "lucide-react"
 
+import { Image } from "@/components/ai-elements/image"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { TooltipIconButton } from "@/components/chat/ui/tooltip-icon-button"
@@ -21,6 +22,7 @@ import { cn } from "@/lib/utils"
 import { loggers } from "@cognia/logging"
 
 import { ImageLightbox, type ImageLightboxItem } from "./image-lightbox"
+import { useMessageImageCollection } from "./message-image-collection"
 
 interface ImageBlockProps {
   src: string
@@ -49,6 +51,28 @@ export const ImageBlock = memo(function ImageBlock({
   const items = useMemo<ImageLightboxItem[]>(
     () => [{ id: src, src, alt, title }],
     [alt, src, title]
+  )
+
+  // Inside a chat message every image joins ONE lightbox so the user can page
+  // across the whole turn. Outside one (attachment preview sheet, dialogs,
+  // settings) there is no provider and the local single-item lightbox below
+  // stays in charge.
+  const collection = useMessageImageCollection()
+  useEffect(() => {
+    if (!collection) return
+    return collection.register({ id: src, src, alt, title })
+  }, [collection, src, alt, title])
+
+  const openViewer = useCallback(
+    (trigger: HTMLElement | null) => {
+      if (collection) {
+        collection.open(src, trigger)
+        return
+      }
+      returnFocusRef.current = trigger
+      setIsOpen(true)
+    },
+    [collection, src]
   )
 
   const handleDownload = useCallback(async () => {
@@ -83,18 +107,28 @@ export const ImageBlock = memo(function ImageBlock({
     )
   }
 
+  // A not-yet-loaded <img> without width/height attributes has an intrinsic
+  // size of 0, so the figure collapsed and the `absolute inset-0` Skeleton had
+  // nothing to fill — it was never actually visible, and the image popping in
+  // shifted everything below it. Reserve the box: use the real aspect ratio
+  // when the caller knows it (computer-use screenshots do), otherwise hold a
+  // placeholder box until `onLoad` fires.
+  const hasIntrinsicSize = Boolean(width && height)
+  const reserveStyle = hasIntrinsicSize ? { aspectRatio: `${width} / ${height}` } : undefined
+
   return (
     <>
       <figure
+        style={reserveStyle}
         className={cn(
           "group relative my-4 inline-block max-w-full overflow-hidden rounded-lg",
+          isLoading && !hasIntrinsicSize && "min-h-32 min-w-48",
           className
         )}
       >
         {isLoading ? <Skeleton className="absolute inset-0 size-full" /> : null}
 
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img
+        <Image
           src={src}
           alt={alt}
           title={title}
@@ -104,6 +138,7 @@ export const ImageBlock = memo(function ImageBlock({
           tabIndex={0}
           aria-label={t("viewFullscreen")}
           loading="lazy"
+          decoding="async"
           onLoad={() => {
             setIsLoading(false)
             setHasError(false)
@@ -113,18 +148,14 @@ export const ImageBlock = memo(function ImageBlock({
             setHasError(true)
           }}
           className={cn(
-            "h-auto max-w-full cursor-zoom-in rounded-lg transition-[opacity,transform] duration-300 group-hover:scale-[1.01]",
+            "cursor-zoom-in rounded-lg transition-[opacity,transform] duration-300 group-hover:scale-[1.01]",
             isLoading && "opacity-0"
           )}
-          onClick={(event) => {
-            returnFocusRef.current = event.currentTarget
-            setIsOpen(true)
-          }}
+          onClick={(event) => openViewer(event.currentTarget)}
           onKeyDown={(event) => {
             if (event.key !== "Enter" && event.key !== " ") return
             event.preventDefault()
-            returnFocusRef.current = event.currentTarget
-            setIsOpen(true)
+            openViewer(event.currentTarget)
           }}
         />
 
@@ -133,10 +164,7 @@ export const ImageBlock = memo(function ImageBlock({
             variant="secondary"
             size="icon"
             className="size-7 bg-background/80 backdrop-blur-sm"
-            onClick={(event) => {
-              returnFocusRef.current = event.currentTarget
-              setIsOpen(true)
-            }}
+            onClick={(event) => openViewer(event.currentTarget)}
             aria-label={t("viewFullscreen")}
             tooltip={t("viewFullscreen")}
           >
@@ -164,21 +192,26 @@ export const ImageBlock = memo(function ImageBlock({
           </TooltipIconButton>
         </div>
 
-        {alt || title ? (
+        {/* Only an explicit `title` is a caption. `alt` is ALTERNATIVE text —
+            printing it under every markdown image turned screen-reader copy
+            into visible chrome. It stays on the <img> for assistive tech. */}
+        {title ? (
           <figcaption className="mt-2 px-2 text-center text-sm text-muted-foreground">
-            {title || alt}
+            {title}
           </figcaption>
         ) : null}
       </figure>
 
-      <ImageLightbox
-        items={items}
-        open={isOpen}
-        activeIndex={activeIndex}
-        returnFocusRef={returnFocusRef}
-        onActiveIndexChange={setActiveIndex}
-        onOpenChange={setIsOpen}
-      />
+      {collection ? null : (
+        <ImageLightbox
+          items={items}
+          open={isOpen}
+          activeIndex={activeIndex}
+          returnFocusRef={returnFocusRef}
+          onActiveIndexChange={setActiveIndex}
+          onOpenChange={setIsOpen}
+        />
+      )}
     </>
   )
 })

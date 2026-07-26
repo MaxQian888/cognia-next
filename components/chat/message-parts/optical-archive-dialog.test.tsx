@@ -4,6 +4,7 @@
 import { render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import type { OpticalArchiveRow } from "@/lib/db/optical-archives"
+import { TooltipProvider } from "@/components/ui/tooltip"
 import { OpticalArchiveDialog } from "./optical-archive-dialog"
 
 jest.mock("next-intl", () => ({
@@ -17,6 +18,17 @@ jest.mock("dexie-react-hooks", () => ({ useLiveQuery: () => mockState.archive })
 jest.mock("@/lib/db/optical-archives", () => ({ getOpticalArchive: jest.fn() }))
 
 const noop = () => {}
+
+// Frames render through `ImageBlock`, whose hover toolbar uses Radix tooltips.
+// The app mounts `TooltipProvider` once in `app/layout.tsx`; the test harness
+// has to supply it.
+function renderDialog(props: { open?: boolean } = {}) {
+  return render(
+    <TooltipProvider>
+      <OpticalArchiveDialog archiveId="compact-1" open={props.open ?? true} onOpenChange={noop} />
+    </TooltipProvider>
+  )
+}
 
 const archive = (over: Partial<OpticalArchiveRow> = {}): OpticalArchiveRow => ({
   id: "compact-1",
@@ -44,7 +56,7 @@ beforeEach(() => {
 })
 
 it("renders the frames, token stats, and shape", () => {
-  render(<OpticalArchiveDialog archiveId="compact-1" open onOpenChange={noop} />)
+  renderDialog()
   // Both frames rendered as data-URI images.
   expect(screen.getByAltText('frameAlt:{"n":1}')).toHaveAttribute(
     "src",
@@ -61,8 +73,16 @@ it("renders the frames, token stats, and shape", () => {
   expect(screen.getByText(/8x8 · bw · 512px/)).toBeInTheDocument()
 })
 
+it("makes each frame zoomable — an optical frame is text rendered to pixels", async () => {
+  renderDialog()
+  await userEvent.click(screen.getByAltText('frameAlt:{"n":2}'))
+  // The lightbox opened on the clicked frame, not the first one.
+  expect(screen.getByTestId("image-lightbox-stage")).toBeInTheDocument()
+  expect(screen.getByText('counter:{"current":2,"total":2}')).toBeInTheDocument()
+})
+
 it("reveals and hides the original text on demand", async () => {
-  render(<OpticalArchiveDialog archiveId="compact-1" open onOpenChange={noop} />)
+  renderDialog()
   expect(screen.queryByText(/original conversation text/)).not.toBeInTheDocument()
   await userEvent.click(screen.getByTestId("optical-reveal-text"))
   expect(screen.getByText(/original conversation text/)).toBeInTheDocument()
@@ -72,7 +92,7 @@ it("reveals and hides the original text on demand", async () => {
 
 it("shows a no-text notice when the original was not captured", () => {
   mockState.archive = archive({ originalText: undefined })
-  render(<OpticalArchiveDialog archiveId="compact-1" open onOpenChange={noop} />)
+  renderDialog()
   expect(screen.getByText("noText")).toBeInTheDocument()
   expect(screen.queryByTestId("optical-reveal-text")).not.toBeInTheDocument()
 })
@@ -85,7 +105,7 @@ it("omits optional stats when absent (shape without size, no coverage/readabilit
     estImageTokens: undefined,
     estTextTokens: undefined,
   })
-  render(<OpticalArchiveDialog archiveId="compact-1" open onOpenChange={noop} />)
+  renderDialog()
   // Shape renders just the font (no size suffix); the optional dt labels are gone.
   expect(screen.getByText("8x8")).toBeInTheDocument()
   expect(screen.queryByText("coverage")).not.toBeInTheDocument()
@@ -95,11 +115,11 @@ it("omits optional stats when absent (shape without size, no coverage/readabilit
 
 it("shows a not-found notice when the archive is gone", () => {
   mockState.archive = undefined
-  render(<OpticalArchiveDialog archiveId="compact-1" open onOpenChange={noop} />)
+  renderDialog()
   expect(screen.getByText("notFound")).toBeInTheDocument()
 })
 
 it("does not query when closed", () => {
-  render(<OpticalArchiveDialog archiveId="compact-1" open={false} onOpenChange={noop} />)
+  renderDialog({ open: false })
   expect(screen.queryByTestId("optical-archive-dialog")).not.toBeInTheDocument()
 })

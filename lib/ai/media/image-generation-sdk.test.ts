@@ -37,6 +37,7 @@ describe("image-generation-sdk registry", () => {
       expect(IMAGE_PROVIDERS.togetherai.defaultModel).toBe("black-forest-labs/FLUX.2-dev")
       expect(IMAGE_PROVIDERS.deepinfra.defaultModel).toBe("black-forest-labs/FLUX-2-klein-9b")
       expect(IMAGE_PROVIDERS.google.defaultModel).toBe("gemini-3.1-flash-image-preview")
+      expect(IMAGE_PROVIDERS.doubao.defaultModel).toBe("seedream-5-0-260128")
     })
   })
 
@@ -111,6 +112,8 @@ describe("image-generation-sdk registry", () => {
       )
       expect(isImageCapableModel("deepinfra", "ByteDance/Seedream-4.5")).toBe(true)
       expect(isImageCapableModel("google", "imagen-4.0-ultra-generate-001")).toBe(true)
+      expect(isImageCapableModel("fal", "fal-ai/qwen-image")).toBe(true)
+      expect(isImageCapableModel("deepinfra", "Qwen/Qwen-Image-Max")).toBe(true)
       expect(isImageCapableModel("nvidia", "qwen/qwen-image")).toBe(true)
       expect(isImageCapableModel("replicate", "ideogram-ai/ideogram-v2")).toBe(true)
     })

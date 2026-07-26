@@ -10,7 +10,7 @@
  * Streaming text uses streamdown (see ai-elements/message MessageResponse).
  */
 
-import { memo, useMemo, isValidElement, Children } from "react"
+import { memo, useMemo } from "react"
 import dynamic from "next/dynamic"
 import ReactMarkdown from "react-markdown"
 import remarkGfm from "remark-gfm"
@@ -20,14 +20,8 @@ import rehypeSanitize, { defaultSchema } from "rehype-sanitize"
 import { cjk } from "@streamdown/cjk"
 import { cn } from "@/lib/utils"
 import { CodeBlock } from "@/components/chat/renderers/code-block"
-import { ImageBlock } from "@/components/chat/renderers/image-block"
-import { VideoBlock } from "@/components/chat/renderers/video-block"
-import { AudioBlock } from "@/components/chat/renderers/audio-block"
-import { AlertBlock, parseAlertFromBlockquote } from "@/components/chat/renderers/alert-block"
-import { DetailsBlock } from "@/components/chat/renderers/details-block"
-import { KbdInline } from "@/components/chat/renderers/kbd-inline"
-import { TaskListItem } from "@/components/chat/renderers/task-list"
 import { withRendererErrorBoundary } from "@/components/chat/renderers/renderer-error-boundary"
+import { createSharedMarkdownComponents } from "@/components/chat/markdown/shared-components"
 import { ArtifactCreateButton } from "@/components/artifacts/artifact-create-button"
 import { ExternalLink } from "@/components/shared/external-link"
 import { ProjectFileLink } from "@/components/chat/project-file-link"
@@ -35,6 +29,11 @@ import {
   parseProjectFileReference,
   type ProjectFileReference,
 } from "@/lib/files/project-file-reference"
+
+// `parseTaskListItem` moved to the shared factory alongside the `li` override
+// that consumes it; re-exported here because it was part of this module's
+// public surface (and its unit tests) before the extraction.
+export { parseTaskListItem } from "@/components/chat/markdown/shared-components"
 
 // Heavy block renderers are code-split via next/dynamic so the initial
 // chat-tab bundle drops their parse cost. Mermaid is ~200KB minified,
@@ -91,15 +90,12 @@ const A2UIBlock = dynamic(
 // malformed fence (bad mermaid graph, unparseable diff/a2ui, broken media
 // URL) degrades to an inline error instead of unmounting the whole message.
 // The math pair keeps its dedicated `withMathErrorBoundary`; everything else
-// routes through the shared renderer boundary here.
+// routes through the shared renderer boundary here. The image / video / audio
+// / alert / details boundaries live in `markdown/shared-components.tsx` next
+// to the overrides that use them.
 const SafeMermaidBlock = withRendererErrorBoundary(MermaidBlock, "Mermaid")
 const SafeDiffBlock = withRendererErrorBoundary(DiffBlock, "Diff")
 const SafeA2UIBlock = withRendererErrorBoundary(A2UIBlock, "A2UI")
-const SafeAlertBlock = withRendererErrorBoundary(AlertBlock, "Alert")
-const SafeDetailsBlock = withRendererErrorBoundary(DetailsBlock, "Details")
-const SafeImageBlock = withRendererErrorBoundary(ImageBlock, "Image")
-const SafeVideoBlock = withRendererErrorBoundary(VideoBlock, "Video")
-const SafeAudioBlock = withRendererErrorBoundary(AudioBlock, "Audio")
 
 /**
  * Sanitization schema extended with KaTeX MathML and a small set of safe
@@ -420,6 +416,14 @@ function buildComponents(
   } = opts
 
   return {
+    // Everything both markdown surfaces agree on. Spread first so the
+    // branch-specific overrides below win on conflict.
+    ...createSharedMarkdownComponents({
+      enableEnhancedImages,
+      enableAlerts,
+      enableVideoEmbed,
+      enableAudioEmbed,
+    }),
     code({ className: codeClassName, children, ...props }) {
       const match = /(?:^|\s)language-([^\s]+)/.exec(codeClassName || "")
       const language = match ? match[1] : undefined
@@ -506,23 +510,6 @@ function buildComponents(
     pre({ children }) {
       return <>{children}</>
     },
-    table({ children }) {
-      return (
-        <div className="overflow-x-auto my-4">
-          <table className="min-w-full border-collapse border border-border">{children}</table>
-        </div>
-      )
-    },
-    th({ children }) {
-      return (
-        <th className="border border-border bg-muted px-4 py-2 text-left font-semibold">
-          {children}
-        </th>
-      )
-    },
-    td({ children }) {
-      return <td className="border border-border px-4 py-2">{children}</td>
-    },
     a({ href, children }) {
       const target = href ? parseProjectFileReference(href, projectRoot) : null
       if (target) {
@@ -541,36 +528,6 @@ function buildComponents(
           {children}
         </ExternalLink>
       )
-    },
-    blockquote({ children }) {
-      if (enableAlerts && children) {
-        const textContent = extractTextContent(children)
-        const alertInfo = parseAlertFromBlockquote(textContent)
-        if (alertInfo) {
-          return <SafeAlertBlock type={alertInfo.type}>{alertInfo.content}</SafeAlertBlock>
-        }
-      }
-      return (
-        <blockquote className="border-l-4 border-primary/30 pl-4 italic text-muted-foreground my-4">
-          {children}
-        </blockquote>
-      )
-    },
-    ul({ children }) {
-      return <ul className="list-disc pl-6 my-2 space-y-1">{children}</ul>
-    },
-    ol({ children }) {
-      return <ol className="list-decimal pl-6 my-2 space-y-1">{children}</ol>
-    },
-    li({ children }) {
-      // GFM task-list items (`- [ ]` / `- [x]`) arrive with a disabled
-      // checkbox `<input>` as the first child. Route those to the styled
-      // TaskListItem; everything else stays a plain list item.
-      const task = parseTaskListItem(children)
-      if (task) {
-        return <TaskListItem checked={task.checked}>{task.label}</TaskListItem>
-      }
-      return <li className="leading-relaxed">{children}</li>
     },
     h1({ children, id }) {
       return (
@@ -614,107 +571,5 @@ function buildComponents(
         </h6>
       )
     },
-    p({ children }) {
-      return <p className="my-2 leading-relaxed">{children}</p>
-    },
-    hr() {
-      return <hr className="my-6 border-border" />
-    },
-    img({ src, alt, title }) {
-      if (!src || typeof src !== "string") return null
-      if (enableVideoEmbed && isVideoUrl(src)) {
-        return <SafeVideoBlock src={src} title={title || alt} />
-      }
-      if (enableAudioEmbed && isAudioUrl(src)) {
-        return <SafeAudioBlock src={src} title={title || alt} />
-      }
-      if (enableEnhancedImages) {
-        return <SafeImageBlock src={src} alt={alt || ""} title={title} />
-      }
-
-      return (
-        // eslint-disable-next-line @next/next/no-img-element -- markdown sources lack the fixed dimensions that next/image requires; ImageBlock above is the optimised path
-        <img
-          src={src}
-          alt={alt || ""}
-          title={title}
-          className="max-w-full h-auto rounded-lg my-4"
-          loading="lazy"
-        />
-      )
-    },
-    details({ children }) {
-      const childArray = Children.toArray(children)
-      let summaryContent: React.ReactNode = "Details"
-      const restContent: React.ReactNode[] = []
-      childArray.forEach((child) => {
-        if (isValidElement(child) && child.type === "summary") {
-          const props = child.props as { children?: React.ReactNode }
-          summaryContent = props.children
-        } else {
-          restContent.push(child)
-        }
-      })
-      return <SafeDetailsBlock summary={summaryContent}>{restContent}</SafeDetailsBlock>
-    },
-    kbd({ children }) {
-      return <KbdInline>{children}</KbdInline>
-    },
   }
-}
-
-/**
- * Detect a GFM task-list item by its leading disabled checkbox `<input>` child.
- * Returns the checked state plus the remaining children (the label, with inline
- * formatting preserved), or null for ordinary list items. Exported for unit
- * testing because remark-gfm / rehype-raw are stubbed in the jest env, so the
- * checkbox child can't be produced through the full markdown pipeline there.
- */
-export function parseTaskListItem(
-  children: React.ReactNode
-): { checked: boolean; label: React.ReactNode[] } | null {
-  const childArray = Children.toArray(children)
-  const inputIdx = childArray.findIndex(
-    (child) =>
-      isValidElement(child) &&
-      child.type === "input" &&
-      (child.props as { type?: string }).type === "checkbox"
-  )
-  if (inputIdx === -1) return null
-  const input = childArray[inputIdx] as React.ReactElement
-  const checked = Boolean((input.props as { checked?: boolean }).checked)
-  const label = childArray.filter((_, i) => i !== inputIdx)
-  return { checked, label }
-}
-
-function extractTextContent(children: React.ReactNode): string {
-  if (typeof children === "string") return children
-  if (typeof children === "number") return String(children)
-  if (Array.isArray(children)) {
-    return children.map(extractTextContent).join("")
-  }
-  if (isValidElement(children)) {
-    const props = children.props as { children?: React.ReactNode }
-    return extractTextContent(props.children)
-  }
-  return ""
-}
-
-function isVideoUrl(url: string): boolean {
-  const videoExtensions = /\.(mp4|webm|ogv|mov|avi|mkv)(?:[?#]|$)/i
-  if (videoExtensions.test(url)) return true
-
-  try {
-    const hostname = new URL(url).hostname.toLowerCase()
-    return ["youtube.com", "youtu.be", "vimeo.com", "bilibili.com"].some(
-      (domain) => hostname === domain || hostname.endsWith(`.${domain}`)
-    )
-  } catch {
-    return false
-  }
-}
-
-function isAudioUrl(url: string): boolean {
-  const audioExtensions = /\.(mp3|wav|ogg|oga|opus|aac|flac|m4a|wma)(?:[?#]|$)/i
-  return audioExtensions.test(url)
 }

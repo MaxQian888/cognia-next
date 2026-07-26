@@ -2,9 +2,11 @@
 
 /**
  * Compact single-line representation of a tool call, used by the "simplified"
- * agent-flow display mode. Shows an icon + tool name + concise target + status
- * glyph on one row; clicking expands the full input/output inline (reusing the
- * standard `ToolBody`).
+ * agent-flow display mode and by every sub-agent tree. Shows an icon + tool
+ * name + concise target + status glyph on one row; clicking expands the same
+ * rich content standard mode renders (dedicated card → structured MCP content
+ * blocks → generic `ToolBody`). The row is the *collapsed* affordance — once
+ * the user asks for the detail, an image must render as an image.
  *
  * Supports both controlled (`expanded` + `onToggle`, driven by the activity
  * group's expand-all/collapse-all) and uncontrolled (internal state) use.
@@ -33,7 +35,11 @@ import {
 import type { LucideIcon } from "lucide-react"
 import type { ToolUIPart } from "ai"
 
-import { ToolBody } from "@/components/ai-elements/tool"
+import {
+  isStructuredMcpToolPart,
+  MCPToolCard,
+  McpToolBodyOrContent,
+} from "@/components/chat/message-parts/mcp-tool-card"
 import { summarizeToolCall, type ToolIconKey } from "@/lib/chat/tool-summary"
 import {
   describeRunningProgress,
@@ -164,7 +170,11 @@ export const ToolCallRow = memo(function ToolCallRow({
       <MotionCollapse open={open}>
         {/* ml aligns the left rule under the chevron (px-1.5 + half of size-3.5). */}
         <div className="ml-[13px] mb-1 space-y-3 border-l pl-3 pt-1 text-popover-foreground">
-          <ToolBody part={part} />
+          {isStructuredMcpToolPart(part) ? (
+            <MCPToolCard part={part} />
+          ) : (
+            <McpToolBodyOrContent part={part} />
+          )}
         </div>
       </MotionCollapse>
     </div>

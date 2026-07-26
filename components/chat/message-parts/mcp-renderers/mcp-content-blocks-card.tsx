@@ -16,26 +16,7 @@ import { MarkdownRenderer } from "@/components/chat/markdown-renderer"
 import { CodeBlock } from "@/components/chat/renderers/code-block"
 import { ImageBlock } from "@/components/chat/renderers/image-block"
 import { AudioBlock } from "@/components/chat/renderers/audio-block"
-import { languageFromPath } from "./common"
-
-/** Build a usable `src` (data URL) from an image/audio block in either wire shape. */
-function blockMediaSrc(block: McpResultBlock, fallbackMime: string): string | null {
-  const b = block as {
-    data?: unknown
-    mimeType?: unknown
-    source?: { data?: unknown; media_type?: unknown }
-  }
-  if (typeof b.data === "string" && b.data.length > 0) {
-    const mime = typeof b.mimeType === "string" ? b.mimeType : fallbackMime
-    return b.data.startsWith("data:") ? b.data : `data:${mime};base64,${b.data}`
-  }
-  const src = b.source
-  if (src && typeof src.data === "string" && src.data.length > 0) {
-    const mime = typeof src.media_type === "string" ? src.media_type : fallbackMime
-    return src.data.startsWith("data:") ? src.data : `data:${mime};base64,${src.data}`
-  }
-  return null
-}
+import { blockMediaSrc, languageFromPath } from "./common"
 
 function ResourceBlock({ block }: { block: Extract<McpResultBlock, { type: "resource" }> }) {
   const t = useTranslations("chat.mcpContent")

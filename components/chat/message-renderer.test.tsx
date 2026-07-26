@@ -4,8 +4,20 @@
 import * as ReactForMocks from "react"
 
 jest.mock("@/components/ai-elements/message", () => ({
-  Message: ({ children }: { children: ReactForMocks.ReactNode }) =>
-    ReactForMocks.createElement("div", { "data-test": "message" }, children),
+  Message: ({
+    children,
+    className,
+    from,
+  }: {
+    children: ReactForMocks.ReactNode
+    className?: string
+    from?: string
+  }) =>
+    ReactForMocks.createElement(
+      "div",
+      { "data-test": "message", "data-from": from, className },
+      children
+    ),
   MessageContent: ({
     children,
     className,
@@ -569,6 +581,28 @@ describe("tool parts", () => {
     }
     render(<MessageRenderer message={msg} />)
     expect(document.querySelector("[data-test='tool']")).toBeTruthy()
+  })
+
+  it("renders a dynamic-tool part as a tool call, not an unknown part", () => {
+    // `dynamic-tool` is the AI SDK shape for a tool the client never declared
+    // statically — imported transcripts and CLI handoff carry it.
+    const msg: UIMessage = {
+      id: "dt1",
+      role: "assistant",
+      parts: [
+        {
+          type: "dynamic-tool",
+          toolName: "SomeTool",
+          toolCallId: "call_d",
+          state: "output-available",
+          input: {},
+          output: "done",
+        } as unknown as UIMessage["parts"][number],
+      ],
+    }
+    render(<MessageRenderer message={msg} />)
+    expect(document.querySelector("[data-test='tool']")).toBeTruthy()
+    expect(document.querySelector("[data-testid='unknown-part-card']")).toBeNull()
   })
 
   it("renders ErrorTraceDetails when the tool part is in output-error state", () => {
@@ -1226,5 +1260,17 @@ describe("message column width", () => {
     render(<MessageRenderer message={assistantMsg("w1")} />)
     const content = document.querySelector("[data-test='message-content']")
     expect(content?.className).toContain("group-[.is-assistant]:w-full")
+  })
+
+  it("uses a compact bubble for the user and an open full-width assistant turn", () => {
+    const { rerender } = render(<MessageRenderer message={userMsg("w2")} />)
+    expect(document.querySelector("[data-test='message']")).toHaveClass("max-w-[min(82%,42rem)]")
+    expect(document.querySelector("[data-test='message-content']")).toHaveClass(
+      "group-[.is-user]:rounded-2xl",
+      "group-[.is-user]:bg-muted/70"
+    )
+
+    rerender(<MessageRenderer message={assistantMsg("w3")} />)
+    expect(document.querySelector("[data-test='message']")).toHaveClass("max-w-full")
   })
 })

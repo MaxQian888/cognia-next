@@ -16,6 +16,20 @@ jest.mock("next-intl", () => ({
 jest.mock("@/components/ai-elements/tool", () => ({
   ToolBody: ({ part }: { part: { type: string } }) =>
     ReactForMocks.createElement("div", { "data-testid": "tool-body" }, part.type),
+  ToolInput: ({ input }: { input: unknown }) =>
+    ReactForMocks.createElement("div", { "data-testid": "tool-input" }, JSON.stringify(input)),
+}))
+jest.mock("@/components/chat/renderers/code-block", () => ({
+  CodeBlock: ({ code }: { code: string }) =>
+    ReactForMocks.createElement("pre", { "data-testid": "code-block" }, code),
+}))
+jest.mock("@/components/chat/renderers/image-block", () => ({
+  ImageBlock: ({ src }: { src: string }) =>
+    ReactForMocks.createElement("img", { "data-testid": "image-block", src, alt: "" }),
+}))
+jest.mock("@/components/chat/markdown-renderer", () => ({
+  MarkdownRenderer: ({ content }: { content: string }) =>
+    ReactForMocks.createElement("div", { "data-testid": "md" }, content),
 }))
 
 function part(type: string, input?: unknown, state = "output-available") {
@@ -52,7 +66,7 @@ describe("ToolCallRow", () => {
     const onToggle = jest.fn()
     const { getByRole, getByTestId, rerender } = render(
       <ToolCallRow
-        part={part("tool-Grep", { pattern: "x" })}
+        part={part("tool-MysteryTool", { pattern: "x" })}
         expanded={false}
         onToggle={onToggle}
       />
@@ -61,8 +75,47 @@ describe("ToolCallRow", () => {
     fireEvent.click(getByRole("button"))
     expect(onToggle).toHaveBeenCalledTimes(1)
     rerender(
-      <ToolCallRow part={part("tool-Grep", { pattern: "x" })} expanded={true} onToggle={onToggle} />
+      <ToolCallRow
+        part={part("tool-MysteryTool", { pattern: "x" })}
+        expanded={true}
+        onToggle={onToggle}
+      />
     )
+    expect(getByTestId("tool-body")).toBeTruthy()
+  })
+
+  // The compact row is the *collapsed* affordance; expanding is an explicit
+  // user action and must show the same rich content standard mode shows.
+  it("expands a registered tool into its dedicated card, not the raw body", () => {
+    const { getByRole, getByTestId, queryByTestId } = render(
+      <ToolCallRow
+        part={partWith("tool-Read", { input: { file_path: "a.ts" }, output: "x = 1" })}
+      />
+    )
+    fireEvent.click(getByRole("button"))
+    expect(getByTestId("mcp-read-path").textContent).toContain("a.ts")
+    expect(queryByTestId("tool-body")).toBeNull()
+  })
+
+  it("expands a tool result carrying image blocks into the image, not a base64 wall", () => {
+    const p = {
+      type: "tool-mcp__srv__capture",
+      state: "output-available",
+      input: {},
+      output: "[image image/png · 3 B]",
+      mcpContent: [{ type: "image", data: "AAAA", mimeType: "image/png" }],
+    } as never
+    const { getByRole, getByTestId, queryByTestId } = render(<ToolCallRow part={p} />)
+    fireEvent.click(getByRole("button"))
+    expect(getByTestId("image-block").getAttribute("src")).toBe("data:image/png;base64,AAAA")
+    expect(queryByTestId("tool-body")).toBeNull()
+  })
+
+  it("still falls back to the generic body for an unregistered plain-text tool", () => {
+    const { getByRole, getByTestId } = render(
+      <ToolCallRow part={partWith("tool-MysteryTool", { output: "raw" })} />
+    )
+    fireEvent.click(getByRole("button"))
     expect(getByTestId("tool-body")).toBeTruthy()
   })
 

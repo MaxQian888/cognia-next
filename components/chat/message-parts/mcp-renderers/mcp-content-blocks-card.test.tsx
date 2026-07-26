@@ -78,6 +78,21 @@ describe("McpContentBlocksCard", () => {
     expect(screen.getByText("file:///a.py")).toBeInTheDocument()
   })
 
+  it("renders a uri-less text resource without an empty path line", () => {
+    const blocks: McpResultBlock[] = [
+      { type: "resource", resource: { text: "hello", mimeType: "text/plain" } },
+    ]
+    const { container } = render(<McpContentBlocksCard part={partWith(blocks)} blocks={blocks} />)
+    expect(screen.getByTestId("code").textContent).toBe("hello")
+    expect(container.querySelector("p")).toBeNull()
+  })
+
+  it("renders a text block with no text as empty markdown", () => {
+    const blocks: McpResultBlock[] = [{ type: "text" } as McpResultBlock]
+    render(<McpContentBlocksCard part={partWith(blocks)} blocks={blocks} />)
+    expect(screen.getByTestId("md").textContent).toBe("")
+  })
+
   it("renders a blob resource as a download link", () => {
     const blocks: McpResultBlock[] = [
       {
@@ -88,6 +103,35 @@ describe("McpContentBlocksCard", () => {
     render(<McpContentBlocksCard part={partWith(blocks)} blocks={blocks} />)
     const link = screen.getByTestId("mcp-block-resource") as HTMLAnchorElement
     expect(link.getAttribute("href")).toBe("data:application/octet-stream;base64,ZZZZ")
+  })
+
+  it("keeps an already-encoded blob URL and falls back to a generic download name", () => {
+    const blocks: McpResultBlock[] = [
+      { type: "resource", resource: { blob: "data:text/csv;base64,WVla" } },
+    ]
+    render(<McpContentBlocksCard part={partWith(blocks)} blocks={blocks} />)
+    const link = screen.getByTestId("mcp-block-resource") as HTMLAnchorElement
+    expect(link.getAttribute("href")).toBe("data:text/csv;base64,WVla")
+    expect(link.getAttribute("download")).toBe("resource")
+  })
+
+  it("dumps a resource carrying neither text nor blob rather than rendering nothing", () => {
+    const blocks: McpResultBlock[] = [{ type: "resource", resource: { uri: "file:///x" } }]
+    render(<McpContentBlocksCard part={partWith(blocks)} blocks={blocks} />)
+    expect(screen.getByTestId("mcp-block-resource").textContent).toContain("file:///x")
+  })
+
+  it("tolerates a resource block with no resource payload at all", () => {
+    const blocks: McpResultBlock[] = [{ type: "resource" }]
+    render(<McpContentBlocksCard part={partWith(blocks)} blocks={blocks} />)
+    expect(screen.getByTestId("mcp-block-resource")).toBeInTheDocument()
+  })
+
+  it("renders nothing for an image or audio block with no payload", () => {
+    const blocks: McpResultBlock[] = [{ type: "image" }, { type: "audio" }]
+    render(<McpContentBlocksCard part={partWith(blocks)} blocks={blocks} />)
+    expect(screen.queryByTestId("img")).toBeNull()
+    expect(screen.queryByTestId("audio")).toBeNull()
   })
 
   it("shows the tool input parameters above the blocks", () => {

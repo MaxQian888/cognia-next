@@ -12,6 +12,8 @@ import { useLiveQuery } from "dexie-react-hooks"
 import { ChevronDownIcon, ChevronRightIcon } from "lucide-react"
 
 import { getOpticalArchive } from "@/lib/db/optical-archives"
+import { ImageBlock } from "@/components/chat/renderers/image-block"
+import { MessageImageCollectionProvider } from "@/components/chat/renderers/message-image-collection"
 import {
   Dialog,
   DialogContent,
@@ -90,19 +92,25 @@ export function OpticalArchiveDialog({
                 )}
             </dl>
 
-            <div className="space-y-3">
-              {archive.frames.map((frame, i) => (
-                // eslint-disable-next-line @next/next/no-img-element -- base64 data URI, not a remote asset
-                <img
-                  key={i}
-                  src={`data:image/png;base64,${frame.base64}`}
-                  alt={t("frameAlt", { n: i + 1 })}
-                  width={frame.width}
-                  height={frame.height}
-                  className="max-w-full rounded border border-border bg-white"
-                />
-              ))}
-            </div>
+            {/* An optical frame IS text rendered to pixels, so "can't zoom"
+                means "can't read". Route through ImageBlock for the lightbox /
+                zoom / download affordances instead of a bare <img>, and share
+                one collection so the frames of a single compaction page as the
+                continuous document they actually are. */}
+            <MessageImageCollectionProvider>
+              <div className="space-y-3">
+                {archive.frames.map((frame, i) => (
+                  <ImageBlock
+                    key={i}
+                    src={`data:image/png;base64,${frame.base64}`}
+                    alt={t("frameAlt", { n: i + 1 })}
+                    width={frame.width}
+                    height={frame.height}
+                    className="my-0 block w-full border border-border bg-white"
+                  />
+                ))}
+              </div>
+            </MessageImageCollectionProvider>
 
             {archive.originalText ? (
               <div>

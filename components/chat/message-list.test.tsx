@@ -55,6 +55,10 @@ jest.mock("@tanstack/react-virtual", () => ({
       measureElement: () => {},
       measure: measureSpy,
       scrollToIndex: scrollToIndexSpy,
+      // Read by the timeline scroll-sync that `ActiveTurnPublisher` runs, to
+      // place off-screen turns from the virtualizer's own cache.
+      options: { count },
+      measurementsCache: [],
     }
   },
 }))
@@ -220,6 +224,18 @@ describe("MessageList", () => {
     )
     expect(screen.getByText("hello")).toBeInTheDocument()
     expect(screen.getByText("world")).toBeInTheDocument()
+  })
+
+  it("keeps conversation turns inside a centered reading column", () => {
+    const Wrapper = withAdapter(makeAdapter())
+    const { container } = render(
+      <Wrapper>
+        <MessageList messages={[userMsg("m1", "hello")]} status="idle" />
+      </Wrapper>
+    )
+
+    const readingColumn = container.querySelector('[data-slot="conversation-reading-column"]')
+    expect(readingColumn).toHaveClass("mx-auto", "max-w-[52rem]")
   })
 
   it("passes the bound conversation root to each message renderer", () => {

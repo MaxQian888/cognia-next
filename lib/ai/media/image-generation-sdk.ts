@@ -27,6 +27,10 @@ export type ImageProviderId =
   // the OpenAI-compatible `/images/edits` endpoint, so they are text-to-image
   // only as far as the Media AI edit flow is concerned).
   | "google"
+  | "azure"
+  | "bedrock"
+  | "doubao"
+  | "volcengine"
   | "fal"
   | "replicate"
   | "nvidia"
@@ -166,6 +170,50 @@ export const IMAGE_PROVIDERS: Record<ImageProviderId, ImageProviderDefinition> =
     supportsMaskEdit: false,
     modelMatchers: ["image", "imagen", "nano-banana"],
   },
+  azure: {
+    id: "azure",
+    // Azure uses the deployment id supplied by the caller. This is only the
+    // fallback when the configured default is a chat deployment.
+    defaultModel: "gpt-image-1",
+    models: ["gpt-image-1", "dall-e-3"],
+    supportsImageEdit: false,
+    supportsMaskEdit: false,
+    modelMatchers: ["image", "dall-e"],
+  },
+  bedrock: {
+    id: "bedrock",
+    defaultModel: "amazon.nova-canvas-v1:0",
+    models: ["amazon.nova-canvas-v1:0"],
+    supportsImageEdit: false,
+    supportsMaskEdit: false,
+    modelMatchers: ["nova-canvas", "canvas"],
+  },
+  doubao: {
+    id: "doubao",
+    defaultModel: "seedream-5-0-260128",
+    models: [
+      "seedream-5-0-260128",
+      "seedream-5-0-lite-260128",
+      "seedream-4-5-251128",
+      "seedream-4-0-250828",
+    ],
+    supportsImageEdit: false,
+    supportsMaskEdit: false,
+    modelMatchers: ["seedream"],
+  },
+  volcengine: {
+    id: "volcengine",
+    defaultModel: "seedream-5-0-260128",
+    models: [
+      "seedream-5-0-260128",
+      "seedream-5-0-lite-260128",
+      "seedream-4-5-251128",
+      "seedream-4-0-250828",
+    ],
+    supportsImageEdit: false,
+    supportsMaskEdit: false,
+    modelMatchers: ["seedream"],
+  },
   fal: {
     id: "fal",
     defaultModel: "fal-ai/flux-2-pro",
@@ -174,6 +222,7 @@ export const IMAGE_PROVIDERS: Record<ImageProviderId, ImageProviderDefinition> =
       "fal-ai/flux-2-flex",
       "fal-ai/flux-2-max",
       "fal-ai/flux-pro/kontext",
+      "fal-ai/qwen-image",
       "fal-ai/recraft-v3",
     ],
     supportsImageEdit: false,

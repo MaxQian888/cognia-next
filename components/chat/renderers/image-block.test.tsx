@@ -177,6 +177,50 @@ describe("ImageBlock", () => {
     ).toBeInTheDocument()
   })
 
+  it("keeps alt as alternative text instead of printing it as a caption", () => {
+    // `alt` is for assistive tech. Rendering it under every markdown image
+    // turned screen-reader copy into visible chrome; only `title` is a caption.
+    const { container } = renderBlock({ alt: "a picture" })
+
+    expect(container.querySelector("figcaption")).not.toBeInTheDocument()
+    expect(screen.getByAltText("a picture")).toBeInTheDocument()
+  })
+
+  it("reserves layout space while loading so the skeleton is visible and nothing shifts", () => {
+    // A not-yet-loaded <img> has an intrinsic size of 0, so the figure used to
+    // collapse and the `absolute inset-0` skeleton had nothing to fill.
+    const { container } = renderBlock()
+    const figure = container.querySelector("figure")
+
+    expect(figure).toHaveClass("min-h-32")
+    expect(container.querySelector('[data-slot="skeleton"]')).toBeInTheDocument()
+
+    fireEvent.load(screen.getByAltText("a picture"))
+
+    expect(figure).not.toHaveClass("min-h-32")
+    expect(container.querySelector('[data-slot="skeleton"]')).not.toBeInTheDocument()
+  })
+
+  it("holds the real aspect ratio when the caller knows the dimensions", () => {
+    const { container } = render(
+      <NextIntlClientProvider locale="en" messages={messages}>
+        <TooltipProvider>
+          <ImageBlock src="https://example.com/shot.png" alt="shot" width={800} height={600} />
+        </TooltipProvider>
+      </NextIntlClientProvider>
+    )
+    const figure = container.querySelector("figure")
+
+    expect(figure).toHaveStyle({ aspectRatio: "800 / 600" })
+    // A known ratio already reserves the box, so no placeholder min-box.
+    expect(figure).not.toHaveClass("min-h-32")
+  })
+
+  it("decodes asynchronously so a large image never blocks the main thread", () => {
+    renderBlock()
+    expect(screen.getByAltText("a picture")).toHaveAttribute("decoding", "async")
+  })
+
   it("uses the default download name and omits an empty caption", async () => {
     const { container } = renderBlock({ src: "https://example.com/", alt: "" })
 

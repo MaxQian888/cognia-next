@@ -1,5 +1,12 @@
 import { render, screen } from "@testing-library/react"
-import { parseOutputJson, hostOf, languageFromPath, McpCardShell, useParsedOutput } from "./common"
+import {
+  blockMediaSrc,
+  parseOutputJson,
+  hostOf,
+  languageFromPath,
+  McpCardShell,
+  useParsedOutput,
+} from "./common"
 import { renderHook } from "@testing-library/react"
 
 describe("parseOutputJson", () => {
@@ -72,6 +79,53 @@ describe("languageFromPath", () => {
 
   it("returns 'text' for a path with no extension", () => {
     expect(languageFromPath("Makefile")).toBe("text")
+  })
+})
+
+describe("blockMediaSrc", () => {
+  it("builds a data URL from the MCP wire shape", () => {
+    expect(blockMediaSrc({ type: "image", data: "AAAA", mimeType: "image/png" }, "image/png")).toBe(
+      "data:image/png;base64,AAAA"
+    )
+  })
+
+  it("builds a data URL from the Anthropic source shape", () => {
+    expect(
+      blockMediaSrc(
+        { type: "image", source: { type: "base64", media_type: "image/jpeg", data: "BBBB" } },
+        "image/png"
+      )
+    ).toBe("data:image/jpeg;base64,BBBB")
+  })
+
+  it("falls back to the caller's mime when the block declares none", () => {
+    expect(blockMediaSrc({ type: "audio", data: "CCCC" }, "audio/mpeg")).toBe(
+      "data:audio/mpeg;base64,CCCC"
+    )
+    expect(
+      blockMediaSrc({ type: "image", source: { type: "base64", data: "DDDD" } }, "image/png")
+    ).toBe("data:image/png;base64,DDDD")
+  })
+
+  it("passes an already-encoded data URL through untouched", () => {
+    expect(blockMediaSrc({ type: "image", data: "data:image/gif;base64,EEEE" }, "image/png")).toBe(
+      "data:image/gif;base64,EEEE"
+    )
+    expect(
+      blockMediaSrc(
+        { type: "image", source: { type: "base64", data: "data:image/gif;base64,FFFF" } },
+        "image/png"
+      )
+    ).toBe("data:image/gif;base64,FFFF")
+  })
+
+  it("returns null when the block carries no payload", () => {
+    expect(blockMediaSrc({ type: "image" }, "image/png")).toBeNull()
+    expect(blockMediaSrc({ type: "image", data: "" }, "image/png")).toBeNull()
+    expect(blockMediaSrc({ type: "text", text: "hi" }, "image/png")).toBeNull()
+    expect(
+      blockMediaSrc({ type: "image", source: { type: "base64", data: "" } }, "image/png")
+    ).toBeNull()
   })
 })
 

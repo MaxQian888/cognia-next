@@ -4,10 +4,17 @@
 import React from "react"
 import { render, screen } from "@testing-library/react"
 import type { ToolUIPart } from "ai"
-import { MCPToolCard, isStructuredMcpToolType, normalizeToolName } from "./mcp-tool-card"
+import { MCPToolCard, isStructuredMcpToolPart, normalizeToolName } from "./mcp-tool-card"
+import {
+  clearAllToolResultRenderers,
+  registerToolResultRenderer,
+} from "@/lib/plugin/api/tool-result-renderers"
 
 jest.mock("@/components/ai-elements/tool", () => ({
   ToolBody: () => <div data-testid="generic-tool-body" />,
+  ToolInput: ({ input }: { input: unknown }) => (
+    <div data-testid="tool-input">{JSON.stringify(input)}</div>
+  ),
 }))
 
 jest.mock("@/components/chat/markdown-renderer", () => ({
@@ -22,6 +29,12 @@ jest.mock("@/components/chat/renderers/code-block", () => ({
   ),
 }))
 
+// ImageBlock pulls in the lightbox + Radix tooltips; the routing assertions
+// only care that an image landed, not how it renders.
+jest.mock("@/components/chat/renderers/image-block", () => ({
+  ImageBlock: ({ src }: { src: string }) => <img data-testid="image-block" src={src} alt="" />,
+}))
+
 const part = (type: string, output?: unknown, input?: unknown): ToolUIPart =>
   ({
     type,
@@ -31,48 +44,48 @@ const part = (type: string, output?: unknown, input?: unknown): ToolUIPart =>
     output,
   }) as unknown as ToolUIPart
 
-describe("isStructuredMcpToolType", () => {
+describe("isStructuredMcpToolPart", () => {
   it("recognises cognia tools", () => {
-    expect(isStructuredMcpToolType("tool-wiki_search")).toBe(true)
-    expect(isStructuredMcpToolType("tool-wiki_read")).toBe(true)
-    expect(isStructuredMcpToolType("tool-rag_search")).toBe(true)
-    expect(isStructuredMcpToolType("tool-runtime_query")).toBe(true)
+    expect(isStructuredMcpToolPart(part("tool-wiki_search"))).toBe(true)
+    expect(isStructuredMcpToolPart(part("tool-wiki_read"))).toBe(true)
+    expect(isStructuredMcpToolPart(part("tool-rag_search"))).toBe(true)
+    expect(isStructuredMcpToolPart(part("tool-runtime_query"))).toBe(true)
   })
 
   it("recognises Claude built-ins", () => {
-    expect(isStructuredMcpToolType("tool-Read")).toBe(true)
-    expect(isStructuredMcpToolType("tool-Glob")).toBe(true)
+    expect(isStructuredMcpToolPart(part("tool-Read"))).toBe(true)
+    expect(isStructuredMcpToolPart(part("tool-Glob"))).toBe(true)
   })
 
   it("recognises the plan-mode signal tools — native, bare and cognia-namespaced", () => {
-    expect(isStructuredMcpToolType("tool-ExitPlanMode")).toBe(true)
-    expect(isStructuredMcpToolType("tool-exit_plan_mode")).toBe(true)
-    expect(isStructuredMcpToolType("tool-mcp__cognia-tools__exit_plan_mode")).toBe(true)
+    expect(isStructuredMcpToolPart(part("tool-ExitPlanMode"))).toBe(true)
+    expect(isStructuredMcpToolPart(part("tool-exit_plan_mode"))).toBe(true)
+    expect(isStructuredMcpToolPart(part("tool-mcp__cognia-tools__exit_plan_mode"))).toBe(true)
     // The dead `Plan` tool name no longer routes anywhere.
-    expect(isStructuredMcpToolType("tool-Plan")).toBe(false)
+    expect(isStructuredMcpToolPart(part("tool-Plan"))).toBe(false)
   })
 
   it("rejects unknown tools and non-tool types", () => {
-    expect(isStructuredMcpToolType("tool-MysteryTool")).toBe(false)
-    expect(isStructuredMcpToolType("text")).toBe(false)
-    expect(isStructuredMcpToolType("Glob")).toBe(false)
+    expect(isStructuredMcpToolPart(part("tool-MysteryTool"))).toBe(false)
+    expect(isStructuredMcpToolPart(part("text"))).toBe(false)
+    expect(isStructuredMcpToolPart(part("Glob"))).toBe(false)
   })
 
   it("recognises the sidecar coreFiles suite — bare and namespaced", () => {
     for (const name of ["read", "glob", "grep", "ls", "edit", "multi_edit", "write"]) {
-      expect(isStructuredMcpToolType(`tool-${name}`)).toBe(true)
-      expect(isStructuredMcpToolType(`tool-mcp__cognia-tools__${name}`)).toBe(true)
+      expect(isStructuredMcpToolPart(part(`tool-${name}`))).toBe(true)
+      expect(isStructuredMcpToolPart(part(`tool-mcp__cognia-tools__${name}`))).toBe(true)
     }
   })
 
   it("recognises the native Anthropic PascalCase LS tool", () => {
-    expect(isStructuredMcpToolType("tool-LS")).toBe(true)
+    expect(isStructuredMcpToolPart(part("tool-LS"))).toBe(true)
   })
 
   it("recognises the workflow proposal plugin tools — bare and plugin-namespaced", () => {
     for (const name of ["wf_propose_batch", "wf_apply_template"]) {
-      expect(isStructuredMcpToolType(`tool-${name}`)).toBe(true)
-      expect(isStructuredMcpToolType(`tool-mcp__cognia-plugin-tools__${name}`)).toBe(true)
+      expect(isStructuredMcpToolPart(part(`tool-${name}`))).toBe(true)
+      expect(isStructuredMcpToolPart(part(`tool-mcp__cognia-plugin-tools__${name}`))).toBe(true)
     }
   })
 
@@ -152,6 +165,58 @@ describe("MCPToolCard — fallback semantics", () => {
   it("falls back to ToolBody when the structured payload is unparseable", () => {
     render(<MCPToolCard part={part("tool-wiki_search", "not json")} />)
     expect(screen.getByTestId("generic-tool-body")).toBeInTheDocument()
+  })
+
+  it("bypasses a dedicated card that would swallow structured content blocks", () => {
+    // `write` has a dedicated card that renders off the string output; if a
+    // result ever carries real blocks, the blocks win — a card must never
+    // silently drop an image/resource because it only knows about `output`.
+    const p = {
+      ...part("tool-write", "wrote a.ts", { file_path: "a.ts", content: "x" }),
+      mcpContent: [{ type: "image", data: "AAAA", mimeType: "image/png" }],
+    } as unknown as ToolUIPart
+    render(<MCPToolCard part={p} />)
+    expect(screen.getByTestId("mcp-content-blocks")).toBeInTheDocument()
+    expect(screen.queryByTestId("mcp-write-card")).toBeNull()
+  })
+
+  it("lets the Read card keep structured content because it renders the blocks itself", () => {
+    const p = {
+      ...part("tool-Read", "/tmp/a.png (12 bytes)", { file_path: "/tmp/a.png" }),
+      mcpContent: [{ type: "image", data: "AAAA", mimeType: "image/png" }],
+    } as unknown as ToolUIPart
+    render(<MCPToolCard part={p} />)
+    expect(screen.getByTestId("mcp-read-image")).toBeInTheDocument()
+    expect(screen.queryByTestId("mcp-content-blocks")).toBeNull()
+  })
+})
+
+describe("MCPToolCard — dynamic-tool parts", () => {
+  const dynamicPart = (toolName: string, output?: unknown, input?: unknown): ToolUIPart =>
+    ({
+      type: "dynamic-tool",
+      toolName,
+      toolCallId: "call",
+      state: "output-available",
+      input,
+      output,
+    }) as unknown as ToolUIPart
+
+  it("routes a dynamic-tool part to the card registered for its toolName", () => {
+    render(<MCPToolCard part={dynamicPart("Read", "const a = 1", { file_path: "a.ts" })} />)
+    expect(screen.getByTestId("mcp-read-path")).toHaveTextContent("a.ts")
+  })
+
+  it("falls back to ToolBody for an unregistered dynamic tool", () => {
+    render(<MCPToolCard part={dynamicPart("MysteryTool", "raw")} />)
+    expect(screen.getByTestId("generic-tool-body")).toBeInTheDocument()
+  })
+
+  it("isStructuredMcpToolPart recognises a dynamic-tool by its toolName", () => {
+    expect(isStructuredMcpToolPart(dynamicPart("Read"))).toBe(true)
+    expect(isStructuredMcpToolPart(dynamicPart("MysteryTool"))).toBe(false)
+    expect(isStructuredMcpToolPart(part("tool-Read"))).toBe(true)
+    expect(isStructuredMcpToolPart(part("text"))).toBe(false)
   })
 })
 
@@ -283,7 +348,7 @@ describe("MCPToolCard — Glob", () => {
 
 describe("MCPToolCard — Grep", () => {
   it("is recognised as a structured tool", () => {
-    expect(isStructuredMcpToolType("tool-Grep")).toBe(true)
+    expect(isStructuredMcpToolPart(part("tool-Grep"))).toBe(true)
   })
 
   it("renders matched content lines from a plain-string output", () => {
@@ -391,6 +456,57 @@ describe("MCPToolCard — NotebookEdit", () => {
 
   it("falls back to ToolBody without a notebook path", () => {
     render(<MCPToolCard part={part("tool-NotebookEdit", "ok", { new_source: "x" })} />)
+    expect(screen.getByTestId("generic-tool-body")).toBeInTheDocument()
+  })
+})
+
+describe("plugin-contributed tool cards", () => {
+  const PluginCard = ({ part: p }: { part: ToolUIPart }) => (
+    <div data-testid="plugin-tool-card">{String((p as { output?: unknown }).output)}</div>
+  )
+
+  afterEach(() => clearAllToolResultRenderers())
+
+  it("renders a plugin card for a tool the host has no built-in for", () => {
+    registerToolResultRenderer("p1", "demo_lookup", PluginCard as never)
+    render(<MCPToolCard part={part("tool-demo_lookup", "from the plugin")} />)
+    expect(screen.getByTestId("plugin-tool-card")).toHaveTextContent("from the plugin")
+    expect(screen.queryByTestId("generic-tool-body")).not.toBeInTheDocument()
+  })
+
+  it("resolves the namespaced provider form onto the same plugin card", () => {
+    registerToolResultRenderer("p1", "demo_lookup", PluginCard as never)
+    render(<MCPToolCard part={part("tool-mcp__cognia-plugin-tools__demo_lookup", "ok")} />)
+    expect(screen.getByTestId("plugin-tool-card")).toBeInTheDocument()
+  })
+
+  it("lets the host's built-in card win — a plugin cannot shadow Read", () => {
+    registerToolResultRenderer("p1", "Read", PluginCard as never)
+    render(<MCPToolCard part={part("tool-Read", "contents", { file_path: "/a/b.ts" })} />)
+    expect(screen.queryByTestId("plugin-tool-card")).not.toBeInTheDocument()
+  })
+
+  it("makes the tool routable — isStructuredMcpToolPart must see the plugin entry", () => {
+    // Load-bearing: message-renderer uses this predicate to decide whether the
+    // part reaches MCPToolCard at all. False here = registered but unreachable.
+    expect(isStructuredMcpToolPart(part("tool-demo_lookup"))).toBe(false)
+    registerToolResultRenderer("p1", "demo_lookup", PluginCard as never)
+    expect(isStructuredMcpToolPart(part("tool-demo_lookup"))).toBe(true)
+  })
+
+  it("contains a crashing plugin card instead of taking down the message", () => {
+    const Boom = () => {
+      throw new Error("plugin exploded")
+    }
+    registerToolResultRenderer("p1", "boom_tool", Boom as never)
+    const spy = jest.spyOn(console, "error").mockImplementation(() => {})
+    render(<MCPToolCard part={part("tool-boom_tool", "x")} />)
+    expect(screen.getByTestId("plugin-part-error")).toHaveAttribute("data-plugin-id", "p1")
+    spy.mockRestore()
+  })
+
+  it("still falls back to the generic body when no plugin claims the tool", () => {
+    render(<MCPToolCard part={part("tool-unclaimed", "x")} />)
     expect(screen.getByTestId("generic-tool-body")).toBeInTheDocument()
   })
 })

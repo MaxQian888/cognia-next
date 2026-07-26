@@ -24,7 +24,8 @@ import { TerminalToolPart } from "@/components/chat/message-parts/terminal-tool-
 import {
   MCPToolCard,
   McpToolBodyOrContent,
-  isStructuredMcpToolType,
+  isStructuredMcpToolPart,
+  toolNameOf,
 } from "@/components/chat/message-parts/mcp-tool-card"
 import { CanvasInlinePart } from "@/components/chat/message-parts/canvas-inline-part"
 import { FilePartPreview } from "@/components/chat/message-parts/file-part-preview"
@@ -33,6 +34,8 @@ import {
   MessageImageGallery,
   type MessageImageGalleryProps,
 } from "@/components/chat/renderers/message-image-gallery"
+import { MessageImageCollectionProvider } from "@/components/chat/renderers/message-image-collection"
+import { PluginPartErrorBoundary } from "@/components/chat/plugin-part-error-boundary"
 import { UnknownPartCard } from "@/components/chat/message-parts/unknown-part-card"
 import {
   HookNoticeRow,
@@ -110,6 +113,10 @@ import {
   subscribeMessagePartRenderers,
   getMessagePartRenderersRevision,
 } from "@/lib/plugin/api/message-part-renderers"
+import {
+  subscribeToolResultRenderers,
+  getToolResultRenderersRevision,
+} from "@/lib/plugin/api/tool-result-renderers"
 import { useSyncExternalStore } from "react"
 import { PerfBoundary } from "@/lib/perf"
 import { useAgentFileAutoFollow } from "@/hooks/agent/use-agent-file-auto-follow"
@@ -142,42 +149,19 @@ function usePluginPartRegistryRevision(): number {
   )
 }
 
-class PluginPartErrorBoundary extends React.Component<
-  {
-    type: string
-    pluginId: string
-    children: React.ReactNode
-  },
-  { error: Error | null }
-> {
-  state = { error: null as Error | null }
-  static getDerivedStateFromError(error: Error) {
-    return { error }
-  }
-  componentDidCatch(error: Error): void {
-    loggers.chat.warn("plugin message-part renderer threw", {
-      pluginId: this.props.pluginId,
-      partType: this.props.type,
-      err: error.message,
-    })
-  }
-  render() {
-    if (this.state.error) {
-      return (
-        <div
-          data-testid="plugin-part-error"
-          data-plugin-id={this.props.pluginId}
-          data-part-type={this.props.type}
-          className="my-2 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive"
-          role="alert"
-        >
-          {/* i18n-exempt: plugin-crash diagnostic; class ErrorBoundary cannot use i18n hooks */}
-          Plugin renderer for &quot;{this.props.type}&quot; crashed: {this.state.error.message}
-        </div>
-      )
-    }
-    return this.props.children
-  }
+/**
+ * Re-render the message when a plugin registers / unregisters a TOOL-RESULT
+ * renderer. Separate from the part registry above because the tool branch is
+ * chosen by `isStructuredMcpToolPart` during render — without this, enabling a
+ * plugin mid-session would leave already-rendered tool calls on the generic
+ * card forever.
+ */
+function usePluginToolRendererRevision(): number {
+  return useSyncExternalStore(
+    subscribeToolResultRenderers,
+    getToolResultRenderersRevision,
+    getToolResultRenderersRevision
+  )
 }
 
 function MessageRendererInner({
@@ -194,6 +178,8 @@ function MessageRendererInner({
   useAgentFileAutoFollow({ parts: message.parts, isStreaming, projectRoot })
   // Re-render when a plugin registers / unregisters a message-part renderer.
   usePluginPartRegistryRevision()
+  // ...and likewise for tool-result cards.
+  usePluginToolRendererRevision()
   const t = useTranslations("chat.message")
   // Agent invocation-flow display mode (simplified / standard / detailed).
   const { mode: agentFlowMode } = useAgentFlowMode()
@@ -364,7 +350,13 @@ function MessageRendererInner({
 
   return (
     <PerfBoundary id="chat:message">
-      <Message from={message.role}>
+      <Message
+        from={message.role}
+        className={cn(
+          "py-2 sm:py-3",
+          message.role === "user" ? "max-w-[min(82%,42rem)]" : "max-w-full"
+        )}
+      >
         {speaker &&
           message.role === "assistant" &&
           (() => {
@@ -419,104 +411,116 @@ function MessageRendererInner({
           // child — collapsing a tool card unmounts its body and the whole
           // column snaps narrow. Pin the assistant side to the full row so
           // expand/collapse never moves the width.
-          <MessageContent className="group-[.is-assistant]:w-full">
-            {(() => {
-              const inboundA2UI = (
-                message as {
-                  metadata?: {
-                    inboundA2UI?: import("@/lib/connectors/adapters/_shared/inbound-a2ui-types").InboundA2UIBlock
+          // Every image in this turn — markdown `![]()`, attachment gallery,
+          // tool-result screenshots — registers with one collection so the
+          // lightbox pages across the whole message instead of dead-ending on
+          // whichever image was clicked.
+          <MessageImageCollectionProvider>
+            <MessageContent
+              className={cn(
+                "leading-relaxed",
+                "group-[.is-user]:rounded-2xl group-[.is-user]:rounded-br-md group-[.is-user]:bg-muted/70 group-[.is-user]:px-4 group-[.is-user]:py-2.5",
+                "group-[.is-assistant]:w-full"
+              )}
+            >
+              {(() => {
+                const inboundA2UI = (
+                  message as {
+                    metadata?: {
+                      inboundA2UI?: import("@/lib/connectors/adapters/_shared/inbound-a2ui-types").InboundA2UIBlock
+                    }
                   }
-                }
-              ).metadata?.inboundA2UI
-              if (!inboundA2UI) return null
-              return <InboundA2UIRenderer block={inboundA2UI} className="mb-2" />
-            })()}
-            {/* Segment the parts so runs of ≥2 consecutive tool calls collapse */}
-            {/* into one activity group. Subagent parts are transparent here and */}
-            {/* render once below as a dispatch tree. */}
-            {segments.map((segment, si) => {
-              if (segment.kind === "group") {
-                const entries: ToolActivityGroupEntry[] = segment.entries.map((e) => ({
-                  part: e.part as ToolUIPart,
-                  key: `${message.id}-${e.index}`,
-                }))
-                return (
-                  <MotionReveal key={`${message.id}-group-${si}`} index={si}>
-                    {/* Key the group on the display mode: the tool cards it wraps
+                ).metadata?.inboundA2UI
+                if (!inboundA2UI) return null
+                return <InboundA2UIRenderer block={inboundA2UI} className="mb-2" />
+              })()}
+              {/* Segment the parts so runs of ≥2 consecutive tool calls collapse */}
+              {/* into one activity group. Subagent parts are transparent here and */}
+              {/* render once below as a dispatch tree. */}
+              {segments.map((segment, si) => {
+                if (segment.kind === "group") {
+                  const entries: ToolActivityGroupEntry[] = segment.entries.map((e) => ({
+                    part: e.part as ToolUIPart,
+                    key: `${message.id}-${e.index}`,
+                  }))
+                  return (
+                    <MotionReveal key={`${message.id}-group-${si}`} index={si}>
+                      {/* Key the group on the display mode: the tool cards it wraps
                         own their open state in uncontrolled Collapsibles
                         (`defaultOpen`, read once at mount), so a live
                         standard⇄detailed switch only takes effect if the group
                         remounts and re-applies the per-mode default. */}
-                    <ToolActivityGroup
-                      key={agentFlowMode}
-                      entries={entries}
-                      mode={agentFlowMode}
-                      renderCard={(part, key, opts) =>
-                        renderToolPart(
-                          part,
-                          key,
-                          agentFlowMode,
-                          opts.forceOpen,
-                          message.id,
-                          branchSessionId ?? undefined,
-                          t
-                        )
-                      }
-                    />
-                  </MotionReveal>
-                )
-              }
+                      <ToolActivityGroup
+                        key={agentFlowMode}
+                        entries={entries}
+                        mode={agentFlowMode}
+                        renderCard={(part, key, opts) =>
+                          renderToolPart(
+                            part,
+                            key,
+                            agentFlowMode,
+                            opts.forceOpen,
+                            message.id,
+                            branchSessionId ?? undefined,
+                            t
+                          )
+                        }
+                      />
+                    </MotionReveal>
+                  )
+                }
 
-              const { part, index } = segment.entry
-              const partKey = `${message.id}-${index}`
-              const partType = (part as { type?: string }).type
-              if (messageImageGallery.partIndexes.has(index)) {
-                if (index !== messageImageGallery.firstPartIndex) return null
-                return (
-                  <MessageImageGallery
-                    key={`${message.id}-image-gallery`}
-                    items={messageImageGallery.items}
+                const { part, index } = segment.entry
+                const partKey = `${message.id}-${index}`
+                const partType = (part as { type?: string }).type
+                if (messageImageGallery.partIndexes.has(index)) {
+                  if (index !== messageImageGallery.firstPartIndex) return null
+                  return (
+                    <MessageImageGallery
+                      key={`${message.id}-image-gallery`}
+                      items={messageImageGallery.items}
+                    />
+                  )
+                }
+                // Tool cards and reasoning read the display mode only through their
+                // Collapsible's uncontrolled `defaultOpen`, snapshotted at mount —
+                // a live standard⇄detailed switch changes the prop but never
+                // re-opens or re-collapses an already-mounted card. Fold the mode
+                // into just those parts' key so switching the display mode remounts
+                // them and re-applies the per-mode default. Prose keeps a
+                // mode-agnostic key (no reflow), and the outer MotionReveal key
+                // stays stable so the entrance animation isn't replayed on a toggle.
+                const modeSensitive = isToolPartType(partType) || partType === "reasoning"
+                const nodeKey = modeSensitive ? `${partKey}-${agentFlowMode}` : partKey
+                const node = (
+                  <MessagePart
+                    key={nodeKey}
+                    part={part}
+                    partKey={partKey}
+                    isStreaming={isStreaming}
+                    mentionPattern={message.role === "user" ? mentionPattern : null}
+                    characterById={characterById}
+                    messageId={message.id}
+                    sessionId={branchSessionId ?? undefined}
+                    mode={agentFlowMode}
+                    t={t}
+                    projectRoot={projectRoot}
                   />
                 )
-              }
-              // Tool cards and reasoning read the display mode only through their
-              // Collapsible's uncontrolled `defaultOpen`, snapshotted at mount —
-              // a live standard⇄detailed switch changes the prop but never
-              // re-opens or re-collapses an already-mounted card. Fold the mode
-              // into just those parts' key so switching the display mode remounts
-              // them and re-applies the per-mode default. Prose keeps a
-              // mode-agnostic key (no reflow), and the outer MotionReveal key
-              // stays stable so the entrance animation isn't replayed on a toggle.
-              const modeSensitive = isToolPartType(partType) || partType === "reasoning"
-              const nodeKey = modeSensitive ? `${partKey}-${agentFlowMode}` : partKey
-              const node = (
-                <MessagePart
-                  key={nodeKey}
-                  part={part}
-                  partKey={partKey}
-                  isStreaming={isStreaming}
-                  mentionPattern={message.role === "user" ? mentionPattern : null}
-                  characterById={characterById}
-                  messageId={message.id}
-                  sessionId={branchSessionId ?? undefined}
-                  mode={agentFlowMode}
-                  t={t}
-                  projectRoot={projectRoot}
-                />
-              )
-              // Give tool cards/rows and dispatch banners a one-shot entrance;
-              // leave text/markdown untouched to avoid wrapping prose in extra
-              // block boxes.
-              return isToolPartType(partType) || partType === "agent-team-dispatch" ? (
-                <MotionReveal key={partKey} index={si}>
-                  {node}
-                </MotionReveal>
-              ) : (
-                node
-              )
-            })}
-            <SubagentTree parts={message.parts} mode={agentFlowMode} />
-          </MessageContent>
+                // Give tool cards/rows and dispatch banners a one-shot entrance;
+                // leave text/markdown untouched to avoid wrapping prose in extra
+                // block boxes.
+                return isToolPartType(partType) || partType === "agent-team-dispatch" ? (
+                  <MotionReveal key={partKey} index={si}>
+                    {node}
+                  </MotionReveal>
+                ) : (
+                  node
+                )
+              })}
+              <SubagentTree parts={message.parts} mode={agentFlowMode} />
+            </MessageContent>
+          </MessageImageCollectionProvider>
         )}
 
         <PluginExtensionSlot point="chat.message.after" className="mt-1 empty:hidden" />
@@ -867,7 +871,7 @@ function renderToolPart(
     tp.state !== "output-error"
   ) {
     toolEl = <TerminalToolPart part={tp} />
-  } else if (isStructuredMcpToolType(type) && tp.state !== "output-error") {
+  } else if (isStructuredMcpToolPart(tp) && tp.state !== "output-error") {
     toolEl = (
       <Tool defaultOpen={cardOpen(tp.state === "input-available")}>
         <ToolHeader type={tp.type} state={tp.state} />
@@ -885,7 +889,7 @@ function renderToolPart(
         <ToolContent>
           <A2UIToolOutput
             toolId={tp.toolCallId}
-            toolName={type.replace(/^tool-/, "")}
+            toolName={toolNameOf(tp) ?? type}
             output={tp.output}
           />
         </ToolContent>
@@ -1114,7 +1118,7 @@ function renderPart(
   // so a plugin can override custom types it owns, but AFTER the host's own
   // hard-coded parts so plugins cannot shadow `artifact` / `a2ui` / etc.
   const pluginEntry =
-    typeof type === "string" && !type.startsWith("tool-") ? getMessagePartRenderer(type) : undefined
+    typeof type === "string" && !isToolPartType(type) ? getMessagePartRenderer(type) : undefined
   if (pluginEntry) {
     const PluginRenderer = pluginEntry.component
     return (
@@ -1133,7 +1137,12 @@ function renderPart(
     )
   }
 
-  if (typeof type === "string" && type.startsWith("tool-")) {
+  // `dynamic-tool` is the AI SDK shape for a tool the client never declared
+  // statically — imported transcripts and CLI handoff carry it, and every
+  // other consumer (grouping, summaries, exports, ToolHeader/ToolBody) already
+  // treats it as a tool call. Route it through the same renderer instead of
+  // dropping it into the unknown-part card.
+  if (isToolPartType(type)) {
     const tp = part as ToolUIPart
     // Delegate to the shared tool renderer (mode-aware: simplified row vs.
     // standard/detailed card), which also appends the per-call plugin slot.
