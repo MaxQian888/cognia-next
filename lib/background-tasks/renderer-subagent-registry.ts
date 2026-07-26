@@ -39,6 +39,44 @@ export function setRendererBackgroundSettleListener(
   settleListener = listener
 }
 
+export type RendererBackgroundLifecycleEvent =
+  | {
+      type: "started"
+      runId: string
+      taskKind: BackgroundTaskStartMeta["kind"]
+    }
+  | {
+      type: "settled"
+      runId: string
+      status: BackgroundTaskSettleInfo["status"]
+    }
+
+export type RendererBackgroundLifecycleListener = (event: RendererBackgroundLifecycleEvent) => void
+
+const lifecycleListeners = new Set<RendererBackgroundLifecycleListener>()
+
+/**
+ * Subscribe to the low-frequency background-run lifecycle. Payloads are
+ * deliberately metadata-only: prompts, results, errors, and session ids never
+ * cross this observation seam.
+ */
+export function subscribeRendererBackgroundLifecycle(
+  listener: RendererBackgroundLifecycleListener
+): () => void {
+  lifecycleListeners.add(listener)
+  return () => lifecycleListeners.delete(listener)
+}
+
+function emitLifecycle(event: RendererBackgroundLifecycleEvent): void {
+  for (const listener of lifecycleListeners) {
+    try {
+      listener(event)
+    } catch {
+      // Observers are best-effort and must never break task execution.
+    }
+  }
+}
+
 /**
  * Journal projection shared by background (registry) and foreground (journal-
  * only) dispatch tracking. A failed run keeps its partial output as
@@ -63,7 +101,14 @@ function projectDispatchResult(
 const registry = new BackgroundTaskRegistry<PluginSubagentDispatchResult>({
   journal,
   projectForJournal: projectDispatchResult,
-  onSettle: (runId, meta, settle) => settleListener?.(runId, meta, settle),
+  onSettle: (runId, meta, settle) => {
+    try {
+      settleListener?.(runId, meta, settle)
+    } catch {
+      // Delivery and lifecycle observers are independent best-effort paths.
+    }
+    emitLifecycle({ type: "settled", runId, status: settle.status })
+  },
 })
 
 export type RendererBackgroundTaskMeta = BackgroundTaskStartMeta & { host: "renderer" }
@@ -75,6 +120,7 @@ export function startRendererBackgroundRun(
   controls?: BackgroundTaskControls
 ): void {
   registry.start(runId, { ...meta, mode: "background" }, promise, controls)
+  emitLifecycle({ type: "started", runId, taskKind: meta.kind })
 }
 
 /**
@@ -203,6 +249,7 @@ export async function interruptRendererBackgroundTasksOnBoot(options: { now?: ()
 export function __clearRendererBackgroundRunsForTesting(): void {
   registry.__clearForTesting()
   settleListener = undefined
+  lifecycleListeners.clear()
 }
 
 /** Reconstruct an error-shaped result (journal fallback / thrown collect). */

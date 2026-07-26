@@ -6,7 +6,33 @@
 
 import { findCapturedByFingerprint, saveCapturedItem } from "@/lib/db/captured-items"
 import { enrichCandidate, buildEnrichDeps, type EnrichDeps } from "./enrich"
-import type { CaptureCandidate, CapturedItem } from "@/types/capture"
+import type { CaptureCandidate, CapturedItem, CaptureKind } from "@/types/capture"
+
+export interface CapturePersistedEvent {
+  captureId: string
+  kind: CaptureKind
+  capturedAt: number
+}
+
+export type CapturePersistedListener = (event: CapturePersistedEvent) => void
+
+const persistedListeners = new Set<CapturePersistedListener>()
+
+/** Subscribe to content-free capture milestones for first-party integrations. */
+export function subscribeCapturePersisted(listener: CapturePersistedListener): () => void {
+  persistedListeners.add(listener)
+  return () => persistedListeners.delete(listener)
+}
+
+function emitCapturePersisted(event: CapturePersistedEvent): void {
+  for (const listener of persistedListeners) {
+    try {
+      listener(event)
+    } catch {
+      // Capture persistence must not fail because an observer failed.
+    }
+  }
+}
 
 function newCaptureId(now: number): string {
   return `cap_${now.toString(36)}_${Math.random().toString(36).slice(2, 8)}`
@@ -43,6 +69,7 @@ export async function persistCapture(
     fingerprint: candidate.fingerprint,
   }
   await saveCapturedItem(item)
+  emitCapturePersisted({ captureId: item.id, kind: item.kind, capturedAt: item.capturedAt })
   return item
 }
 

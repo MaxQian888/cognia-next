@@ -12,6 +12,11 @@ export type PetEventSource =
   | "terminal"
   | "workflow"
   | "twin"
+  // Unified Control Center projection (approval / HITL / fleet waits).
+  | "attention"
+  | "source-control"
+  | "background-task"
+  | "capture"
   | "user"
   | "system"
   // Plugin-originated interactions/rewards via ctx.pet (rate-limited +

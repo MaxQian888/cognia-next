@@ -8,8 +8,12 @@
 
 import { emitPetEvent, type PetEmit } from "./pet-event-bus"
 import { wireChatSource } from "./sources/chat-source"
+import { wireAttentionSource } from "./sources/attention-source"
+import { wireCaptureSource } from "./sources/capture-source"
 import { wireTerminalSource } from "./sources/terminal-source"
+import { wireGitSource } from "./sources/git-source"
 import { wireAgentTeamSource } from "./sources/agent-team-source"
+import { wireBackgroundTaskSource } from "./sources/background-task-source"
 import { wireConnectorSource } from "./sources/connector-source"
 import { wireGoalSource } from "./sources/goal-source"
 import { wireWorkflowSource } from "./sources/workflow-source"
@@ -22,8 +26,12 @@ export type PetSourceWire = (emit: PetEmit) => () => void
 
 export const DEFAULT_PET_SOURCES: PetSourceWire[] = [
   wireChatSource,
+  wireAttentionSource,
+  wireCaptureSource,
   wireTerminalSource,
+  wireGitSource,
   wireAgentTeamSource,
+  wireBackgroundTaskSource,
   wireConnectorSource,
   wireGoalSource,
   wireWorkflowSource,

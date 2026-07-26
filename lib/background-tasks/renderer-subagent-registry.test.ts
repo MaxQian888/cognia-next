@@ -19,6 +19,7 @@ import {
   listRendererBackgroundRuns,
   setRendererBackgroundSettleListener,
   startRendererBackgroundRun,
+  subscribeRendererBackgroundLifecycle,
 } from "./renderer-subagent-registry"
 import type { PluginSubagentDispatchResult } from "@/types/plugin/plugin-agent-sdk"
 
@@ -253,6 +254,42 @@ describe("renderer subagent background registry", () => {
       expect.objectContaining({ subagentId: "reviewer", sessionId: "ses_1", mode: "background" }),
       expect.objectContaining({ status: "done", resultText: "done" })
     )
+  })
+
+  it("publishes minimal start/settle lifecycle events without prompt or result text", async () => {
+    const listener = jest.fn()
+    const unsubscribe = subscribeRendererBackgroundLifecycle(listener)
+
+    startRendererBackgroundRun("r1", meta(), Promise.resolve(ok("sensitive result")))
+    await new Promise((r) => setTimeout(r, 0))
+
+    expect(listener.mock.calls).toEqual([
+      [{ type: "started", runId: "r1", taskKind: "subagent" }],
+      [{ type: "settled", runId: "r1", status: "done" }],
+    ])
+    expect(JSON.stringify(listener.mock.calls)).not.toContain("check this")
+    expect(JSON.stringify(listener.mock.calls)).not.toContain("sensitive result")
+
+    unsubscribe()
+    startRendererBackgroundRun("r2", meta(), new Promise(() => {}))
+    expect(listener).toHaveBeenCalledTimes(2)
+  })
+
+  it("keeps lifecycle subscribers alive when the delivery settle listener throws", async () => {
+    const lifecycle = jest.fn()
+    subscribeRendererBackgroundLifecycle(lifecycle)
+    setRendererBackgroundSettleListener(() => {
+      throw new Error("delivery observer failed")
+    })
+
+    startRendererBackgroundRun("r1", meta(), Promise.resolve(ok("done")))
+    await new Promise((r) => setTimeout(r, 0))
+
+    expect(lifecycle).toHaveBeenLastCalledWith({
+      type: "settled",
+      runId: "r1",
+      status: "done",
+    })
   })
 
   it("journals a background failure with its envelope message + partial output", async () => {

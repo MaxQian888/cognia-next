@@ -2,6 +2,10 @@ import { wirePetSources, DEFAULT_PET_SOURCES, type PetSourceWire } from "./wire-
 import { wireHeartbeatSource } from "./sources/heartbeat-source"
 import { wireSchedulerDueSource } from "./sources/scheduler-due-source"
 import { wireBirthdaySource } from "./sources/birthday-source"
+import { wireAttentionSource } from "./sources/attention-source"
+import { wireGitSource } from "./sources/git-source"
+import { wireBackgroundTaskSource } from "./sources/background-task-source"
+import { wireCaptureSource } from "./sources/capture-source"
 
 describe("wirePetSources", () => {
   it("wires every provided source and disposes them all", () => {
@@ -21,7 +25,17 @@ describe("wirePetSources", () => {
   })
 
   it("ships the full default source set", () => {
-    expect(DEFAULT_PET_SOURCES).toHaveLength(10)
+    expect(DEFAULT_PET_SOURCES).toHaveLength(14)
+  })
+
+  it("includes the unified attention source", () => {
+    expect(DEFAULT_PET_SOURCES).toContain(wireAttentionSource)
+  })
+
+  it("includes source-control, background-task, and capture linkages", () => {
+    expect(DEFAULT_PET_SOURCES).toContain(wireGitSource)
+    expect(DEFAULT_PET_SOURCES).toContain(wireBackgroundTaskSource)
+    expect(DEFAULT_PET_SOURCES).toContain(wireCaptureSource)
   })
 
   it("includes the birthday anniversary source", () => {

@@ -5,6 +5,7 @@
 
 "use client"
 
+import { memo } from "react"
 import { useReducedMotion } from "motion/react"
 import type {
   PetBones,
@@ -40,7 +41,7 @@ export interface PetRendererProps {
   held?: boolean
 }
 
-export function PetRenderer({
+export const PetRenderer = memo(function PetRenderer({
   bones,
   stage,
   state,
@@ -56,7 +57,7 @@ export function PetRenderer({
   held,
 }: PetRendererProps) {
   const osReduced = useReducedMotion()
-  const reduced = reducedMotion ?? osReduced ?? false
+  const reduced = Boolean(reducedMotion ?? osReduced)
   const skin = getSkin(skinId)
   return (
     <>
@@ -76,4 +77,4 @@ export function PetRenderer({
       })}
     </>
   )
-}
+})

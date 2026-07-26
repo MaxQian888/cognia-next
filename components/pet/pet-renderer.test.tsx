@@ -1,6 +1,7 @@
 import { render } from "@testing-library/react"
 import { PetRenderer } from "./pet-renderer"
 import type { PetBones } from "@/types/pet"
+import { registerSkin } from "./skins/registry"
 
 function makeBones(overrides: Partial<PetBones> = {}): PetBones {
   return {
@@ -48,5 +49,25 @@ describe("PetRenderer", () => {
       <PetRenderer bones={makeBones()} stage="adult" state="idle" skinId="nope" />
     )
     expect(container.querySelector('[data-pet-skin-root="svg"]')).not.toBeNull()
+  })
+
+  it("does not rerender an unchanged skin during parent animation frames", () => {
+    const renderSkin = jest.fn(() => <div data-testid="memo-skin" />)
+    registerSkin({ id: "memo-test", render: renderSkin })
+    const bones = makeBones()
+    const { rerender } = render(
+      <PetRenderer bones={bones} stage="adult" state="idle" skinId="memo-test" reducedMotion />
+    )
+    const initialRenderCount = renderSkin.mock.calls.length
+
+    rerender(
+      <PetRenderer bones={bones} stage="adult" state="idle" skinId="memo-test" reducedMotion />
+    )
+    expect(renderSkin).toHaveBeenCalledTimes(initialRenderCount)
+
+    rerender(
+      <PetRenderer bones={bones} stage="adult" state="thinking" skinId="memo-test" reducedMotion />
+    )
+    expect(renderSkin).toHaveBeenCalledTimes(initialRenderCount + 1)
   })
 })
