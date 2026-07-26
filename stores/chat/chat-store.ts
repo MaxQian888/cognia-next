@@ -526,6 +526,15 @@ interface ChatState {
   addArtifactSelection: (selection: ArtifactSelectionRef) => void
   /** Remove a staged artifact selection (by index, since snapshots can repeat). */
   removeArtifactSelection: (index: number) => void
+  /**
+   * Move a staged selection to the front, making it the send's edit target.
+   *
+   * Only the first selection becomes `pendingArtifactEditTarget` — the rest
+   * contribute context alone — so with more than one staged, which artifact
+   * receives the AI's per-hunk revision proposal has to be the user's choice
+   * rather than whichever chip happened to be staged first.
+   */
+  promoteArtifactSelection: (index: number) => void
   clearArtifactSelections: () => void
   setPendingCommandOverrides: (overrides: PendingCommandOverrides | null) => void
   toggleBookmark: (messageId: string) => void
@@ -833,6 +842,14 @@ export const useChatStore = create<ChatState>((set) => ({
         ? s
         : { artifactSelections: s.artifactSelections.filter((_, i) => i !== index) }
     ),
+  promoteArtifactSelection: (index) =>
+    set((s) => {
+      if (index <= 0 || index >= s.artifactSelections.length) return s
+      const next = [...s.artifactSelections]
+      const [promoted] = next.splice(index, 1)
+      next.unshift(promoted)
+      return { artifactSelections: next }
+    }),
   clearArtifactSelections: () =>
     set((s) => (s.artifactSelections.length === 0 ? s : { artifactSelections: [] })),
   removeReferencedPath: (absolute) =>

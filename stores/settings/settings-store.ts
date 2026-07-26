@@ -606,6 +606,13 @@ export function resolveSkillBundleMirrors(settings: AppSettings | null | undefin
 }
 
 let updateSettingsSaveQueue: Promise<void> = Promise.resolve()
+let providerMutationQueue: Promise<unknown> = Promise.resolve()
+
+function enqueueProviderMutation<T>(task: () => Promise<T>): Promise<T> {
+  const next = providerMutationQueue.catch(() => undefined).then(task)
+  providerMutationQueue = next.catch(() => undefined)
+  return next
+}
 
 export const useSettingsStore = create<SettingsState>((rawSet, get) => {
   // Intercept every state update: if the update modifies `settings`, also
@@ -1281,95 +1288,98 @@ export const useSettingsStore = create<SettingsState>((rawSet, get) => {
       set({ settings: next })
     },
 
-    setDefaultProvider: async (providerId) => {
-      const cur = get().settings
-      // Keep the (defaultModel, defaultProvider) pair coherent: a stale model
-      // from the previous provider would otherwise ride along and be sent to
-      // the new provider's base URL. Only rewritten when the current default
-      // model isn't servable by the new provider (see the resolver's contract).
-      const { resolveDefaultModelForProvider } = await import("@/lib/ai/model-options")
-      const syncedModel = resolveDefaultModelForProvider(
-        providerId,
-        cur?.defaultModel,
-        cur?.providerSettings,
-        cur?.customProviders
-      )
-      const next = await saveSettings({
-        defaultProvider: providerId,
-        ...(syncedModel !== undefined ? { defaultModel: syncedModel } : {}),
-      })
-      set({ settings: next })
-      // `ApiKeyState` (Rust) is an Anthropic-only env slot — only push to it,
-      // and only restart the sidecar, when switching TO the Anthropic
-      // provider. Every other provider is read fresh per-turn by the ai-sdk
-      // dispatch path (`providerCredentials`), so no push/restart is needed
-      // and pushing here would silently corrupt the Anthropic env slot.
-      if (isTauri() && providerId === "anthropic") {
-        const cfg = next.providerSettings?.[providerId]
-        const apiKey = cfg?.apiKey ?? null
-        const baseURL = cfg?.baseURL ?? null
-        try {
-          await setProviderEnv(apiKey, baseURL)
-          await restartSidecar()
-          // We just restarted with this exact env — record it so a following
-          // identical config edit doesn't schedule a second debounced restart.
-          markAnthropicEnvApplied(apiKey, baseURL)
-        } catch (err) {
-          console.warn("setProviderEnv/restartSidecar failed", err)
-        }
-      }
-    },
-
-    setProviderConfig: async (providerId, patch) => {
-      const cur = get().settings
-      const existing =
-        cur?.providerSettings?.[providerId] ??
-        ({
+    setDefaultProvider: (providerId) =>
+      enqueueProviderMutation(async () => {
+        const cur = get().settings
+        // Keep the (defaultModel, defaultProvider) pair coherent: a stale model
+        // from the previous provider would otherwise ride along and be sent to
+        // the new provider's base URL. Only rewritten when the current default
+        // model isn't servable by the new provider (see the resolver's contract).
+        const { resolveDefaultModelForProvider } = await import("@/lib/ai/model-options")
+        const syncedModel = resolveDefaultModelForProvider(
           providerId,
-          enabled: false,
-          defaultModel: "",
-        } as UserProviderSettings)
-      const map = { ...(cur?.providerSettings ?? {}) }
-      map[providerId] = { ...existing, ...patch, providerId }
-      const next = await saveSettings({ providerSettings: map })
-      set({ settings: next })
-      // If this is the active default provider AND the patch touched
-      // `apiKey` or `baseURL`, push the change to the sidecar and schedule a
-      // (debounced) restart so the next chat turn actually picks it up —
-      // `ApiKeyState` only holds Anthropic's env, so this only applies when
-      // the edited provider IS Anthropic (see `scheduleAnthropicSidecarRestart`).
-      if (
-        isTauri() &&
-        providerId === "anthropic" &&
-        next.defaultProvider === providerId &&
-        ("apiKey" in patch || "baseURL" in patch)
-      ) {
-        const cfg = map[providerId]
-        const apiKey = cfg?.apiKey ?? null
-        const baseURL = cfg?.baseURL ?? null
-        try {
-          await setProviderEnv(apiKey, baseURL)
-          scheduleAnthropicSidecarRestart(apiKey, baseURL)
-        } catch (err) {
-          console.warn("setProviderEnv failed", err)
+          cur?.defaultModel,
+          cur?.providerSettings,
+          cur?.customProviders
+        )
+        const next = await saveSettings({
+          defaultProvider: providerId,
+          ...(syncedModel !== undefined ? { defaultModel: syncedModel } : {}),
+        })
+        set({ settings: next })
+        // `ApiKeyState` (Rust) is an Anthropic-only env slot — only push to it,
+        // and only restart the sidecar, when switching TO the Anthropic
+        // provider. Every other provider is read fresh per-turn by the ai-sdk
+        // dispatch path (`providerCredentials`), so no push/restart is needed
+        // and pushing here would silently corrupt the Anthropic env slot.
+        if (isTauri() && providerId === "anthropic") {
+          const cfg = next.providerSettings?.[providerId]
+          const apiKey = cfg?.apiKey ?? null
+          const baseURL = cfg?.baseURL ?? null
+          try {
+            await setProviderEnv(apiKey, baseURL)
+            await restartSidecar()
+            // We just restarted with this exact env — record it so a following
+            // identical config edit doesn't schedule a second debounced restart.
+            markAnthropicEnvApplied(apiKey, baseURL)
+          } catch (err) {
+            console.warn("setProviderEnv/restartSidecar failed", err)
+          }
         }
-      }
-    },
+      }),
+
+    setProviderConfig: (providerId, patch) =>
+      enqueueProviderMutation(async () => {
+        const cur = get().settings
+        const existing =
+          cur?.providerSettings?.[providerId] ??
+          ({
+            providerId,
+            enabled: false,
+            defaultModel: "",
+          } as UserProviderSettings)
+        const map = { ...(cur?.providerSettings ?? {}) }
+        map[providerId] = { ...existing, ...patch, providerId }
+        const next = await saveSettings({ providerSettings: map })
+        set({ settings: next })
+        // If this is the active default provider AND the patch touched
+        // `apiKey` or `baseURL`, push the change to the sidecar and schedule a
+        // (debounced) restart so the next chat turn actually picks it up —
+        // `ApiKeyState` only holds Anthropic's env, so this only applies when
+        // the edited provider IS Anthropic (see `scheduleAnthropicSidecarRestart`).
+        if (
+          isTauri() &&
+          providerId === "anthropic" &&
+          next.defaultProvider === providerId &&
+          ("apiKey" in patch || "baseURL" in patch)
+        ) {
+          const cfg = map[providerId]
+          const apiKey = cfg?.apiKey ?? null
+          const baseURL = cfg?.baseURL ?? null
+          try {
+            await setProviderEnv(apiKey, baseURL)
+            scheduleAnthropicSidecarRestart(apiKey, baseURL)
+          } catch (err) {
+            console.warn("setProviderEnv failed", err)
+          }
+        }
+      }),
 
     updateProviderSettings: async (providerId, patch) => {
       // Cognia-compatible alias — components written for Cognia call this.
       await get().setProviderConfig(providerId, patch)
     },
 
-    upsertCustomProvider: async (provider) => {
-      const cur = get().settings
-      const list = cur?.customProviders ?? []
-      const idx = list.findIndex((p) => p.id === provider.id)
-      const updated =
-        idx >= 0 ? list.map((p) => (p.id === provider.id ? provider : p)) : [...list, provider]
-      const next = await saveSettings({ customProviders: updated })
-      set({ settings: next })
-    },
+    upsertCustomProvider: (provider) =>
+      enqueueProviderMutation(async () => {
+        const cur = get().settings
+        const list = cur?.customProviders ?? []
+        const idx = list.findIndex((p) => p.id === provider.id)
+        const updated =
+          idx >= 0 ? list.map((p) => (p.id === provider.id ? provider : p)) : [...list, provider]
+        const next = await saveSettings({ customProviders: updated })
+        set({ settings: next })
+      }),
 
     addCustomProvider: async (provider) => {
       const id = provider.id || `custom-${Date.now().toString(36)}`
@@ -1397,47 +1407,105 @@ export const useSettingsStore = create<SettingsState>((rawSet, get) => {
       return id
     },
 
-    updateCustomProvider: async (providerId, patch) => {
-      const cur = get().settings
-      const list = cur?.customProviders ?? []
-      const idx = list.findIndex((p) => p.id === providerId)
-      if (idx < 0) return
-      const updated = [...list]
-      updated[idx] = { ...updated[idx], ...patch, id: providerId, isCustom: true }
-      const next = await saveSettings({ customProviders: updated })
-      set({ settings: next })
-    },
+    updateCustomProvider: (providerId, patch) =>
+      enqueueProviderMutation(async () => {
+        const cur = get().settings
+        const list = cur?.customProviders ?? []
+        const idx = list.findIndex((p) => p.id === providerId)
+        if (idx < 0) return
+        const updated = [...list]
+        updated[idx] = { ...updated[idx], ...patch, id: providerId, isCustom: true }
+        const next = await saveSettings({ customProviders: updated })
+        set({ settings: next })
+      }),
 
-    removeCustomProvider: async (providerId) => {
-      const cur = get().settings
-      const list = cur?.customProviders ?? []
-      const next = await saveSettings({ customProviders: list.filter((p) => p.id !== providerId) })
-      set({ settings: next })
-    },
+    removeCustomProvider: (providerId) =>
+      enqueueProviderMutation(async () => {
+        const cur = get().settings
+        const list = cur?.customProviders ?? []
+        const customProviders = list.filter((provider) => provider.id !== providerId)
+        const modelMappings = (cur?.modelMappings ?? [])
+          .map((mapping) => ({
+            ...mapping,
+            providers: mapping.providers.filter((entry) => entry.providerId !== providerId),
+          }))
+          .filter((mapping) => mapping.providers.length > 0)
+        const providerUIPreferences: ProviderUIPreferences = {
+          ...DEFAULT_PROVIDER_UI_PREFERENCES,
+          ...(cur?.providerUIPreferences ?? {}),
+          selectedProviderId:
+            cur?.providerUIPreferences?.selectedProviderId === providerId
+              ? undefined
+              : cur?.providerUIPreferences?.selectedProviderId,
+          comparisonProviderIds: cur?.providerUIPreferences?.comparisonProviderIds?.filter(
+            (id) => id !== providerId
+          ),
+        }
+        const patch: Partial<AppSettings> = {
+          customProviders,
+          modelMappings,
+          providerUIPreferences,
+        }
 
-    recordProviderUsage: async (providerId, modelId, entry) => {
-      const cur = get().settings
-      const stats = { ...(cur?.providerUsageStats ?? {}) }
-      const key = `${providerId}:${modelId}`
-      const list = stats[key] ?? []
-      // Cap retained history at 500 newest entries per (provider:model) pair
-      // so the singleton row doesn't grow without bound.
-      const trimmed = [...list, entry].slice(-500)
-      stats[key] = trimmed
-      const next = await saveSettings({ providerUsageStats: stats })
-      set({ settings: next })
-    },
+        if (cur?.defaultProvider === providerId) {
+          const fallbackProviderId =
+            Object.entries(cur.providerSettings ?? {}).find(
+              ([, settings]) => settings.enabled
+            )?.[0] ?? customProviders.find((provider) => provider.enabled)?.id
+          const { resolveDefaultModelForProvider } = await import("@/lib/ai/model-options")
+          patch.defaultProvider = fallbackProviderId
+          patch.defaultModel = fallbackProviderId
+            ? resolveDefaultModelForProvider(
+                fallbackProviderId,
+                undefined,
+                cur.providerSettings,
+                customProviders
+              )
+            : undefined
+        }
 
-    setProviderUIPreferences: async (patch) => {
-      const cur = get().settings
-      const merged: ProviderUIPreferences = {
-        ...DEFAULT_PROVIDER_UI_PREFERENCES,
-        ...(cur?.providerUIPreferences ?? {}),
-        ...patch,
-      }
-      const next = await saveSettings({ providerUIPreferences: merged })
-      set({ settings: next })
-    },
+        const next = await saveSettings({
+          ...patch,
+        })
+        set({ settings: next })
+      }),
+
+    recordProviderUsage: (providerId, modelId, entry) =>
+      enqueueProviderMutation(async () => {
+        const cur = get().settings
+        const stats = { ...(cur?.providerUsageStats ?? {}) }
+        const key = `${providerId}:${modelId}`
+        const list = stats[key] ?? []
+        // Cap retained history at 500 newest entries per (provider:model) pair
+        // so the singleton row doesn't grow without bound.
+        const trimmed = [...list, entry].slice(-500)
+        stats[key] = trimmed
+        const next = await saveSettings({ providerUsageStats: stats })
+        set({ settings: next })
+      }),
+
+    setProviderUIPreferences: (patch) =>
+      enqueueProviderMutation(async () => {
+        const cur = get().settings
+        const merged: ProviderUIPreferences = {
+          ...DEFAULT_PROVIDER_UI_PREFERENCES,
+          ...(cur?.providerUIPreferences ?? {}),
+          ...patch,
+        }
+        const optimisticSettings = cur ? { ...cur, providerUIPreferences: merged } : null
+        if (optimisticSettings) set({ settings: optimisticSettings })
+        try {
+          const next = await saveSettings({ providerUIPreferences: merged })
+          set({ settings: next })
+        } catch (error) {
+          // Roll back only if no unrelated settings update replaced this exact
+          // optimistic snapshot while the write was in flight.
+          if (optimisticSettings && get().settings === optimisticSettings) {
+            set({ settings: cur })
+          }
+          throw error
+        }
+      }),
 
     dismissProviderOnboarding: async () => {
       const next = await saveSettings({ providerOnboardingDismissed: true })

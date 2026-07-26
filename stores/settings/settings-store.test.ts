@@ -962,6 +962,200 @@ describe("setProviderConfig — anthropic env push + debounced restart", () => {
   })
 })
 
+describe("provider mutation persistence", () => {
+  it("updates provider UI preferences optimistically while persistence is pending", async () => {
+    const initial = baseSettings({
+      providerUIPreferences: { statusFilter: "all", sortBy: "name" },
+    })
+    useSettingsStore.setState({ settings: initial })
+    let resolveWrite!: () => void
+    dbSettings.saveSettings.mockImplementationOnce(
+      (patch) =>
+        new Promise((resolve) => {
+          resolveWrite = () => resolve(baseSettings({ ...initial, ...patch }))
+        })
+    )
+
+    const pending = useSettingsStore.getState().setProviderUIPreferences({ statusFilter: "error" })
+    await Promise.resolve()
+    await Promise.resolve()
+
+    expect(useSettingsStore.getState().providerUIPreferences.statusFilter).toBe("error")
+
+    resolveWrite()
+    await pending
+  })
+
+  it("rolls back optimistic provider UI preferences when persistence fails", async () => {
+    const initial = baseSettings({
+      providerUIPreferences: { statusFilter: "all", sortBy: "name" },
+    })
+    useSettingsStore.setState({ settings: initial })
+    dbSettings.saveSettings.mockRejectedValueOnce(new Error("db unavailable"))
+
+    await expect(
+      useSettingsStore.getState().setProviderUIPreferences({ statusFilter: "error" })
+    ).rejects.toThrow("db unavailable")
+
+    expect(useSettingsStore.getState().providerUIPreferences.statusFilter).toBe("all")
+    expect(useSettingsStore.getState().settings?.providerUIPreferences?.statusFilter).toBe("all")
+  })
+
+  it("serializes rapid provider patches without losing fields from an earlier write", async () => {
+    tauri.isTauri.mockReturnValue(false)
+    useSettingsStore.setState({
+      settings: baseSettings({
+        providerSettings: {
+          openai: {
+            providerId: "openai",
+            enabled: true,
+            defaultModel: "gpt-4.1",
+          },
+        },
+      }),
+    })
+
+    let releaseFirst!: () => void
+    dbSettings.saveSettings
+      .mockImplementationOnce(
+        (patch) =>
+          new Promise((resolve) => {
+            releaseFirst = () => resolve(baseSettings(patch))
+          })
+      )
+      .mockImplementationOnce(async (patch) => baseSettings(patch))
+
+    const first = useSettingsStore.getState().setProviderConfig("openai", {
+      apiKey: "sk-new",
+    })
+    const second = useSettingsStore.getState().setProviderConfig("openai", {
+      baseURL: "https://proxy.example.com/v1",
+    })
+
+    for (
+      let attempt = 0;
+      attempt < 5 && dbSettings.saveSettings.mock.calls.length === 0;
+      attempt++
+    ) {
+      await Promise.resolve()
+    }
+    expect(dbSettings.saveSettings).toHaveBeenCalledTimes(1)
+
+    releaseFirst()
+    await Promise.all([first, second])
+
+    expect(dbSettings.saveSettings).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        providerSettings: expect.objectContaining({
+          openai: expect.objectContaining({
+            apiKey: "sk-new",
+            baseURL: "https://proxy.example.com/v1",
+          }),
+        }),
+      })
+    )
+  })
+
+  it("continues the provider mutation queue after a failed write", async () => {
+    tauri.isTauri.mockReturnValue(false)
+    useSettingsStore.setState({ settings: baseSettings({ providerSettings: {} }) })
+    dbSettings.saveSettings
+      .mockRejectedValueOnce(new Error("db unavailable"))
+      .mockImplementationOnce(async (patch) => baseSettings(patch))
+
+    await expect(
+      useSettingsStore.getState().setProviderConfig("openai", { apiKey: "lost" })
+    ).rejects.toThrow("db unavailable")
+    await expect(
+      useSettingsStore.getState().setProviderConfig("openai", { apiKey: "saved" })
+    ).resolves.toBeUndefined()
+
+    expect(dbSettings.saveSettings).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        providerSettings: expect.objectContaining({
+          openai: expect.objectContaining({ apiKey: "saved" }),
+        }),
+      })
+    )
+  })
+
+  it("removes dangling default, routing, and UI references with a custom provider", async () => {
+    tauri.isTauri.mockReturnValue(false)
+    useSettingsStore.setState({
+      settings: baseSettings({
+        defaultProvider: "custom-gateway",
+        defaultModel: "custom-model",
+        providerSettings: {
+          openai: {
+            providerId: "openai",
+            enabled: true,
+            defaultModel: "gpt-4.1",
+          },
+        },
+        customProviders: [
+          {
+            id: "custom-gateway",
+            providerId: "custom-gateway",
+            isCustom: true,
+            name: "Custom Gateway",
+            customName: "Custom Gateway",
+            baseURL: "https://gateway.example.com/v1",
+            apiProtocol: "openai",
+            customModels: ["custom-model"],
+            models: ["custom-model"],
+            defaultModel: "custom-model",
+            enabled: true,
+          },
+        ],
+        modelMappings: [
+          {
+            id: "mixed",
+            alias: "balanced",
+            providers: [
+              { providerId: "custom-gateway", modelId: "custom-model" },
+              { providerId: "openai", modelId: "gpt-4.1" },
+            ],
+            distribution: "priority",
+            enabled: true,
+            createdAt: 1,
+            updatedAt: 1,
+          },
+        ],
+        providerUIPreferences: {
+          selectedProviderId: "custom-gateway",
+          comparisonProviderIds: ["custom-gateway", "openai"],
+        },
+      }),
+    })
+    dbSettings.saveSettings.mockImplementation(async (patch) =>
+      baseSettings({
+        ...useSettingsStore.getState().settings,
+        ...patch,
+      })
+    )
+
+    await useSettingsStore.getState().removeCustomProvider("custom-gateway")
+
+    expect(dbSettings.saveSettings).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        customProviders: [],
+        defaultProvider: "openai",
+        defaultModel: "gpt-4.1",
+        modelMappings: [
+          expect.objectContaining({
+            providers: [{ providerId: "openai", modelId: "gpt-4.1" }],
+          }),
+        ],
+        providerUIPreferences: expect.objectContaining({
+          selectedProviderId: undefined,
+          comparisonProviderIds: ["openai"],
+        }),
+      })
+    )
+  })
+})
+
 describe("setDefaultProvider — anthropic env push + immediate restart", () => {
   it("pushes env and restarts immediately when switching the default provider to anthropic", async () => {
     tauri.isTauri.mockReturnValue(true)

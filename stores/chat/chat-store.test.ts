@@ -1510,6 +1510,41 @@ describe("artifactSelections", () => {
     expect(useChatStore.getState().artifactSelections).toBe(before)
   })
 
+  it("promoteArtifactSelection moves a chip to the front without dropping the rest", () => {
+    act(() => {
+      useChatStore.getState().addArtifactSelection(sel({ title: "one", artifactId: "a1" }))
+      useChatStore.getState().addArtifactSelection(sel({ title: "two", artifactId: "a2" }))
+      useChatStore.getState().addArtifactSelection(sel({ title: "three", artifactId: "a3" }))
+    })
+
+    // Only the first selection becomes the send's edit target, so promoting is
+    // how the user picks which artifact receives the revision proposal.
+    act(() => useChatStore.getState().promoteArtifactSelection(2))
+
+    expect(useChatStore.getState().artifactSelections.map((s) => s.title)).toEqual([
+      "three",
+      "one",
+      "two",
+    ])
+  })
+
+  it("promoteArtifactSelection is a no-op for index 0 and out-of-range (stable reference)", () => {
+    act(() => {
+      useChatStore.getState().addArtifactSelection(sel({ title: "one" }))
+      useChatStore.getState().addArtifactSelection(sel({ title: "two" }))
+    })
+    const before = useChatStore.getState().artifactSelections
+
+    act(() => useChatStore.getState().promoteArtifactSelection(0))
+    expect(useChatStore.getState().artifactSelections).toBe(before)
+
+    act(() => useChatStore.getState().promoteArtifactSelection(9))
+    expect(useChatStore.getState().artifactSelections).toBe(before)
+
+    act(() => useChatStore.getState().promoteArtifactSelection(-1))
+    expect(useChatStore.getState().artifactSelections).toBe(before)
+  })
+
   it("focus change and clear() reset selections", () => {
     act(() => {
       useChatStore.getState().setActiveSession("s1")
