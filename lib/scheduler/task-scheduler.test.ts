@@ -37,6 +37,7 @@ jest.mock("./scheduler-db", () => ({
     getOverdueActiveTasks: jest.fn().mockResolvedValue([]),
     createTask: jest.fn().mockResolvedValue(undefined),
     updateTask: jest.fn().mockResolvedValue(undefined),
+    claimTaskSlot: jest.fn().mockResolvedValue(null),
     deleteTask: jest.fn().mockResolvedValue(true),
     getTask: jest.fn().mockResolvedValue(null),
     getAllTasks: jest.fn().mockResolvedValue([]),
@@ -72,7 +73,7 @@ jest.mock("@cognia/logging", () => {
 })
 
 import { schedulerDb } from "./scheduler-db"
-import { validateCronExpression } from "./cron-parser"
+import { getNextCronTime, validateCronExpression } from "./cron-parser"
 
 const mockSchedulerDb = schedulerDb as jest.Mocked<typeof schedulerDb>
 
@@ -523,7 +524,7 @@ describe("TaskScheduler", () => {
         const resumed = await scheduler.resumeTask(created.id)
         expect(resumed).toBe(true)
 
-        mockSchedulerDb.getTask.mockResolvedValueOnce({ ...created, status: "active" })
+        mockSchedulerDb.getTask.mockResolvedValue({ ...created, status: "active" })
         await scheduler.runTaskNow(created.id)
         await jest.advanceTimersByTimeAsync(20)
 
@@ -1338,6 +1339,304 @@ describe("TaskScheduler", () => {
       expect(driver.stop).toHaveBeenCalled()
     })
 
+    it("does not finish initialization after it is stopped during driver startup", async () => {
+      let resolveStart!: () => void
+      const driver = makeMockDriver()
+      driver.start = jest.fn(
+        () =>
+          new Promise<void>((resolve) => {
+            resolveStart = resolve
+          })
+      )
+      const sched = createTaskScheduler(driver)
+
+      const initialization = sched.initialize()
+      sched.stop()
+      resolveStart()
+      await initialization
+
+      expect(sched.getStatus()).toEqual({
+        initialized: false,
+        scheduledCount: 0,
+        runningCount: 0,
+      })
+      expect(mockSchedulerDb.getTasksByStatus).not.toHaveBeenCalled()
+    })
+
+    it("does not restart from an in-flight due callback after stop", async () => {
+      let resolveTask!: (task: ScheduledTask) => void
+      const driver = makeMockDriver()
+      const sched = createTaskScheduler(driver)
+      await sched.initialize()
+      const scheduledFor = new Date(Date.now() + 60_000)
+      const task: ScheduledTask = {
+        id: "stale-due-task",
+        name: "Stale Due Task",
+        type: "test",
+        trigger: { type: "interval", intervalMs: 60_000 },
+        config: {
+          maxRetries: 0,
+          retryDelay: 1_000,
+          timeout: 30_000,
+          allowConcurrent: false,
+          runMissedOnStartup: false,
+        },
+        notification: { onStart: false, onComplete: false, onError: false },
+        status: "active",
+        nextRunAt: scheduledFor,
+        runCount: 0,
+        successCount: 0,
+        failureCount: 0,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      }
+      mockSchedulerDb.getTask.mockReturnValueOnce(
+        new Promise<ScheduledTask>((resolve) => {
+          resolveTask = resolve
+        })
+      )
+
+      driver.fire(task.id, scheduledFor.getTime())
+      await Promise.resolve()
+      expect(mockSchedulerDb.getTask).toHaveBeenCalledWith(task.id)
+
+      sched.stop()
+      resolveTask(task)
+      await Promise.resolve()
+      await Promise.resolve()
+
+      expect(mockSchedulerDb.claimTaskSlot).not.toHaveBeenCalled()
+      expect(driver.start).toHaveBeenCalledTimes(1)
+      expect(driver.arm).not.toHaveBeenCalled()
+      expect(sched.getStatus().initialized).toBe(false)
+    })
+
+    it("does not restart after a running execution finishes following stop", async () => {
+      let resolveExecution!: (result: { success: boolean }) => void
+      const executor = jest.fn(
+        () =>
+          new Promise<{ success: boolean }>((resolve) => {
+            resolveExecution = resolve
+          })
+      )
+      registerTaskExecutor("test", executor)
+      const driver = makeMockDriver()
+      const sched = createTaskScheduler(driver)
+      await sched.initialize()
+      const task: ScheduledTask = {
+        id: "stop-running-task",
+        name: "Stop Running Task",
+        type: "test",
+        trigger: { type: "interval", intervalMs: 60_000 },
+        config: {
+          maxRetries: 0,
+          retryDelay: 1_000,
+          timeout: 30_000,
+          allowConcurrent: false,
+          runMissedOnStartup: false,
+        },
+        notification: { onStart: false, onComplete: false, onError: false },
+        status: "active",
+        runCount: 0,
+        successCount: 0,
+        failureCount: 0,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      }
+      mockSchedulerDb.getTask.mockResolvedValue(task)
+
+      const execution = sched.runTaskNow(task.id)
+      await jest.advanceTimersByTimeAsync(1)
+      sched.stop()
+      resolveExecution({ success: true })
+      const stoppedExecution = await execution
+
+      expect(driver.start).toHaveBeenCalledTimes(1)
+      expect(sched.getStatus().initialized).toBe(false)
+      expect(stoppedExecution).toEqual(
+        expect.objectContaining({ status: "cancelled", terminalReason: "scheduler-stopped" })
+      )
+    })
+
+    it("cancels scheduled retries when the scheduler stops", async () => {
+      const executor = jest.fn().mockResolvedValue({ success: false, error: "retry me" })
+      registerTaskExecutor("test", executor)
+      const driver = makeMockDriver()
+      const sched = createTaskScheduler(driver)
+      await sched.initialize()
+      const task: ScheduledTask = {
+        id: "stop-retry-task",
+        name: "Stop Retry Task",
+        type: "test",
+        trigger: { type: "interval", intervalMs: 60_000 },
+        config: {
+          maxRetries: 1,
+          retryDelay: 1_000,
+          maxRetryDelay: 1_000,
+          timeout: 30_000,
+          allowConcurrent: false,
+          runMissedOnStartup: false,
+        },
+        notification: { onStart: false, onComplete: false, onError: false },
+        status: "active",
+        runCount: 0,
+        successCount: 0,
+        failureCount: 0,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      }
+      mockSchedulerDb.getTask.mockResolvedValue(task)
+
+      await sched.runTaskNow(task.id)
+      sched.stop()
+      await jest.advanceTimersByTimeAsync(2_000)
+
+      expect(executor).toHaveBeenCalledTimes(1)
+      expect(sched.getStatus().initialized).toBe(false)
+    })
+
+    it("cancels scheduled retries when the task is paused", async () => {
+      const executor = jest.fn().mockResolvedValue({ success: false, error: "retry me" })
+      registerTaskExecutor("test", executor)
+      const driver = makeMockDriver()
+      const sched = createTaskScheduler(driver)
+      await sched.initialize()
+      const task: ScheduledTask = {
+        id: "pause-retry-task",
+        name: "Pause Retry Task",
+        type: "test",
+        trigger: { type: "interval", intervalMs: 60_000 },
+        config: {
+          maxRetries: 1,
+          retryDelay: 1_000,
+          maxRetryDelay: 1_000,
+          timeout: 30_000,
+          allowConcurrent: false,
+          runMissedOnStartup: false,
+        },
+        notification: { onStart: false, onComplete: false, onError: false },
+        status: "active",
+        runCount: 0,
+        successCount: 0,
+        failureCount: 0,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      }
+      mockSchedulerDb.getTask.mockResolvedValue(task)
+
+      await sched.runTaskNow(task.id)
+      await sched.pauseTask(task.id)
+      await jest.advanceTimersByTimeAsync(2_000)
+
+      expect(executor).toHaveBeenCalledTimes(1)
+      expect(mockSchedulerDb.updateTask).toHaveBeenCalledWith(
+        expect.objectContaining({ status: "paused" })
+      )
+      sched.stop()
+    })
+
+    it("does not schedule a stale retry when a running task fails after pause", async () => {
+      let rejectExecution!: (error: Error) => void
+      const executor = jest.fn(
+        () =>
+          new Promise<{ success: boolean }>((_resolve, reject) => {
+            rejectExecution = reject
+          })
+      )
+      registerTaskExecutor("test", executor)
+      const driver = makeMockDriver()
+      const sched = createTaskScheduler(driver)
+      await sched.initialize()
+      const task: ScheduledTask = {
+        id: "pause-running-retry-task",
+        name: "Pause Running Retry Task",
+        type: "test",
+        trigger: { type: "interval", intervalMs: 60_000 },
+        config: {
+          maxRetries: 1,
+          retryDelay: 1_000,
+          maxRetryDelay: 1_000,
+          timeout: 30_000,
+          allowConcurrent: false,
+          runMissedOnStartup: false,
+        },
+        notification: { onStart: false, onComplete: false, onError: false },
+        status: "active",
+        runCount: 0,
+        successCount: 0,
+        failureCount: 0,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      }
+      mockSchedulerDb.getTask.mockResolvedValue(task)
+
+      const execution = sched.runTaskNow(task.id)
+      await jest.advanceTimersByTimeAsync(1)
+      await sched.pauseTask(task.id)
+      rejectExecution(new Error("failed after pause"))
+      await execution
+      await jest.advanceTimersByTimeAsync(2_000)
+
+      expect(executor).toHaveBeenCalledTimes(1)
+      sched.stop()
+    })
+
+    it("cancels a running execution without recreating the task after delete", async () => {
+      const executor = jest.fn(() => new Promise<{ success: boolean }>(() => undefined))
+      registerTaskExecutor("test", executor)
+      const driver = makeMockDriver()
+      const sched = createTaskScheduler(driver)
+      await sched.initialize()
+      const task: ScheduledTask = {
+        id: "delete-running-task",
+        name: "Delete Running Task",
+        type: "test",
+        trigger: { type: "interval", intervalMs: 60_000 },
+        config: {
+          maxRetries: 0,
+          retryDelay: 1_000,
+          timeout: 30_000,
+          allowConcurrent: false,
+          runMissedOnStartup: false,
+        },
+        notification: { onStart: false, onComplete: false, onError: false },
+        status: "active",
+        runCount: 0,
+        successCount: 0,
+        failureCount: 0,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      }
+      let deleted = false
+      mockSchedulerDb.getTask.mockImplementation(async () => (deleted ? null : task))
+      mockSchedulerDb.deleteTask.mockImplementationOnce(async () => {
+        deleted = true
+        return true
+      })
+
+      const execution = sched.runTaskNow(task.id)
+      await jest.advanceTimersByTimeAsync(1)
+      await sched.deleteTask(task.id)
+      const result = await execution
+
+      expect(result).toEqual(
+        expect.objectContaining({ status: "cancelled", terminalReason: "task-deleted" })
+      )
+      expect(mockSchedulerDb.updateTask).not.toHaveBeenCalled()
+      sched.stop()
+    })
+
+    it("stops the driver when initialization fails after startup", async () => {
+      const driver = makeMockDriver()
+      mockSchedulerDb.getTasksByStatus.mockRejectedValueOnce(new Error("load failed"))
+      const sched = createTaskScheduler(driver)
+
+      await expect(sched.initialize()).rejects.toThrow("load failed")
+
+      expect(driver.stop).toHaveBeenCalled()
+      expect(sched.getStatus().initialized).toBe(false)
+    })
+
     it("installs an injected driver on the scheduler singleton", async () => {
       const driver = makeMockDriver()
 
@@ -1492,6 +1791,7 @@ describe("TaskScheduler", () => {
         updatedAt: new Date(),
       }
       mockSchedulerDb.getTask.mockResolvedValue(task)
+      mockSchedulerDb.claimTaskSlot.mockResolvedValue(task)
 
       const slot = Date.now()
       driver.fire("due-task-1", slot)
@@ -1501,6 +1801,51 @@ describe("TaskScheduler", () => {
       expect(mockSchedulerDb.createExecution).toHaveBeenCalledWith(
         expect.objectContaining({ triggerSource: "schedule", scheduledFor: new Date(slot) })
       )
+      sched.stop()
+    })
+
+    it("executes a persisted schedule slot only once when duplicate due events race", async () => {
+      const executor = jest.fn().mockResolvedValue({ success: true })
+      registerTaskExecutor("test", executor)
+      const driver = makeMockDriver()
+      const sched = createTaskScheduler(driver)
+      await sched.initialize()
+      const slot = Date.now()
+      const task: ScheduledTask = {
+        id: "duplicate-due-task",
+        name: "Duplicate Due Task",
+        type: "test",
+        trigger: { type: "interval", intervalMs: 60_000 },
+        config: {
+          maxRetries: 0,
+          retryDelay: 1_000,
+          timeout: 30_000,
+          allowConcurrent: true,
+          overlapPolicy: "allow",
+          runMissedOnStartup: false,
+        },
+        notification: { onStart: false, onComplete: false, onError: false },
+        status: "active",
+        nextRunAt: new Date(slot),
+        runCount: 0,
+        successCount: 0,
+        failureCount: 0,
+        createdAt: new Date(slot - 60_000),
+        updatedAt: new Date(),
+      }
+      mockSchedulerDb.getTask.mockResolvedValue(task)
+      mockSchedulerDb.claimTaskSlot.mockResolvedValueOnce({
+        ...task,
+        nextRunAt: new Date(slot + 60_000),
+      })
+      mockSchedulerDb.claimTaskSlot.mockResolvedValueOnce(null)
+
+      driver.fire(task.id, slot)
+      driver.fire(task.id, slot)
+      await jest.advanceTimersByTimeAsync(10)
+
+      expect(mockSchedulerDb.claimTaskSlot).toHaveBeenCalledTimes(2)
+      expect(executor).toHaveBeenCalledTimes(1)
       sched.stop()
     })
 
@@ -1518,6 +1863,247 @@ describe("TaskScheduler", () => {
 
       expect(executor).not.toHaveBeenCalled()
       sched.stop()
+    })
+
+    /**
+     * A slot whose successor has ALSO elapsed means the process was away for
+     * more than one period. Claiming it would persist an already-past
+     * `nextRunAt`, which the driver re-arms with a zero delay — the tight
+     * catch-up loop that used to emit one execution record and one
+     * overlap-skipped warning per missed slot on every startup.
+     */
+    describe("missed-run backlog", () => {
+      function makeBacklogTask(overrides: Partial<ScheduledTask> = {}): ScheduledTask {
+        return {
+          id: "backlog-task",
+          name: "Backlog Task",
+          type: "test",
+          trigger: { type: "interval", intervalMs: 300_000 },
+          config: {
+            maxRetries: 0,
+            retryDelay: 1_000,
+            timeout: 30_000,
+            allowConcurrent: false,
+            runMissedOnStartup: false,
+            maxMissedRuns: 1,
+          },
+          notification: { onStart: false, onComplete: false, onError: false },
+          status: "active",
+          runCount: 0,
+          successCount: 0,
+          failureCount: 0,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+          ...overrides,
+        }
+      }
+
+      function lastPersistedTask(): ScheduledTask {
+        return mockSchedulerDb.updateTask.mock.calls.at(-1)?.[0] as ScheduledTask
+      }
+
+      it("reconciles the whole window once instead of replaying every missed slot", async () => {
+        const executor = jest.fn().mockResolvedValue({ success: true })
+        registerTaskExecutor("test", executor)
+        const driver = makeMockDriver()
+        const sched = createTaskScheduler(driver)
+        await sched.initialize()
+
+        const intervalMs = 300_000
+        const firedAt = Date.now()
+        const staleSlot = firedAt - 24 * intervalMs // 2h offline
+        const task = makeBacklogTask({
+          nextRunAt: new Date(staleSlot),
+          createdAt: new Date(staleSlot - intervalMs),
+        })
+        mockSchedulerDb.getTask.mockResolvedValue(task)
+
+        driver.fire(task.id, staleSlot)
+        await jest.advanceTimersByTimeAsync(10)
+
+        // Policy is runMissedOnStartup:false ⇒ nothing runs, and the backlog
+        // collapses to a single skipped record rather than one per slot.
+        expect(mockSchedulerDb.claimTaskSlot).not.toHaveBeenCalled()
+        expect(executor).not.toHaveBeenCalled()
+        expect(mockSchedulerDb.createExecution).toHaveBeenCalledTimes(1)
+        expect(mockSchedulerDb.createExecution).toHaveBeenCalledWith(
+          expect.objectContaining({ status: "skipped", terminalReason: "missed-run-skipped" })
+        )
+
+        // Re-armed strictly in the future, so the driver cannot re-fire at once.
+        expect(lastPersistedTask().nextRunAt!.getTime()).toBeGreaterThan(firedAt)
+        const armedAt = (driver.arm as jest.Mock).mock.calls.at(-1)?.[1] as number
+        expect(armedAt).toBeGreaterThan(firedAt)
+        sched.stop()
+      })
+
+      it("runs only maxMissedRuns slots when runMissedOnStartup is on", async () => {
+        const executor = jest.fn().mockResolvedValue({ success: true })
+        registerTaskExecutor("test", executor)
+        const driver = makeMockDriver()
+        const sched = createTaskScheduler(driver)
+        await sched.initialize()
+
+        const intervalMs = 60_000
+        const firedAt = Date.now()
+        const staleSlot = firedAt - 60 * intervalMs // 60 missed slots
+        const task = makeBacklogTask({
+          id: "backlog-catchup-task",
+          trigger: { type: "interval", intervalMs },
+          config: {
+            ...makeBacklogTask().config,
+            runMissedOnStartup: true,
+            maxMissedRuns: 2,
+          },
+          nextRunAt: new Date(staleSlot),
+          createdAt: new Date(staleSlot - intervalMs),
+        })
+        mockSchedulerDb.getTask.mockResolvedValue(task)
+
+        driver.fire(task.id, staleSlot)
+        await jest.advanceTimersByTimeAsync(10)
+
+        expect(executor).toHaveBeenCalledTimes(2)
+        expect(mockSchedulerDb.createExecution).toHaveBeenCalledWith(
+          expect.objectContaining({ triggerSource: "catch-up", scheduledFor: new Date(staleSlot) })
+        )
+        expect(lastPersistedTask().nextRunAt!.getTime()).toBeGreaterThan(firedAt)
+        sched.stop()
+      })
+
+      it("jumps a long short-interval backlog to the next phase-aligned slot", async () => {
+        registerTaskExecutor("test", jest.fn().mockResolvedValue({ success: true }))
+        const driver = makeMockDriver()
+        const sched = createTaskScheduler(driver)
+        await sched.initialize()
+
+        const intervalMs = 1_000
+        const firedAt = Date.now()
+        // ~604_800 missed slots: a slot-by-slot walk would be pathological.
+        const staleSlot = firedAt - 7 * 24 * 60 * 60_000 - 137
+        const task = makeBacklogTask({
+          id: "backlog-dense-task",
+          trigger: { type: "interval", intervalMs },
+          nextRunAt: new Date(staleSlot),
+          createdAt: new Date(staleSlot - intervalMs),
+        })
+        mockSchedulerDb.getTask.mockResolvedValue(task)
+
+        driver.fire(task.id, staleSlot)
+        await jest.advanceTimersByTimeAsync(10)
+
+        const nextMs = lastPersistedTask().nextRunAt!.getTime()
+        expect(nextMs).toBeGreaterThan(firedAt)
+        // Still on the original slot grid, and the FIRST such slot past now.
+        expect((nextMs - staleSlot) % intervalMs).toBe(0)
+        expect(nextMs - intervalMs).toBeLessThanOrEqual(firedAt)
+        expect(mockSchedulerDb.createExecution).toHaveBeenCalledTimes(1)
+        sched.stop()
+      })
+
+      it("records the missed window without running anything when maxMissedRuns is 0", async () => {
+        const executor = jest.fn().mockResolvedValue({ success: true })
+        registerTaskExecutor("test", executor)
+        const driver = makeMockDriver()
+        const sched = createTaskScheduler(driver)
+        await sched.initialize()
+
+        const intervalMs = 300_000
+        const firedAt = Date.now()
+        const staleSlot = firedAt - 10 * intervalMs
+        const task = makeBacklogTask({
+          id: "backlog-nocatchup-task",
+          config: { ...makeBacklogTask().config, maxMissedRuns: 0 },
+          nextRunAt: new Date(staleSlot),
+          createdAt: new Date(staleSlot - intervalMs),
+        })
+        mockSchedulerDb.getTask.mockResolvedValue(task)
+
+        driver.fire(task.id, staleSlot)
+        await jest.advanceTimersByTimeAsync(10)
+
+        expect(executor).not.toHaveBeenCalled()
+        expect(mockSchedulerDb.createExecution).toHaveBeenCalledTimes(1)
+        expect(mockSchedulerDb.createExecution).toHaveBeenCalledWith(
+          expect.objectContaining({
+            status: "skipped",
+            terminalReason: "missed-run-skipped",
+            scheduledFor: new Date(staleSlot),
+          })
+        )
+        expect(lastPersistedTask().nextRunAt!.getTime()).toBeGreaterThan(firedAt)
+        sched.stop()
+      })
+
+      it("walks a cron backlog to the first future slot", async () => {
+        const executor = jest.fn().mockResolvedValue({ success: true })
+        registerTaskExecutor("test", executor)
+        const driver = makeMockDriver()
+        const sched = createTaskScheduler(driver)
+        await sched.initialize()
+
+        const hourMs = 60 * 60_000
+        const firedAt = Date.now()
+        const staleSlot = firedAt - 5 * hourMs
+        const cron = getNextCronTime as jest.Mock
+        // Hourly cron: cron slots have no closed-form jump, so the reconciler
+        // walks them one by one until it passes `now`.
+        cron.mockImplementation((_expr: string, from: Date) => new Date(from.getTime() + hourMs))
+        try {
+          const task = makeBacklogTask({
+            id: "backlog-cron-task",
+            trigger: { type: "cron", cronExpression: "0 * * * *" },
+            nextRunAt: new Date(staleSlot),
+            createdAt: new Date(staleSlot - hourMs),
+          })
+          mockSchedulerDb.getTask.mockResolvedValue(task)
+
+          driver.fire(task.id, staleSlot)
+          await jest.advanceTimersByTimeAsync(10)
+
+          expect(mockSchedulerDb.claimTaskSlot).not.toHaveBeenCalled()
+          expect(executor).not.toHaveBeenCalled()
+          expect(mockSchedulerDb.createExecution).toHaveBeenCalledTimes(1)
+          expect(lastPersistedTask().nextRunAt!.getTime()).toBeGreaterThan(firedAt)
+        } finally {
+          cron.mockReset()
+          cron.mockReturnValue(new Date(Date.now() + 60_000))
+          sched.stop()
+        }
+      })
+
+      it("still claims and executes when only the current slot is due", async () => {
+        const executor = jest.fn().mockResolvedValue({ success: true })
+        registerTaskExecutor("test", executor)
+        const driver = makeMockDriver()
+        const sched = createTaskScheduler(driver)
+        await sched.initialize()
+
+        const intervalMs = 60_000
+        const slot = Date.now()
+        const task = makeBacklogTask({
+          id: "on-time-task",
+          trigger: { type: "interval", intervalMs },
+          nextRunAt: new Date(slot),
+          createdAt: new Date(slot - intervalMs),
+        })
+        mockSchedulerDb.getTask.mockResolvedValue(task)
+        mockSchedulerDb.claimTaskSlot.mockResolvedValue({
+          ...task,
+          nextRunAt: new Date(slot + intervalMs),
+        })
+
+        driver.fire(task.id, slot)
+        await jest.advanceTimersByTimeAsync(10)
+
+        expect(mockSchedulerDb.claimTaskSlot).toHaveBeenCalledWith(
+          task.id,
+          new Date(slot),
+          new Date(slot + intervalMs)
+        )
+        expect(executor).toHaveBeenCalledTimes(1)
+        sched.stop()
+      })
     })
   })
 
@@ -1779,6 +2365,40 @@ describe("TaskScheduler", () => {
         expect(mockSchedulerDb.updateTask).toHaveBeenCalledWith(
           expect.objectContaining({ status: "expired", lastTerminalReason: "max-runs-reached" })
         )
+      })
+
+      it("does not count a claimed scheduled slot twice when it completes", async () => {
+        const executor = jest.fn().mockResolvedValue({ success: true })
+        registerTaskExecutor("test", executor)
+        const driver = makeMockDriver()
+        const sched = createTaskScheduler(driver)
+        await sched.initialize()
+        const slot = new Date(Date.now())
+        const task = makePolicyTask({
+          id: "reserved-final-run",
+          nextRunAt: slot,
+          runCount: 0,
+          config: {
+            ...makePolicyTask().config,
+            maxRuns: 1,
+            overlapPolicy: "allow",
+          },
+        })
+        const claimed = { ...task, runCount: 1, nextRunAt: undefined }
+        mockSchedulerDb.getTask.mockResolvedValueOnce(task).mockResolvedValue(claimed)
+        mockSchedulerDb.claimTaskSlot.mockResolvedValueOnce(claimed)
+
+        driver.fire(task.id, slot.getTime())
+        await jest.advanceTimersByTimeAsync(10)
+
+        expect(executor).toHaveBeenCalledTimes(1)
+        expect(mockSchedulerDb.updateTask).toHaveBeenCalledWith(
+          expect.objectContaining({ runCount: 1, successCount: 1 })
+        )
+        expect(mockSchedulerDb.updateTask).not.toHaveBeenCalledWith(
+          expect.objectContaining({ runCount: 2 })
+        )
+        sched.stop()
       })
     })
 
@@ -2145,6 +2765,10 @@ describe("TaskScheduler", () => {
 
         // When the (jittered) fire arrives, the canonical slot is preserved.
         mockSchedulerDb.getTask.mockResolvedValue(task)
+        mockSchedulerDb.claimTaskSlot.mockResolvedValue({
+          ...task,
+          nextRunAt: new Date(canonicalMs + 60_000),
+        })
         driver.fire(task.id, canonicalMs + 5_000)
         await jest.advanceTimersByTimeAsync(10)
 

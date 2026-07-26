@@ -2,6 +2,7 @@
  * @jest-environment jsdom
  */
 
+import { StrictMode } from "react"
 import { render, act } from "@testing-library/react"
 
 const stopSchedulerSystem = jest.fn()
@@ -67,6 +68,47 @@ describe("SchedulerInitializer", () => {
     expect(logInfo).toHaveBeenCalled()
   })
 
+  it("does not stop the live scheduler during the StrictMode effect replay", async () => {
+    const view = render(
+      <StrictMode>
+        <SchedulerInitializer />
+      </StrictMode>
+    )
+    await act(async () => {
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    // The effect body is replayed, while the real store deduplicates both
+    // calls through its shared in-flight initialization promise.
+    expect(storeState.initialize).toHaveBeenCalledTimes(2)
+    expect(stopSchedulerSystem).not.toHaveBeenCalled()
+
+    view.unmount()
+    await act(async () => {
+      await Promise.resolve()
+    })
+  })
+
+  it("does not stop when the store transitions to initialized", async () => {
+    const view = render(<SchedulerInitializer />)
+    await act(async () => {
+      await Promise.resolve()
+    })
+
+    storeState.isInitialized = true
+    view.rerender(<SchedulerInitializer />)
+    await act(async () => {
+      await Promise.resolve()
+    })
+
+    expect(stopSchedulerSystem).not.toHaveBeenCalled()
+    view.unmount()
+    await act(async () => {
+      await Promise.resolve()
+    })
+  })
+
   it("logs an error and sets status to stopped when initialize fails", async () => {
     const boom = new Error("init boom")
     storeState.initialize = jest.fn(async () => {
@@ -92,7 +134,10 @@ describe("SchedulerInitializer", () => {
     await act(async () => {
       await Promise.resolve()
     })
-    unmount()
+    await act(async () => {
+      unmount()
+      await Promise.resolve()
+    })
     expect(stopSchedulerSystem).toHaveBeenCalled()
     expect(storeState.setSchedulerStatus).toHaveBeenCalledWith("stopped")
   })
@@ -105,6 +150,9 @@ describe("SchedulerInitializer", () => {
     expect(installBridgeMock).toHaveBeenCalledTimes(1)
     unmount()
     expect(teardownBridgeMock).toHaveBeenCalledTimes(1)
+    await act(async () => {
+      await Promise.resolve()
+    })
   })
 
   it("captures beforeunload to stop the scheduler", async () => {
@@ -125,7 +173,10 @@ describe("SchedulerInitializer", () => {
     await act(async () => {
       await Promise.resolve()
     })
-    unmount()
+    await act(async () => {
+      unmount()
+      await Promise.resolve()
+    })
     expect(logError).toHaveBeenCalled()
   })
 

@@ -32,6 +32,8 @@ const log = loggers.store
 
 // Deduplication guard for concurrent initialize() calls
 let initPromise: Promise<void> | null = null
+// Invalidates an async initialize() when the runtime is stopped before it settles.
+let initializationGeneration = 0
 
 // Deduplication guard for concurrent refreshAll() calls
 let refreshPromise: Promise<void> | null = null
@@ -729,6 +731,12 @@ export const useSchedulerStore = create<SchedulerStore>()(
       // ========== System Status ==========
 
       setSchedulerStatus: (status) => {
+        if (status === "stopped") {
+          initializationGeneration += 1
+          initPromise = null
+          set({ schedulerStatus: status, isInitialized: false, isLoading: false })
+          return
+        }
         set({ schedulerStatus: status })
       },
 
@@ -740,31 +748,47 @@ export const useSchedulerStore = create<SchedulerStore>()(
         // Deduplicate concurrent calls (SchedulerInitializer + useScheduler may both call)
         if (initPromise) return initPromise
 
-        initPromise = (async () => {
+        const generation = initializationGeneration
+        const currentPromise = (async () => {
           set({ isLoading: true })
           try {
             const { initSchedulerSystem } = await import("@/lib/scheduler")
             await initSchedulerSystem()
+            if (generation !== initializationGeneration) return
 
             // Load initial data
             await get().refreshAll()
+            if (generation !== initializationGeneration) return
 
             set({ isInitialized: true })
           } catch (error) {
-            log.error("SchedulerStore: Initialization failed", error as Error)
-            set({ error: "Failed to initialize scheduler" })
+            if (generation === initializationGeneration) {
+              log.error("SchedulerStore: Initialization failed", error as Error)
+              set({ error: "Failed to initialize scheduler" })
+            }
+            throw error
           } finally {
-            set({ isLoading: false })
-            initPromise = null
+            if (generation === initializationGeneration) {
+              set({ isLoading: false })
+            }
           }
         })()
+        initPromise = currentPromise
 
-        return initPromise
+        try {
+          await currentPromise
+        } finally {
+          if (initPromise === currentPromise) {
+            initPromise = null
+          }
+        }
       },
 
       // ========== Reset ==========
 
       reset: () => {
+        initializationGeneration += 1
+        initPromise = null
         set(initialState)
       },
     }),

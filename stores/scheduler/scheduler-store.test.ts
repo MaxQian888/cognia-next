@@ -1551,10 +1551,38 @@ describe("useSchedulerStore", () => {
       schedulerLibMock.initSchedulerSystem.mockRejectedValueOnce(new Error("init-fail"))
       const { result } = renderHook(() => useSchedulerStore())
       await act(async () => {
-        await result.current.initialize()
+        await expect(result.current.initialize()).rejects.toThrow("init-fail")
       })
       expect(result.current.error).toBe("Failed to initialize scheduler")
       expect(result.current.isInitialized).toBe(false)
+    })
+
+    it("does not commit a stale initialization after the scheduler is stopped", async () => {
+      let resolveInitialization!: () => void
+      schedulerLibMock.initSchedulerSystem.mockImplementationOnce(
+        () =>
+          new Promise<void>((resolve) => {
+            resolveInitialization = resolve
+          })
+      )
+      const { result } = renderHook(() => useSchedulerStore())
+
+      let initialization!: Promise<void>
+      await act(async () => {
+        initialization = result.current.initialize()
+        await Promise.resolve()
+      })
+      act(() => {
+        result.current.setSchedulerStatus("stopped")
+      })
+      await act(async () => {
+        resolveInitialization()
+        await initialization
+      })
+
+      expect(result.current.isInitialized).toBe(false)
+      expect(result.current.schedulerStatus).toBe("stopped")
+      expect(result.current.isLoading).toBe(false)
     })
 
     it("deduplicates concurrent invocations via the in-flight promise guard", async () => {

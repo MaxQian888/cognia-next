@@ -60,7 +60,7 @@
     "namePlaceholder": "e.g., Daily Backup",
     "options": {
       "artifacts": "Artifacts",
-      "indexedDB": "Database (IndexedDB)",
+      "indexedDB": "Other database content",
       "sessions": "Chat Sessions",
       "settings": "App Settings"
     },

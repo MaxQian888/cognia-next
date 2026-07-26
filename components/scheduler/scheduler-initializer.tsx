@@ -8,6 +8,8 @@ import { installExecutionEventBridge } from "@/lib/execution/event-bridge"
 import { loggers } from "@cognia/logging"
 
 const log = loggers.scheduler
+let schedulerInitializerMounts = 0
+let pendingStopVersion = 0
 
 /**
  * SchedulerInitializer Component
@@ -22,7 +24,9 @@ export function SchedulerInitializer() {
   const setSchedulerStatus = useSchedulerStore((state) => state.setSchedulerStatus)
 
   useEffect(() => {
-    if (isInitialized) return
+    schedulerInitializerMounts += 1
+    pendingStopVersion += 1
+    let active = true
 
     // Bridge the ExecutionBroker's leg-completed events into the scheduler event
     // system so an event-triggered task can react to "any chat / agent run
@@ -30,26 +34,40 @@ export function SchedulerInitializer() {
     // already emit their own subsystem-level events). Idempotent.
     const teardownBridge = installExecutionEventBridge()
 
-    initialize()
-      .then(() => {
-        setSchedulerStatus("running")
-        log.info("[SchedulerInitializer] Scheduler system initialized")
-      })
-      .catch((error) => {
-        log.error("[SchedulerInitializer] Failed to initialize scheduler:", error)
-        setSchedulerStatus("stopped")
-      })
+    if (!isInitialized) {
+      initialize()
+        .then(() => {
+          if (!active) return
+          setSchedulerStatus("running")
+          log.info("[SchedulerInitializer] Scheduler system initialized")
+        })
+        .catch((error) => {
+          if (!active) return
+          log.error("[SchedulerInitializer] Failed to initialize scheduler:", error)
+          setSchedulerStatus("stopped")
+        })
+    }
 
     // Cleanup on component unmount
     return () => {
-      try {
-        teardownBridge()
-        stopSchedulerSystem()
-        setSchedulerStatus("stopped")
-        log.info("[SchedulerInitializer] Scheduler system stopped")
-      } catch (error) {
-        log.error("[SchedulerInitializer] Error stopping scheduler:", error as Error)
-      }
+      active = false
+      teardownBridge()
+      schedulerInitializerMounts = Math.max(0, schedulerInitializerMounts - 1)
+      const stopVersion = ++pendingStopVersion
+
+      // React StrictMode replays effects as mount → cleanup → mount. Defer the
+      // destructive stop to a microtask so the immediate remount can retain
+      // the single live scheduler instead of creating a ghost listener.
+      queueMicrotask(() => {
+        if (schedulerInitializerMounts > 0 || stopVersion !== pendingStopVersion) return
+        try {
+          stopSchedulerSystem()
+          setSchedulerStatus("stopped")
+          log.info("[SchedulerInitializer] Scheduler system stopped")
+        } catch (error) {
+          log.error("[SchedulerInitializer] Error stopping scheduler:", error as Error)
+        }
+      })
     }
   }, [initialize, isInitialized, setSchedulerStatus])
 
@@ -58,6 +76,7 @@ export function SchedulerInitializer() {
     const handleBeforeUnload = () => {
       try {
         stopSchedulerSystem()
+        setSchedulerStatus("stopped")
       } catch (error) {
         log.error("[SchedulerInitializer] Error on beforeunload:", error as Error)
       }
@@ -65,7 +84,7 @@ export function SchedulerInitializer() {
 
     window.addEventListener("beforeunload", handleBeforeUnload)
     return () => window.removeEventListener("beforeunload", handleBeforeUnload)
-  }, [])
+  }, [setSchedulerStatus])
 
   return null
 }

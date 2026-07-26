@@ -77,12 +77,19 @@ export class SchedulerError extends Error {
     })
   }
 
-  /** Raised when a running execution is aborted by the `cancel-previous` overlap policy. */
-  static executionCancelled(taskName: string): SchedulerError {
+  /** Raised when a running execution is aborted by lifecycle or overlap policy. */
+  static executionCancelled(
+    taskName: string,
+    reason: "overlap-cancelled" | "scheduler-stopped" | "task-deleted" = "overlap-cancelled"
+  ): SchedulerError {
     return new SchedulerError(
       "EXECUTION_CANCELLED",
-      `Execution cancelled by a newer start (cancel-previous overlap policy)`,
-      { taskName }
+      reason === "scheduler-stopped"
+        ? "Execution cancelled because the scheduler stopped"
+        : reason === "task-deleted"
+          ? "Execution cancelled because the task was deleted"
+          : "Execution cancelled by a newer start (cancel-previous overlap policy)",
+      { taskName, reason }
     )
   }
 

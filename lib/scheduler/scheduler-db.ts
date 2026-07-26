@@ -122,6 +122,48 @@ class SchedulerDatabase extends Dexie {
   }
 
   /**
+   * Atomically claim one persisted schedule slot and advance the task to its
+   * next slot. The transaction also reserves one run from `maxRuns` before any
+   * execution starts, so a short interval cannot admit several overlapping
+   * runs against the same remaining budget. Exactly one renderer/process
+   * callback can win for a given `(taskId, expectedRunAt)` pair.
+   */
+  async claimTaskSlot(
+    taskId: string,
+    expectedRunAt: Date,
+    nextRunAt?: Date
+  ): Promise<ScheduledTask | null> {
+    return this.transaction("rw", this.tasks, async () => {
+      const dbTask = await this.tasks.get(taskId)
+      if (
+        !dbTask ||
+        dbTask.status !== "active" ||
+        dbTask.nextRunAt !== expectedRunAt.toISOString()
+      ) {
+        return null
+      }
+
+      const config = JSON.parse(dbTask.config) as ScheduledTask["config"]
+      const maxRuns = config.maxRuns
+      if (typeof maxRuns === "number" && maxRuns > 0 && dbTask.runCount >= maxRuns) {
+        return null
+      }
+      const runCount = dbTask.runCount + 1
+      const exhaustedBudget = typeof maxRuns === "number" && maxRuns > 0 && runCount >= maxRuns
+      const claimed: DBScheduledTask = {
+        ...dbTask,
+        runCount,
+        // Do not expose another slot once this reservation consumes the final
+        // budget. The in-flight run finalizes the task as expired.
+        nextRunAt: exhaustedBudget ? undefined : nextRunAt?.toISOString(),
+        updatedAt: new Date().toISOString(),
+      }
+      await this.tasks.put(claimed)
+      return deserializeTask(claimed)
+    })
+  }
+
+  /**
    * Get all tasks
    */
   async getAllTasks(): Promise<ScheduledTask[]> {

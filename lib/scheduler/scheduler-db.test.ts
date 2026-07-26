@@ -87,6 +87,60 @@ describe("SchedulerDatabase", () => {
       expect(retrieved!.name).toBe("Updated Task")
     })
 
+    it("atomically claims a schedule slot only once, reserves runCount, and advances nextRunAt", async () => {
+      const expectedRunAt = new Date("2026-07-25T09:00:00.000Z")
+      const nextRunAt = new Date("2026-07-25T10:00:00.000Z")
+      const task = createMockTask({
+        id: "claim-once",
+        nextRunAt: expectedRunAt,
+      })
+      await schedulerDb.createTask(task)
+
+      const [first, second] = await Promise.all([
+        schedulerDb.claimTaskSlot(task.id, expectedRunAt, nextRunAt),
+        schedulerDb.claimTaskSlot(task.id, expectedRunAt, nextRunAt),
+      ])
+
+      expect([first, second].filter(Boolean)).toHaveLength(1)
+      expect(await schedulerDb.getTask(task.id)).toEqual(
+        expect.objectContaining({ nextRunAt, runCount: 1 })
+      )
+    })
+
+    it("does not expose another slot after atomically reserving the final maxRuns budget", async () => {
+      const expectedRunAt = new Date("2026-07-25T09:00:00.000Z")
+      const nextRunAt = new Date("2026-07-25T09:00:00.100Z")
+      const task = createMockTask({
+        id: "claim-final-budget",
+        nextRunAt: expectedRunAt,
+        config: { ...createMockTask().config, maxRuns: 1, overlapPolicy: "allow" },
+      })
+      await schedulerDb.createTask(task)
+
+      const claimed = await schedulerDb.claimTaskSlot(task.id, expectedRunAt, nextRunAt)
+
+      expect(claimed).toEqual(expect.objectContaining({ runCount: 1, nextRunAt: undefined }))
+      expect(await schedulerDb.getTask(task.id)).toEqual(
+        expect.objectContaining({ runCount: 1, nextRunAt: undefined })
+      )
+    })
+
+    it("does not claim a stale or paused schedule slot", async () => {
+      const expectedRunAt = new Date("2026-07-25T09:00:00.000Z")
+      await schedulerDb.createTask(
+        createMockTask({
+          id: "paused-claim",
+          status: "paused",
+          nextRunAt: expectedRunAt,
+        })
+      )
+
+      await expect(schedulerDb.claimTaskSlot("paused-claim", expectedRunAt)).resolves.toBeNull()
+      await expect(
+        schedulerDb.claimTaskSlot("paused-claim", new Date("2026-07-25T08:00:00.000Z"))
+      ).resolves.toBeNull()
+    })
+
     it("should delete a task and its executions", async () => {
       const task = createMockTask({ id: "test-task-3" })
       await schedulerDb.createTask(task)

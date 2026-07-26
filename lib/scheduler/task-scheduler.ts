@@ -94,6 +94,7 @@ interface ExecuteTaskContext {
   triggerSource?: TaskExecutionTriggerSource
   scheduledFor?: Date
   deferNextRunUpdate?: boolean
+  scheduledSlotClaimed?: boolean
 }
 
 /** A buffered start waiting for the running execution to finish (queue-one / queue-all). */
@@ -101,6 +102,7 @@ interface QueuedStart {
   triggerSource: TaskExecutionTriggerSource
   scheduledFor?: Date
   deferNextRunUpdate?: boolean
+  scheduledSlotClaimed?: boolean
 }
 
 class TaskSchedulerImpl {
@@ -115,9 +117,15 @@ class TaskSchedulerImpl {
   /** Buffered starts per task for the queue-one / queue-all overlap policies. */
   private queues: Map<string, QueuedStart[]> = new Map()
   private retryChains: Set<string> = new Set()
+  /** Retry timers must not outlive pause/delete/stop lifecycle transitions. */
+  private retryTimers: Map<string, Set<ReturnType<typeof setTimeout>>> = new Map()
+  /** Invalidates async work from an older pause/delete lifecycle for one task. */
+  private taskLifecycleVersions: Map<string, number> = new Map()
   private isInitialized = false
   /** Shared by concurrent early callers so the timing driver starts once. */
   private initializationPromise: Promise<void> | null = null
+  /** Invalidates async initialization work when stop() begins a new lifecycle. */
+  private lifecycleVersion = 0
   /** Becomes true immediately after driver.start(), before boot tasks are armed. */
   private driverReady = false
   /** Guards the one-shot boot reconcile so multiple authority transitions in a
@@ -177,15 +185,19 @@ class TaskSchedulerImpl {
     if (this.isInitialized) return
     if (this.initializationPromise) return this.initializationPromise
 
-    this.initializationPromise = this.initializeOnce()
+    const version = this.lifecycleVersion
+    const initializationPromise = this.initializeOnce(version)
+    this.initializationPromise = initializationPromise
     try {
-      await this.initializationPromise
+      await initializationPromise
     } finally {
-      this.initializationPromise = null
+      if (this.initializationPromise === initializationPromise) {
+        this.initializationPromise = null
+      }
     }
   }
 
-  private async initializeOnce(): Promise<void> {
+  private async initializeOnce(version: number): Promise<void> {
     log.info("Initializing task scheduler...")
 
     try {
@@ -198,9 +210,13 @@ class TaskSchedulerImpl {
 
       // A task becomes due → execute it through the normal pipeline.
       driver.onDue((taskId, firedAtMs) => {
-        void this.handleTaskDue(taskId, firedAtMs)
+        void this.handleTaskDue(taskId, firedAtMs, version)
       })
       await driver.start()
+      if (version !== this.lifecycleVersion) {
+        driver.stop()
+        return
+      }
       this.driverReady = true
 
       if (driver.supportsLeaderElection) {
@@ -208,9 +224,10 @@ class TaskSchedulerImpl {
         // changes to (re)arm or disarm all tasks.
         const leaderAware = driver as LeaderAwareTimingDriver
         this.leaderUnsubscribe = leaderAware.onLeaderChange((isLeader) => {
+          if (version !== this.lifecycleVersion) return
           if (isLeader) {
             log.info("This tab became leader — scheduling all active tasks")
-            this.scheduleAllActiveTasks().catch((err) => {
+            this.scheduleAllActiveTasks(version).catch((err) => {
               log.error("Error scheduling tasks after becoming leader:", err)
             })
           } else {
@@ -219,11 +236,15 @@ class TaskSchedulerImpl {
           }
         })
         if (leaderAware.isLeader()) {
-          await this.scheduleAllActiveTasks()
+          await this.scheduleAllActiveTasks(version)
         }
       } else {
         // Rust daemon: single native process is the sole authority.
-        await this.scheduleAllActiveTasks()
+        await this.scheduleAllActiveTasks(version)
+      }
+      if (version !== this.lifecycleVersion) {
+        driver.stop()
+        return
       }
 
       // Start periodic check for missed tasks (belt-and-suspenders in both
@@ -258,7 +279,12 @@ class TaskSchedulerImpl {
       this.isInitialized = true
       log.info("Task scheduler initialized successfully")
     } catch (error) {
+      if (version !== this.lifecycleVersion) {
+        this.driver?.stop()
+        return
+      }
       this.driverReady = false
+      this.driver?.stop()
       log.error("Failed to initialize task scheduler:", error)
       throw SchedulerError.initFailed(
         error instanceof Error ? error.message : String(error),
@@ -270,7 +296,8 @@ class TaskSchedulerImpl {
   /**
    * Schedule all active tasks (called on init and when becoming leader)
    */
-  private async scheduleAllActiveTasks(): Promise<void> {
+  private async scheduleAllActiveTasks(version: number = this.lifecycleVersion): Promise<void> {
+    if (version !== this.lifecycleVersion) return
     // Boot reconcile (once per process, at the first authority transition):
     // cancel executions left `running`/`pending` by a previous process. Their
     // in-memory controllers didn't survive the reload/crash, so the Dexie rows
@@ -290,9 +317,11 @@ class TaskSchedulerImpl {
     }
 
     const tasks = await schedulerDb.getTasksByStatus("active")
+    if (version !== this.lifecycleVersion) return
     log.info(`Found ${tasks.length} active tasks to schedule`)
     for (const task of tasks) {
-      await this.scheduleTask(task)
+      if (version !== this.lifecycleVersion) return
+      await this.scheduleTask(task, version)
     }
   }
 
@@ -310,24 +339,54 @@ class TaskSchedulerImpl {
    * latest task row and runs it through the same execution path as before.
    * `firedAtMs` is the originally-armed slot so interval cadence stays stable.
    */
-  private async handleTaskDue(taskId: string, firedAtMs: number): Promise<void> {
+  private async handleTaskDue(taskId: string, firedAtMs: number, version: number): Promise<void> {
+    if (version !== this.lifecycleVersion) return
     this.armedTaskIds.delete(taskId)
     // Jitter only shifts the armed epoch; the canonical slot identity is
     // preserved here so interval cadence and missed-run math stay stable.
     const canonicalMs = this.armedCanonicalMs.get(taskId) ?? firedAtMs
     this.armedCanonicalMs.delete(taskId)
     const task = await schedulerDb.getTask(taskId)
+    if (version !== this.lifecycleVersion) return
     if (!task || task.status !== "active") return
-    // Lifecycle bounds may have been crossed between arm and fire.
-    if (isPastEndAt(task, new Date()) || isAtMaxRuns(task)) {
+    const now = new Date()
+    // Lifecycle bounds are checked before consuming the persisted slot so an
+    // expired task records its terminal state without advancing the schedule.
+    if (isPastEndAt(task, now) || isAtMaxRuns(task)) {
       await this.expireTask(task, isAtMaxRuns(task) ? "max-runs-reached" : "ended")
       return
     }
-    this.executeTask(task, 0, {
+    const scheduledFor = new Date(canonicalMs)
+    const nextRunAt = this.getNextRunAfter(task.trigger, scheduledFor)
+    // Backlog head: the slot *after* this one has already elapsed too, so the
+    // process was away (app closed, machine asleep, tab throttled) for more
+    // than one period. Claiming this slot would persist an already-past
+    // `nextRunAt`, which the driver re-arms with a zero delay — replaying the
+    // entire backlog in a tight loop, one execution record and one overlap
+    // warning per missed slot. Hand the whole window to the missed-run policy
+    // instead: it honors runMissedOnStartup / maxMissedRuns / catchupWindowMs
+    // and lands on the first *future* slot in a single step.
+    if (
+      (task.trigger.type === "interval" || task.trigger.type === "cron") &&
+      nextRunAt &&
+      nextRunAt <= now
+    ) {
+      await this.reconcileMissedRecurringTask(task, now, version)
+      return
+    }
+    const claimedTask = await schedulerDb.claimTaskSlot(taskId, scheduledFor, nextRunAt)
+    if (version !== this.lifecycleVersion) return
+    if (!claimedTask) return
+    if (claimedTask.nextRunAt) {
+      await this.scheduleTask(claimedTask, version)
+    }
+    if (version !== this.lifecycleVersion) return
+    this.executeTask(claimedTask, 0, {
       triggerSource: "schedule",
-      scheduledFor: new Date(canonicalMs),
+      scheduledFor,
+      scheduledSlotClaimed: true,
     }).catch((err) => {
-      log.error(`Error executing scheduled task ${task.name}:`, err)
+      log.error(`Error executing scheduled task ${claimedTask.name}:`, err)
     })
   }
 
@@ -427,7 +486,15 @@ class TaskSchedulerImpl {
       cursor = this.getNextRunAfter(task.trigger, cursor)
     }
 
-    // Always advance to a future slot so overdue windows are reconciled deterministically.
+    // Always advance to a future slot so overdue windows are reconciled
+    // deterministically. Intervals jump in O(1): this is the only path that
+    // walks a long backlog now, and stepping period-by-period over a short
+    // interval times days of downtime would burn millions of iterations.
+    if (cursor && cursor <= now && task.trigger.type === "interval" && task.trigger.intervalMs) {
+      const intervalMs = task.trigger.intervalMs
+      const steps = Math.ceil((now.getTime() - cursor.getTime() + 1) / intervalMs)
+      cursor = new Date(cursor.getTime() + steps * intervalMs)
+    }
     while (cursor && cursor <= now) {
       cursor = this.getNextRunAfter(task.trigger, cursor)
     }
@@ -438,7 +505,8 @@ class TaskSchedulerImpl {
   private async persistNextFutureSlot(
     task: ScheduledTask,
     nextFutureSlot?: Date,
-    terminalReason?: string
+    terminalReason?: string,
+    expectedVersion?: number
   ): Promise<void> {
     const now = new Date()
     if (nextFutureSlot) {
@@ -454,7 +522,7 @@ class TaskSchedulerImpl {
           : {}),
       }
       await schedulerDb.updateTask(updatedTask)
-      await this.scheduleTask(updatedTask)
+      await this.scheduleTask(updatedTask, expectedVersion)
       return
     }
 
@@ -471,7 +539,11 @@ class TaskSchedulerImpl {
     })
   }
 
-  private async reconcileMissedRecurringTask(task: ScheduledTask, now: Date): Promise<void> {
+  private async reconcileMissedRecurringTask(
+    task: ScheduledTask,
+    now: Date,
+    expectedVersion?: number
+  ): Promise<void> {
     const { dueSlots: rawDueSlots, nextFutureSlot } = this.collectMissedRunSlots(task, now)
 
     // Time-based catch-up window: slots older than catchupWindowMs are skipped
@@ -491,7 +563,12 @@ class TaskSchedulerImpl {
         })
       }
       if (dueSlots.length === 0 && expired.length > 0) {
-        await this.persistNextFutureSlot(task, nextFutureSlot, "catchup-window-expired")
+        await this.persistNextFutureSlot(
+          task,
+          nextFutureSlot,
+          "catchup-window-expired",
+          expectedVersion
+        )
         return
       }
     }
@@ -504,10 +581,15 @@ class TaskSchedulerImpl {
           terminalReason: "missed-run-skipped",
           message: "Skipped missed run reconciliation by policy",
         })
-        await this.persistNextFutureSlot(task, nextFutureSlot, "missed-run-skipped")
+        await this.persistNextFutureSlot(
+          task,
+          nextFutureSlot,
+          "missed-run-skipped",
+          expectedVersion
+        )
         return
       }
-      await this.persistNextFutureSlot(task, nextFutureSlot)
+      await this.persistNextFutureSlot(task, nextFutureSlot, undefined, expectedVersion)
       return
     }
 
@@ -518,7 +600,7 @@ class TaskSchedulerImpl {
         terminalReason: "missed-run-skipped",
         message: "Skipped missed run reconciliation by policy",
       })
-      await this.persistNextFutureSlot(task, nextFutureSlot, "missed-run-skipped")
+      await this.persistNextFutureSlot(task, nextFutureSlot, "missed-run-skipped", expectedVersion)
       return
     }
 
@@ -530,7 +612,7 @@ class TaskSchedulerImpl {
       })
     }
 
-    await this.persistNextFutureSlot(task, nextFutureSlot)
+    await this.persistNextFutureSlot(task, nextFutureSlot, undefined, expectedVersion)
   }
 
   private async expireMissedOneTimeTask(task: ScheduledTask, now: Date): Promise<void> {
@@ -558,6 +640,18 @@ class TaskSchedulerImpl {
    */
   stop(): void {
     log.info("Stopping task scheduler...")
+    this.lifecycleVersion += 1
+    this.initializationPromise = null
+
+    for (const controller of this.executionControllers.values()) {
+      controller.abort("scheduler-stopped")
+    }
+    for (const timers of this.retryTimers.values()) {
+      for (const timer of timers) clearTimeout(timer)
+    }
+    this.retryTimers.clear()
+    this.retryChains.clear()
+    this.queues.clear()
 
     // Unsubscribe leader-change listener (renderer driver only)
     if (this.leaderUnsubscribe) {
@@ -676,6 +770,12 @@ class TaskSchedulerImpl {
    * Update an existing task
    */
   async updateTask(taskId: string, input: UpdateScheduledTaskInput): Promise<ScheduledTask | null> {
+    if (input.status !== undefined && input.status !== "active") {
+      this.invalidateTaskLifecycle(taskId)
+      this.unscheduleTask(taskId)
+      this.clearTaskRetries(taskId)
+      this.queues.delete(taskId)
+    }
     const task = await schedulerDb.getTask(taskId)
     if (!task) {
       log.warn(`Task not found: ${taskId}`)
@@ -737,6 +837,10 @@ class TaskSchedulerImpl {
 
     // Reschedule
     this.unscheduleTask(taskId)
+    if (updatedTask.status !== "active") {
+      this.clearTaskRetries(taskId)
+      this.queues.delete(taskId)
+    }
     if (updatedTask.status === "active") {
       await this.scheduleTask(updatedTask)
     }
@@ -748,7 +852,14 @@ class TaskSchedulerImpl {
    * Delete a task
    */
   async deleteTask(taskId: string): Promise<boolean> {
+    this.invalidateTaskLifecycle(taskId)
     this.unscheduleTask(taskId)
+    this.clearTaskRetries(taskId)
+    this.queues.delete(taskId)
+    const running = this.runningByTask.get(taskId)
+    for (const executionId of running ? Array.from(running.keys()) : []) {
+      this.executionControllers.get(executionId)?.abort("task-deleted")
+    }
     const deleted = await schedulerDb.deleteTask(taskId)
     if (deleted) {
       log.info(`Deleted task: ${taskId}`)
@@ -774,10 +885,15 @@ class TaskSchedulerImpl {
    * Pause a task
    */
   async pauseTask(taskId: string): Promise<boolean> {
+    // Invalidate first: a running execution can settle while the database read
+    // below is pending, and must not recreate a retry after pause has begun.
+    this.invalidateTaskLifecycle(taskId)
+    this.unscheduleTask(taskId)
+    this.clearTaskRetries(taskId)
+    this.queues.delete(taskId)
     const task = await schedulerDb.getTask(taskId)
     if (!task) return false
 
-    this.unscheduleTask(taskId)
     await schedulerDb.updateTask({ ...task, status: "paused", updatedAt: new Date() })
     log.info(`Paused task: ${task.name} (${taskId})`)
     return true
@@ -864,7 +980,8 @@ class TaskSchedulerImpl {
    * instant. The driver (renderer timers or the Rust alarm daemon) invokes
    * `handleTaskDue` when the instant elapses; overdue instants fire promptly.
    */
-  private async scheduleTask(task: ScheduledTask): Promise<void> {
+  private async scheduleTask(task: ScheduledTask, expectedVersion?: number): Promise<void> {
+    if (expectedVersion !== undefined && expectedVersion !== this.lifecycleVersion) return
     if (task.status !== "active") return
 
     // Lazy lifecycle check: never arm a task that has crossed its bounds.
@@ -881,20 +998,28 @@ class TaskSchedulerImpl {
 
     let driver = this.driver
     if (!driver || !this.driverReady) {
+      if (expectedVersion !== undefined && expectedVersion !== this.lifecycleVersion) return
       // Lifecycle writes can legitimately arrive before React/headless startup
       // mounts the scheduler initializer (notably plugin activation). Start it
       // here. The boot sweep normally arms the persisted task; if its read view
       // missed the concurrent write, continue below and arm it directly.
       await this.initialize()
+      if (expectedVersion !== undefined && expectedVersion !== this.lifecycleVersion) return
       if (this.armedTaskIds.has(task.id)) return
       driver = this.driver
     }
+    if (expectedVersion !== undefined && expectedVersion !== this.lifecycleVersion) return
     if (!driver || !this.driverReady || !this.isTimingAuthority()) return
 
     this.armedTaskIds.add(task.id)
     // Arm with optional jitter; remember the canonical slot for handleTaskDue.
     const canonicalMs = nextRun.getTime()
     this.armedCanonicalMs.set(task.id, canonicalMs)
+    if (expectedVersion !== undefined && expectedVersion !== this.lifecycleVersion) {
+      this.armedTaskIds.delete(task.id)
+      this.armedCanonicalMs.delete(task.id)
+      return
+    }
     await driver.arm(task.id, applyJitter(canonicalMs, task.trigger.jitterMs, this.rng))
 
     log.debug(`Scheduled task ${task.name} for ${nextRun.toISOString()}`)
@@ -942,6 +1067,8 @@ class TaskSchedulerImpl {
     retryAttempt: number = 0,
     context: ExecuteTaskContext = {}
   ): Promise<TaskExecution> {
+    const executionLifecycleVersion = this.lifecycleVersion
+    const taskLifecycleVersion = this.getTaskLifecycleVersion(task.id)
     const executionId = nanoid()
     const startTime = new Date()
     const triggerSource = context.triggerSource ?? (retryAttempt > 0 ? "retry" : "schedule")
@@ -962,6 +1089,7 @@ class TaskSchedulerImpl {
             triggerSource,
             scheduledFor: context.scheduledFor,
             deferNextRunUpdate: context.deferNextRunUpdate,
+            scheduledSlotClaimed: context.scheduledSlotClaimed,
           }
           if (overlapPolicy === "queue-one") {
             // Newest wins: any displaced pending start is dropped as skipped.
@@ -1103,7 +1231,7 @@ class TaskSchedulerImpl {
       )
 
       // Update task statistics
-      await this.updateTaskStats(task, execution)
+      await this.updateTaskStats(task, execution, context.scheduledSlotClaimed === true)
 
       // Notify completion
       if (result.success && task.notification.onComplete) {
@@ -1162,7 +1290,10 @@ class TaskSchedulerImpl {
         this.triggerDependentTasks(task, "success").catch((err) => {
           log.error("Failed to trigger dependent tasks:", err)
         })
-      } else if (retryAttempt < task.config.maxRetries) {
+      } else if (
+        retryAttempt < task.config.maxRetries &&
+        taskLifecycleVersion === this.getTaskLifecycleVersion(task.id)
+      ) {
         const delay = this.calculateRetryDelay(task.config, retryAttempt)
         shouldRetry = true
         nextRetryAt = new Date(Date.now() + delay)
@@ -1175,15 +1306,16 @@ class TaskSchedulerImpl {
           )
         )
         this.retryChains.add(task.id)
-        setTimeout(() => {
-          this.executeTask(task, retryAttempt + 1, {
-            triggerSource: "retry",
-            scheduledFor: nextRetryAt,
-            deferNextRunUpdate: context.deferNextRunUpdate,
-          }).catch((err) => {
-            log.error(`Retry failed for task ${task.name}:`, err)
-          })
-        }, delay)
+        this.scheduleRetry(
+          task,
+          retryAttempt + 1,
+          nextRetryAt,
+          context.deferNextRunUpdate,
+          context.scheduledSlotClaimed,
+          delay,
+          executionLifecycleVersion,
+          taskLifecycleVersion
+        )
       }
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error)
@@ -1219,7 +1351,12 @@ class TaskSchedulerImpl {
       // Handle retry with exponential backoff + jitter.
       // Timeouts and overlap-cancellations are terminal — never retried.
       const isTimeout = error instanceof SchedulerError && error.code === "EXECUTION_TIMEOUT"
-      if (!isTimeout && !isCancelled && retryAttempt < task.config.maxRetries) {
+      if (
+        !isTimeout &&
+        !isCancelled &&
+        retryAttempt < task.config.maxRetries &&
+        taskLifecycleVersion === this.getTaskLifecycleVersion(task.id)
+      ) {
         const delay = this.calculateRetryDelay(task.config, retryAttempt)
         shouldRetry = true
         nextRetryAt = new Date(Date.now() + delay)
@@ -1232,19 +1369,20 @@ class TaskSchedulerImpl {
           )
         )
         this.retryChains.add(task.id)
-        setTimeout(() => {
-          this.executeTask(task, retryAttempt + 1, {
-            triggerSource: "retry",
-            scheduledFor: nextRetryAt,
-            deferNextRunUpdate: context.deferNextRunUpdate,
-          }).catch((err) => {
-            log.error(`Retry failed for task ${task.name}:`, err)
-          })
-        }, delay)
+        this.scheduleRetry(
+          task,
+          retryAttempt + 1,
+          nextRetryAt,
+          context.deferNextRunUpdate,
+          context.scheduledSlotClaimed,
+          delay,
+          executionLifecycleVersion,
+          taskLifecycleVersion
+        )
       }
 
       // Update task statistics
-      await this.updateTaskStats(task, execution)
+      await this.updateTaskStats(task, execution, context.scheduledSlotClaimed === true)
     } finally {
       this.untrackRunning(execution)
       this.executionControllers.delete(executionId)
@@ -1254,6 +1392,10 @@ class TaskSchedulerImpl {
       if (!shouldRetry) {
         this.retryChains.delete(task.id)
 
+        if (executionLifecycleVersion !== this.lifecycleVersion) {
+          return execution
+        }
+
         // Forward failure chain fires only on a *terminal* failure (cancelled
         // runs were displaced, not failed — they trigger nothing).
         if (execution.status === "failed") {
@@ -1262,7 +1404,9 @@ class TaskSchedulerImpl {
           })
         }
 
-        if (!context.deferNextRunUpdate) {
+        if (context.scheduledSlotClaimed) {
+          await this.finalizeClaimedScheduledRun(task)
+        } else if (!context.deferNextRunUpdate) {
           const referenceDate = execution.scheduledFor ?? execution.startedAt
           await this.updateNextRunTime(task, {
             fromDate: referenceDate,
@@ -1277,6 +1421,76 @@ class TaskSchedulerImpl {
     }
 
     return execution
+  }
+
+  private scheduleRetry(
+    task: ScheduledTask,
+    retryAttempt: number,
+    scheduledFor: Date,
+    deferNextRunUpdate: boolean | undefined,
+    scheduledSlotClaimed: boolean | undefined,
+    delay: number,
+    lifecycleVersion: number,
+    taskLifecycleVersion: number
+  ): void {
+    const timer = setTimeout(() => {
+      const timers = this.retryTimers.get(task.id)
+      timers?.delete(timer)
+      if (timers?.size === 0) this.retryTimers.delete(task.id)
+
+      if (
+        lifecycleVersion !== this.lifecycleVersion ||
+        taskLifecycleVersion !== this.getTaskLifecycleVersion(task.id)
+      ) {
+        this.retryChains.delete(task.id)
+        return
+      }
+
+      void schedulerDb
+        .getTask(task.id)
+        .then((latest) => {
+          if (
+            !latest ||
+            latest.status !== "active" ||
+            lifecycleVersion !== this.lifecycleVersion ||
+            taskLifecycleVersion !== this.getTaskLifecycleVersion(task.id)
+          ) {
+            this.retryChains.delete(task.id)
+            return
+          }
+          return this.executeTask(latest, retryAttempt, {
+            triggerSource: "retry",
+            scheduledFor,
+            deferNextRunUpdate,
+            scheduledSlotClaimed,
+          })
+        })
+        .catch((err) => {
+          this.retryChains.delete(task.id)
+          log.error(`Retry failed for task ${task.name}:`, err)
+        })
+    }, delay)
+
+    const timers = this.retryTimers.get(task.id) ?? new Set()
+    timers.add(timer)
+    this.retryTimers.set(task.id, timers)
+  }
+
+  private getTaskLifecycleVersion(taskId: string): number {
+    return this.taskLifecycleVersions.get(taskId) ?? 0
+  }
+
+  private invalidateTaskLifecycle(taskId: string): void {
+    this.taskLifecycleVersions.set(taskId, this.getTaskLifecycleVersion(taskId) + 1)
+  }
+
+  private clearTaskRetries(taskId: string): void {
+    const timers = this.retryTimers.get(taskId)
+    if (timers) {
+      for (const timer of timers) clearTimeout(timer)
+      this.retryTimers.delete(taskId)
+    }
+    this.retryChains.delete(taskId)
   }
 
   /**
@@ -1301,6 +1515,7 @@ class TaskSchedulerImpl {
           triggerSource: next.triggerSource,
           scheduledFor: next.scheduledFor,
           deferNextRunUpdate: next.deferNextRunUpdate,
+          scheduledSlotClaimed: next.scheduledSlotClaimed,
         })
       })
       .catch((err) => {
@@ -1350,18 +1565,25 @@ class TaskSchedulerImpl {
     controller: AbortController = new AbortController()
   ): Promise<T> {
     const timer = setTimeout(() => controller.abort("execution-timeout"), timeoutMs)
+    const abortError = () => {
+      const reason = controller.signal.reason
+      return reason === "overlap-cancelled"
+        ? SchedulerError.executionCancelled("task", "overlap-cancelled")
+        : reason === "scheduler-stopped"
+          ? SchedulerError.executionCancelled("task", "scheduler-stopped")
+          : reason === "task-deleted"
+            ? SchedulerError.executionCancelled("task", "task-deleted")
+            : SchedulerError.executionTimeout("task", timeoutMs)
+    }
 
     try {
+      if (controller.signal.aborted) {
+        throw abortError()
+      }
       const result = await Promise.race([
         fn(controller.signal),
         new Promise<never>((_resolve, reject) => {
-          controller.signal.addEventListener("abort", () => {
-            reject(
-              controller.signal.reason === "overlap-cancelled"
-                ? SchedulerError.executionCancelled("task")
-                : SchedulerError.executionTimeout("task", timeoutMs)
-            )
-          })
+          controller.signal.addEventListener("abort", () => reject(abortError()), { once: true })
         }),
       ])
       return result
@@ -1373,11 +1595,20 @@ class TaskSchedulerImpl {
   /**
    * Update task statistics after execution
    */
-  private async updateTaskStats(task: ScheduledTask, execution: TaskExecution): Promise<void> {
+  private async updateTaskStats(
+    task: ScheduledTask,
+    execution: TaskExecution,
+    runBudgetReserved: boolean = false
+  ): Promise<void> {
     const latestTask = await schedulerDb.getTask(task.id)
-    const baseTask = latestTask || task
+    // Deletion is terminal. Never recreate a task row from the execution's
+    // stale snapshot after deleteTask removed it.
+    if (!latestTask) return
+    const baseTask = latestTask
     const updates: Partial<ScheduledTask> = {
-      runCount: baseTask.runCount + 1,
+      // Scheduled slots reserve their run budget inside `claimTaskSlot` before
+      // execution. Completion and retry attempts must not consume it again.
+      runCount: runBudgetReserved ? baseTask.runCount : baseTask.runCount + 1,
       lastRunAt: execution.startedAt,
       lastTerminalReason: execution.terminalReason,
       lastTerminalAt: execution.completedAt ?? new Date(),
@@ -1429,7 +1660,8 @@ class TaskSchedulerImpl {
     // Re-fetch the latest row: `task` may be a pre-execution snapshot, and a
     // wholesale put from it would clobber stats / status written by
     // `updateTaskStats` (runCount, auto-pause, consecutiveFailures).
-    const latest = (await schedulerDb.getTask(task.id)) ?? task
+    const latest = await schedulerDb.getTask(task.id)
+    if (!latest) return
 
     // Lifecycle bounds: a task that just consumed its maxRuns budget (or whose
     // endAt passed) expires instead of re-arming.
@@ -1458,6 +1690,30 @@ class TaskSchedulerImpl {
         status: "expired",
         updatedAt: new Date(),
       })
+    }
+  }
+
+  /**
+   * A normal due event advances nextRunAt before execution through the DB
+   * claim transaction. Completion must therefore only enforce terminal
+   * lifecycle rules; recalculating from the old slot could move a task
+   * backwards after a later overlapping slot has already been claimed.
+   */
+  private async finalizeClaimedScheduledRun(task: ScheduledTask): Promise<void> {
+    const latest = await schedulerDb.getTask(task.id)
+    if (!latest) return
+    if (latest.status !== "active") return
+    if (latest.trigger.type === "once") {
+      await schedulerDb.updateTask({
+        ...latest,
+        status: "expired",
+        nextRunAt: undefined,
+        updatedAt: new Date(),
+      })
+      return
+    }
+    if (isPastEndAt(latest, new Date()) || isAtMaxRuns(latest)) {
+      await this.expireTask(latest, isAtMaxRuns(latest) ? "max-runs-reached" : "ended")
     }
   }
 
@@ -1563,6 +1819,8 @@ class TaskSchedulerImpl {
       return "execution-timeout"
     }
     if (error instanceof SchedulerError && error.code === "EXECUTION_CANCELLED") {
+      if (error.details?.reason === "scheduler-stopped") return "scheduler-stopped"
+      if (error.details?.reason === "task-deleted") return "task-deleted"
       return "overlap-cancelled"
     }
     return "execution-error"

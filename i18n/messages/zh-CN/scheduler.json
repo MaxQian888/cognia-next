@@ -60,7 +60,7 @@
     "namePlaceholder": "例如：每日备份",
     "options": {
       "artifacts": "产物",
-      "indexedDB": "数据库（IndexedDB）",
+      "indexedDB": "其他数据库内容",
       "sessions": "聊天会话",
       "settings": "应用设置"
     },
