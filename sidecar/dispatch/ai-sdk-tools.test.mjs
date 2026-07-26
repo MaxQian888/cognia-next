@@ -71,6 +71,187 @@ test("buildAiSdkTools wires plugin tools that round-trip through the renderer", 
   assert.equal(result, "plugin says hi")
 })
 
+test("plugin tool image results pass through as content blocks the model can see", async () => {
+  const pendingPluginToolCalls = new Map()
+  const tools = buildAiSdkTools({
+    sendOptions: {
+      permissionMode: "bypassPermissions",
+      pluginTools: [
+        { name: "take_screenshot", description: "", jsonSchema: { type: "object" }, pluginId: "p" },
+      ],
+    },
+    emit: () => {},
+    sessionId: "s1",
+    pendingPluginToolCalls,
+  })
+  const execPromise = tools.take_screenshot.execute({})
+  await Promise.resolve()
+  const [, pending] = [...pendingPluginToolCalls.entries()][0]
+  const callToolResult = {
+    content: [
+      { type: "text", text: "shot.png (12 bytes)" },
+      { type: "image", data: "AAAA", mimeType: "image/png" },
+    ],
+  }
+  pending.resolve({ result: callToolResult })
+  // Not JSON.stringify-ed: the raw MCP object survives for toModelOutput.
+  assert.deepEqual(await execPromise, callToolResult)
+
+  // …and toModelOutput maps it to a multimodal part, not a base64 string.
+  const modelOutput = tools.take_screenshot.toModelOutput({ output: callToolResult })
+  assert.equal(modelOutput.type, "content")
+  assert.deepEqual(modelOutput.value, [
+    { type: "text", text: "shot.png (12 bytes)" },
+    { type: "image-data", mediaType: "image/png", data: "AAAA" },
+  ])
+})
+
+test("plugin tool audio-only results pass through as file content the model can see", async () => {
+  const pendingPluginToolCalls = new Map()
+  const tools = buildAiSdkTools({
+    sendOptions: {
+      permissionMode: "bypassPermissions",
+      pluginTools: [
+        { name: "record_audio", description: "", jsonSchema: { type: "object" }, pluginId: "p" },
+      ],
+    },
+    emit: () => {},
+    sessionId: "s1",
+    pendingPluginToolCalls,
+  })
+  const execPromise = tools.record_audio.execute({})
+  await Promise.resolve()
+  const [, pending] = [...pendingPluginToolCalls.entries()][0]
+  const callToolResult = {
+    content: [{ type: "audio", data: "UklGRg==", mimeType: "audio/wav" }],
+  }
+  pending.resolve({ result: callToolResult })
+
+  assert.deepEqual(await execPromise, callToolResult)
+  assert.deepEqual(tools.record_audio.toModelOutput({ output: callToolResult }), {
+    type: "content",
+    value: [{ type: "file-data", mediaType: "audio/wav", data: "UklGRg==" }],
+  })
+})
+
+test("plugin tool resource-only results pass through with embedded text and blob content", async () => {
+  const pendingPluginToolCalls = new Map()
+  const tools = buildAiSdkTools({
+    sendOptions: {
+      permissionMode: "bypassPermissions",
+      pluginTools: [
+        { name: "read_resource", description: "", jsonSchema: { type: "object" }, pluginId: "p" },
+      ],
+    },
+    emit: () => {},
+    sessionId: "s1",
+    pendingPluginToolCalls,
+  })
+  const execPromise = tools.read_resource.execute({})
+  await Promise.resolve()
+  const [, pending] = [...pendingPluginToolCalls.entries()][0]
+  const callToolResult = {
+    content: [
+      {
+        type: "resource",
+        resource: { uri: "file:///repo/notes.txt", text: "resource text", mimeType: "text/plain" },
+      },
+      {
+        type: "resource",
+        resource: {
+          uri: "file:///repo/clip.wav",
+          name: "clip.wav",
+          blob: "UklGRg==",
+          mimeType: "audio/wav",
+        },
+      },
+    ],
+  }
+  pending.resolve({ result: callToolResult })
+
+  assert.deepEqual(await execPromise, callToolResult)
+  assert.deepEqual(tools.read_resource.toModelOutput({ output: callToolResult }), {
+    type: "content",
+    value: [
+      { type: "text", text: "resource text" },
+      { type: "file-data", mediaType: "audio/wav", data: "UklGRg==", filename: "clip.wav" },
+    ],
+  })
+})
+
+test("plugin rich results are blocked before model output when they contain PII", async () => {
+  const pendingPluginToolCalls = new Map()
+  const tools = buildAiSdkTools({
+    sendOptions: {
+      permissionMode: "bypassPermissions",
+      pluginTools: [
+        { name: "read_resource", description: "", jsonSchema: { type: "object" }, pluginId: "p" },
+      ],
+    },
+    emit: () => {},
+    sessionId: "s1",
+    pendingPluginToolCalls,
+  })
+  const execPromise = tools.read_resource.execute({})
+  await Promise.resolve()
+  const [, pending] = [...pendingPluginToolCalls.entries()][0]
+  pending.resolve({
+    result: {
+      content: [
+        {
+          type: "resource",
+          resource: {
+            uri: "file:///repo/contacts.txt",
+            text: "Contact alice@example.com",
+            mimeType: "text/plain",
+          },
+        },
+      ],
+    },
+  })
+
+  await assert.rejects(execPromise, /PII redaction gate/)
+})
+
+test("resource links remain visible text without authorizing provider-side fetches", () => {
+  const output = __testing__.builtinToModelOutput({
+    output: {
+      content: [
+        {
+          type: "resource_link",
+          uri: "https://example.test/manual.pdf",
+          name: "Manual",
+        },
+      ],
+    },
+  })
+
+  assert.deepEqual(output, {
+    type: "content",
+    value: [{ type: "text", text: "Manual: https://example.test/manual.pdf" }],
+  })
+})
+
+test("plugin tool results with no image still flatten to JSON text", async () => {
+  const pendingPluginToolCalls = new Map()
+  const tools = buildAiSdkTools({
+    sendOptions: {
+      permissionMode: "bypassPermissions",
+      pluginTools: [
+        { name: "plain", description: "", jsonSchema: { type: "object" }, pluginId: "p" },
+      ],
+    },
+    emit: () => {},
+    sessionId: "s1",
+    pendingPluginToolCalls,
+  })
+  const execPromise = tools.plain.execute({})
+  await Promise.resolve()
+  const [, pending] = [...pendingPluginToolCalls.entries()][0]
+  pending.resolve({ result: { ok: true, count: 2 } })
+  assert.equal(await execPromise, '{"ok":true,"count":2}')
+})
+
 test("plugin tool execute throws on an error response", async () => {
   const pendingPluginToolCalls = new Map()
   const tools = buildAiSdkTools({

@@ -15,6 +15,7 @@
 import { tool, jsonSchema } from "ai"
 import { z } from "zod"
 import { randomUUID } from "node:crypto"
+import { hasNoLeakingPiiDeep } from "@cognia/redact"
 
 import {
   collectCogniaToolDefs,
@@ -39,6 +40,7 @@ import { createDoomLoopGuard } from "./doom-loop.mjs"
 import { markAiSdkToolSource } from "./ai-sdk-tool-search.mjs"
 
 const PLUGIN_TOOLS_SERVER_NAME = "cognia-plugin-tools"
+const TOOL_RESULT_PII_ERROR = "Tool result blocked by the PII redaction gate"
 
 /**
  * Plugin tools that MUST remain callable in plan mode: subagent dispatch
@@ -416,9 +418,46 @@ function hasImageBlock(result) {
 }
 
 /**
+ * Does an MCP CallToolResult carry content that must remain structured for the
+ * model-output mapper? Text-only results keep their legacy flattened behavior.
+ */
+function hasRichContentBlock(result) {
+  return (
+    Array.isArray(result?.content) &&
+    result.content.some(
+      (b) =>
+        b &&
+        (b.type === "image" ||
+          b.type === "audio" ||
+          b.type === "resource" ||
+          b.type === "resource_link")
+    )
+  )
+}
+
+function binaryModelPart(data, mediaType, filename) {
+  if (mediaType.startsWith("image/")) {
+    return { type: "image-data", mediaType, data }
+  }
+  return {
+    type: "file-data",
+    mediaType,
+    data,
+    ...(filename ? { filename } : {}),
+  }
+}
+
+function assertModelSafeToolOutput(output) {
+  if (!hasNoLeakingPiiDeep(output)) {
+    throw new Error(TOOL_RESULT_PII_ERROR)
+  }
+  return output
+}
+
+/**
  * Map a tool's execute output to an AI SDK v6 model output. Text results stay
- * plain text (unchanged behavior); image results (from multimodal `read`)
- * become a multimodal content part so vision models see the actual image.
+ * plain text (unchanged behavior); image, audio, and embedded-resource results
+ * become content parts so models receive the actual payload.
  *
  * Image blocks are emitted as the current `image-data` part (a base64 image),
  * NOT the legacy `media` part — `media` is `@deprecated` in AI SDK v6 and only
@@ -434,12 +473,30 @@ function builtinToModelOutput({ output }) {
       value.push({ type: "text", text: b.text })
     } else if (b.type === "image" && b.data) {
       const mediaType = b.mimeType ?? "image/png"
-      // image/* → image-data; any other media type → file-data (e.g. audio).
-      value.push(
-        mediaType.startsWith("image/")
-          ? { type: "image-data", mediaType, data: b.data }
-          : { type: "file-data", mediaType, data: b.data }
-      )
+      value.push(binaryModelPart(b.data, mediaType))
+    } else if (b.type === "audio" && b.data) {
+      value.push(binaryModelPart(b.data, b.mimeType ?? "audio/mpeg"))
+    } else if (b.type === "resource" && b.resource) {
+      const resource = b.resource
+      if (typeof resource.text === "string") {
+        value.push({ type: "text", text: resource.text })
+      } else if (typeof resource.blob === "string") {
+        value.push(
+          binaryModelPart(
+            resource.blob,
+            resource.mimeType ?? "application/octet-stream",
+            resource.name ?? resource.title
+          )
+        )
+      }
+    } else if (b.type === "resource_link" && typeof b.uri === "string") {
+      const label =
+        typeof b.name === "string" && b.name.length > 0
+          ? `${b.name}: `
+          : typeof b.title === "string" && b.title.length > 0
+            ? `${b.title}: `
+            : ""
+      value.push({ type: "text", text: `${label}${b.uri}` })
     }
   }
   return { type: "content", value }
@@ -483,6 +540,7 @@ function builtinDefToAiSdkTool(def, gate, timeoutMs, reviewToolOutput) {
           msg,
           true
         )
+        assertModelSafeToolOutput(reviewed)
         throw reviewed === msg ? err : new Error(String(reviewed))
       }
       if (result && result.isError) {
@@ -494,12 +552,20 @@ function builtinDefToAiSdkTool(def, gate, timeoutMs, reviewToolOutput) {
           msg,
           true
         )
+        assertModelSafeToolOutput(reviewed)
         throw new Error(String(reviewed))
       }
-      // Image results pass through as the raw MCP object for toModelOutput;
-      // every other result flattens to text (unchanged).
-      const out = hasImageBlock(result) ? result : callToolResultToText(result)
-      return applyOutputReview(reviewToolOutput, namespaced, options?.toolCallId, out, false)
+      // Structured content passes through as the raw MCP object for
+      // toModelOutput; text-only results keep the established flattening.
+      const out = hasRichContentBlock(result) ? result : callToolResultToText(result)
+      const reviewed = await applyOutputReview(
+        reviewToolOutput,
+        namespaced,
+        options?.toolCallId,
+        out,
+        false
+      )
+      return assertModelSafeToolOutput(reviewed)
     },
     toModelOutput: builtinToModelOutput,
   })
@@ -542,12 +608,29 @@ function pluginToolToAiSdkTool(
           msg,
           true
         )
+        assertModelSafeToolOutput(reviewed)
         throw new Error(String(reviewed))
       }
       const payload = response ? response.result : null
-      const out = typeof payload === "string" ? payload : JSON.stringify(payload ?? null)
-      return applyOutputReview(reviewToolOutput, namespaced, options?.toolCallId, out, false)
+      // A plugin that already speaks MCP passes its content blocks straight
+      // through for `builtinToModelOutput` to map — the same treatment built-in
+      // tools get above. Without this a plugin can only ever return text, so an
+      // media result reaches the model (and the chat) as base64 gibberish.
+      const out = hasRichContentBlock(payload)
+        ? payload
+        : typeof payload === "string"
+          ? payload
+          : JSON.stringify(payload ?? null)
+      const reviewed = await applyOutputReview(
+        reviewToolOutput,
+        namespaced,
+        options?.toolCallId,
+        out,
+        false
+      )
+      return assertModelSafeToolOutput(reviewed)
     },
+    toModelOutput: builtinToModelOutput,
   })
 }
 
@@ -703,5 +786,7 @@ export const __testing__ = {
   runBuiltinHandler,
   builtinToModelOutput,
   hasImageBlock,
+  hasRichContentBlock,
+  assertModelSafeToolOutput,
   DEFAULT_BUILTIN_TOOL_TIMEOUT_MS,
 }

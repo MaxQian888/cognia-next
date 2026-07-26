@@ -645,9 +645,79 @@ describe("applySdkEvent — user (tool results)", () => {
     }
     // flattened string still present for back-compat
     expect(part.output).toContain("here is the screenshot")
+    // …but the image is a compact placeholder, not a base64 wall: the bytes
+    // live on `mcpContent`, and nothing downstream can read them out of a
+    // string anyway (exports, share, CLI handoff all just print `output`).
+    expect(part.output).not.toContain("AAAA")
+    expect(part.output).toContain("[image image/png")
     // structured blocks preserved verbatim
     expect(part.mcpContent).toHaveLength(2)
     expect(part.mcpContent?.[1]?.type).toBe("image")
+  })
+
+  it("summarises audio and resource blocks in the flattened output too", () => {
+    const assistant: UIMessage = {
+      id: "a",
+      role: "assistant",
+      parts: [
+        {
+          type: "tool-mcp__some-server__fetch",
+          toolCallId: "t-mixed",
+          state: "input-available",
+          input: {},
+        } as unknown as UIMessage["parts"][number],
+      ],
+    } as UIMessage
+    const result = applySdkEvent(
+      [assistant],
+      userToolResult([
+        {
+          type: "tool_result",
+          tool_use_id: "t-mixed",
+          content: [
+            { type: "audio", data: "BBBB", mimeType: "audio/wav" },
+            { type: "resource", resource: { uri: "file:///a.py", text: "print(1)" } },
+            // An unrecognised block keeps the honest JSON dump — no silent loss.
+            { type: "weird", payload: 1 },
+          ],
+          is_error: false,
+        },
+      ])
+    )
+    const part = result.messages[0].parts[0] as { output?: string }
+    expect(part.output).toContain("[audio audio/wav")
+    expect(part.output).not.toContain("BBBB")
+    expect(part.output).toContain("[resource file:///a.py]")
+    expect(part.output).toContain('{"type":"weird","payload":1}')
+  })
+
+  it("reports the decoded byte size of a media block, not the base64 length", () => {
+    const assistant: UIMessage = {
+      id: "a",
+      role: "assistant",
+      parts: [
+        {
+          type: "tool-Read",
+          toolCallId: "t-size",
+          state: "input-available",
+          input: {},
+        } as unknown as UIMessage["parts"][number],
+      ],
+    } as UIMessage
+    // 4 base64 chars with no padding → 3 decoded bytes.
+    const result = applySdkEvent(
+      [assistant],
+      userToolResult([
+        {
+          type: "tool_result",
+          tool_use_id: "t-size",
+          content: [{ type: "image", data: "AAAA", mimeType: "image/png" }],
+          is_error: false,
+        },
+      ])
+    )
+    const part = result.messages[0].parts[0] as { output?: string }
+    expect(part.output).toBe("[image image/png · 3 B]")
   })
 
   it("does NOT attach mcpContent for a pure-text array result (no behavior change)", () => {

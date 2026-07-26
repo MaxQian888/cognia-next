@@ -292,6 +292,49 @@ function blockToPart(block: BetaContentBlock): Part | null {
   }
 }
 
+/** Human-scale byte size for the media placeholders below. */
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+}
+
+/**
+ * Compact stand-in for a media/resource block in the flattened `output` string.
+ *
+ * The real payload is preserved structurally on `part.mcpContent`
+ * (`extractMcpContentBlocks`) and rendered by the cards. `output` is only ever
+ * printed — by the tool cards, the activity-row summaries, the markdown/HTML
+ * exporters, share, and the CLI handoff — so inlining base64 there produced an
+ * unreadable wall AND a second full copy of every image in the `messages`
+ * table. Returns null for blocks we can't summarise, which keep the JSON dump.
+ */
+function describeNonTextBlock(block: Record<string, unknown>): string | null {
+  const type = block.type
+  if (type === "image" || type === "audio") {
+    const source = block.source as { data?: unknown; media_type?: unknown } | undefined
+    const data = typeof block.data === "string" ? block.data : source?.data
+    const mime =
+      (typeof block.mimeType === "string" ? block.mimeType : undefined) ??
+      (typeof source?.media_type === "string" ? source.media_type : undefined)
+    // base64 → decoded bytes: 4 chars carry 3 bytes, minus any `=` padding.
+    const size =
+      typeof data === "string" && !data.startsWith("data:")
+        ? Math.floor((data.length * 3) / 4) - (data.endsWith("==") ? 2 : data.endsWith("=") ? 1 : 0)
+        : undefined
+    const head = mime ? `${type} ${mime}` : String(type)
+    return size !== undefined ? `[${head} · ${formatBytes(size)}]` : `[${head}]`
+  }
+  if (type === "resource") {
+    const resource = block.resource as { uri?: unknown; mimeType?: unknown } | undefined
+    const label =
+      (typeof resource?.uri === "string" ? resource.uri : undefined) ??
+      (typeof resource?.mimeType === "string" ? resource.mimeType : undefined)
+    return label ? `[resource ${label}]` : "[resource]"
+  }
+  return null
+}
+
 function flattenToolResultContent(content: BetaToolResultBlock["content"]): string {
   if (typeof content === "string") return content
   if (Array.isArray(content)) {
@@ -302,7 +345,7 @@ function flattenToolResultContent(content: BetaToolResultBlock["content"]): stri
           if ((c as { type?: string }).type === "text") {
             return (c as { type: "text"; text: string }).text
           }
-          return JSON.stringify(c)
+          return describeNonTextBlock(c as Record<string, unknown>) ?? JSON.stringify(c)
         }
         return ""
       })
