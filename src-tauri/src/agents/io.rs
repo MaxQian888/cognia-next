@@ -102,7 +102,11 @@ fn parse_toml(raw: &str) -> Result<Json, String> {
 /// Strip `//` line comments, `/* ... */` block comments, and trailing commas
 /// from JSONC. Hand-rolled (rather than pulling another crate) because the
 /// rules are short and well-defined for this use.
-fn strip_jsonc(raw: &str) -> String {
+///
+/// `pub(crate)` because VS Code writes JSONC in more than one place the app has
+/// to read — `codeserver`'s `argv.json` parser needs the same rules, and a second
+/// hand-rolled stripper is a second set of escaping bugs.
+pub(crate) fn strip_jsonc(raw: &str) -> String {
     let bytes = raw.as_bytes();
     let mut out = Vec::with_capacity(bytes.len());
     let mut i = 0;

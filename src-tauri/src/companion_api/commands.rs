@@ -342,7 +342,7 @@ pub fn register_default_event_channels(app: &tauri::AppHandle, bus: Arc<EventBus
     register_tauri_event(app, Arc::clone(&bus), "goal://status");
     // Remote Session Control — host computer-use HITL consent prompts so a
     // remote watcher can render and resolve them via `automation_consent_respond`.
-    register_tauri_event(app, Arc::clone(&bus), "automation:consent-request");
+    register_tauri_event(app, Arc::clone(&bus), AUTOMATION_CONSENT_CHANNEL);
     // Pairing-lifecycle events — useful for multi-device observation.
     register_tauri_event(app, Arc::clone(&bus), "companion://device-paired");
     // ADR-0061 P2 — live workflow run-status frames (every transition incl.
@@ -401,16 +401,82 @@ pub fn register_default_event_channels(app: &tauri::AppHandle, bus: Arc<EventBus
     // ADR-0061 P3 — a remote step is waiting on a device. Ids only; the
     // request params ride the WS frame the device receives on open.
     register_push_trigger(app, "workflow://step-pending");
+    // Host computer-use is blocked on a HITL consent decision. Without this
+    // the prompt reached foreground devices only, so a backgrounded phone
+    // never saw it and the broker fail-closed on timeout — i.e. remote
+    // supervision silently didn't work whenever the screen was off.
+    // The payload is sanitized down to ids by `push_data_for_channel`.
+    register_push_trigger(app, AUTOMATION_CONSENT_CHANNEL);
 }
 
-/// Human-ish push body for a channel name: strip any `scheme://` prefix so
-/// e.g. `workflow://run-terminal` renders as `run-terminal`. The phone
-/// resolves real display text from its synced mirror via `data`.
-fn push_body_for_channel(channel: &str) -> String {
+/// Channel carrying host computer-use consent prompts. Named because both the
+/// event-bus registration and the push trigger reference it, and because its
+/// payload needs channel-specific sanitizing before it can transit a push.
+pub(crate) const AUTOMATION_CONSENT_CHANNEL: &str = "automation:consent-request";
+
+/// Human-ish push body for a channel: strip any `scheme://` prefix so e.g.
+/// `workflow://run-terminal` renders as `run-terminal`. The phone resolves
+/// real display text from its synced mirror via `data`.
+///
+/// The consent channel gets a real sentence instead, because there is nothing
+/// for the phone to resolve it against until the user opens the app — and the
+/// whole point is to let them triage from the lock screen. It names the action
+/// and the process but **never** the window title: notification text is
+/// readable by anyone holding the phone, and the title is the field most
+/// likely to carry something private ("Re: severance package.xlsx").
+fn push_body_for_channel(
+    channel: &str,
+    data: &serde_json::Map<String, serde_json::Value>,
+) -> String {
+    if channel == AUTOMATION_CONSENT_CHANNEL {
+        let command = data
+            .get("command")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+            .unwrap_or("a desktop action");
+        return match data
+            .get("processName")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+        {
+            Some(process) => format!("Confirm {command} in {process}"),
+            None => format!("Confirm {command}"),
+        };
+    }
     match channel.split_once("://") {
         Some((_, rest)) => rest.to_string(),
         None => channel.to_string(),
     }
+}
+
+/// Project an event payload into the `data` map that rides the push.
+///
+/// Most channels pass through: they already carry ids only. The consent
+/// channel does not — its frame holds a screen thumbnail (tens of KB, far past
+/// the ~4 KB APNs/FCM payload ceiling, so passing it through would break the
+/// push outright) plus the window title and the full command detail, which are
+/// exactly the fields decided to stay off the lock screen. Allowlist down to
+/// what the phone needs to deep-link; it reads the rest off the authenticated
+/// WS frame once opened.
+fn push_data_for_channel(
+    channel: &str,
+    raw: &serde_json::Map<String, serde_json::Value>,
+) -> serde_json::Map<String, serde_json::Value> {
+    if channel != AUTOMATION_CONSENT_CHANNEL {
+        return raw.clone();
+    }
+    let mut out = serde_json::Map::new();
+    if let Some(id) = raw.get("id").and_then(|v| v.as_str()) {
+        out.insert("id".into(), serde_json::Value::String(id.to_string()));
+    }
+    out.insert(
+        "source".into(),
+        serde_json::Value::String("automation".into()),
+    );
+    // The consent sheet is mounted app-wide (`mobile-shell-wrapper.tsx`), so
+    // any route brings it up; the deep link only has to foreground the app.
+    out.insert("href".into(), serde_json::Value::String("/".into()));
+    out
 }
 
 /// Subscribe to `channel` and, on each emit, broadcast a push payload to
@@ -431,14 +497,17 @@ fn register_push_trigger(app: &tauri::AppHandle, channel: &'static str) {
             let registry = std::sync::Arc::clone(&state.push_tokens);
             let dispatchers = super::push_dispatchers();
 
-            let data: serde_json::Map<String, serde_json::Value> = serde_json::from_str(&raw)
+            let raw_data: serde_json::Map<String, serde_json::Value> = serde_json::from_str(&raw)
                 .ok()
                 .and_then(|v: serde_json::Value| v.as_object().cloned())
                 .unwrap_or_default();
+            // Body is derived from the *raw* payload (it needs the action and
+            // process name); `data` is the sanitized projection that actually
+            // transits the push provider.
             let payload = super::push::PushPayload {
                 title: Some("cognia".into()),
-                body: Some(push_body_for_channel(&channel_name)),
-                data,
+                body: Some(push_body_for_channel(&channel_name, &raw_data)),
+                data: push_data_for_channel(&channel_name, &raw_data),
             };
 
             for provider in [
@@ -1002,21 +1071,118 @@ mod tests {
     #[test]
     fn commands_module_compiles() {}
 
+    fn empty_data() -> serde_json::Map<String, serde_json::Value> {
+        serde_json::Map::new()
+    }
+
+    /// A consent frame as it actually arrives: flattened prompt fields, a
+    /// window title, a command detail, and a fat base64 thumbnail.
+    fn consent_payload() -> serde_json::Map<String, serde_json::Value> {
+        let mut m = serde_json::Map::new();
+        m.insert("id".into(), serde_json::json!("consent-123"));
+        m.insert("command".into(), serde_json::json!("click"));
+        m.insert("surface".into(), serde_json::json!("computerUse"));
+        m.insert("processName".into(), serde_json::json!("Xcode"));
+        m.insert(
+            "windowTitle".into(),
+            serde_json::json!("Re: severance package.xlsx"),
+        );
+        m.insert(
+            "commandDetail".into(),
+            serde_json::json!("rm -rf ~/Documents/secret"),
+        );
+        m.insert("sessionKey".into(), serde_json::json!("session-a"));
+        m.insert(
+            "thumbnail".into(),
+            serde_json::json!({ "bytes": "A".repeat(40_000), "width": 640, "height": 400, "redacted": false }),
+        );
+        m
+    }
+
     #[test]
     fn push_body_strips_any_scheme_prefix() {
         assert_eq!(
-            push_body_for_channel("claude://message-added"),
+            push_body_for_channel("claude://message-added", &empty_data()),
             "message-added"
         );
         assert_eq!(
-            push_body_for_channel("companion://needs-input"),
+            push_body_for_channel("companion://needs-input", &empty_data()),
             "needs-input"
         );
         assert_eq!(
-            push_body_for_channel("workflow://run-terminal"),
+            push_body_for_channel("workflow://run-terminal", &empty_data()),
             "run-terminal"
         );
-        assert_eq!(push_body_for_channel("no-scheme"), "no-scheme");
+        assert_eq!(
+            push_body_for_channel("no-scheme", &empty_data()),
+            "no-scheme"
+        );
+    }
+
+    #[test]
+    fn consent_push_body_names_action_and_process() {
+        assert_eq!(
+            push_body_for_channel(AUTOMATION_CONSENT_CHANNEL, &consent_payload()),
+            "Confirm click in Xcode"
+        );
+    }
+
+    #[test]
+    fn consent_push_body_never_leaks_the_window_title() {
+        let body = push_body_for_channel(AUTOMATION_CONSENT_CHANNEL, &consent_payload());
+        assert!(
+            !body.contains("severance"),
+            "lock-screen text must not carry the window title, got {body:?}"
+        );
+        assert!(
+            !body.contains("rm -rf"),
+            "lock-screen text must not carry the command detail, got {body:?}"
+        );
+    }
+
+    #[test]
+    fn consent_push_body_degrades_without_a_process_name() {
+        let mut payload = consent_payload();
+        payload.remove("processName");
+        assert_eq!(
+            push_body_for_channel(AUTOMATION_CONSENT_CHANNEL, &payload),
+            "Confirm click"
+        );
+    }
+
+    #[test]
+    fn consent_push_data_is_allowlisted_to_ids() {
+        let data = push_data_for_channel(AUTOMATION_CONSENT_CHANNEL, &consent_payload());
+        assert_eq!(data.get("id").and_then(|v| v.as_str()), Some("consent-123"));
+        assert_eq!(data.get("href").and_then(|v| v.as_str()), Some("/"));
+        for leaked in ["thumbnail", "windowTitle", "commandDetail", "sessionKey"] {
+            assert!(
+                !data.contains_key(leaked),
+                "{leaked} must never transit a push provider"
+            );
+        }
+    }
+
+    #[test]
+    fn consent_push_data_stays_under_the_provider_payload_ceiling() {
+        // APNs and FCM both cap a notification payload at ~4 KB. The raw frame
+        // is far past that because of the thumbnail; the sanitized projection
+        // must not be.
+        let data = push_data_for_channel(AUTOMATION_CONSENT_CHANNEL, &consent_payload());
+        let encoded = serde_json::to_string(&data).expect("data serializes");
+        assert!(
+            encoded.len() < 4096,
+            "sanitized push data is {} bytes, over the ~4 KB provider ceiling",
+            encoded.len()
+        );
+    }
+
+    #[test]
+    fn other_channels_pass_their_payload_through_untouched() {
+        let mut m = serde_json::Map::new();
+        m.insert("runId".into(), serde_json::json!("run-1"));
+        let data = push_data_for_channel("workflow://run-terminal", &m);
+        assert_eq!(data.get("runId").and_then(|v| v.as_str()), Some("run-1"));
     }
 
     #[test]

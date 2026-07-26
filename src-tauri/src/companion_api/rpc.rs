@@ -4152,6 +4152,8 @@ pub(super) async fn dispatch(
             let repo: String = required(&args, "repo")?;
             let git_ref: Option<String> = optional(&args, "gitRef")?;
             let subdir: Option<String> = optional(&args, "subdir")?;
+            let generated_files: Option<std::collections::BTreeMap<String, String>> =
+                optional(&args, "generatedFiles")?;
             if let Some(services) = host.headless() {
                 let result =
                     crate::plugin_api::github::installer::plugin_install_from_github_for_state(
@@ -4159,6 +4161,7 @@ pub(super) async fn dispatch(
                         repo,
                         git_ref,
                         subdir,
+                        generated_files.unwrap_or_default(),
                     )
                     .await
                     .map_err(RpcError::internal)?;
@@ -4175,7 +4178,11 @@ pub(super) async fn dispatch(
             let app = host.tauri_app(name)?;
             let st: tauri::State<'_, crate::plugin_api::PluginRuntimeState> = app.state();
             crate::plugin_api::github::installer::plugin_install_from_github(
-                st, repo, git_ref, subdir,
+                st,
+                repo,
+                git_ref,
+                subdir,
+                generated_files,
             )
             .await
             .map_err(RpcError::internal)
@@ -5272,7 +5279,10 @@ mod tests {
             "server-id-1".to_string(),
         );
         assert_eq!(value["lanBaseUrl"], "https://192.168.1.42:27890");
-        assert_eq!(value["tunnelBaseUrl"], "https://calm-rock.trycloudflare.com");
+        assert_eq!(
+            value["tunnelBaseUrl"],
+            "https://calm-rock.trycloudflare.com"
+        );
         assert_eq!(value["fingerprint"], "abc123");
         assert_eq!(value["serverId"], "server-id-1");
     }
