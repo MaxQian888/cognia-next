@@ -29,7 +29,7 @@ import {
 } from "@/lib/github/types"
 import { requireGithubRuntime, setGithubRuntime, type GithubRuntime } from "./workflow/runtime"
 import { setIssueLoopDriver } from "./workflow/issue-loop"
-import { SidecarIssueLoopDriver } from "./drivers/sidecar-driver"
+import { SelectableIssueLoopDriver } from "./drivers/external-agent-driver"
 import { GithubAdapter } from "./adapter/github-adapter"
 import type { PluginAdapterContext } from "@/lib/plugin/bridge/connectors-bridge"
 // Post-ADR-0026 migration: nodes are no longer registered via top-level
@@ -233,10 +233,10 @@ const definition: PluginDefinition = {
 
     setGithubRuntime(makeRuntime(ctx))
     // Real driver for `action.github.runIssueLoop` — uses the existing
-    // Claude sidecar (+ its built-in cognia-tools MCP) to drive the agent
-    // SDK inside the cloned workspace. Without this, the executor returns
+    // Claude sidecar by default, or the explicitly selected External Agent,
+    // to drive the cloned workspace. Without this, the executor returns
     // the friendly "No issue-loop AI driver" failure result.
-    setIssueLoopDriver(new SidecarIssueLoopDriver())
+    setIssueLoopDriver(new SelectableIssueLoopDriver())
     // Register the 13 action.github.* executors against the workflow
     // registry. Pre-ADR-0026 this happened at import-time; the new path
     // lets us tear down cleanly in `deactivate()` so disabling the

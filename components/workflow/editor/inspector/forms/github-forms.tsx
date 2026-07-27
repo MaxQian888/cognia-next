@@ -16,6 +16,7 @@ import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { Switch } from "@/components/ui/switch"
 import { Button } from "@/components/ui/button"
+import { ExternalAgentSelector } from "@/components/agent/external-agent/selector"
 import { Plus, Trash2 } from "lucide-react"
 import { Field, FieldGroup, patchParam, readBoolean, readNumber, readString } from "./shared"
 import { ExpressionField } from "./shared/expression-field"
@@ -268,9 +269,9 @@ export function GithubReviewPrConfig({ params, onChange }: ConfigProps) {
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="APPROVE">APPROVE</SelectItem>
-            <SelectItem value="REQUEST_CHANGES">REQUEST_CHANGES</SelectItem>
-            <SelectItem value="COMMENT">COMMENT</SelectItem>
+            <SelectItem value="APPROVE">{t("event.options.approve")}</SelectItem>
+            <SelectItem value="REQUEST_CHANGES">{t("event.options.requestChanges")}</SelectItem>
+            <SelectItem value="COMMENT">{t("event.options.comment")}</SelectItem>
           </SelectContent>
         </Select>
       </Field>
@@ -616,6 +617,21 @@ export function GithubRunIssueLoopConfig({ params, onChange }: ConfigProps) {
           onChange={(e) =>
             onChange(patchParam(params, "issueNumber", parseInt(e.target.value, 10) || 0))
           }
+        />
+      </Field>
+      <Field label={t("runtime.label")} name="externalAgentId" hint={t("runtime.hint")}>
+        <ExternalAgentSelector
+          selectedAgentId={readString(params, "externalAgentId") || null}
+          onAgentChange={(agentId) => {
+            if (agentId) {
+              onChange(patchParam(params, "externalAgentId", agentId))
+              return
+            }
+            const next = { ...params }
+            delete next.externalAgentId
+            onChange(next)
+          }}
+          className="w-full justify-between"
         />
       </Field>
       <Field label={t("worktreeMode.label")} name="worktreeMode">

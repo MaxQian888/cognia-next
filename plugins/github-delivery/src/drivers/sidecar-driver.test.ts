@@ -75,7 +75,11 @@ describe("SidecarIssueLoopDriver", () => {
     })
 
     const result = await runPromise
-    expect(result).toEqual({ summary: "fixed typo", durationMs: 500 })
+    expect(result).toEqual({
+      summary: "fixed typo",
+      durationMs: 500,
+      driverId: "claude-code",
+    })
     expect(ctx.unlisten).toHaveBeenCalled()
   })
 
@@ -240,6 +244,9 @@ describe("ISSUE_LOOP_PERMISSION_RULESET", () => {
     "git -C /tmp/checkout remote set-url origin https://x@github.com/a/b.git",
     "env gh pr create --fill",
     "command gh pr merge 1",
+    "bash -c 'git push origin main'",
+    "cmd /c gh pr create --fill",
+    'pwsh -Command "git remote -v"',
   ])("denies the equivalent spelling %s", (command) => {
     expect(verdict(command)).toBe("deny")
   })

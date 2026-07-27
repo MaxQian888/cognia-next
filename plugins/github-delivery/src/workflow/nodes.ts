@@ -136,6 +136,8 @@ interface RunIssueLoopParams extends Common {
   worktreeMode?: "local" | "e2b"
   /** Branch name template, default `cognia/issue-{n}`. */
   branchTemplate?: string
+  /** Existing External Agent configuration selected for this delivery run. */
+  externalAgentId?: string
 }
 interface ReviewPrInlineParams extends Common {
   prNumber: number

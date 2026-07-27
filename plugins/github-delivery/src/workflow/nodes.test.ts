@@ -11,6 +11,7 @@ import type { GhAction, GhAuditEntry, GhPolicy, PolicyDecision } from "@/lib/git
 import { DEFAULT_GH_POLICY } from "@/lib/github/types"
 import { getExecutor } from "@/lib/workflow/nodes/registry"
 import { setGithubRuntime } from "./runtime"
+import { setIssueLoopDriver } from "./issue-loop"
 import { WORKFLOW_NODE_KINDS } from "@/types/workflow/visual"
 
 // Post-ADR-0026 migration: nodes are no longer registered at import
@@ -81,7 +82,10 @@ async function exec(kind: string, params: Record<string, unknown>) {
   return reg.execute(makeStep(params))
 }
 
-afterEach(() => setGithubRuntime(null))
+afterEach(() => {
+  setIssueLoopDriver(null)
+  setGithubRuntime(null)
+})
 
 describe("github workflow node definition parity", () => {
   it("covers every global action.github.* kind with exactly one plugin executor", () => {
@@ -374,6 +378,46 @@ describe("action.github.runIssueLoop", () => {
       branchTemplate: "cognia/x-{n}",
     })
     expect(captured).toMatchObject({ kind: "push", branch: "cognia/x-42" })
+  })
+
+  it("forwards externalAgentId into the Issue Loop work order", async () => {
+    const workOrders: Array<Partial<import("@/lib/github/types").GhWorkOrder>> = []
+    setIssueLoopDriver({
+      run: jest.fn(async () => ({
+        summary: "unused",
+        durationMs: 0,
+        driverId: "codex-main",
+      })),
+    })
+    setGithubRuntime({
+      getRepo: async () => null,
+      getOctokit: async () =>
+        ({
+          request: jest.fn(async () => ({ data: { title: "x", body: "" } })),
+          auth: jest.fn(async () => ({})),
+        }) as unknown as import("@octokit/core").Octokit,
+      recordAudit: async () => undefined,
+      checkPolicy: async () => ({
+        decision: { allow: true },
+        effectivePolicy: DEFAULT_GH_POLICY,
+      }),
+      getWorkOrder: async () => null,
+      upsertWorkOrder: async (params) => {
+        workOrders.push(params)
+        return { ...params, createdAt: 0, updatedAt: 0 }
+      },
+    })
+
+    await exec("action.github.runIssueLoop", {
+      repoFullName: "o/r",
+      issueNumber: 7,
+      externalAgentId: "codex-main",
+    })
+
+    expect(workOrders[0]).toMatchObject({
+      status: "in_progress",
+      aiDriver: "codex-main",
+    })
   })
 })
 

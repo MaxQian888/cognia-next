@@ -1052,6 +1052,7 @@ const GithubPushTagParams = GithubCommonParams.extend({
 const GithubRunIssueLoopParams = GithubIssueNumberParams.extend({
   worktreeMode: z.enum(["local", "e2b"]).optional(),
   branchTemplate: optionalString,
+  externalAgentId: optionalString,
 })
 
 // ── Desktop automation ──────────────────────────────────────────────────────

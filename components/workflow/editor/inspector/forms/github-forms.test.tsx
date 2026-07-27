@@ -2,7 +2,33 @@
  * @jest-environment jsdom
  */
 import { fireEvent, render, screen } from "@testing-library/react"
-import { GithubOpenPrConfig, GithubWebhookTriggerConfig } from "./github-forms"
+import {
+  GithubOpenPrConfig,
+  GithubRunIssueLoopConfig,
+  GithubWebhookTriggerConfig,
+} from "./github-forms"
+
+jest.mock("@/components/agent/external-agent/selector", () => ({
+  ExternalAgentSelector: ({
+    selectedAgentId,
+    onAgentChange,
+  }: {
+    selectedAgentId: string | null
+    onAgentChange: (agentId: string | null) => void
+  }) => (
+    <div data-testid="external-agent-selector" data-selected-agent={selectedAgentId ?? "built-in"}>
+      <button type="button" onClick={() => onAgentChange("codex-main")}>
+        select-codex
+      </button>
+      <button type="button" onClick={() => onAgentChange(null)}>
+        select-built-in
+      </button>
+      <button type="button" disabled>
+        disabled-agent
+      </button>
+    </div>
+  ),
+}))
 
 jest.mock("./shared/expression-field", () => ({
   ExpressionField: ({
@@ -89,5 +115,41 @@ describe("GitHub forms", () => {
     expect(repoInputs).toHaveLength(2)
     const ids = Array.from(repoInputs).map((input) => input.id)
     expect(new Set(ids).size).toBe(ids.length)
+  })
+})
+
+describe("GithubRunIssueLoopConfig", () => {
+  it("loads legacy params as built-in Claude and persists External Agent selection", () => {
+    const onChange = jest.fn()
+    render(<GithubRunIssueLoopConfig params={{ issueNumber: 1 }} onChange={onChange} />)
+
+    expect(screen.getByTestId("external-agent-selector")).toHaveAttribute(
+      "data-selected-agent",
+      "built-in"
+    )
+    fireEvent.click(screen.getByRole("button", { name: "select-codex" }))
+    expect(onChange).toHaveBeenCalledWith(
+      expect.objectContaining({ issueNumber: 1, externalAgentId: "codex-main" })
+    )
+  })
+
+  it("reloads and clears a persisted External Agent without saving disabled agents", () => {
+    const onChange = jest.fn()
+    render(
+      <GithubRunIssueLoopConfig
+        params={{ issueNumber: 1, externalAgentId: "codex-main" }}
+        onChange={onChange}
+      />
+    )
+
+    expect(screen.getByTestId("external-agent-selector")).toHaveAttribute(
+      "data-selected-agent",
+      "codex-main"
+    )
+    expect(screen.getByRole("button", { name: "disabled-agent" })).toBeDisabled()
+    fireEvent.click(screen.getByRole("button", { name: "disabled-agent" }))
+    expect(onChange).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole("button", { name: "select-built-in" }))
+    expect(onChange).toHaveBeenCalledWith({ issueNumber: 1 })
   })
 })

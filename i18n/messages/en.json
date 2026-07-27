@@ -29595,7 +29595,12 @@
             "label": "Review body"
           },
           "event": {
-            "label": "Review verdict"
+            "label": "Review verdict",
+            "options": {
+              "approve": "Approve",
+              "comment": "Comment",
+              "requestChanges": "Request changes"
+            }
           }
         },
         "reviewPrInline": {
@@ -29630,6 +29635,10 @@
           "branchTemplate": {
             "hint": "`{n}` is replaced by the issue number.",
             "label": "Branch template"
+          },
+          "runtime": {
+            "hint": "Built-in uses Claude Agent SDK. Choose a configured External Agent to run the same delivery path without fallback.",
+            "label": "AI runtime"
           },
           "worktreeMode": {
             "label": "Worktree backend",

@@ -29595,7 +29595,12 @@
             "label": "审查正文"
           },
           "event": {
-            "label": "审查结论"
+            "label": "审查结论",
+            "options": {
+              "approve": "批准",
+              "comment": "评论",
+              "requestChanges": "要求修改"
+            }
           }
         },
         "reviewPrInline": {
@@ -29630,6 +29635,10 @@
           "branchTemplate": {
             "hint": "`{n}` 会被替换为 issue 编号。",
             "label": "分支模板"
+          },
+          "runtime": {
+            "hint": "内建模式使用 Claude Agent SDK。选择已配置的 External Agent 可运行同一交付链路，失败时不会回退。",
+            "label": "AI 运行时"
           },
           "worktreeMode": {
             "label": "工作树后端",

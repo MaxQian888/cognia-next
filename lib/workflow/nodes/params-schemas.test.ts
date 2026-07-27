@@ -659,6 +659,19 @@ describe("action: GitHub Delivery schemas", () => {
 
   it("keeps GitHub enum, numeric, and list fields aligned with plugin executors", () => {
     expect(
+      PARAMS_SCHEMAS["action.github.runIssueLoop"].parse({
+        repoFullName: "o/r",
+        issueNumber: 1,
+        externalAgentId: "codex-main",
+      })
+    ).toMatchObject({ externalAgentId: "codex-main" })
+    expect(
+      PARAMS_SCHEMAS["action.github.runIssueLoop"].safeParse({
+        repoFullName: "o/r",
+        issueNumber: 1,
+      }).success
+    ).toBe(true)
+    expect(
       PARAMS_SCHEMAS["action.github.mergePr"].safeParse({
         repoFullName: "o/r",
         prNumber: 1,

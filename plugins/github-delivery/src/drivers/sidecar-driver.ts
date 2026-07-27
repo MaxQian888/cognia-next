@@ -52,6 +52,14 @@ const GIT_GLOBAL_OPTIONS = ["-C **", "-c **", "--git-dir=**", "--work-tree=**", 
  * anchored on the segment head (`env gh pr create`).
  */
 const EXEC_WRAPPERS = ["env", "command", "sudo", "nohup", "setsid"]
+const SHELL_WRAPPERS = [
+  "sh -c",
+  "bash -c",
+  "zsh -c",
+  "cmd /c",
+  "powershell -Command",
+  "pwsh -Command",
+]
 
 /** Every spelling of `command` this gate must refuse. */
 function denySpellings(command: string): string[] {
@@ -66,6 +74,7 @@ function denySpellings(command: string): string[] {
     }
   }
   for (const wrapper of EXEC_WRAPPERS) spellings.push(`${wrapper} ${command}`)
+  for (const wrapper of SHELL_WRAPPERS) spellings.push(`${wrapper} **${command}**`)
   // Each spelling needs both the bare and the argument-bearing form.
   return spellings.flatMap((spelling) => [spelling, `${spelling} **`])
 }
@@ -144,6 +153,7 @@ export class SidecarIssueLoopDriver implements IssueLoopDriver {
   }: Parameters<IssueLoopDriver["run"]>[0]): Promise<{
     summary: string
     durationMs: number
+    driverId: string
   }> {
     const sessionId = `wf:gh-issue:${repoFullName}:${issueNumber}:${this.deps.now()}`
     const systemPrompt = buildIssueSystemPrompt()
@@ -223,6 +233,7 @@ export class SidecarIssueLoopDriver implements IssueLoopDriver {
     return {
       summary: finalSummary ?? "",
       durationMs: this.deps.now() - start,
+      driverId: "claude-code",
     }
   }
 }

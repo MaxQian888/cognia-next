@@ -60,7 +60,11 @@ describe("runIssueLoop", () => {
     installRuntime(octokit)
 
     const driver = {
-      run: jest.fn(async () => ({ summary: "Wrote one line.", durationMs: 100 })),
+      run: jest.fn(async () => ({
+        summary: "Wrote one line.",
+        durationMs: 100,
+        driverId: "codex-main",
+      })),
     }
     setIssueLoopDriver(driver)
 
@@ -74,7 +78,7 @@ describe("runIssueLoop", () => {
     const pushSpy = jest.fn(async () => "abc1234")
 
     const result = await runIssueLoop(
-      { repoFullName: "o/r", issueNumber: 7 },
+      { repoFullName: "o/r", issueNumber: 7, externalAgentId: "codex-main" },
       { cloneToWorkspace: cloneSpy, commitAndPush: pushSpy }
     )
 
@@ -91,6 +95,7 @@ describe("runIssueLoop", () => {
         issueTitle: "Fix the bug",
         issueBody: "It broke.",
         workspacePath: "/tmp/wt",
+        externalAgentId: "codex-main",
       })
     )
 
@@ -109,6 +114,12 @@ describe("runIssueLoop", () => {
         String(c[0]).includes("labels")
       )
     ).toBe(true)
+    const prRequest = (octokit.request as unknown as jest.Mock).mock.calls.find((c) =>
+      String(c[0]).includes("POST /repos/{owner}/{repo}/pulls")
+    )
+    expect(prRequest?.[1]).toMatchObject({
+      body: expect.stringContaining("Driver: codex-main."),
+    })
   })
 
   it("returns failed when the driver throws", async () => {
@@ -146,6 +157,111 @@ describe("runIssueLoop", () => {
     expect(result.status).toBe("failed")
     expect(result.reason).toMatch(/clone token/)
   })
+
+  it("does not push, open a PR, or label after the driver is aborted", async () => {
+    const octokit = fakeOctokit({
+      "GET /repos/{owner}/{repo}/issues/{issue_number}": {
+        data: { title: "x", body: "y" },
+      },
+    })
+    installRuntime(octokit)
+    const abortController = new AbortController()
+    setIssueLoopDriver({
+      run: jest.fn(async () => {
+        abortController.abort("cancelled")
+        throw new Error("external agent aborted")
+      }),
+    })
+    const pushSpy = jest.fn(async () => "sha")
+
+    const result = await runIssueLoop(
+      { repoFullName: "o/r", issueNumber: 1, externalAgentId: "codex-main" },
+      {
+        abortController,
+        cloneToWorkspace: async () => ({
+          backend: "local" as const,
+          path: "/tmp/work",
+          repoFullName: "o/r",
+          branch: "main",
+          createdAt: 0,
+        }),
+        commitAndPush: pushSpy,
+      }
+    )
+
+    expect(result).toMatchObject({ status: "failed", reason: "external agent aborted" })
+    expect(pushSpy).not.toHaveBeenCalled()
+    expect(octokit.request).not.toHaveBeenCalledWith(
+      "POST /repos/{owner}/{repo}/pulls",
+      expect.anything()
+    )
+    expect(
+      (octokit.request as unknown as jest.Mock).mock.calls.some((call) =>
+        String(call[0]).includes("/labels")
+      )
+    ).toBe(false)
+  })
+
+  it("replays a completed checkpoint without executing the Agent again", async () => {
+    const octokit = fakeOctokit({
+      "GET /repos/{owner}/{repo}/issues/{issue_number}": {
+        data: { title: "x", body: "y" },
+      },
+      "POST /repos/{owner}/{repo}/pulls": {
+        data: { number: 8, html_url: "u" },
+      },
+    })
+    installRuntime(octokit)
+    const driver = { run: jest.fn() }
+    setIssueLoopDriver(driver)
+    const checkpointRunner = ((options: {
+      run: (ctx: {
+        state: {
+          phase: "completed"
+          summary: string
+          durationMs: number
+          driverId: string
+        }
+        progress: () => Promise<void>
+      }) => Promise<unknown>
+    }) => ({
+      promise: options.run({
+        state: {
+          phase: "completed",
+          summary: "checkpoint summary",
+          durationMs: 17,
+          driverId: "codex-main",
+        },
+        progress: async () => undefined,
+      }),
+      abort: jest.fn(),
+      onProgress: jest.fn(),
+    })) as unknown as typeof import("@/lib/workflow/runtime/long-step-runner").runLongStep
+    const pushSpy = jest.fn(async () => "sha")
+
+    const result = await runIssueLoop(
+      { repoFullName: "o/r", issueNumber: 1, externalAgentId: "codex-main" },
+      {
+        runLongStep: checkpointRunner,
+        cloneToWorkspace: async () => ({
+          backend: "local" as const,
+          path: "/tmp/work",
+          repoFullName: "o/r",
+          branch: "main",
+          createdAt: 0,
+        }),
+        commitAndPush: pushSpy,
+      }
+    )
+
+    expect(result.status).toBe("pr_opened")
+    expect(driver.run).not.toHaveBeenCalled()
+    expect(pushSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message: expect.stringContaining("checkpoint summary"),
+      })
+    )
+  })
 })
 
 describe("runIssueLoop work-order writes", () => {
@@ -162,7 +278,11 @@ describe("runIssueLoop work-order writes", () => {
     })
     installRuntime(octokit, { workOrders: upsertSpy })
     setIssueLoopDriver({
-      run: jest.fn(async () => ({ summary: "did it", durationMs: 1 })),
+      run: jest.fn(async () => ({
+        summary: "did it",
+        durationMs: 1,
+        driverId: "claude-code",
+      })),
     })
     const result = await runIssueLoop(
       { repoFullName: "o/r", issueNumber: 5 },
