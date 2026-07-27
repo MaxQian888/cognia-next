@@ -14,20 +14,23 @@ import { useState } from "react"
 import { useTranslations } from "next-intl"
 import { Button } from "@/components/ui/button"
 import { publishWorkflow, unpublishWorkflow } from "@/lib/workflow/publish/publish-workflow"
-import type { WorkflowPublication } from "@/types/workflow/visual"
+import type { WorkflowInterface, WorkflowPublication } from "@/types/workflow/visual"
 
 export function WorkflowPublishSection({
   workflowId,
-  published: initialPublished,
+  published,
+  onPublicationChange,
 }: {
   workflowId: string
   published?: WorkflowPublication
+  onPublicationChange: (
+    published?: WorkflowPublication,
+    workflowInterface?: WorkflowInterface
+  ) => void
 }) {
   const t = useTranslations("workflowEditor.settings.publish")
-  const [published, setPublished] = useState<WorkflowPublication | undefined>(initialPublished)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [toolName, setToolName] = useState<string | undefined>(initialPublished?.toolName)
 
   const onPublish = async () => {
     setBusy(true)
@@ -35,8 +38,7 @@ export function WorkflowPublishSection({
     try {
       const at = Date.now()
       const result = await publishWorkflow(workflowId, at)
-      setPublished({ at, toolName: result.toolName })
-      setToolName(result.toolName)
+      onPublicationChange({ at, toolName: result.toolName }, result.workflowInterface)
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     } finally {
@@ -49,8 +51,7 @@ export function WorkflowPublishSection({
     setError(null)
     try {
       await unpublishWorkflow(workflowId)
-      setPublished(undefined)
-      setToolName(undefined)
+      onPublicationChange(undefined, undefined)
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     } finally {
@@ -64,7 +65,8 @@ export function WorkflowPublishSection({
       {published ? (
         <div className="space-y-2">
           <p className="text-xs">
-            {t("publishedAs")} <code className="rounded bg-muted px-1 py-0.5">{toolName}</code>
+            {t("publishedAs")}{" "}
+            <code className="rounded bg-muted px-1 py-0.5">{published.toolName}</code>
           </p>
           <div className="flex gap-2">
             <Button size="sm" variant="outline" onClick={onPublish} disabled={busy}>

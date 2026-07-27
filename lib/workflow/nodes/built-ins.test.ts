@@ -2313,7 +2313,8 @@ describe("flow.subworkflow", () => {
   })
 
   it("validates input against the target's declared interface (D5)", async () => {
-    const { createWorkflow, updateWorkflow } = await import("@/lib/db/workflows")
+    const { createWorkflow } = await import("@/lib/db/workflows")
+    const { publishWorkflow } = await import("@/lib/workflow/publish/publish-workflow")
     const sub = await createWorkflow({
       name: "TypedSub",
       nodes: [
@@ -2322,20 +2323,21 @@ describe("flow.subworkflow", () => {
           type: "trigger.manual",
           typeVersion: 1,
           position: { x: 0, y: 0 },
-          data: { label: "start", params: {} },
+          data: {
+            label: "start",
+            params: {
+              inputSchema: {
+                type: "object",
+                properties: { topic: { type: "string" } },
+                required: ["topic"],
+              },
+            },
+          },
         },
       ],
       edges: [],
     })
-    await updateWorkflow(sub.id, {
-      interface: {
-        inputSchema: {
-          type: "object",
-          properties: { topic: { type: "string" } },
-          required: ["topic"],
-        },
-      },
-    })
+    await publishWorkflow(sub.id, 1)
     // Missing required `topic` → rejected before the run starts.
     await expect(
       exec("flow.subworkflow", makeCtx("flow.subworkflow", { workflowId: sub.id, input: {} }))

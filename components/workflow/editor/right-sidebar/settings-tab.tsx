@@ -45,6 +45,7 @@ export function SettingsTab({ useStore }: { useStore: EditorStore }) {
     credentials,
     workflowId,
     published,
+    syncPublication,
     setSettings,
     setVariables,
     setCredentials,
@@ -55,6 +56,7 @@ export function SettingsTab({ useStore }: { useStore: EditorStore }) {
       credentials: s.baseWorkflow.credentials,
       workflowId: s.baseWorkflow.id,
       published: s.baseWorkflow.published,
+      syncPublication: s.syncPublication,
       setSettings: s.setSettings,
       setVariables: s.setVariables,
       setCredentials: s.setCredentials,
@@ -289,7 +291,11 @@ export function SettingsTab({ useStore }: { useStore: EditorStore }) {
           <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
             {t("publish.title")}
           </h4>
-          <WorkflowPublishSection workflowId={workflowId} published={published} />
+          <WorkflowPublishSection
+            workflowId={workflowId}
+            published={published}
+            onPublicationChange={syncPublication}
+          />
         </section>
 
         <Separator />

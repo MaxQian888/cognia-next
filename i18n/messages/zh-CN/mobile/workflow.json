@@ -46,6 +46,7 @@
     "menu": "更多操作",
     "modeEdit": "编辑",
     "modeRead": "查看",
+    "publicationInvalidated": "工作流已保存，但因可调用接口发生变化而自动下架。请重新发布以开放新契约。",
     "redo": "重做",
     "run": "运行",
     "runHistory": "运行历史",

@@ -3,7 +3,7 @@
  */
 import "fake-indexeddb/auto"
 import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
-import { createWorkflow, getWorkflow } from "@/lib/db/workflows"
+import { createWorkflow, getWorkflow, updateWorkflow } from "@/lib/db/workflows"
 import {
   publishWorkflow,
   unpublishWorkflow,
@@ -116,6 +116,41 @@ describe("publishWorkflow", () => {
     expect(matching).toHaveLength(1)
   })
 
+  it("serializes concurrent publish attempts into one generated skill", async () => {
+    const wf = await createWorkflow({ name: "Concurrent", nodes: nodesWithInterface(), edges: [] })
+    const results = await Promise.all([
+      publishWorkflow(wf.id, 1),
+      publishWorkflow(wf.id, 2),
+      publishWorkflow(wf.id, 3),
+    ])
+
+    expect(new Set(results.map((result) => result.skillId)).size).toBe(1)
+    const matching = (await getDb().skills.toArray()).filter(
+      (skill) => skill.canonicalId === workflowSkillCanonicalId(wf.id)
+    )
+    expect(matching).toHaveLength(1)
+  })
+
+  it("keeps a published workflow and its generated skill aligned across renames", async () => {
+    const wf = await createWorkflow({ name: "Old name", nodes: nodesWithInterface(), edges: [] })
+    const published = await publishWorkflow(wf.id, 123)
+
+    await updateWorkflow(wf.id, { name: "New name", description: "Updated description" })
+
+    const reloaded = await getWorkflow(wf.id)
+    expect(reloaded?.published).toEqual({ at: 123, toolName: "wf_new_name" })
+    const skill = await getDb().skills.get(published.skillId)
+    expect(skill).toMatchObject({
+      id: published.skillId,
+      name: "New name",
+      description: "Updated description",
+      canonicalId: workflowSkillCanonicalId(wf.id),
+      kind: "workflow",
+      workflowId: wf.id,
+    })
+    expect(skill?.content).toContain('"name": "New name"')
+  })
+
   it("throws for an unknown workflow", async () => {
     await expect(publishWorkflow("wf_nope", 1)).rejects.toThrow(/not found/)
   })
@@ -129,6 +164,7 @@ describe("unpublishWorkflow", () => {
 
     const reloaded = await getWorkflow(wf.id)
     expect(reloaded?.published).toBeUndefined()
+    expect(reloaded?.interface).toBeUndefined()
     expect(await getDb().skills.get(published.skillId)).toBeUndefined()
   })
 })

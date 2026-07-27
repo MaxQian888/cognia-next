@@ -560,7 +560,7 @@ export interface WorkflowInterface {
 /** Publication record: registers the 3 call surfaces (tool / subworkflow / skill). */
 export interface WorkflowPublication {
   at: number
-  /** Stable tool name the agent calls (also the skill-catalog canonical id). */
+  /** Display-only slug; execution always uses the shared typed workflow runner. */
   toolName: string
 }
 

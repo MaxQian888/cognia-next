@@ -13,16 +13,21 @@ import type { VisualWorkflow } from "@/types/workflow/visual"
 
 const toastSuccess = jest.fn()
 const toastError = jest.fn()
+const toastWarning = jest.fn()
 jest.mock("sonner", () => ({
   toast: {
     success: (...a: unknown[]) => toastSuccess(...a),
     error: (...a: unknown[]) => toastError(...a),
+    warning: (...a: unknown[]) => toastWarning(...a),
   },
 }))
 
 jest.mock("@/lib/capacitor/haptics", () => ({ impact: jest.fn(async () => ({ kind: "ok" })) }))
 
-const persistEditorWorkflow = jest.fn(async (..._a: unknown[]) => 0)
+const persistEditorWorkflow = jest.fn(async (..._a: unknown[]) => ({
+  issueCount: 0,
+  publicationInvalidated: false,
+}))
 jest.mock("@/lib/workflow/editor/persist-workflow", () => ({
   persistEditorWorkflow: (...a: unknown[]) => persistEditorWorkflow(...a),
 }))
@@ -92,6 +97,7 @@ function renderTopbar(mode: "read" | "edit" = "read") {
 beforeEach(async () => {
   toastSuccess.mockReset()
   toastError.mockReset()
+  toastWarning.mockReset()
   persistEditorWorkflow.mockClear()
   downloadWorkflowJson.mockClear()
   const all = await listAll()
@@ -138,6 +144,21 @@ describe("<MobileEditorTopbar />", () => {
     await user.click(screen.getByTestId("mobile-editor-save"))
     await waitFor(() => expect(persistEditorWorkflow).toHaveBeenCalledTimes(1))
     expect(toastSuccess).toHaveBeenCalledWith("saved")
+  })
+
+  it("warns when saving invalidates a published callable contract", async () => {
+    const user = userEvent.setup()
+    const { store } = renderTopbar()
+    act(() => store.getState().setName("Edited"))
+    persistEditorWorkflow.mockResolvedValueOnce({
+      issueCount: 0,
+      publicationInvalidated: true,
+    })
+
+    await user.click(screen.getByTestId("mobile-editor-save"))
+
+    await waitFor(() => expect(toastWarning).toHaveBeenCalledWith("publicationInvalidated"))
+    expect(toastSuccess).not.toHaveBeenCalled()
   })
 
   it("enqueues a manual trigger for the paired desktop on Run", async () => {

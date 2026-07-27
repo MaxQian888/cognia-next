@@ -25,8 +25,10 @@ import type { Viewport } from "@xyflow/react"
 import type {
   VisualWorkflow,
   WorkflowCredentialRef,
+  WorkflowInterface,
   WorkflowNodeData,
   WorkflowNodeKind,
+  WorkflowPublication,
   WorkflowSettings,
 } from "@/types/workflow/visual"
 import {
@@ -420,8 +422,13 @@ export interface EditorState extends EditorStateSnapshot {
   loadWorkflow: (wf: VisualWorkflow, options?: { dirty?: boolean }) => void
   /** Snapshot back into a `VisualWorkflow` for `replaceWorkflow(wf)`. */
   toWorkflow: () => VisualWorkflow
-  /** Mark the editor as saved at the current timestamp. */
-  markSaved: () => void
+  /**
+   * Mark the editor as saved and optionally synchronize canonical persistence
+   * metadata without replacing graph, selection, or undo history.
+   */
+  markSaved: (workflow?: VisualWorkflow) => void
+  /** Synchronize explicit publish/unpublish results without marking the graph dirty. */
+  syncPublication: (published?: WorkflowPublication, workflowInterface?: WorkflowInterface) => void
   resetDirty: () => void
 
   // ── productivity actions (undoable) ──────────────────────────────────────
@@ -1156,7 +1163,28 @@ export function createEditorStore(initial: VisualWorkflow): EditorStore {
           return reactFlowToWorkflow(s.baseWorkflow, s.nodes, s.edges, s.viewport)
         },
 
-        markSaved: () => set({ dirty: false, savedAt: Date.now() }),
+        markSaved: (workflow) =>
+          set((state) => ({
+            baseWorkflow: workflow
+              ? {
+                  ...state.baseWorkflow,
+                  schemaVersion: workflow.schemaVersion,
+                  interface: workflow.interface,
+                  published: workflow.published,
+                  updatedAt: workflow.updatedAt,
+                }
+              : state.baseWorkflow,
+            dirty: false,
+            savedAt: workflow?.updatedAt ?? Date.now(),
+          })),
+        syncPublication: (published, workflowInterface) =>
+          set((state) => ({
+            baseWorkflow: {
+              ...state.baseWorkflow,
+              published,
+              interface: workflowInterface,
+            },
+          })),
         resetDirty: () => set({ dirty: false }),
 
         duplicateNodes: (ids) => {

@@ -3,6 +3,7 @@ import "fake-indexeddb/auto"
 import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
 import { createWorkflow, updateWorkflow } from "@/lib/db/workflows"
 import { executeRunWorkflowTyped } from "./run-workflow-typed-tool"
+import { publishWorkflow } from "./publish-workflow"
 
 // Overridable passthrough so the catch-all branch can be exercised — ESM
 // namespaces reject spyOn redefinition.
@@ -45,15 +46,20 @@ async function seedPublished(
         type: "trigger.manual",
         typeVersion: 1,
         position: { x: 0, y: 0 },
-        data: { label: "start", params: {} },
+        data: { label: "start", params: { inputSchema } },
       },
     ],
     edges: [],
   })
-  await updateWorkflow(wf.id, {
-    interface: { inputSchema, ...(opts.outputSchema ? { outputSchema: opts.outputSchema } : {}) },
-    published: { at: 1, toolName: "wf_" + name.toLowerCase() },
-  })
+  await publishWorkflow(wf.id, 1)
+  // This fixture targets the runner's final output guard rather than the
+  // io.output node's own schema validation, so inject the stored contract
+  // directly after the canonical publish path has established publication.
+  if (opts.outputSchema) {
+    await getDb().workflows.update(wf.id, {
+      interface: { inputSchema, outputSchema: opts.outputSchema },
+    })
+  }
   return wf.id
 }
 

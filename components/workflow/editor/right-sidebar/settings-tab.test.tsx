@@ -7,6 +7,13 @@ import { NextIntlClientProvider } from "next-intl"
 import { createEditorStore } from "@/lib/workflow/editor/store"
 import type { VisualWorkflow } from "@/types/workflow/visual"
 
+const publishWorkflow = jest.fn()
+const unpublishWorkflow = jest.fn()
+jest.mock("@/lib/workflow/publish/publish-workflow", () => ({
+  publishWorkflow: (...args: unknown[]) => publishWorkflow(...args),
+  unpublishWorkflow: (...args: unknown[]) => unpublishWorkflow(...args),
+}))
+
 const EMPTY_CATALOG: never[] = []
 jest.mock("@/lib/workflow/nodes/catalog", () => ({
   subscribePluginCatalog: () => () => {},
@@ -79,6 +86,14 @@ const messages = {
         sections: { nodes: "Nodes", triggers: "Triggers", templates: "Templates" },
         contributedBy: "Provided by {plugin}",
       },
+      publish: {
+        title: "Publish",
+        hint: "Publish hint",
+        publish: "Publish",
+        publishedAs: "Published as tool",
+        republish: "Re-publish",
+        unpublish: "Unpublish",
+      },
     },
   },
 }
@@ -112,6 +127,11 @@ function mount() {
 }
 
 describe("SettingsTab", () => {
+  beforeEach(() => {
+    publishWorkflow.mockReset()
+    unpublishWorkflow.mockReset()
+  })
+
   it("renders all sections", () => {
     mount()
     expect(screen.getByTestId("workflow-settings-tab")).toBeInTheDocument()
@@ -161,5 +181,37 @@ describe("SettingsTab", () => {
     expect(store.getState().baseWorkflow.settings.riskGating).toBe(true)
     fireEvent.click(screen.getByTestId("wf-risk-gating"))
     expect(store.getState().baseWorkflow.settings.riskGating).toBe(false)
+  })
+
+  it("syncs publish and unpublish results into the editor store without marking it dirty", async () => {
+    const workflowInterface = {
+      inputSchema: { type: "object" },
+      outputSchema: { type: "string" },
+    }
+    publishWorkflow.mockResolvedValue({
+      toolName: "wf_wf",
+      workflowInterface,
+      created: true,
+      skillId: "skill_wf",
+    })
+    unpublishWorkflow.mockResolvedValue(undefined)
+    const store = mount()
+
+    fireEvent.click(screen.getByTestId("workflow-publish-button"))
+
+    await screen.findByText("wf_wf")
+    expect(store.getState().baseWorkflow.published).toEqual({
+      at: expect.any(Number),
+      toolName: "wf_wf",
+    })
+    expect(store.getState().baseWorkflow.interface).toEqual(workflowInterface)
+    expect(store.getState().dirty).toBe(false)
+
+    fireEvent.click(screen.getByText("Unpublish"))
+
+    await screen.findByTestId("workflow-publish-button")
+    expect(store.getState().baseWorkflow.published).toBeUndefined()
+    expect(store.getState().baseWorkflow.interface).toBeUndefined()
+    expect(store.getState().dirty).toBe(false)
   })
 })

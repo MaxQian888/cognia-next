@@ -1153,6 +1153,76 @@ describe("editor store — pin data", () => {
   })
 })
 
+describe("editor store — persisted publication metadata", () => {
+  it("syncs publish and unpublish results without dirtying or replacing editor state", () => {
+    const useStore = createEditorStore(emptyWorkflow())
+    const nodeId = useStore.getState().addNode("trigger.manual", { x: 0, y: 0 })
+    useStore.getState().setSelectedNodes([nodeId])
+    useStore.getState().markSaved()
+    const nodes = useStore.getState().nodes
+    const selectedNodeIds = useStore.getState().selectedNodeIds
+    const historyLength = useStore.temporal.getState().pastStates.length
+    const workflowInterface = {
+      inputSchema: { type: "object" },
+      outputSchema: { type: "string" },
+    }
+
+    useStore.getState().syncPublication({ at: 100, toolName: "wf_empty" }, workflowInterface)
+
+    expect(useStore.getState().baseWorkflow.published).toEqual({
+      at: 100,
+      toolName: "wf_empty",
+    })
+    expect(useStore.getState().baseWorkflow.interface).toEqual(workflowInterface)
+    expect(useStore.getState().dirty).toBe(false)
+    expect(useStore.getState().nodes).toBe(nodes)
+    expect(useStore.getState().selectedNodeIds).toBe(selectedNodeIds)
+    expect(useStore.temporal.getState().pastStates).toHaveLength(historyLength)
+
+    useStore.getState().syncPublication(undefined, undefined)
+
+    expect(useStore.getState().baseWorkflow.published).toBeUndefined()
+    expect(useStore.getState().baseWorkflow.interface).toBeUndefined()
+    expect(useStore.getState().dirty).toBe(false)
+    expect(useStore.getState().nodes).toBe(nodes)
+    expect(useStore.getState().selectedNodeIds).toBe(selectedNodeIds)
+    expect(useStore.temporal.getState().pastStates).toHaveLength(historyLength)
+  })
+
+  it("marks a canonical save without replacing graph, selection, or undo history", () => {
+    const useStore = createEditorStore(emptyWorkflow())
+    const nodeId = useStore.getState().addNode("trigger.manual", { x: 0, y: 0 })
+    useStore.getState().setSelectedNodes([nodeId])
+    const nodes = useStore.getState().nodes
+    const selectedNodeIds = useStore.getState().selectedNodeIds
+    const historyLength = useStore.temporal.getState().pastStates.length
+    const persisted: VisualWorkflow = {
+      ...useStore.getState().toWorkflow(),
+      schemaVersion: 2,
+      updatedAt: 200,
+      interface: {
+        inputSchema: { type: "object" },
+        outputSchema: { type: "number" },
+      },
+      published: { at: 100, toolName: "wf_empty" },
+    }
+
+    useStore.getState().markSaved(persisted)
+
+    expect(useStore.getState().baseWorkflow).toMatchObject({
+      schemaVersion: 2,
+      updatedAt: 200,
+      interface: persisted.interface,
+      published: persisted.published,
+    })
+    expect(useStore.getState().savedAt).toBe(200)
+    expect(useStore.getState().dirty).toBe(false)
+    expect(useStore.getState().nodes).toBe(nodes)
+    expect(useStore.getState().selectedNodeIds).toBe(selectedNodeIds)
+    expect(useStore.temporal.getState().pastStates).toHaveLength(historyLength)
+  })
+})
+
 describe("editor store — run-single-step signal", () => {
   it("sets and clears requestedRunSingleStepId without polluting undo history", () => {
     const useStore = createEditorStore(emptyWorkflow())

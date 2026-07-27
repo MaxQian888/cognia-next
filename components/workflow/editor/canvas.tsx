@@ -380,8 +380,10 @@ function CanvasInner({ store, onRequestRun }: CanvasInnerProps) {
     try {
       // Shared persist path (toWorkflow → replaceWorkflow → trigger sync →
       // markSaved → revalidate); the mobile editor uses the same helper.
-      const issueCount = await persistEditorWorkflow(useStore)
-      if (issueCount > 0) {
+      const { issueCount, publicationInvalidated } = await persistEditorWorkflow(useStore)
+      if (publicationInvalidated) {
+        toast.warning(t("publicationInvalidated"))
+      } else if (issueCount > 0) {
         toast.warning(tValidation("blockedSaveTitle", { count: issueCount }))
       } else {
         toast.success(t("savedOk"))

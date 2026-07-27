@@ -14,115 +14,29 @@
  * callers see only the interface.
  */
 
-import type { VisualWorkflow, WorkflowInterface } from "@/types/workflow/visual"
-import { getWorkflow, updateWorkflow } from "@/lib/db/workflows"
-import { getDb } from "@/lib/db/schema"
-import { createSkill, updateSkill, deleteSkill, workflowSkillBody } from "@/lib/db/skills"
 import { WORKFLOW_RUNNER_TOOL_NAME } from "./runner-tool"
-import type { Skill } from "@cognia/agent-config-types"
+import {
+  derivePublishedInterface,
+  publishWorkflowLifecycle,
+  toolNameForWorkflow,
+  unpublishWorkflowLifecycle,
+  workflowSkillCanonicalId,
+  type PublishWorkflowResult,
+} from "./publication-lifecycle"
 
 export { WORKFLOW_RUNNER_TOOL_NAME }
-
-/** Canonical id of the skill-catalog entry backing a published workflow. */
-export function workflowSkillCanonicalId(workflowId: string): string {
-  return `workflow:${workflowId}`
-}
-
-/**
- * Stable, slug-based display identifier for a published workflow. Shown in
- * publish UI / catalog rows only — it is NOT a registered tool name; the
- * callable surface is {@link WORKFLOW_RUNNER_TOOL_NAME}.
- */
-export function toolNameForWorkflow(workflow: Pick<VisualWorkflow, "name">): string {
-  const slug = workflow.name
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "_")
-    .replace(/^_+|_+$/g, "")
-    .slice(0, 40)
-  return `wf_${slug || "workflow"}`
-}
-
-/** Scan the canvas for the declared input/output schemas. */
-export function derivePublishedInterface(workflow: VisualWorkflow): WorkflowInterface {
-  let inputSchema: Record<string, unknown> | undefined
-  let outputSchema: Record<string, unknown> | undefined
-  const hasProps = (s: unknown): s is Record<string, unknown> =>
-    !!s && typeof s === "object" && Object.keys(s as object).length > 0
-  for (const node of workflow.nodes) {
-    const params = (node.data?.params ?? {}) as Record<string, unknown>
-    if (node.type === "trigger.manual" && hasProps(params.inputSchema)) {
-      inputSchema = params.inputSchema as Record<string, unknown>
-    }
-    if (node.type === "io.output" && hasProps(params.outputSchema)) {
-      outputSchema = params.outputSchema as Record<string, unknown>
-    }
-  }
-  return {
-    ...(inputSchema ? { inputSchema } : {}),
-    ...(outputSchema ? { outputSchema } : {}),
-  }
-}
-
-async function findWorkflowSkill(canonicalId: string): Promise<Skill | undefined> {
-  const all = await getDb().skills.toArray()
-  return all.find((s) => s.canonicalId === canonicalId)
-}
-
-export interface PublishResult {
-  toolName: string
-  workflowInterface: WorkflowInterface
-  skillId: string
-  created: boolean
-}
+export { derivePublishedInterface, toolNameForWorkflow, workflowSkillCanonicalId }
+export type PublishResult = PublishWorkflowResult
 
 /**
  * Publish (or re-publish) the workflow. Idempotent: re-publishing refreshes the
  * derived interface, the publication timestamp, and the skill entry.
  */
 export async function publishWorkflow(workflowId: string, at: number): Promise<PublishResult> {
-  const workflow = await getWorkflow(workflowId)
-  if (!workflow) throw new Error(`publishWorkflow: workflow ${workflowId} not found`)
-
-  const workflowInterface = derivePublishedInterface(workflow)
-  const toolName = toolNameForWorkflow(workflow)
-
-  await updateWorkflow(workflowId, {
-    interface: workflowInterface,
-    published: { at, toolName },
-  })
-
-  const canonicalId = workflowSkillCanonicalId(workflowId)
-  const existing = await findWorkflowSkill(canonicalId)
-  const draft = {
-    name: workflow.name,
-    description: workflow.description?.trim() || `Run the "${workflow.name}" workflow.`,
-    // Canonical graph-bodied skill body (shared with `renderSkillsSection`,
-    // which re-derives it at render time so stale stored bodies self-heal).
-    content: workflowSkillBody(workflow.name),
-    category: "meta" as const,
-    source: "generated" as const,
-    canonicalId,
-    kind: "workflow" as const,
-    workflowId,
-  }
-
-  if (existing) {
-    await updateSkill(existing.id, {
-      name: draft.name,
-      description: draft.description,
-      content: draft.content,
-      kind: "workflow",
-      workflowId,
-    })
-    return { toolName, workflowInterface, skillId: existing.id, created: false }
-  }
-  const skill = await createSkill(draft)
-  return { toolName, workflowInterface, skillId: skill.id, created: true }
+  return publishWorkflowLifecycle(workflowId, at)
 }
 
 /** Unpublish: clear the publication and drop the backing skill entry. */
 export async function unpublishWorkflow(workflowId: string): Promise<void> {
-  await updateWorkflow(workflowId, { published: undefined })
-  const existing = await findWorkflowSkill(workflowSkillCanonicalId(workflowId))
-  if (existing) await deleteSkill(existing.id)
+  await unpublishWorkflowLifecycle(workflowId)
 }

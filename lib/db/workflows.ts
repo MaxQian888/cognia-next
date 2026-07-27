@@ -19,6 +19,12 @@ import { ROOT_FOLDER_ID } from "@/types/workflow/folder"
 import { getDb } from "./schema"
 import { recordTombstones } from "@/lib/sync/tombstones"
 import { migrateWorkflow } from "@/lib/workflow/definition/migrate"
+import {
+  deleteWorkflowWithPublication,
+  replaceWorkflowWithPublication,
+  updateWorkflowWithPublication,
+  type WorkflowMutationResult,
+} from "@/lib/workflow/publish/publication-lifecycle"
 
 function newWorkflowId(): string {
   return "wf_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 8)
@@ -84,7 +90,6 @@ export type WorkflowDraft = Pick<VisualWorkflow, "name"> &
       | "pinData"
       | "staticData"
       | "interface"
-      | "published"
     >
   >
 
@@ -118,7 +123,7 @@ export async function createWorkflow(draft: WorkflowDraft): Promise<WorkflowRow>
     staticData: draft.staticData,
     viewport: draft.viewport ?? { x: 0, y: 0, zoom: 1 },
     interface: draft.interface,
-    published: draft.published,
+    published: undefined,
   }
   await getDb().workflows.put(workflow)
   await projectPersistedWorkflowTriggers(workflow)
@@ -126,7 +131,10 @@ export async function createWorkflow(draft: WorkflowDraft): Promise<WorkflowRow>
 }
 
 export type WorkflowPatch = Partial<
-  Omit<VisualWorkflow, "id" | "createdAt" | "isBuiltIn" | "schemaVersion">
+  Omit<
+    VisualWorkflow,
+    "id" | "createdAt" | "updatedAt" | "isBuiltIn" | "schemaVersion" | "interface" | "published"
+  >
 >
 
 /**
@@ -134,11 +142,14 @@ export type WorkflowPatch = Partial<
  * automatically; callers must not pass it manually (otherwise concurrent
  * editors with stale clocks could rewind it).
  */
-export async function updateWorkflow(id: string, patch: WorkflowPatch): Promise<void> {
-  const updated = await getDb().workflows.update(id, { ...patch, updatedAt: nowMs() })
-  if (updated === 0) return
-  const workflow = await getDb().workflows.get(id)
-  if (workflow) await projectPersistedWorkflowTriggers(migrateWorkflow(workflow))
+export async function updateWorkflow(
+  id: string,
+  patch: WorkflowPatch
+): Promise<WorkflowRow | undefined> {
+  const result = await updateWorkflowWithPublication(id, patch, nowMs())
+  if (!result) return undefined
+  await projectPersistedWorkflowTriggers(result.workflow)
+  return result.workflow
 }
 
 /**
@@ -146,14 +157,13 @@ export async function updateWorkflow(id: string, patch: WorkflowPatch): Promise<
  * whole graph round-trips. Refuses to write if the id doesn't already exist
  * (use `createWorkflow` for new rows). Bumps `updatedAt`.
  */
-export async function replaceWorkflow(workflow: VisualWorkflow): Promise<void> {
-  const existing = await getDb().workflows.get(workflow.id)
-  if (!existing) {
+export async function replaceWorkflow(workflow: VisualWorkflow): Promise<WorkflowMutationResult> {
+  const result = await replaceWorkflowWithPublication(workflow, nowMs())
+  if (!result) {
     throw new Error(`Workflow ${workflow.id} not found`)
   }
-  const replacement: VisualWorkflow = { ...workflow, schemaVersion: 2, updatedAt: nowMs() }
-  await getDb().workflows.put(replacement)
-  await projectPersistedWorkflowTriggers(replacement)
+  await projectPersistedWorkflowTriggers(result.workflow)
+  return result
 }
 
 /** Query options for {@link listWorkflowRuns}. */
@@ -188,11 +198,11 @@ export async function deleteWorkflow(id: string): Promise<void> {
   if (existing?.isBuiltIn) {
     throw new Error("Built-in workflows cannot be deleted. Duplicate first.")
   }
+  await deleteWorkflowWithPublication(id)
   if (existing) {
     const { unsyncWorkflowTriggers } = await import("@/lib/workflow/runtime/webhook-bridge")
     await unsyncWorkflowTriggers(existing)
   }
-  await getDb().workflows.delete(id)
   // Mirror the deletion to paired phones via the companion sync (v61).
   await recordTombstones("workflows", [id])
   // Cascade-drop orphan fan-out subscriptions so they don't accumulate
@@ -235,6 +245,7 @@ export async function duplicateWorkflow(id: string): Promise<WorkflowRow> {
     name: `${source.name} (copy)`,
     isBuiltIn: false,
     isTemplate: false,
+    published: undefined,
     createdAt: now,
     updatedAt: now,
   }
@@ -493,7 +504,6 @@ export async function saveWorkflowAsTemplate(id: string): Promise<WorkflowRow> {
     // Publication is identity-bearing state tied to the source workflow id
     // and stable tool name. The reusable interface is copied; the template
     // must be explicitly published after instantiation.
-    published: undefined,
   })
 }
 

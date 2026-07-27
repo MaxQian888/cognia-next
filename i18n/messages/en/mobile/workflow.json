@@ -46,6 +46,7 @@
     "menu": "More actions",
     "modeEdit": "Edit",
     "modeRead": "View",
+    "publicationInvalidated": "Workflow saved and unpublished because its callable interface changed. Publish it again to expose the new contract.",
     "redo": "Redo",
     "run": "Run",
     "runHistory": "Run history",

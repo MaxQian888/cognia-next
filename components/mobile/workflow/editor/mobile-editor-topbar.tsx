@@ -112,8 +112,12 @@ export function MobileEditorTopbar({
     if (saving) return
     setSaving(true)
     try {
-      const issueCount = await persistEditorWorkflow(store)
-      toast.success(issueCount > 0 ? t("savedWithIssues", { count: issueCount }) : t("saved"))
+      const { issueCount, publicationInvalidated } = await persistEditorWorkflow(store)
+      if (publicationInvalidated) {
+        toast.warning(t("publicationInvalidated"))
+      } else {
+        toast.success(issueCount > 0 ? t("savedWithIssues", { count: issueCount }) : t("saved"))
+      }
     } catch (err) {
       toast.error(err instanceof Error ? err.message : t("saveFailed"))
     } finally {

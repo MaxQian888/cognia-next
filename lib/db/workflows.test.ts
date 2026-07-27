@@ -36,6 +36,7 @@ import {
 import { __resetDbForTesting, getDb, whenSeeded } from "./schema"
 import { ROOT_FOLDER_ID } from "@/types/workflow/folder"
 import { DEFAULT_WORKFLOW_SETTINGS, type VisualWorkflow } from "@/types/workflow/visual"
+import { publishWorkflow } from "@/lib/workflow/publish/publish-workflow"
 
 jest.mock("@/lib/workflow/runtime/webhook-bridge", () => ({
   syncWorkflowTriggers: jest.fn(async () => undefined),
@@ -147,7 +148,6 @@ describe("createWorkflow", () => {
       pinData: { n1: { preview: true } },
       staticData: { cursor: 7 },
       interface: { inputSchema: { type: "object" }, outputSchema: { type: "string" } },
-      published: { at: 100, toolName: "complete_flow" },
       settings: {
         ...DEFAULT_WORKFLOW_SETTINGS,
         riskGating: false,
@@ -161,10 +161,20 @@ describe("createWorkflow", () => {
       pinData: { n1: { preview: true } },
       staticData: { cursor: 7 },
       interface: { inputSchema: { type: "object" }, outputSchema: { type: "string" } },
-      published: { at: 100, toolName: "complete_flow" },
     })
     expect(wf.settings.riskGating).toBe(false)
     expect(wf.settings.onFailure).toEqual({ runCatchNodes: false, notify: true })
+  })
+
+  it("never accepts publication state through the ordinary create boundary", async () => {
+    const wf = await createWorkflow({
+      name: "Cannot bypass publish",
+      published: { at: 100, toolName: "wf_bypass" },
+    } as Parameters<typeof createWorkflow>[0] & {
+      published: { at: number; toolName: string }
+    })
+
+    expect(wf.published).toBeUndefined()
   })
 
   it("projects the persisted workflow into the trigger runtime", async () => {
@@ -271,6 +281,44 @@ describe("updateWorkflow / replaceWorkflow", () => {
       expect.objectContaining({ id: wf.id, nodes: [manualNode("replacement-trigger")] })
     )
   })
+
+  it("rejects protected metadata injected through an ordinary update patch", async () => {
+    const initialInterface = {
+      inputSchema: { type: "object" },
+      outputSchema: { type: "string" },
+    }
+    const wf = await createWorkflow({ name: "Protected", interface: initialInterface })
+    const canonicalUpdatedAt = wf.updatedAt + 500
+    const now = jest.spyOn(Date, "now").mockReturnValue(canonicalUpdatedAt)
+
+    try {
+      const updated = await updateWorkflow(wf.id, {
+        id: "wf_injected",
+        createdAt: 0,
+        updatedAt: 0,
+        schemaVersion: 999,
+        interface: {
+          inputSchema: { type: "array" },
+          outputSchema: { type: "number" },
+        },
+        published: { at: 1, toolName: "wf_injected" },
+        description: "Allowed",
+      } as Parameters<typeof updateWorkflow>[1] & Record<string, unknown>)
+
+      expect(updated).toMatchObject({
+        id: wf.id,
+        createdAt: wf.createdAt,
+        updatedAt: canonicalUpdatedAt,
+        schemaVersion: wf.schemaVersion,
+        interface: initialInterface,
+        description: "Allowed",
+      })
+      expect(updated.published).toBeUndefined()
+      expect(await getWorkflow("wf_injected")).toBeUndefined()
+    } finally {
+      now.mockRestore()
+    }
+  })
 })
 
 describe("deleteWorkflow", () => {
@@ -280,7 +328,7 @@ describe("deleteWorkflow", () => {
     expect(await getWorkflow(wf.id)).toBeUndefined()
   })
 
-  it("unregisters trigger nodes before deleting the workflow row", async () => {
+  it("unregisters trigger nodes after deleting the workflow row and Skill atomically", async () => {
     const wf = await createWorkflow({ name: "A", nodes: [manualNode("n_manual")] })
 
     await deleteWorkflow(wf.id)
@@ -289,6 +337,24 @@ describe("deleteWorkflow", () => {
       expect.objectContaining({ id: wf.id, nodes: wf.nodes })
     )
     expect(await getWorkflow(wf.id)).toBeUndefined()
+  })
+
+  it("keeps triggers registered when the atomic workflow and Skill delete rolls back", async () => {
+    const wf = await createWorkflow({ name: "A", nodes: [manualNode("n_manual")] })
+    const publication = await publishWorkflow(wf.id, 10)
+    const skillDelete = jest
+      .spyOn(getDb().skills, "delete")
+      .mockRejectedValueOnce(new Error("skill delete failed"))
+
+    try {
+      await expect(deleteWorkflow(wf.id)).rejects.toThrow("skill delete failed")
+
+      expect(unsyncWorkflowTriggersMock).not.toHaveBeenCalled()
+      expect(await getWorkflow(wf.id)).toBeDefined()
+      expect(await getDb().skills.get(publication.skillId)).toBeDefined()
+    } finally {
+      skillDelete.mockRestore()
+    }
   })
 
   it("records a tombstone so the deletion mirrors to phones (v61)", async () => {
@@ -719,6 +785,8 @@ describe("schemaVersion 2 funnel", () => {
         pinData: { n1: { sample: 1 } },
         staticData: { cursor: 3 },
         interface: { inputSchema: { type: "object" }, outputSchema: { type: "object" } },
+      })
+      await getDb().workflows.update(src.id, {
         published: { at: 10, toolName: "published_pipeline" },
       })
 

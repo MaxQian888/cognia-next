@@ -288,6 +288,8 @@ export async function upsertSkillByCanonicalId(input: {
       syncOrigin: draft.syncOrigin ?? existing.syncOrigin,
       syncFingerprint: draft.syncFingerprint ?? existing.syncFingerprint,
       validationErrors: draft.validationErrors,
+      kind: draft.kind ?? existing.kind,
+      workflowId: draft.workflowId ?? existing.workflowId,
     })
     if (draft.resources) {
       await replaceResourcesForSkill(existing.id, draft.resources)

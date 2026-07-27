@@ -1,7 +1,8 @@
 /** @jest-environment jsdom */
 import "fake-indexeddb/auto"
 import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
-import { createWorkflow, updateWorkflow } from "@/lib/db/workflows"
+import { createWorkflow } from "@/lib/db/workflows"
+import { publishWorkflow } from "@/lib/workflow/publish/publish-workflow"
 import { buildRunTypedTools } from "./run-typed-tools"
 
 const tool = buildRunTypedTools().find((t) => t.name === "wf_run_workflow_typed")!
@@ -28,15 +29,12 @@ async function seedPublished(name: string): Promise<string> {
         type: "trigger.manual",
         typeVersion: 1,
         position: { x: 0, y: 0 },
-        data: { label: "start", params: {} },
+        data: { label: "start", params: { inputSchema } },
       },
     ],
     edges: [],
   })
-  await updateWorkflow(wf.id, {
-    interface: { inputSchema },
-    published: { at: 1, toolName: "wf_" + name.toLowerCase() },
-  })
+  await publishWorkflow(wf.id, 1)
   return wf.id
 }
 

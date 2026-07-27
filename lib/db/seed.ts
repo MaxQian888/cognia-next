@@ -10,6 +10,7 @@ import { seedBuiltInTeams } from "./teams"
 import { seedBuiltInPresets } from "./prompt-presets"
 import { seedBuiltInWorkflowTemplates } from "@/lib/workflow/definition/seed"
 import { seedGoalTemplates } from "@/lib/goal/seed-templates"
+import { reconcileWorkflowPublications } from "@/lib/workflow/publish/publication-lifecycle"
 
 /**
  * Run all built-in seeders. Skills, characters, presets, and workflow
@@ -25,4 +26,5 @@ export async function seedBuiltIns(): Promise<void> {
     seedGoalTemplates(),
   ])
   await seedBuiltInTeams()
+  await reconcileWorkflowPublications()
 }

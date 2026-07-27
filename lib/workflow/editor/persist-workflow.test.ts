@@ -3,9 +3,12 @@
  */
 import "fake-indexeddb/auto"
 
-const replaceWorkflow = jest.fn(async (..._a: unknown[]) => {})
+const replaceWorkflow = jest.fn(async (workflow: VisualWorkflow) => ({
+  workflow: { ...workflow, updatedAt: 99 },
+  publicationInvalidated: false,
+}))
 jest.mock("@/lib/db/workflows", () => ({
-  replaceWorkflow: (...a: unknown[]) => replaceWorkflow(...a),
+  replaceWorkflow: (...a: unknown[]) => replaceWorkflow(a[0] as VisualWorkflow),
 }))
 
 import { persistEditorWorkflow } from "./persist-workflow"
@@ -48,18 +51,49 @@ describe("persistEditorWorkflow", () => {
     store.getState().setName("Edited") // mark dirty
     expect(store.getState().dirty).toBe(true)
 
-    const issueCount = await persistEditorWorkflow(store)
+    const result = await persistEditorWorkflow(store)
 
     expect(replaceWorkflow).toHaveBeenCalledTimes(1)
     expect(store.getState().dirty).toBe(false)
-    expect(issueCount).toBe(0)
+    expect(store.getState().baseWorkflow.updatedAt).toBe(99)
+    expect(result).toEqual({ issueCount: 0, publicationInvalidated: false })
   })
 
   it("reports the validation issue count for an invalid node", async () => {
     // ai.prompt with empty params is missing its required prompt → 1 issue.
     const store = createEditorStore(buildWorkflow("ai.prompt"))
-    const issueCount = await persistEditorWorkflow(store)
-    expect(issueCount).toBeGreaterThan(0)
+    const result = await persistEditorWorkflow(store)
+    expect(result.issueCount).toBeGreaterThan(0)
     expect(replaceWorkflow).toHaveBeenCalledTimes(1)
+  })
+
+  it("syncs an invalidated publication without resetting graph or selection state", async () => {
+    const workflow = {
+      ...buildWorkflow("trigger.manual"),
+      published: { at: 1, toolName: "wf_persist" },
+      interface: { inputSchema: { type: "object" } },
+    }
+    const store = createEditorStore(workflow)
+    store.getState().setSelectedNodes(["n1"])
+    store.getState().setName("Edited")
+    const historyLength = store.temporal.getState().pastStates.length
+    replaceWorkflow.mockResolvedValueOnce({
+      workflow: {
+        ...store.getState().toWorkflow(),
+        updatedAt: 100,
+        published: undefined,
+        interface: undefined,
+      },
+      publicationInvalidated: true,
+    })
+
+    const result = await persistEditorWorkflow(store)
+
+    expect(result.publicationInvalidated).toBe(true)
+    expect(store.getState().baseWorkflow.published).toBeUndefined()
+    expect(store.getState().baseWorkflow.interface).toBeUndefined()
+    expect(store.getState().selectedNodeIds).toEqual(["n1"])
+    expect(store.getState().nodes).toHaveLength(1)
+    expect(store.temporal.getState().pastStates).toHaveLength(historyLength)
   })
 })

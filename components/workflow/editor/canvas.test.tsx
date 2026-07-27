@@ -11,6 +11,7 @@ import { toast } from "sonner"
 import type { VisualWorkflow } from "@/types/workflow/visual"
 import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
 import { createWorkflow, getWorkflow } from "@/lib/db/workflows"
+import { publishWorkflow } from "@/lib/workflow/publish/publish-workflow"
 
 function renderWithProviders(ui: React.ReactElement) {
   return render(<TooltipProvider>{ui}</TooltipProvider>)
@@ -215,6 +216,64 @@ describe("WorkflowEditorCanvas", () => {
       expect((await getWorkflow(wf.id))?.name).toBe("Imported graph")
     })
   })
+
+  it("warns and refreshes publication state when a saved import changes the contract", async () => {
+    const originalSchema = {
+      type: "object",
+      properties: { topic: { type: "string" } },
+    }
+    const wf = await createWorkflow({
+      name: "Published canvas",
+      nodes: [
+        {
+          ...buildSample().nodes[0],
+          data: { label: "Run", params: { inputSchema: originalSchema } },
+        },
+      ],
+      edges: [],
+    })
+    await publishWorkflow(wf.id, 1)
+    const published = (await getWorkflow(wf.id))!
+    ;(toast.warning as jest.Mock).mockClear()
+    renderWithProviders(<WorkflowEditorCanvas workflow={published} />)
+
+    fireEvent.change(screen.getByTestId("workflow-import-input"), {
+      target: {
+        files: [
+          new File(
+            [
+              JSON.stringify({
+                name: published.name,
+                nodes: [
+                  {
+                    ...buildSample().nodes[0],
+                    data: {
+                      label: "Run",
+                      params: {
+                        inputSchema: {
+                          type: "object",
+                          properties: { url: { type: "string" } },
+                        },
+                      },
+                    },
+                  },
+                ],
+                edges: [],
+              }),
+            ],
+            "workflow.json",
+            { type: "application/json" }
+          ),
+        ],
+      },
+    })
+
+    await waitFor(() => expect(screen.getByText("Unsaved changes")).toBeInTheDocument())
+    fireEvent.click(screen.getByTestId("workflow-save"))
+
+    await waitFor(async () => expect((await getWorkflow(wf.id))?.published).toBeUndefined())
+    expect(toast.warning).toHaveBeenCalled()
+  }, 10_000)
 
   it("renders an empty state when the workflow has no nodes", async () => {
     const wf = await createWorkflow({ name: "x" })

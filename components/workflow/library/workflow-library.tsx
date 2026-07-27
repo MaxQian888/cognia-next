@@ -164,7 +164,6 @@ export function WorkflowLibrary() {
             // A publication belongs to the exported workflow id/tool name.
             // Import the callable interface, then require an explicit publish
             // for the fresh row to avoid two definitions claiming one tool.
-            published: undefined,
           })
           imported += 1
         }

@@ -3,18 +3,28 @@
  * then mark the store saved and re-validate. `replaceWorkflow` owns trigger
  * projection for every writer, so this helper must not register twice.
  *
- * Returns the count of nodes with validation issues so callers can surface
- * their own toast. Saves are never blocked on validation — a dirty draft is
- * allowed on disk.
+ * Returns validation and publication outcomes so callers can surface their
+ * own toast. Saves are never blocked on validation — a dirty draft is allowed
+ * on disk.
  */
 
 import { replaceWorkflow } from "@/lib/db/workflows"
 import type { EditorStore } from "@/lib/workflow/editor/store"
 
-export async function persistEditorWorkflow(store: EditorStore): Promise<number> {
+export interface PersistEditorWorkflowResult {
+  issueCount: number
+  publicationInvalidated: boolean
+}
+
+export async function persistEditorWorkflow(
+  store: EditorStore
+): Promise<PersistEditorWorkflowResult> {
   const wf = store.getState().toWorkflow()
-  await replaceWorkflow(wf)
-  store.getState().markSaved()
+  const persisted = await replaceWorkflow(wf)
+  store.getState().markSaved(persisted.workflow)
   const issues = store.getState().revalidateAll()
-  return Object.keys(issues).length
+  return {
+    issueCount: Object.keys(issues).length,
+    publicationInvalidated: persisted.publicationInvalidated,
+  }
 }
