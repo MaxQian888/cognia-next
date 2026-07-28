@@ -11,6 +11,7 @@
 import { useEffect, useMemo, useState } from "react"
 import { useRouter } from "next/navigation"
 import { useLocale, useTranslations } from "next-intl"
+import { AnimatePresence, motion } from "motion/react"
 import {
   CopyIcon,
   MoreHorizontalIcon,
@@ -68,6 +69,13 @@ import {
 } from "@/components/ui/empty"
 import { toast } from "sonner"
 
+import {
+  MOBILE_SPRING,
+  STAGGER_CHILD,
+  STAGGER_CONTAINER,
+  useReducedMotionTransition,
+  useReducedMotionVariants,
+} from "@/lib/ui/motion"
 import { useAgentTeamStore } from "@/stores/agent/agent-team-store"
 import { useUIStore } from "@/stores/ui/ui-store"
 import { useTeamLiveStatus } from "@/hooks/agent-runs/use-team-live-status"
@@ -142,6 +150,9 @@ export default function AgentTeamsListPage() {
   const router = useRouter()
   const t = useTranslations("agentTeamsWorkspace")
   const tCat = useTranslations("agentTeamsWorkspace.templates.categories")
+  // Shared motion tokens, same vocabulary as the workspace panels.
+  const cardVariants = useReducedMotionVariants(STAGGER_CHILD)
+  const layoutTransition = useReducedMotionTransition(MOBILE_SPRING)
 
   const teams = useAgentTeamStore((s) => s.teams)
   const teammates = useAgentTeamStore((s) => s.teammates)
@@ -299,8 +310,9 @@ export default function AgentTeamsListPage() {
         </div>
       </div>
 
-      {/* Stats */}
-      <div className="grid grid-cols-3 gap-3">
+      {/* Stats. `grid-cols-3` with no breakpoint crushed three cards into a
+          narrow window; stack them below `sm` instead. */}
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
         <Card className="space-y-1 p-3 text-center sm:p-4">
           <p className="text-2xl font-semibold tabular-nums">{stats.total}</p>
           <p className="text-xs text-muted-foreground">{t("stats.totalTeams")}</p>
@@ -374,24 +386,43 @@ export default function AgentTeamsListPage() {
               </Empty>
             )
           ) : (
-            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-              {teamList.map((team) => (
-                <TeamCard
-                  key={team.id}
-                  team={team}
-                  teammates={teammates}
-                  editing={editingId === team.id}
-                  editName={editName}
-                  onEditNameChange={setEditName}
-                  onCommitRename={() => commitRename(team.id)}
-                  onCancelRename={() => setEditingId(null)}
-                  onOpen={() => router.push(`/agent-teams/workspace?teamId=${team.id}`)}
-                  onRename={() => startRename(team)}
-                  onDuplicate={() => handleDuplicate(team)}
-                  onDelete={() => setDeletingTeam(team)}
-                />
-              ))}
-            </div>
+            <motion.div
+              className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4"
+              variants={STAGGER_CONTAINER}
+              initial="initial"
+              animate="animate"
+            >
+              {/* `layout` + AnimatePresence: deleting a team used to blink it out
+                  and snap the rest of the grid up a row; filtering by search was
+                  the same jump. Both now read as movement. */}
+              <AnimatePresence initial={false}>
+                {teamList.map((team) => (
+                  <motion.div
+                    key={team.id}
+                    layout
+                    variants={cardVariants}
+                    initial="initial"
+                    animate="animate"
+                    exit="exit"
+                    transition={layoutTransition}
+                  >
+                    <TeamCard
+                      team={team}
+                      teammates={teammates}
+                      editing={editingId === team.id}
+                      editName={editName}
+                      onEditNameChange={setEditName}
+                      onCommitRename={() => commitRename(team.id)}
+                      onCancelRename={() => setEditingId(null)}
+                      onOpen={() => router.push(`/agent-teams/workspace?teamId=${team.id}`)}
+                      onRename={() => startRename(team)}
+                      onDuplicate={() => handleDuplicate(team)}
+                      onDelete={() => setDeletingTeam(team)}
+                    />
+                  </motion.div>
+                ))}
+              </AnimatePresence>
+            </motion.div>
           )}
         </TabsContent>
 
@@ -555,9 +586,12 @@ function TeamCard({
   const memberNames = team.teammateIds.map((id) => teammates[id]?.name ?? "?").slice(0, 3)
   const overflow = Math.max(0, team.teammateIds.length - 3)
 
+  // `transition-colors` rather than a bare `transition`: the latter animates
+  // every property including layout-affecting ones, which fights the `layout`
+  // animation on the wrapper when the grid reflows.
   return (
     <Card
-      className="group cursor-pointer space-y-2 p-4 transition hover:border-primary"
+      className="group cursor-pointer space-y-2 p-4 transition-colors duration-150 hover:border-primary"
       onClick={onOpen}
       data-testid={`team-card-${team.id}`}
     >
@@ -794,7 +828,7 @@ function CreateTeamDialog({ open, onOpenChange, templates, onCreated }: CreateTe
                   type="button"
                   disabled={saving}
                   onClick={() => handlePickTemplate(tpl)}
-                  className="flex items-start gap-3 rounded-md border p-3 text-left transition hover:border-primary disabled:opacity-50"
+                  className="flex items-start gap-3 rounded-md border p-3 text-left transition-colors duration-150 hover:border-primary disabled:opacity-50"
                 >
                   <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-primary/10 text-xs font-medium">
                     {tpl.name.charAt(0)}

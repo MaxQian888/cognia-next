@@ -645,21 +645,86 @@ describe("CodexAppServerAdapter", () => {
   })
 
   describe("thread housekeeping", () => {
-    it("compactSession and rollbackSession send the thread requests", async () => {
+    it("waits for provider-confirmed context compaction completion", async () => {
       responders["thread/compact/start"] = () => ({})
       responders["thread/rollback"] = () => ({})
       const adapter = await connectedAdapter()
       const session = await adapter.createSession()
-      await adapter.compactSession(session.id)
+      let settled = false
+      const compaction = adapter.compactSession(session.id).then(() => {
+        settled = true
+      })
+      await Promise.resolve()
+      await Promise.resolve()
       expect(lastWritten((m) => m.method === "thread/compact/start")?.params).toEqual({
         threadId: session.id,
       })
+      expect(settled).toBe(false)
+      feed("item/started", {
+        threadId: session.id,
+        item: { id: "compact_1", type: "contextCompaction" },
+      })
+      expect(settled).toBe(false)
+      feed("item/completed", {
+        threadId: session.id,
+        item: { id: "compact_1", type: "contextCompaction" },
+      })
+      await compaction
+      expect(settled).toBe(true)
+
       await adapter.rollbackSession(session.id, 2)
       expect(lastWritten((m) => m.method === "thread/rollback")?.params).toEqual({
         threadId: session.id,
         numTurns: 2,
       })
       expect(adapter.supportsCompaction()).toBe(true)
+      await expect(adapter.getCompactionCapability(session.id)).resolves.toMatchObject({
+        status: "supported",
+        routes: [{ kind: "native", supportsFocus: false }],
+      })
+    })
+
+    it("rejects focus rather than silently dropping it when no command accepts input", async () => {
+      const adapter = await connectedAdapter()
+      const session = await adapter.createSession()
+
+      await expect(
+        adapter.compactSession(session.id, { focus: "preserve API decisions" })
+      ).rejects.toThrow(/focus is not supported/i)
+      expect(lastWritten((message) => message.method === "thread/compact/start")).toBeUndefined()
+    })
+
+    it("falls back once to an advertised command when native compaction is unsupported", async () => {
+      responders["thread/compact/start"] = () => ({
+        __error: { code: -32601, message: "Method not found" },
+      })
+      const adapter = await connectedAdapter()
+      const session = await adapter.createSession()
+      session.metadata = {
+        ...session.metadata,
+        availableCommands: [{ name: "/compact", description: "Compact context", input: null }],
+      }
+
+      const compaction = adapter.compactSession(session.id)
+      for (let attempt = 0; attempt < 20; attempt += 1) {
+        if (lastWritten((message) => message.method === "turn/start")) break
+        await new Promise<void>((resolve) => setTimeout(resolve, 0))
+      }
+      expect(lastWritten((message) => message.method === "turn/start")).toBeDefined()
+      feed("turn/completed", {
+        threadId: session.id,
+        turn: { id: "turn_compact", status: "completed" },
+      })
+      await compaction
+
+      const fallback = lastWritten((message) => message.method === "turn/start")
+      expect((fallback?.params as { input: Array<{ text?: string }> }).input[0].text).toBe(
+        "/compact"
+      )
+      expect(await adapter.getCompactionCapability(session.id)).toEqual({
+        status: "supported",
+        routes: [{ kind: "command", command: "compact", supportsFocus: false }],
+      })
     })
 
     it("updates the session title from thread/name/updated", async () => {

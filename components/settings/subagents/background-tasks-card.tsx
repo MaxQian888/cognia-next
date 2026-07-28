@@ -1,21 +1,15 @@
 "use client"
 
-import { useEffect, useState } from "react"
-import { toast } from "sonner"
 import { useTranslations } from "next-intl"
-import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
 import { Textarea } from "@/components/ui/textarea"
-import { useSettingsStore } from "@/stores/settings"
 import type { ToolRules } from "@/lib/claude/permissions/ruleset"
-import { createLogger } from "@cognia/logging"
+import type { AppSettings } from "@cognia/agent-config-types"
 
-const log = createLogger("settings.backgroundTasks")
-
-/** Serialize a deny-list of projected subagent ids back into a `ToolRules`. */
-function rulesToDenyLines(rules: ToolRules | undefined): string {
+/** Serialize a deny-list of projected subagent ids back into editor text. */
+export function rulesToDenyLines(rules: ToolRules | undefined): string {
   if (!rules) return ""
   return Object.entries(rules)
     .filter(([, v]) => v === "deny")
@@ -24,7 +18,7 @@ function rulesToDenyLines(rules: ToolRules | undefined): string {
 }
 
 /** Parse newline-separated globs into a deny-only `ToolRules` (empty → undefined). */
-function denyLinesToRules(text: string): ToolRules | undefined {
+export function denyLinesToRules(text: string): ToolRules | undefined {
   const globs = text
     .split("\n")
     .map((l) => l.trim())
@@ -41,67 +35,78 @@ const clampInt = (value: string, min: number, max: number, fallback: number): nu
   return Math.max(min, Math.min(max, n))
 }
 
+export interface BackgroundPolicyValues {
+  autoResume: boolean
+  maxAttempts: number
+  /** true → `subagentAsks: "surface"`, false → `"auto-deny"`. */
+  surfaceAsks: boolean
+  /** Newline-separated glob text; parsed to `subagentRules` on save. */
+  denyGlobs: string
+}
+
+export const BACKGROUND_DEFAULTS: BackgroundPolicyValues = {
+  autoResume: false,
+  maxAttempts: 2,
+  surfaceAsks: true,
+  denyGlobs: "",
+}
+
+export function backgroundValuesFromSettings(
+  settings: AppSettings | null | undefined
+): BackgroundPolicyValues {
+  const bg = settings?.backgroundTasks
+  const ap = settings?.agentPermissions
+  return {
+    autoResume: bg?.autoResumeInterrupted ?? BACKGROUND_DEFAULTS.autoResume,
+    maxAttempts: bg?.maxAutoResumeAttempts ?? BACKGROUND_DEFAULTS.maxAttempts,
+    surfaceAsks: (ap?.subagentAsks ?? "surface") === "surface",
+    denyGlobs: rulesToDenyLines(ap?.subagentRules),
+  }
+}
+
+/**
+ * Project the form back onto the two settings branches it spans. The existing
+ * `agentPermissions` is spread through so this card never drops a sibling key
+ * it does not own.
+ */
+export function backgroundValuesToSettings(
+  values: BackgroundPolicyValues,
+  existingPermissions: AppSettings["agentPermissions"] | undefined
+): Pick<AppSettings, "backgroundTasks" | "agentPermissions"> {
+  const subagentRules = denyLinesToRules(values.denyGlobs)
+  return {
+    backgroundTasks: {
+      autoResumeInterrupted: values.autoResume,
+      maxAutoResumeAttempts: values.maxAttempts,
+    },
+    agentPermissions: {
+      ...(existingPermissions ?? {}),
+      subagentAsks: values.surfaceAsks ? "surface" : "auto-deny",
+      subagentRules,
+    },
+  }
+}
+
+export interface BackgroundTasksCardProps {
+  value: BackgroundPolicyValues
+  onChange: (partial: Partial<BackgroundPolicyValues>) => void
+}
+
 /**
  * Writer UI for the background-subagent lifecycle + permission settings:
- *  - `backgroundTasks.autoResumeInterrupted` / `maxAutoResumeAttempts`
- *  - `agentPermissions.subagentAsks` (surface ⇄ auto-deny)
- *  - `agentPermissions.subagentRules` (dispatch deny-list glob editor)
+ * `backgroundTasks.*`, `agentPermissions.subagentAsks`, and the dispatch
+ * deny-list (`agentPermissions.subagentRules`). Without this card those
+ * settings had no writer at all, leaving the boot auto-resume path and the
+ * dispatch policy dormant.
  *
- * Without this card those settings had no writer, leaving the boot auto-resume
- * path and the dispatch policy dormant. Self-contained save (mirrors the
- * sibling nesting card).
+ * Controlled — see the note on `SubagentNestingCard` for why the local state
+ * and per-card Save button were removed.
  */
-export function BackgroundTasksCard() {
+export function BackgroundTasksCard({ value, onChange }: BackgroundTasksCardProps) {
   const t = useTranslations("settings.subagents.backgroundTasks")
-  const settings = useSettingsStore((s) => s.settings)
-  const save = useSettingsStore((s) => s.save)
-
-  const [autoResume, setAutoResume] = useState(false)
-  const [maxAttempts, setMaxAttempts] = useState(2)
-  const [surfaceAsks, setSurfaceAsks] = useState(true)
-  const [denyGlobs, setDenyGlobs] = useState("")
-
-  useEffect(() => {
-    /* eslint-disable react-hooks/set-state-in-effect */
-    const bg = settings?.backgroundTasks
-    setAutoResume(bg?.autoResumeInterrupted ?? false)
-    setMaxAttempts(bg?.maxAutoResumeAttempts ?? 2)
-    const ap = settings?.agentPermissions
-    setSurfaceAsks((ap?.subagentAsks ?? "surface") === "surface")
-    setDenyGlobs(rulesToDenyLines(ap?.subagentRules))
-    /* eslint-enable react-hooks/set-state-in-effect */
-  }, [settings])
-
-  const handleSave = async () => {
-    try {
-      const ap = settings?.agentPermissions ?? {}
-      const subagentRules = denyLinesToRules(denyGlobs)
-      await save({
-        backgroundTasks: {
-          autoResumeInterrupted: autoResume,
-          maxAutoResumeAttempts: maxAttempts,
-        },
-        agentPermissions: {
-          ...ap,
-          subagentAsks: surfaceAsks ? "surface" : "auto-deny",
-          ...(subagentRules ? { subagentRules } : { subagentRules: undefined }),
-        },
-      })
-      log.info("backgroundTasks.saved", { autoResume, maxAttempts, surfaceAsks })
-      toast.success(t("saved"))
-    } catch (err) {
-      log.error("backgroundTasks.saveFailed", err)
-      toast.error(err instanceof Error ? err.message : String(err))
-    }
-  }
 
   return (
     <div className="space-y-4" data-setting-id="subagent-background-tasks">
-      <div className="space-y-0.5">
-        <Label className="text-sm font-medium">{t("title")}</Label>
-        <p className="text-xs text-muted-foreground">{t("description")}</p>
-      </div>
-
       <div className="flex items-center justify-between gap-4">
         <div className="space-y-0.5">
           <Label htmlFor="settings-bg-auto-resume" className="text-sm">
@@ -111,8 +116,8 @@ export function BackgroundTasksCard() {
         </div>
         <Switch
           id="settings-bg-auto-resume"
-          checked={autoResume}
-          onCheckedChange={setAutoResume}
+          checked={value.autoResume}
+          onCheckedChange={(autoResume) => onChange({ autoResume })}
           aria-label={t("autoResume")}
         />
       </div>
@@ -124,9 +129,9 @@ export function BackgroundTasksCard() {
           type="number"
           min={1}
           max={10}
-          value={maxAttempts}
-          onChange={(e) => setMaxAttempts(clampInt(e.target.value, 1, 10, 2))}
-          disabled={!autoResume}
+          value={value.maxAttempts}
+          onChange={(e) => onChange({ maxAttempts: clampInt(e.target.value, 1, 10, 2) })}
+          disabled={!value.autoResume}
           aria-label={t("maxAttempts")}
         />
         <p className="text-xs text-muted-foreground">{t("maxAttemptsHint")}</p>
@@ -141,8 +146,8 @@ export function BackgroundTasksCard() {
         </div>
         <Switch
           id="settings-bg-surface-asks"
-          checked={surfaceAsks}
-          onCheckedChange={setSurfaceAsks}
+          checked={value.surfaceAsks}
+          onCheckedChange={(surfaceAsks) => onChange({ surfaceAsks })}
           aria-label={t("surfaceAsks")}
         />
       </div>
@@ -151,20 +156,14 @@ export function BackgroundTasksCard() {
         <Label htmlFor="settings-bg-deny-globs">{t("denyList")}</Label>
         <Textarea
           id="settings-bg-deny-globs"
-          value={denyGlobs}
-          onChange={(e) => setDenyGlobs(e.target.value)}
+          value={value.denyGlobs}
+          onChange={(e) => onChange({ denyGlobs: e.target.value })}
           placeholder={t("denyListPlaceholder")}
           rows={3}
           className="font-mono text-xs"
           aria-label={t("denyList")}
         />
         <p className="text-xs text-muted-foreground">{t("denyListHint")}</p>
-      </div>
-
-      <div className="flex justify-end">
-        <Button size="sm" onClick={handleSave}>
-          {t("save")}
-        </Button>
       </div>
     </div>
   )

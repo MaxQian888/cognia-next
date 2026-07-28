@@ -6,20 +6,40 @@
  */
 
 import React from "react"
-import { fireEvent, render, screen } from "@testing-library/react"
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 
+// Strip motion props that React would warn about on a plain DOM node; the
+// roster now uses variants + AnimatePresence for enter/exit and `layout` for
+// the reflow when a member is removed.
+const stripMotionProps = (props: Record<string, unknown>) => {
+  const {
+    variants: _v,
+    initial: _i,
+    animate: _a,
+    exit: _e,
+    transition: _t,
+    layout: _l,
+    layoutId: _lid,
+    ...rest
+  } = props
+  return rest
+}
+
 jest.mock("motion/react", () => ({
+  AnimatePresence: ({ children }: { children: React.ReactNode }) => <>{children}</>,
   motion: {
-    div: ({ children, className, ...props }: React.HTMLAttributes<HTMLDivElement>) => (
-      <div className={className} {...props}>
-        {children}
-      </div>
+    div: ({ children, ...props }: React.HTMLAttributes<HTMLDivElement>) => (
+      <div {...stripMotionProps(props as Record<string, unknown>)}>{children}</div>
     ),
-    span: ({ children, className, ...props }: React.HTMLAttributes<HTMLSpanElement>) => (
-      <span className={className} {...props}>
-        {children}
-      </span>
+    span: ({ children, ...props }: React.HTMLAttributes<HTMLSpanElement>) => (
+      <span {...stripMotionProps(props as Record<string, unknown>)}>{children}</span>
+    ),
+    ul: ({ children, ...props }: React.HTMLAttributes<HTMLUListElement>) => (
+      <ul {...stripMotionProps(props as Record<string, unknown>)}>{children}</ul>
+    ),
+    li: ({ children, ...props }: React.HTMLAttributes<HTMLLIElement>) => (
+      <li {...stripMotionProps(props as Record<string, unknown>)}>{children}</li>
     ),
   },
   useReducedMotion: () => true,
@@ -63,6 +83,7 @@ jest.mock("@/hooks/agent-runs/use-team-pr-status", () => ({
 }))
 
 import { AgentTeamMembers } from "./members"
+import { buildTeam } from "@/lib/storybook/fixtures/agent-team"
 import type { AgentTeammate } from "@/types/agent/agent-team"
 
 const teammate = (overrides: Partial<AgentTeammate>): AgentTeammate => ({
@@ -204,5 +225,89 @@ describe("AgentTeamMembers", () => {
     const finalRemove = screen.getAllByRole("button", { name: /Remove/i }).at(-1)
     await userEvent.click(finalRemove!)
     expect(removeTeammateMock).toHaveBeenCalledWith("tm_1")
+  })
+
+  it("persists a runtime switch through updateTeammate, merging rather than replacing config", async () => {
+    // Radix Select needs userEvent, not fireEvent (jest-gotchas #4).
+    const user = userEvent.setup()
+    const worker = teammate({
+      id: "tm_1",
+      name: "Worker One",
+      role: "teammate",
+      config: { runtime: "claude", model: "sonnet" } as AgentTeammate["config"],
+    })
+    render(<AgentTeamMembers teamId="team_x" teammates={[worker]} leadId="" />)
+
+    const combo = screen.getByTestId("runtime-select-tm_1")
+    expect(combo).toHaveAttribute("role", "combobox")
+    await user.click(combo)
+    const option = await screen.findByRole("option", { name: "Codex" })
+    await user.click(option)
+
+    // The `model` key must survive — the handler spreads the existing config.
+    expect(updateTeammateMock).toHaveBeenCalledWith("tm_1", {
+      config: { runtime: "codex", model: "sonnet" },
+    })
+  })
+
+  it("opens the teammate config dialog from the row menu", async () => {
+    const user = userEvent.setup()
+    const worker = teammate({ id: "tm_1", name: "Worker One", role: "teammate" })
+    render(<AgentTeamMembers team={buildTeam()} teammates={[worker]} leadId="" />)
+
+    const trigger = screen
+      .getAllByRole("button")
+      .find((b) => b.closest('[data-testid="member-tm_1"]') !== null && b.querySelector("svg"))
+    await user.click(trigger!)
+    await user.click(await screen.findByTestId("configure-tm_1"))
+    expect(await screen.findByRole("dialog")).toBeInTheDocument()
+  })
+
+  it("falls back to the default runtime when a teammate has none configured", () => {
+    const worker = teammate({
+      id: "tm_1",
+      name: "Worker One",
+      role: "teammate",
+      config: {},
+    })
+    render(<AgentTeamMembers teamId="team_x" teammates={[worker]} leadId="" />)
+    // Rendering at all proves the `?? DEFAULT_TEAMMATE_RUNTIME` fallback ran;
+    // a missing runtime used to leave the Select with an undefined value.
+    expect(screen.getByTestId("runtime-select-tm_1")).toBeInTheDocument()
+  })
+
+  it("refuses to add a teammate with a blank name", async () => {
+    const user = userEvent.setup()
+    render(<AgentTeamMembers teamId="team_x" teammates={[]} leadId="" />)
+    await user.click(screen.getAllByRole("button").at(-1)!)
+    const dialog = await screen.findByRole("dialog")
+    // Submit with the name untouched — the guard must swallow it.
+    const save = within(dialog)
+      .getAllByRole("button")
+      .find((b) => !/cancel/i.test(b.textContent ?? ""))
+    await user.click(save!)
+    expect(addTeammateMock).not.toHaveBeenCalled()
+  })
+
+  it("prefers the team prop over the legacy teamId prop", () => {
+    const worker = teammate({ id: "tm_1", name: "Worker One", role: "teammate" })
+    render(<AgentTeamMembers team={buildTeam()} teammates={[worker]} leadId="" />)
+    expect(screen.getByTestId("member-tm_1")).toBeInTheDocument()
+  })
+
+  it("closes the config dialog when the teammate dialog requests it", async () => {
+    const user = userEvent.setup()
+    const worker = teammate({ id: "tm_1", name: "Worker One", role: "teammate" })
+    render(<AgentTeamMembers team={buildTeam()} teammates={[worker]} leadId="" />)
+
+    const trigger = screen
+      .getAllByRole("button")
+      .find((b) => b.closest('[data-testid="member-tm_1"]') !== null && b.querySelector("svg"))
+    await user.click(trigger!)
+    await user.click(await screen.findByTestId("configure-tm_1"))
+    const dialog = await screen.findByRole("dialog")
+
+    await user.keyboard("{Escape}")
+    await waitFor(() => expect(dialog).not.toBeInTheDocument())
   })
 })

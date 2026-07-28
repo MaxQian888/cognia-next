@@ -719,9 +719,11 @@ export const DEFAULT_TEAM_CONFIG: AgentTeamConfig = {
  * dispatches to that external ACP/CLI agent (see
  * `lib/ai/agent/external/presets.ts`; `resolveTeammatePresetId` treats the
  * runtime string as the preset id directly). Covers the full executable preset
- * catalog — `custom` is excluded because it has no fixed backend.
+ * catalog — `custom` and service-discovered preview integrations are excluded
+ * because they have no fixed executable backend.
  */
-export type TeammateRuntime = "claude" | Exclude<ExternalAgentPresetId, "custom">
+export type TeammateRuntime =
+  "claude" | Exclude<ExternalAgentPresetId, "custom" | "opencode-v2-preview">
 
 /** Default runtime when a teammate has no explicit runtime configured. */
 export const DEFAULT_TEAMMATE_RUNTIME: TeammateRuntime = "claude"

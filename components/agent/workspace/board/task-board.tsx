@@ -8,7 +8,7 @@
 
 import { useEffect, useMemo, useState } from "react"
 import { useTranslations } from "next-intl"
-import { BotIcon } from "lucide-react"
+import { BotIcon, ListTodoIcon } from "lucide-react"
 import {
   DndContext,
   PointerSensor,
@@ -23,6 +23,7 @@ import { SortableContext, verticalListSortingStrategy } from "@dnd-kit/sortable"
 import { toast } from "sonner"
 
 import { StatusBadge } from "@/components/status-badge"
+import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
 import { cn } from "@/lib/utils"
 import { useAgentTeamStore } from "@/stores/agent/agent-team-store"
 import { useTeamLiveStatus } from "@/hooks/agent-runs/use-team-live-status"
@@ -236,7 +237,20 @@ export function TaskBoard({ team, tasks, teammates }: TaskBoardProps) {
         </div>
       )}
 
-      {swimlanes ? (
+      {tasks.length === 0 ? (
+        /* Team-level empty state. Without it a brand-new team shows a row of
+           empty columns each repeating "no tasks", which reads as a broken
+           board rather than an empty one and offers no way forward. */
+        <Empty data-testid="board-empty">
+          <EmptyMedia variant="icon">
+            <ListTodoIcon />
+          </EmptyMedia>
+          <EmptyHeader>
+            <EmptyTitle>{t("empty.title")}</EmptyTitle>
+            <EmptyDescription>{t("empty.description")}</EmptyDescription>
+          </EmptyHeader>
+        </Empty>
+      ) : swimlanes ? (
         <div className="space-y-4" data-testid="board-swimlanes">
           {lanes.map((lane) => (
             <div key={lane.teammateId ?? "__unassigned__"} className="space-y-1.5">

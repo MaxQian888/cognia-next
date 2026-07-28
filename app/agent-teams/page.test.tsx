@@ -197,6 +197,21 @@ describe("AgentTeamsListPage", () => {
     )
   })
 
+  it("stacks the stat cards below sm instead of crushing three into a row", () => {
+    render(<AgentTeamsListPage />)
+    const stats = screen.getByText("Total teams").closest("div")?.parentElement
+    expect(stats?.className).toContain("grid-cols-1")
+    expect(stats?.className).toContain("sm:grid-cols-3")
+  })
+
+  it("animates the team grid with the shared list tokens, not a bare transition", () => {
+    render(<AgentTeamsListPage />)
+    const card = screen.getByTestId("team-card-team_1")
+    // Named property, so the hover tint cannot fight the wrapper's `layout`.
+    expect(card.className).toContain("transition-colors")
+    expect(card.className).not.toMatch(/(^|\s)transition(\s|$)/)
+  })
+
   it("relies on createTeam's seeded lead when creating from scratch", async () => {
     const user = userEvent.setup()
     render(<AgentTeamsListPage />)

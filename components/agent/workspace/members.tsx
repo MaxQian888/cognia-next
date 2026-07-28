@@ -2,8 +2,16 @@
 
 import { useState } from "react"
 import { useTranslations } from "next-intl"
-import { motion, useReducedMotion } from "motion/react"
+import { AnimatePresence, motion } from "motion/react"
 import { MoreHorizontalIcon, PlusIcon, Settings2Icon, Trash2Icon, UsersIcon } from "lucide-react"
+
+import {
+  MOBILE_SPRING,
+  STAGGER_CHILD,
+  STAGGER_CONTAINER,
+  useReducedMotionTransition,
+  useReducedMotionVariants,
+} from "@/lib/ui/motion"
 
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
@@ -80,7 +88,13 @@ export function AgentTeamMembers({
 }: AgentTeamMembersProps) {
   const teamId = team?.id ?? legacyTeamId ?? ""
   const t = useTranslations("agentTeamsWorkspace.members")
-  const prefersReducedMotion = useReducedMotion()
+  // House motion tokens (`@/lib/ui/motion`) rather than the hand-rolled
+  // `y:4 / 0.15s / easeOut` this file used to carry — the same idiom was copied
+  // into four workspace panels and none of them matched the rest of the app.
+  // `layout` + a spring is what makes a roster reflow when a member is removed
+  // instead of the survivors jumping into the gap.
+  const childVariants = useReducedMotionVariants(STAGGER_CHILD)
+  const layoutTransition = useReducedMotionTransition(MOBILE_SPRING)
   const addTeammate = useAgentTeamStore((s) => s.addTeammate)
   const removeTeammate = useAgentTeamStore((s) => s.removeTeammate)
   const updateTeammate = useAgentTeamStore((s) => s.updateTeammate)
@@ -173,30 +187,36 @@ export function AgentTeamMembers({
 
       {/* Workers */}
       {workers.length > 0 && (
-        <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 items-start">
-          {workers.map((m, index) => (
-            <motion.div
-              key={m.id}
-              initial={prefersReducedMotion ? false : { opacity: 0, y: 4 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{
-                duration: 0.15,
-                ease: "easeOut",
-                delay: prefersReducedMotion ? 0 : Math.min(index * 0.03, 0.15),
-              }}
-            >
-              <Card className="p-3" data-testid={`member-${m.id}`}>
-                <MemberRow
-                  member={m}
-                  teamId={teamId}
-                  onRemove={() => setRemoving(m)}
-                  onConfigure={() => setConfiguring(m)}
-                  onRuntimeChange={(r) => handleRuntimeChange(m, r)}
-                />
-              </Card>
-            </motion.div>
-          ))}
-        </div>
+        <motion.div
+          className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 items-start"
+          variants={STAGGER_CONTAINER}
+          initial="initial"
+          animate="animate"
+        >
+          <AnimatePresence initial={false}>
+            {workers.map((m) => (
+              <motion.div
+                key={m.id}
+                layout
+                variants={childVariants}
+                initial="initial"
+                animate="animate"
+                exit="exit"
+                transition={layoutTransition}
+              >
+                <Card className="p-3" data-testid={`member-${m.id}`}>
+                  <MemberRow
+                    member={m}
+                    teamId={teamId}
+                    onRemove={() => setRemoving(m)}
+                    onConfigure={() => setConfiguring(m)}
+                    onRuntimeChange={(r) => handleRuntimeChange(m, r)}
+                  />
+                </Card>
+              </motion.div>
+            ))}
+          </AnimatePresence>
+        </motion.div>
       )}
 
       {configuring && team ? (

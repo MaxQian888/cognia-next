@@ -36,6 +36,7 @@ export type ExternalAgentPresetId =
   | "droid"
   | "opencode-server"
   | "opencode-remote"
+  | "opencode-v2-preview"
   | "custom"
 
 /**
@@ -159,6 +160,20 @@ const OPENCODE_REMOTE_PRESET: ExternalAgentPresetConfig = {
   tags: ["opencode", "sdk", "remote"],
 }
 
+const OPENCODE_V2_PREVIEW_PRESET: ExternalAgentPresetConfig = {
+  name: "OpenCode V2 local service (Preview)",
+  description:
+    "Connect to a compatible, already-running OpenCode V2 local service. Cognia never starts or stops it.",
+  protocol: "opencode-v2",
+  transport: "sse",
+  metadata: { preview: true, localServiceDiscovery: true },
+  setupHint: "Beta preview. Start the compatible service yourself with `opencode2 service start`.",
+  docsUrl: "https://opencode.ai/v2/docs/build/client",
+  supportTier: "executable",
+  defaultPermissionMode: "default",
+  tags: ["opencode", "v2", "beta", "preview", "local-service"],
+}
+
 export const EXTERNAL_AGENT_PRESETS: Record<
   ExternalAgentPresetId,
   ExternalAgentPresetConfig | null
@@ -175,6 +190,7 @@ export const EXTERNAL_AGENT_PRESETS: Record<
   droid: buildPresetConfig("droid"),
   "opencode-server": OPENCODE_SERVER_PRESET,
   "opencode-remote": OPENCODE_REMOTE_PRESET,
+  "opencode-v2-preview": OPENCODE_V2_PREVIEW_PRESET,
   custom: null,
 }
 
@@ -291,7 +307,7 @@ export function listDynamicPresetEntries(): Array<{
 
 /**
  * The builtin *executable* external-agent preset ids — every static preset
- * except the `custom` sentinel (all shipping presets are directly executable).
+ * except the `custom` sentinel and service-discovered preview integrations.
  * These are exactly the ids a teammate `runtime` or a subagent `externalPresetId`
  * may name; plugin-contributed presets stay outside this closed set and are
  * reached through the capability overlay instead. Derived from the record so it
@@ -300,8 +316,8 @@ export function listDynamicPresetEntries(): Array<{
 export const BUILTIN_EXECUTABLE_PRESET_IDS = (
   Object.keys(EXTERNAL_AGENT_PRESETS) as ExternalAgentPresetId[]
 ).filter(
-  (id): id is Exclude<ExternalAgentPresetId, "custom"> =>
-    id !== "custom" && EXTERNAL_AGENT_PRESETS[id] !== null
+  (id): id is Exclude<ExternalAgentPresetId, "custom" | "opencode-v2-preview"> =>
+    id !== "custom" && id !== "opencode-v2-preview" && EXTERNAL_AGENT_PRESETS[id] !== null
 )
 
 /**

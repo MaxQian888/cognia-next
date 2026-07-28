@@ -122,34 +122,40 @@ function mapSourceToLifecycleStage(
   return "execution"
 }
 
+/**
+ * Remediation advice for a branch reason, as i18n key ids.
+ *
+ * These used to be English sentences returned from `lib/`, which meant the only
+ * actionable text the external-agent subsystem produced could never be shown in
+ * Chinese — and, in practice, was never rendered at all. Returning ids keeps the
+ * advice here (where the reason codes live) while leaving the wording to
+ * `i18n/messages/{en,zh-CN}/diagnostics.json` under `recoveryHint.*`.
+ *
+ * Callers must resolve them: `t(\`recoveryHint.${id}\`)` in the `diagnostics`
+ * namespace.
+ */
 function resolveRecoveryHints(reasonCode: ExternalAgentBranchReasonCode): string[] {
   switch (reasonCode) {
     case "ecosystem_prerequisite_missing":
-      return ["Complete the required external-agent setup, then retry the connection."]
+      return ["completeSetupThenRetry"]
     case "ecosystem_documented_only":
-      return [
-        "Use the linked official product workflow for this surface.",
-        "Select an executable local surface in Cognia for direct connection.",
-      ]
+      return ["useOfficialWorkflow", "selectLocalSurface"]
     case "protocol_unsupported":
-      return ["Switch agent protocol to ACP.", "Re-save external-agent configuration."]
+      return ["switchToAcp", "resaveConfiguration"]
     case "transport_blocked":
-      return ["Run Cognia in desktop (Tauri) runtime for stdio transport."]
+      return ["useDesktopRuntime"]
     case "initialization_failed":
-      return ["Check ACP process command and startup arguments.", "Retry after reconnect."]
+      return ["checkCommandAndArgs", "retryAfterReconnect"]
     case "health_check_failed":
-      return ["Inspect external-agent health endpoint/logs.", "Reconnect and retry."]
+      return ["inspectHealthEndpoint", "reconnectAndRetry"]
     case "extension_unsupported":
-      return [
-        "Use operations supported by this endpoint.",
-        "Create a new session when resume/fork is unavailable.",
-      ]
+      return ["useSupportedOperations", "createNewSession"]
     case "session_resolution_failed":
-      return ["Resume with an existing session id or allow new session creation."]
+      return ["resumeWithSessionIdOrAllowNew"]
     case "permission_denied":
-      return ["Adjust permission mode or approve required actions."]
+      return ["adjustPermissionMode"]
     case "execution_failed":
-      return ["Check runtime diagnostics and retry with scoped input."]
+      return ["checkDiagnosticsAndRetry"]
     default:
       return []
   }

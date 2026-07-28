@@ -144,6 +144,62 @@ const targets: MentionTarget[] = [
   },
 ]
 
+describe("AgentTeamChat unread divider", () => {
+  it("anchors the divider above the first unread message", () => {
+    render(
+      <AgentTeamChat
+        teamId="t1"
+        messages={[
+          makeMessage("a", { read: true }),
+          makeMessage("b", { read: true }),
+          makeMessage("c"),
+          makeMessage("d"),
+        ]}
+      />
+    )
+    const divider = screen.getByTestId("chat-unread-divider")
+    const thread = screen.getByTestId("workspace-chat")
+    const children = Array.from(thread.children)
+    // Divider must sit immediately before message "c", not at the top.
+    expect(children.indexOf(divider)).toBe(2)
+  })
+
+  it("omits the divider when the whole thread is read", () => {
+    render(
+      <AgentTeamChat
+        teamId="t1"
+        messages={[makeMessage("a", { read: true }), makeMessage("b", { read: true })]}
+      />
+    )
+    expect(screen.queryByTestId("chat-unread-divider")).not.toBeInTheDocument()
+  })
+
+  it("ignores a streaming reply so the divider does not jump above a live answer", () => {
+    render(
+      <AgentTeamChat
+        teamId="t1"
+        messages={[
+          makeMessage("a", { read: true }),
+          makeMessage("live", { metadata: { streaming: true } }),
+        ]}
+      />
+    )
+    expect(screen.queryByTestId("chat-unread-divider")).not.toBeInTheDocument()
+  })
+
+  it("keeps the divider in place after the thread is marked read", () => {
+    // The workspace marks the thread read as soon as this tab is active. The
+    // anchor is snapshotted at mount, so a re-render with everything read must
+    // NOT drop the divider — otherwise it would flash for one frame and vanish.
+    const messages = [makeMessage("a", { read: true }), makeMessage("b")]
+    const { rerender } = render(<AgentTeamChat teamId="t1" messages={messages} />)
+    expect(screen.getByTestId("chat-unread-divider")).toBeInTheDocument()
+
+    rerender(<AgentTeamChat teamId="t1" messages={messages.map((m) => ({ ...m, read: true }))} />)
+    expect(screen.getByTestId("chat-unread-divider")).toBeInTheDocument()
+  })
+})
+
 describe("AgentTeamChat", () => {
   it("renders the empty state when no messages and no composer", () => {
     render(<AgentTeamChat teamId="t1" messages={[]} />)

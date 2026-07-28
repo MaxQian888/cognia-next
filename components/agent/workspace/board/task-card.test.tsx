@@ -56,6 +56,24 @@ jest.mock("@dnd-kit/sortable", () => ({
   useSortable: jest.fn(() => sortableState),
 }))
 
+// The card nests a motion node INSIDE the dnd-kit node so `layout` and dnd's
+// inline transform never contend for the same element. Surface `layout` as an
+// attribute so the split can be asserted.
+let reducedMotion = false
+jest.mock("motion/react", () => ({
+  motion: {
+    div: ({ children, ...props }: Record<string, unknown>) => {
+      const { layout, transition: _t, ...rest } = props
+      return (
+        <div data-layout={String(layout)} {...(rest as object)}>
+          {children as React.ReactNode}
+        </div>
+      )
+    },
+  },
+  useReducedMotion: () => reducedMotion,
+}))
+
 let slotPoints: Array<{ point: string; context?: Record<string, unknown> }> = []
 jest.mock("@/components/plugins/plugin-extension-slot", () => ({
   PluginExtensionSlot: (props: { point: string; context?: Record<string, unknown> }) => {
@@ -97,8 +115,53 @@ const renderCard = (props: Partial<Parameters<typeof TaskBoardCard>[0]> = {}) =>
 
 beforeEach(() => {
   slotPoints = []
+  reducedMotion = false
+  sortableState.isDragging = false
   useAgentTeamStore.getState().reset()
   jest.clearAllMocks()
+})
+
+describe("TaskBoardCard drag affordance", () => {
+  it("drops the grab cursor when dragging is disabled", () => {
+    renderCard({ dragDisabled: true })
+    const handle = screen.getByRole("button", { name: "Ship the board" })
+    expect(handle.className).toContain("cursor-default")
+    expect(handle.className).not.toContain("cursor-grab")
+  })
+
+  it("offers the grab cursor when dragging is allowed", () => {
+    renderCard()
+    const handle = screen.getByRole("button", { name: "Ship the board" })
+    expect(handle.className).toContain("cursor-grab")
+  })
+})
+
+describe("TaskBoardCard layout animation", () => {
+  it("animates layout so a runtime-driven column move reads as a move", () => {
+    renderCard()
+    expect(screen.getByTestId("board-card-task-1").parentElement).toHaveAttribute(
+      "data-layout",
+      "true"
+    )
+  })
+
+  it("switches layout off during a pointer drag so dnd-kit owns the transform alone", () => {
+    sortableState.isDragging = true
+    renderCard()
+    expect(screen.getByTestId("board-card-task-1").parentElement).toHaveAttribute(
+      "data-layout",
+      "false"
+    )
+  })
+
+  it("switches layout off under reduced motion", () => {
+    reducedMotion = true
+    renderCard()
+    expect(screen.getByTestId("board-card-task-1").parentElement).toHaveAttribute(
+      "data-layout",
+      "false"
+    )
+  })
 })
 
 describe("TaskBoardCard", () => {

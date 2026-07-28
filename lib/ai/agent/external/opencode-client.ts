@@ -30,6 +30,13 @@ import { loggers } from "@cognia/logging"
 import { isTauri } from "@/lib/utils"
 import { BaseProtocolAdapter, type SessionCreateOptions } from "./protocol-adapter"
 import { isExternalAgentAlreadyRunningError } from "./spawn-reclaim"
+import {
+  isExplicitlyUnsupportedCapabilityError,
+  resolveCommandCompactionCapability,
+  type ExternalAgentCompactionCapability,
+  type ExternalAgentCompactionOptions,
+  type ExternalAgentCommandCompactionRoute,
+} from "./session-capabilities"
 import type {
   ExternalAgentConfig,
   ExternalAgentSession,
@@ -75,13 +82,18 @@ function toLogContext(error: unknown): Record<string, unknown> | undefined {
  * Unwrap SDK response, throwing on error.
  * The SDK returns `{ data, error }` with `responseStyle: 'fields'`.
  */
-function unwrap<T>(result: { data?: T; error?: unknown }): T {
+function unwrap<T>(result: { data?: T; error?: unknown; response?: { status?: number } }): T {
   if (result.error !== undefined) {
+    const errorRecord =
+      result.error && typeof result.error === "object"
+        ? (result.error as Record<string, unknown>)
+        : undefined
     const errMsg =
-      result.error && typeof result.error === "object" && "message" in result.error
-        ? (result.error as { message: string }).message
-        : JSON.stringify(result.error)
-    throw new Error(`OpenCode SDK error: ${errMsg}`)
+      typeof errorRecord?.message === "string" ? errorRecord.message : JSON.stringify(result.error)
+    throw Object.assign(new Error(`OpenCode SDK error: ${errMsg}`), {
+      status: result.response?.status,
+      code: errorRecord?.code ?? errorRecord?._tag,
+    })
   }
   return result.data as T
 }
@@ -251,6 +263,7 @@ export class OpenCodeClientAdapter extends BaseProtocolAdapter {
   private baseUrl = ""
   private requestFetch?: (request: Request) => ReturnType<typeof fetch>
   private pendingInteractions = new Map<string, PendingOpenCodeInteraction>()
+  private summarizeUnsupported = false
 
   /** Agent id of an auto-spawned `opencode serve` process, if any. */
   private spawnedServerId: string | null = null
@@ -262,6 +275,7 @@ export class OpenCodeClientAdapter extends BaseProtocolAdapter {
   async connect(config: ExternalAgentConfig): Promise<void> {
     this._config = config
     this._connectionStatus = "connecting"
+    this.summarizeUnsupported = false
 
     try {
       // Resolve the base URL (explicit endpoint, desktop auto-spawn, or default).
@@ -1019,6 +1033,80 @@ export class OpenCodeClientAdapter extends BaseProtocolAdapter {
 
   getSessionModels(sessionId: string): AcpSessionModelState | undefined {
     return this.sessionModels.get(sessionId)
+  }
+
+  async getCompactionCapability(sessionId: string): Promise<ExternalAgentCompactionCapability> {
+    if (!this.isConnected()) {
+      return { status: "unknown", routes: [], reason: "not_connected" }
+    }
+    if (!this.getSession(sessionId)) {
+      return { status: "unknown", routes: [], reason: "session_not_found" }
+    }
+
+    const commandRoutes = resolveCommandCompactionCapability(this.getAvailableCommands()).routes
+    const model = this.resolveCompactionModel(sessionId)
+    const nativeRoutes =
+      model && !this.summarizeUnsupported
+        ? ([{ kind: "native", supportsFocus: false }] as const)
+        : []
+    const routes = [...nativeRoutes, ...commandRoutes]
+    return routes.length > 0
+      ? { status: "supported", routes }
+      : {
+          status: "unsupported",
+          routes: [],
+          reason: model ? "native_method_unsupported" : "model_unavailable",
+        }
+  }
+
+  getProviderUndoCapability(sessionId: string) {
+    return this.getAdvertisedProviderUndoCapability(sessionId)
+  }
+
+  async undoLastProviderChange(sessionId: string): Promise<void> {
+    const capability = await this.getProviderUndoCapability(sessionId)
+    if (capability.status !== "supported") {
+      throw new Error("Agent does not support provider undo")
+    }
+    await this.executeCommand(sessionId, "undo")
+  }
+
+  async compactSession(
+    sessionId: string,
+    options: ExternalAgentCompactionOptions = {}
+  ): Promise<void> {
+    const commandRoute = resolveCommandCompactionCapability(
+      this.getAvailableCommands()
+    ).routes.find(
+      (route): route is ExternalAgentCommandCompactionRoute =>
+        route.kind === "command" && (!options.focus || route.supportsFocus)
+    )
+    if (options.focus) {
+      if (!commandRoute) {
+        throw new Error("OpenCode compaction focus is not supported")
+      }
+      await this.executeCommand(sessionId, commandRoute.command, options.focus)
+      return
+    }
+
+    const model = this.resolveCompactionModel(sessionId)
+    if (model && !this.summarizeUnsupported) {
+      try {
+        const completed = await this.summarizeSession(sessionId, model.providerID, model.modelID)
+        if (!completed) throw new Error("OpenCode context compaction did not complete")
+        return
+      } catch (error) {
+        if (!isExplicitlyUnsupportedCapabilityError(error)) throw error
+        this.summarizeUnsupported = true
+        if (!commandRoute) throw error
+      }
+    }
+
+    if (commandRoute) {
+      await this.executeCommand(sessionId, commandRoute.command)
+      return
+    }
+    throw new Error("OpenCode compaction requires a session model or advertised command")
   }
 
   async setConfigOption(
@@ -2311,6 +2399,17 @@ export class OpenCodeClientAdapter extends BaseProtocolAdapter {
 
     const [providerID, modelID] = entries[0]
     return { providerID, modelID }
+  }
+
+  private resolveCompactionModel(
+    sessionId: string
+  ): { providerID: string; modelID: string } | undefined {
+    const currentModelId = this.sessionModels.get(sessionId)?.currentModelId
+    if (currentModelId?.includes("/")) {
+      const [providerID, modelID] = currentModelId.split("/", 2)
+      if (providerID && modelID) return { providerID, modelID }
+    }
+    return this.getDefaultModel()
   }
 
   private async refreshSessionConfigOptions(sessionId: string): Promise<void> {

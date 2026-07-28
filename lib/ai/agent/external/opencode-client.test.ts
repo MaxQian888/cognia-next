@@ -1067,6 +1067,102 @@ describe("OpenCodeClientAdapter — session + delegating ops", () => {
     expect(a.getSdkClient()).toBe(client)
   })
 
+  it("compacts with the session model before an advertised command", async () => {
+    const client = makeFakeClient()
+    client.provider.list.mockResolvedValue({
+      data: {
+        all: [{ id: "anthropic", models: { claude: { id: "claude", name: "Claude" } } }],
+        default: { anthropic: "claude" },
+        connected: ["anthropic"],
+      },
+    })
+    client.command.list.mockResolvedValue({
+      data: [{ name: "/compact", description: "Compact", args: { focus: "string" } }],
+    })
+    mockCreateOpencodeClient.mockReturnValue(client)
+    const adapter = new OpenCodeClientAdapter()
+    await adapter.connect(buildConfig())
+    const session = await adapter.createSession()
+
+    await expect(adapter.getCompactionCapability(session.id)).resolves.toEqual({
+      status: "supported",
+      routes: [
+        { kind: "native", supportsFocus: false },
+        { kind: "command", command: "compact", supportsFocus: true },
+      ],
+    })
+    await adapter.compactSession(session.id)
+    expect(client.session.summarize).toHaveBeenCalledWith({
+      path: { id: session.id },
+      body: { providerID: "anthropic", modelID: "claude" },
+    })
+    expect(client.session.command).not.toHaveBeenCalled()
+  })
+
+  it("uses a parameterized command for focus and only falls back on explicit unsupported", async () => {
+    const client = makeFakeClient()
+    client.provider.list.mockResolvedValue({
+      data: {
+        all: [{ id: "anthropic", models: { claude: { id: "claude" } } }],
+        default: { anthropic: "claude" },
+        connected: ["anthropic"],
+      },
+    })
+    client.command.list.mockResolvedValue({
+      data: [{ name: "compress", args: { focus: "string" } }],
+    })
+    mockCreateOpencodeClient.mockReturnValue(client)
+    const adapter = new OpenCodeClientAdapter()
+    await adapter.connect(buildConfig())
+    const session = await adapter.createSession()
+
+    await adapter.compactSession(session.id, { focus: "Keep API decisions" })
+    expect(client.session.command).toHaveBeenCalledWith({
+      path: { id: session.id },
+      body: { command: "compress", arguments: "Keep API decisions" },
+    })
+    expect(client.session.summarize).not.toHaveBeenCalled()
+
+    client.session.command.mockClear()
+    client.session.summarize.mockRejectedValueOnce(new Error("Authentication failed"))
+    await expect(adapter.compactSession(session.id)).rejects.toThrow("Authentication failed")
+    expect(client.session.command).not.toHaveBeenCalled()
+
+    client.session.summarize.mockResolvedValueOnce({
+      error: { message: "Provider model not found", code: "MODEL_NOT_FOUND" },
+      response: { status: 404 },
+    } as never)
+    await expect(adapter.compactSession(session.id)).rejects.toThrow("Provider model not found")
+    expect(client.session.command).not.toHaveBeenCalled()
+
+    client.session.summarize.mockResolvedValueOnce({
+      error: { message: "Method not found", code: "METHOD_NOT_FOUND" },
+      response: { status: 404 },
+    } as never)
+    await adapter.compactSession(session.id)
+    expect(client.session.command).toHaveBeenCalledWith({
+      path: { id: session.id },
+      body: { command: "compress", arguments: "" },
+    })
+  })
+
+  it("reports compaction unavailable when neither model nor command exists", async () => {
+    const client = makeFakeClient()
+    mockCreateOpencodeClient.mockReturnValue(client)
+    const adapter = new OpenCodeClientAdapter()
+    await adapter.connect(buildConfig())
+    const session = await adapter.createSession()
+
+    await expect(adapter.getCompactionCapability(session.id)).resolves.toEqual({
+      status: "unsupported",
+      routes: [],
+      reason: "model_unavailable",
+    })
+    await expect(adapter.compactSession(session.id)).rejects.toThrow(
+      "OpenCode compaction requires a session model"
+    )
+  })
+
   it("authenticate sets an API key via the auth endpoint", async () => {
     await a.authenticate("anthropic", { key: "sk-1" })
     expect(client.auth.set).toHaveBeenCalledWith(

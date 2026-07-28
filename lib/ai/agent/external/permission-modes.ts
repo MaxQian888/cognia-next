@@ -38,7 +38,7 @@ export const ALL_PERMISSION_MODES: readonly AcpPermissionMode[] = [
  * falls back to the full ACP set for them and lets the adapter clamp at runtime.
  *
  * - `acp` — reference model, all five.
- * - `codex-app-server` / `opencode` — no pre-approval registry, so `dontAsk`
+ * - `codex-app-server` / `opencode` / `opencode-v2` — no pre-approval registry, so `dontAsk`
  *   ("deny unless pre-approved") has no distinct behaviour and is dropped; the
  *   other four map onto their native approval policies.
  * - `a2a` / `http` / `websocket` — fire-and-forget request/response transports
@@ -52,6 +52,7 @@ export const PROTOCOL_PERMISSION_MODE_SUPPORT: Record<
   acp: ALL_PERMISSION_MODES,
   "codex-app-server": ["default", "acceptEdits", "bypassPermissions", "plan"],
   opencode: ["default", "acceptEdits", "bypassPermissions", "plan"],
+  "opencode-v2": ["default", "acceptEdits", "bypassPermissions", "plan"],
   a2a: ["default"],
   http: ["default"],
   websocket: ["default"],

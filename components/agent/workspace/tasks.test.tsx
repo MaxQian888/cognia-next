@@ -17,17 +17,24 @@ import type { AgentTeamTask, AgentTeammate } from "@/types/agent/agent-team"
 // ── motion mock ──────────────────────────────────────────────────────────────
 const mockUseReducedMotion = jest.fn(() => true)
 jest.mock("motion/react", () => ({
+  AnimatePresence: ({ children }: { children: React.ReactNode }) => <>{children}</>,
   motion: {
     div: ({
       children,
       initial: _initial,
       animate: _animate,
+      exit: _exit,
       transition: _transition,
+      variants: _variants,
+      layout: _layout,
       ...props
     }: React.HTMLAttributes<HTMLDivElement> & {
       initial?: unknown
       animate?: unknown
+      exit?: unknown
       transition?: unknown
+      variants?: unknown
+      layout?: unknown
     }) => <div {...props}>{children}</div>,
   },
   useReducedMotion: () => mockUseReducedMotion(),
@@ -443,5 +450,47 @@ describe("AgentTeamTasks", () => {
     expect(screen.getByTestId("mock-comments-ct1")).toBeInTheDocument()
     await user.click(screen.getByTestId("task-ct1-comments-toggle"))
     expect(screen.queryByTestId("mock-comments-ct1")).toBeNull()
+  })
+
+  // Covers both arms of `task.comments?.length ?? 0`. The i18n mock returns the
+  // bare key without interpolating, so assert on the toggle rendering at all
+  // rather than on the rendered number.
+  it("renders the comment toggle for tasks with and without a thread", () => {
+    render(
+      <AgentTeamTasks
+        teamId="t1"
+        tasks={[
+          makeTask("nc"),
+          makeTask("wc", {
+            comments: [
+              {
+                id: "c1",
+                taskId: "wc",
+                authorId: "tm1",
+                authorName: "Worker One",
+                text: "hi",
+                createdAt: new Date(),
+              },
+            ],
+          }),
+        ]}
+        teammates={[]}
+      />
+    )
+    expect(screen.getByTestId("task-nc-comments-toggle")).toBeInTheDocument()
+    expect(screen.getByTestId("task-wc-comments-toggle")).toBeInTheDocument()
+  })
+
+  // The left border is the only at-a-glance priority cue on a list card, so
+  // every arm of the mapping needs to actually resolve to a distinct colour.
+  it.each([
+    ["critical", "border-l-red-500"],
+    ["high", "border-l-amber-500"],
+    ["normal", "border-l-border"],
+    ["low", "border-l-blue-500"],
+    ["background", "border-l-slate-400"],
+  ] as const)("accents a %s task with %s", (priority, expected) => {
+    render(<AgentTeamTasks teamId="t1" tasks={[makeTask("p", { priority })]} teammates={[]} />)
+    expect(screen.getByTestId("task-p").className).toContain(expected)
   })
 })

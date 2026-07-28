@@ -8,6 +8,8 @@ import { useState } from "react"
 import { useTranslations } from "next-intl"
 import { useSortable } from "@dnd-kit/sortable"
 import { CSS } from "@dnd-kit/utilities"
+import { motion, useReducedMotion } from "motion/react"
+import { MOBILE_SPRING, useReducedMotionTransition } from "@/lib/ui/motion"
 import { BotIcon, LockIcon, MessageSquareIcon, MoreHorizontalIcon, Trash2Icon } from "lucide-react"
 import { toast } from "sonner"
 
@@ -79,6 +81,8 @@ export function TaskBoardCard({
   const deleteTask = useAgentTeamStore((s) => s.deleteTask)
   const [commentsOpen, setCommentsOpen] = useState(false)
   const [deleteOpen, setDeleteOpen] = useState(false)
+  const reduce = useReducedMotion()
+  const layoutTransition = useReducedMotionTransition(MOBILE_SPRING)
 
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: task.id,
@@ -86,128 +90,139 @@ export function TaskBoardCard({
   })
 
   return (
+    // Two nodes, deliberately. dnd-kit owns the OUTER node: it writes inline
+    // `transform` / `transition` there for the drag, and motion's `layout` would
+    // fight it for the same style properties on the same element.
+    //
+    // The INNER motion node handles the other kind of movement — the runtime
+    // moving a task between columns on its own (todo → in_progress as an agent
+    // picks it up). Without it the card blinks out of one column and appears in
+    // another with nothing connecting the two. `layout` is switched off while a
+    // pointer drag is in flight so only one system animates at a time.
     <div
       ref={setNodeRef}
       style={{ transform: CSS.Transform.toString(transform), transition }}
       className={cn(isDragging && "opacity-60")}
     >
-      <Card
-        className={cn("space-y-1 border-l-2 p-2.5", priorityAccent(task.priority))}
-        data-testid={`board-card-${task.id}`}
-      >
-        <div className="flex items-start justify-between gap-1.5">
-          <button
-            type="button"
-            className={cn(
-              "min-w-0 flex-1 text-left",
-              dragDisabled ? "cursor-default" : "cursor-grab active:cursor-grabbing"
-            )}
-            aria-label={task.title}
-            {...listeners}
-            {...attributes}
-          >
-            <p className="truncate text-xs font-medium">{task.title}</p>
-          </button>
-          <div className="flex shrink-0 items-center gap-0.5">
-            {lock.locked && (
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <span
-                    className="inline-flex text-red-400"
-                    data-testid={`board-card-${task.id}-lock`}
+      <motion.div layout={!isDragging && !reduce} transition={layoutTransition}>
+        <Card
+          className={cn("space-y-1 border-l-2 p-2.5", priorityAccent(task.priority))}
+          data-testid={`board-card-${task.id}`}
+        >
+          <div className="flex items-start justify-between gap-1.5">
+            <button
+              type="button"
+              className={cn(
+                "min-w-0 flex-1 text-left",
+                dragDisabled ? "cursor-default" : "cursor-grab active:cursor-grabbing"
+              )}
+              aria-label={task.title}
+              {...listeners}
+              {...attributes}
+            >
+              <p className="truncate text-xs font-medium">{task.title}</p>
+            </button>
+            <div className="flex shrink-0 items-center gap-0.5">
+              {lock.locked && (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <span
+                      className="inline-flex text-red-400"
+                      data-testid={`board-card-${task.id}-lock`}
+                    >
+                      <LockIcon className="size-3" />
+                    </span>
+                  </TooltipTrigger>
+                  <TooltipContent side="top">
+                    {t("lockedBy", {
+                      titles: lock.blocking.map((b) => b.title ?? b.id).join(", "),
+                    })}
+                  </TooltipContent>
+                </Tooltip>
+              )}
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="size-6 text-muted-foreground"
+                    aria-label={t("cardMenu")}
+                    data-testid={`board-card-${task.id}-menu`}
                   >
-                    <LockIcon className="size-3" />
-                  </span>
-                </TooltipTrigger>
-                <TooltipContent side="top">
-                  {t("lockedBy", {
-                    titles: lock.blocking.map((b) => b.title ?? b.id).join(", "),
-                  })}
-                </TooltipContent>
-              </Tooltip>
-            )}
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="size-6 text-muted-foreground"
-                  aria-label={t("cardMenu")}
-                  data-testid={`board-card-${task.id}-menu`}
-                >
-                  <MoreHorizontalIcon className="size-3.5" />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="min-w-40">
-                {/* Plugin-contributed per-task actions (e.g. push to an
+                    <MoreHorizontalIcon className="size-3.5" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="min-w-40">
+                  {/* Plugin-contributed per-task actions (e.g. push to an
                     external tracker). Context mirrors the canonical point
                     contract in lib/plugin/contracts/plugin-points.ts. */}
-                <PluginExtensionSlot
-                  point="agent.team.task.actions"
-                  context={{
-                    teamId: task.teamId,
-                    taskId: task.id,
-                    status: task.status,
-                    assignedTo: task.assignedTo,
-                    tags: task.tags,
-                  }}
-                />
-                <DropdownMenuSeparator />
-                <DropdownMenuItem
-                  variant="destructive"
-                  onSelect={() => setDeleteOpen(true)}
-                  data-testid={`board-card-${task.id}-delete`}
-                >
-                  <Trash2Icon className="mr-1.5 size-3.5" />
-                  {tTasks("delete")}
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
+                  <PluginExtensionSlot
+                    point="agent.team.task.actions"
+                    context={{
+                      teamId: task.teamId,
+                      taskId: task.id,
+                      status: task.status,
+                      assignedTo: task.assignedTo,
+                      tags: task.tags,
+                    }}
+                  />
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem
+                    variant="destructive"
+                    onSelect={() => setDeleteOpen(true)}
+                    data-testid={`board-card-${task.id}-delete`}
+                  >
+                    <Trash2Icon className="mr-1.5 size-3.5" />
+                    {tTasks("delete")}
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
           </div>
-        </div>
 
-        <div className="flex flex-wrap items-center gap-1.5 text-[10px] text-muted-foreground">
-          <Badge variant="secondary" className="px-1 py-0 text-[10px]">
-            {tPriority(task.priority)}
-          </Badge>
-          {assigneeName && <span className="truncate">{assigneeName}</span>}
-          {twinName && (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Badge
-                  variant="outline"
-                  className="gap-0.5 px-1 py-0 text-[10px]"
-                  data-testid={`board-card-${task.id}-twin`}
-                >
-                  <BotIcon className="size-2.5" />
-                  {twinName}
-                </Badge>
-              </TooltipTrigger>
-              <TooltipContent side="top">{t("twinBound", { name: twinName })}</TooltipContent>
-            </Tooltip>
-          )}
-          {task.tags.slice(0, 3).map((tag) => (
-            <span key={tag} className="rounded bg-muted px-1 py-0.5">
-              {tag}
-            </span>
-          ))}
-        </div>
+          <div className="flex flex-wrap items-center gap-1.5 text-[10px] text-muted-foreground">
+            <Badge variant="secondary" className="px-1 py-0 text-[10px]">
+              {tPriority(task.priority)}
+            </Badge>
+            {assigneeName && <span className="truncate">{assigneeName}</span>}
+            {twinName && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Badge
+                    variant="outline"
+                    className="gap-0.5 px-1 py-0 text-[10px]"
+                    data-testid={`board-card-${task.id}-twin`}
+                  >
+                    <BotIcon className="size-2.5" />
+                    {twinName}
+                  </Badge>
+                </TooltipTrigger>
+                <TooltipContent side="top">{t("twinBound", { name: twinName })}</TooltipContent>
+              </Tooltip>
+            )}
+            {task.tags.slice(0, 3).map((tag) => (
+              <span key={tag} className="rounded bg-muted px-1 py-0.5">
+                {tag}
+              </span>
+            ))}
+          </div>
 
-        {task.error && <p className="line-clamp-2 text-[10px] text-destructive">{task.error}</p>}
+          {task.error && <p className="line-clamp-2 text-[10px] text-destructive">{task.error}</p>}
 
-        <Button
-          variant="ghost"
-          size="sm"
-          className="h-5 px-1 text-[10px] text-muted-foreground hover:text-foreground"
-          onClick={() => setCommentsOpen((v) => !v)}
-          aria-expanded={commentsOpen}
-          data-testid={`board-card-${task.id}-comments`}
-        >
-          <MessageSquareIcon className="mr-1 size-3" />
-          {tTasks("comments.count", { count: task.comments?.length ?? 0 })}
-        </Button>
-        {commentsOpen && <TaskComments taskId={task.id} />}
-      </Card>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-5 px-1 text-[10px] text-muted-foreground hover:text-foreground"
+            onClick={() => setCommentsOpen((v) => !v)}
+            aria-expanded={commentsOpen}
+            data-testid={`board-card-${task.id}-comments`}
+          >
+            <MessageSquareIcon className="mr-1 size-3" />
+            {tTasks("comments.count", { count: task.comments?.length ?? 0 })}
+          </Button>
+          {commentsOpen && <TaskComments taskId={task.id} />}
+        </Card>
+      </motion.div>
 
       <AlertDialog open={deleteOpen} onOpenChange={setDeleteOpen}>
         <AlertDialogContent>

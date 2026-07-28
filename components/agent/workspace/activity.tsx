@@ -1,7 +1,8 @@
 "use client"
 
 import { useTranslations } from "next-intl"
-import { motion, useReducedMotion } from "motion/react"
+import { motion } from "motion/react"
+import { STAGGER_CHILD, STAGGER_CONTAINER, useReducedMotionVariants } from "@/lib/ui/motion"
 import { ActivityIcon, HistoryIcon } from "lucide-react"
 
 import { ScrollArea } from "@/components/ui/scroll-area"
@@ -78,7 +79,9 @@ export function AgentTeamActivity({
 }: AgentTeamActivityProps) {
   const t = useTranslations("agentTeamsWorkspace.activity")
   const tReport = useTranslations("agentTeamsWorkspace.activity.report")
-  const prefersReducedMotion = useReducedMotion()
+  // Shared list-entrance variants (`@/lib/ui/motion`); the container supplies
+  // the stagger so rows no longer carry a hand-computed per-index delay.
+  const childVariants = useReducedMotionVariants(STAGGER_CHILD)
 
   // Live teammate-progress rows are surfaced in a dedicated pulsing block,
   // one per task (latest frame wins — the store already replaces in place).
@@ -173,17 +176,17 @@ export function AgentTeamActivity({
             </div>
           ) : (
             <ScrollArea className="max-h-[60vh] rounded-md border">
-              <ul className="divide-y" data-testid="workspace-activity">
+              <motion.ul
+                className="divide-y"
+                data-testid="workspace-activity"
+                variants={STAGGER_CONTAINER}
+                initial="initial"
+                animate="animate"
+              >
                 {ordered.map((event, i) => (
                   <motion.li
                     key={`${event.type}-${event.timestamp.toISOString?.() ?? i}`}
-                    initial={prefersReducedMotion ? false : { opacity: 0, y: 4 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{
-                      duration: 0.15,
-                      ease: "easeOut",
-                      delay: prefersReducedMotion ? 0 : Math.min(i * 0.025, 0.12),
-                    }}
+                    variants={childVariants}
                     className="flex items-center justify-between gap-2 px-3 py-2 text-xs"
                     data-testid={`activity-row-${i}`}
                   >
@@ -203,7 +206,7 @@ export function AgentTeamActivity({
                     </span>
                   </motion.li>
                 ))}
-              </ul>
+              </motion.ul>
             </ScrollArea>
           )}
         </Card>

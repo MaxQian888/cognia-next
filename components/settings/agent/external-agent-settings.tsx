@@ -285,6 +285,7 @@ const PROTOCOL_OPTIONS: readonly { value: ExternalAgentProtocol; label: string }
   { value: "acp", label: "ACP (Agent Client Protocol)" },
   { value: "codex-app-server", label: "Codex app-server (JSON-RPC)" },
   { value: "opencode", label: "OpenCode (HTTP + SSE)" },
+  { value: "opencode-v2", label: "OpenCode V2 (Preview)" },
   { value: "a2a", label: "A2A (Agent-to-Agent)" },
   { value: "http", label: "HTTP" },
   { value: "websocket", label: "WebSocket" },
@@ -332,14 +333,17 @@ function AgentEditorDialog({
       if (preset) {
         return {
           ...DEFAULT_FORM_DATA,
-          name: preset.name,
+          name: initialPreset === "opencode-v2-preview" ? t("opencodeV2PresetName") : preset.name,
           protocol: preset.protocol,
           transport: preset.transport,
           processCommand: preset.process?.command ?? "",
           processArgs: preset.process?.args.join(" ") ?? "",
           networkEndpoint: preset.network?.endpoint ?? "",
           defaultPermissionMode: preset.defaultPermissionMode,
-          description: preset.description,
+          description:
+            initialPreset === "opencode-v2-preview"
+              ? t("opencodeV2PresetDescription")
+              : preset.description,
           ...opencodeFieldsFromMetadata(preset.metadata),
         }
       }
@@ -426,7 +430,10 @@ function AgentEditorDialog({
     const selectedPresetConfig =
       selectedPreset && selectedPreset !== "custom" ? getPresetConfig(selectedPreset) : null
 
-    if (formData.protocol === "opencode") {
+    if (formData.protocol === "opencode-v2") {
+      // The preview adapter discovers the local service and ephemeral auth
+      // through the desktop sidecar; no endpoint or process is persisted.
+    } else if (formData.protocol === "opencode") {
       // OpenCode auto-spawns a local `opencode serve` when the toggle is on
       // (seeded from the preset); otherwise it connects to a server endpoint.
       if (formData.opencodeAutoSpawn) {
@@ -539,18 +546,21 @@ function AgentEditorDialog({
       if (!preset) return
       setFormData((current) => ({
         ...current,
-        name: preset.name,
+        name: presetId === "opencode-v2-preview" ? t("opencodeV2PresetName") : preset.name,
         protocol: preset.protocol,
         transport: preset.transport,
         processCommand: preset.process?.command || current.processCommand,
         processArgs: preset.process?.args.join(" ") || current.processArgs,
         networkEndpoint: preset.network?.endpoint || current.networkEndpoint,
         defaultPermissionMode: preset.defaultPermissionMode,
-        description: preset.description,
+        description:
+          presetId === "opencode-v2-preview"
+            ? t("opencodeV2PresetDescription")
+            : preset.description,
         ...opencodeFieldsFromMetadata(preset.metadata),
       }))
     },
-    [setFormData]
+    [setFormData, t]
   )
 
   return (
@@ -578,7 +588,11 @@ function AgentEditorDialog({
                     return (
                       <SelectItem key={presetId} value={presetId}>
                         <div className="flex items-center gap-2">
-                          <span>{preset.name}</span>
+                          <span>
+                            {presetId === "opencode-v2-preview"
+                              ? t("opencodeV2PresetName")
+                              : preset.name}
+                          </span>
                           {preset.tags.length > 0 && (
                             <span className="text-xs text-muted-foreground">
                               ({preset.tags.slice(0, 3).join(", ")})
@@ -621,7 +635,12 @@ function AgentEditorDialog({
                     protocol,
                     // The Codex app-server is a locally spawned JSON-RPC process;
                     // it has no network transport to fall back on.
-                    transport: protocol === "codex-app-server" ? "stdio" : formData.transport,
+                    transport:
+                      protocol === "codex-app-server"
+                        ? "stdio"
+                        : protocol === "opencode" || protocol === "opencode-v2"
+                          ? "sse"
+                          : formData.transport,
                   })
                 }}
               >
@@ -631,14 +650,14 @@ function AgentEditorDialog({
                 <SelectContent>
                   {PROTOCOL_OPTIONS.map((option) => (
                     <SelectItem key={option.value} value={option.value}>
-                      {option.label}
+                      {option.value === "opencode-v2" ? t("opencodeV2Protocol") : option.label}
                     </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
             </div>
 
-            {formData.protocol !== "opencode" && (
+            {formData.protocol !== "opencode" && formData.protocol !== "opencode-v2" && (
               <div className="grid gap-2">
                 <Label>{t("transport")}</Label>
                 <Select
@@ -787,7 +806,7 @@ function AgentEditorDialog({
 
           {/* Connection — stdio process args or the network endpoint, whichever
               the chosen transport actually uses. */}
-          {formData.protocol !== "opencode" && (
+          {formData.protocol !== "opencode" && formData.protocol !== "opencode-v2" && (
             <FormSection
               title={t("sectionConnection")}
               defaultOpen
@@ -1202,7 +1221,9 @@ function PresetGalleryCard({ disabled, onPick }: PresetGalleryCardProps) {
             {presets.map(({ id, config }) => (
               <Card key={id} data-testid={`preset-card-${id}`} className="space-y-2 p-3">
                 <div className="flex flex-wrap items-start justify-between gap-1">
-                  <p className="text-sm font-medium">{config.name}</p>
+                  <p className="text-sm font-medium">
+                    {id === "opencode-v2-preview" ? t("opencodeV2PresetName") : config.name}
+                  </p>
                   {(CODEX_EXECUTABLE_PRESET_IDS as readonly string[]).includes(id) &&
                     id === preferredCodexPreset && (
                       <Badge
@@ -1228,7 +1249,11 @@ function PresetGalleryCard({ disabled, onPick }: PresetGalleryCardProps) {
                     </Badge>
                   )}
                 </div>
-                <p className="line-clamp-3 text-xs text-muted-foreground">{config.description}</p>
+                <p className="line-clamp-3 text-xs text-muted-foreground">
+                  {id === "opencode-v2-preview"
+                    ? t("opencodeV2PresetDescription")
+                    : config.description}
+                </p>
                 {config.tags.length > 0 && (
                   <div className="flex flex-wrap gap-1">
                     {config.tags.slice(0, 3).map((tag) => (
@@ -1287,7 +1312,7 @@ function AgentDetail({
 }: AgentDetailProps) {
   const t = useTranslations("externalAgent.settings")
   const tCommon = useTranslations("common")
-  const { getConnectionStatus, getAgentValidity } = useExternalAgentStore()
+  const { getConnectionStatus, getAgentValidity, updateAgent } = useExternalAgentStore()
 
   const status = getConnectionStatus(agent.id)
   const isConnected = status === "connected"
@@ -1372,6 +1397,28 @@ function AgentDetail({
         </div>
       </CardHeader>
       <CardContent className="space-y-4">
+        {agent.metadata?.providerUndoWarningAcknowledged === true && (
+          <div className="flex items-center justify-between gap-3 rounded-md border p-3">
+            <div>
+              <p className="text-sm font-medium">{t("providerUndoWarningSetting")}</p>
+              <p className="text-xs text-muted-foreground">
+                {t("providerUndoWarningSettingDescription")}
+              </p>
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() =>
+                updateAgent(agent.id, {
+                  metadata: { providerUndoWarningAcknowledged: false },
+                })
+              }
+              data-testid="reset-provider-undo-warning"
+            >
+              {t("providerUndoWarningReset")}
+            </Button>
+          </div>
+        )}
         {/* Agent Details */}
         <div className="grid grid-cols-1 gap-x-6 gap-y-1.5 text-sm @lg/agents-pane:grid-cols-2">
           <div>

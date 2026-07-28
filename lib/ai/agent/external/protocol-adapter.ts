@@ -23,7 +23,15 @@ import type {
   AcpConfigOption,
   ExternalAgentConnectionStatus,
   ExternalAgentSessionExtensionSupport,
+  AcpAvailableCommand,
 } from "@/types/agent/external-agent"
+import {
+  resolveCommandCompactionCapability,
+  resolveProviderUndoCapability,
+  type ExternalAgentCompactionCapability,
+  type ExternalAgentCompactionOptions,
+  type ExternalAgentProviderUndoCapability,
+} from "./session-capabilities"
 
 /**
  * Protocol adapter interface
@@ -144,6 +152,18 @@ export interface ProtocolAdapter {
    * queue-and-replay fallback for that case.
    */
   steerTurn?: (sessionId: string, text: string) => Promise<void>
+
+  /** Optional: discover native or advertised context-compaction routes. */
+  getCompactionCapability?: (sessionId: string) => Promise<ExternalAgentCompactionCapability>
+
+  /** Optional: compact a session and resolve after provider-confirmed completion. */
+  compactSession?: (sessionId: string, options?: ExternalAgentCompactionOptions) => Promise<void>
+
+  /** Optional: discover the provider's advertised `/undo` command. */
+  getProviderUndoCapability?: (sessionId: string) => Promise<ExternalAgentProviderUndoCapability>
+
+  /** Optional: execute provider-specific undo semantics. */
+  undoLastProviderChange?: (sessionId: string) => Promise<void>
 
   /**
    * Optional: List sessions (ACP extension / unstable)
@@ -342,6 +362,69 @@ export abstract class BaseProtocolAdapter implements ProtocolAdapter {
 
   async healthCheck(): Promise<boolean> {
     return this.isConnected()
+  }
+
+  protected async getAdvertisedCommandCompactionCapability(
+    sessionId: string
+  ): Promise<ExternalAgentCompactionCapability> {
+    const session = this.getSession(sessionId)
+    if (!session) {
+      return { status: "unknown", routes: [], reason: "session_not_found" }
+    }
+    return resolveCommandCompactionCapability(
+      (session.metadata?.availableCommands as AcpAvailableCommand[] | undefined) ?? []
+    )
+  }
+
+  protected async compactWithAdvertisedCommand(
+    sessionId: string,
+    options: ExternalAgentCompactionOptions = {}
+  ): Promise<void> {
+    const capability = await this.getAdvertisedCommandCompactionCapability(sessionId)
+    const route = capability.routes.find(
+      (candidate) => candidate.kind === "command" && (!options.focus || candidate.supportsFocus)
+    )
+    if (!route || route.kind !== "command") {
+      throw new Error("Agent does not support context compaction")
+    }
+    const text = options.focus ? `/${route.command} ${options.focus}` : `/${route.command}`
+    const result = await this.execute(sessionId, {
+      id: this.generateMessageId(),
+      role: "user",
+      content: [{ type: "text", text }],
+      timestamp: new Date(),
+    })
+    if (!result.success) {
+      throw new Error(result.error || "Context compaction failed")
+    }
+  }
+
+  protected async getAdvertisedProviderUndoCapability(
+    sessionId: string
+  ): Promise<ExternalAgentProviderUndoCapability> {
+    const session = this.getSession(sessionId)
+    if (!session) {
+      return { status: "unknown", reason: "session_not_found" }
+    }
+    return resolveProviderUndoCapability(
+      (session.metadata?.availableCommands as AcpAvailableCommand[] | undefined) ?? []
+    )
+  }
+
+  protected async undoWithAdvertisedCommand(sessionId: string): Promise<void> {
+    const capability = await this.getAdvertisedProviderUndoCapability(sessionId)
+    if (capability.status !== "supported") {
+      throw new Error("Agent does not support provider undo")
+    }
+    const result = await this.execute(sessionId, {
+      id: this.generateMessageId(),
+      role: "user",
+      content: [{ type: "text", text: "/undo" }],
+      timestamp: new Date(),
+    })
+    if (!result.success) {
+      throw new Error(result.error || "Provider undo failed")
+    }
   }
 
   /**

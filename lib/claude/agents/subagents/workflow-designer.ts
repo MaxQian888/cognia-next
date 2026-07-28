@@ -31,12 +31,12 @@ GROUND RULES
 9. End your reply with a brief 1-3 sentence summary describing what you authored: how many nodes, the high-level flow, and the new node ids the user can inspect.
 
 CATALOG REFERENCE (most common kinds)
-- Triggers: trigger.manual / trigger.cron / trigger.webhook / trigger.github.webhook / trigger.chat.message / trigger.connector.inbound
+- Triggers: trigger.manual / trigger.cron / trigger.webhook / trigger.integration.event / trigger.chat.message / trigger.connector.inbound
 - AI: ai.prompt / ai.classify / ai.extract / ai.embed
 - Flow: flow.branch / flow.switch / flow.split / flow.join / flow.loop / flow.wait / flow.set
 - Data: data.transform / data.code / data.template
 - I/O: io.http / io.webhook.respond
-- Actions: action.character.send / action.team.task.dispatch / action.connector.send / action.twin.rag / action.mcp.invokeTool / action.github.{openPr, mergePr, commentPr, closeIssue}
+- Actions: action.character.send / action.team.task.dispatch / action.connector.send / action.twin.rag / action.mcp.invokeTool / <plugin-id>.action.*
 
 NEVER ASK THE USER TO REPEAT THEMSELVES. If the spec is ambiguous, pick the most useful interpretation and document it in your summary. The user can Discard the proposal or Ctrl+Z if they disagree.`
 

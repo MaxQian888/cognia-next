@@ -74,4 +74,47 @@ describe("MobileSubagentsPage", () => {
     expect(screen.getByTestId("me-section-subagents")).toBeInTheDocument()
     expect(screen.queryByTestId("subagent-row-web-research")).toBeNull()
   })
+
+  it("marks a template disabled on desktop so the two surfaces agree", () => {
+    // A disabled template is excluded from dispatch by every resolver; without
+    // the badge this read-only list would still present it as available.
+    mockTemplates({
+      off: {
+        id: "off",
+        name: "Retired",
+        description: "",
+        category: "general",
+        taskTemplate: "",
+        config: {},
+        isBuiltIn: false,
+        disabled: true,
+      },
+    })
+    render(<MobileSubagentsPage />)
+    expect(screen.getByTestId("disabled-off")).toBeInTheDocument()
+  })
+
+  it("marks a hidden template, which stays dispatchable", () => {
+    mockTemplates({
+      quiet: {
+        id: "quiet",
+        name: "Quiet",
+        description: "",
+        category: "general",
+        taskTemplate: "",
+        config: {},
+        isBuiltIn: false,
+        hidden: true,
+      },
+    })
+    render(<MobileSubagentsPage />)
+    expect(screen.getByTestId("hidden-quiet")).toBeInTheDocument()
+    expect(screen.queryByTestId("disabled-quiet")).toBeNull()
+  })
+
+  it("leaves an ordinary template unbadged", () => {
+    render(<MobileSubagentsPage />)
+    expect(screen.queryByTestId("disabled-my-fork")).toBeNull()
+    expect(screen.queryByTestId("hidden-my-fork")).toBeNull()
+  })
 })

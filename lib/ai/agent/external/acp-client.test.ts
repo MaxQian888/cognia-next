@@ -1384,6 +1384,57 @@ function setAgentCaps(a: AcpClientAdapter, caps: unknown): void {
 }
 
 describe("AcpClientAdapter — ACP v1 session updates", () => {
+  it.each([
+    {
+      label: "compact",
+      commands: [{ name: "compact", description: "Compact context", input: null }],
+      compaction: {
+        status: "supported",
+        routes: [{ kind: "command", command: "compact", supportsFocus: false }],
+      },
+      undo: { status: "unsupported" },
+    },
+    {
+      label: "compress with input",
+      commands: [{ name: "/compress", description: "Compress context", input: { hint: "focus" } }],
+      compaction: {
+        status: "supported",
+        routes: [{ kind: "command", command: "compress", supportsFocus: true }],
+      },
+      undo: { status: "unsupported" },
+    },
+    {
+      label: "provider undo",
+      commands: [{ name: "/undo", description: "Undo last provider change", input: null }],
+      compaction: { status: "unsupported", routes: [] },
+      undo: { status: "supported", command: "undo" },
+    },
+    {
+      label: "non-equivalent parameterized command",
+      commands: [
+        { name: "compress-fast", description: "Fast compression", input: { hint: "focus" } },
+      ],
+      compaction: { status: "unsupported", routes: [] },
+      undo: { status: "unsupported" },
+    },
+    {
+      label: "no relevant commands",
+      commands: [{ name: "handoff", description: "Create a handoff", input: null }],
+      compaction: { status: "unsupported", routes: [] },
+      undo: { status: "unsupported" },
+    },
+  ])("projects $label command capabilities from the runtime fixture", async (fixture) => {
+    const adapter = new AcpClientAdapter()
+    seedSession(adapter, "s1", "default")
+    handleUpdate(adapter, "s1", {
+      sessionUpdate: "available_commands_update",
+      availableCommands: fixture.commands,
+    })
+
+    expect(await adapter.getCompactionCapability("s1")).toEqual(fixture.compaction)
+    expect(await adapter.getProviderUndoCapability("s1")).toEqual(fixture.undo)
+  })
+
   it("maps item plan_update and plan_removed notifications", () => {
     const a = new AcpClientAdapter()
     seedSession(a, "s1", "default")

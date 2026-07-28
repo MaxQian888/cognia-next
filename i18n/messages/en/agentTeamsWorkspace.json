@@ -235,6 +235,7 @@
       "running": "running",
       "toggleDetails": "Toggle details for {name}"
     },
+    "unreadDivider": "{count, plural, one {# new message} other {# new messages}}",
     "virtualTag": "Virtual"
   },
   "clearSearch": "Clear search",
@@ -328,6 +329,7 @@
     "unavailableDesc": "The project editor needs a desktop app or a paired device to reach the project files.",
     "unavailableTitle": "Editor unavailable"
   },
+  "gatesPending": "{count, plural, one {# gate waiting} other {# gates waiting}}",
   "listDescription": "Multi-agent teams that plan, divide work, and execute in parallel.",
   "listEmpty": "No teams yet. Create one from scratch or pick a template below.",
   "listTitle": "Agent Teams",
@@ -395,6 +397,7 @@
     "startTeamUltracode": "Run with ultracode",
     "status": "Status",
     "stopTeam": "Cancel team",
+    "tasksProgress": "Tasks done",
     "teammates": "Teammates",
     "tokenInput": "Prompt",
     "tokenOutput": "Completion",
@@ -504,6 +507,14 @@
         "notify": "Notify only",
         "pause_for_review": "Pause for review",
         "reduce_concurrency": "Reduce concurrency to 1"
+      },
+      "nudges": {
+        "busySignalHint": "Skipped if the member produced tool activity inside this window — it is working, not stuck.",
+        "busySignalWindowMs": "Busy-signal window (ms)",
+        "description": "When a teammate turn fails on a provider rate limit, the runtime waits out the cooldown and sends one \"continue\" nudge instead of aborting the whole wave.",
+        "enabled": "Enable guarded nudges",
+        "heading": "Rate-limit nudges",
+        "maxPerMemberPerHour": "Max nudges per member per hour"
       },
       "progressLedger": {
         "allowAutonomousConsensus": "Allow autonomously opening a consensus on stall",
@@ -725,6 +736,10 @@
         "illegal-transition": "That move isn't allowed from this column.",
         "runtime-owned": "The team is running this task — pause the run to move it.",
         "task-not-found": "Task no longer exists."
+      },
+      "empty": {
+        "description": "Add the first task and the board fills in as the team picks work up.",
+        "title": "No tasks on this board yet"
       },
       "emptyColumn": "No tasks",
       "filterAssignee": "Assignee",

@@ -146,6 +146,28 @@ beforeEach(() => {
   jest.clearAllMocks()
 })
 
+describe("TaskBoard empty state", () => {
+  it("replaces the column strip with one team-level empty state when there are no tasks", () => {
+    const ctx = seed()
+    render(
+      <TooltipProvider>
+        <TaskBoard team={ctx.team} tasks={[]} teammates={ctx.teammates} />
+      </TooltipProvider>
+    )
+    expect(screen.getByTestId("board-empty")).toBeInTheDocument()
+    // Eight columns each repeating "No tasks" reads as broken, not empty.
+    expect(screen.queryByTestId("board-columns")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("board-swimlanes")).not.toBeInTheDocument()
+  })
+
+  it("shows the columns again as soon as a task exists", () => {
+    const ctx = seed()
+    renderBoard(ctx)
+    expect(screen.queryByTestId("board-empty")).not.toBeInTheDocument()
+    expect(screen.getByTestId("board-columns")).toBeInTheDocument()
+  })
+})
+
 describe("TaskBoard", () => {
   it("renders the 8 canonical columns with counts", () => {
     const ctx = seed()

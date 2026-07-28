@@ -15,7 +15,7 @@ import { resolveExternalAgentSurfaceFromMetadata } from "./ecosystem-adapters"
 import { adaptPermissionMode } from "./permission-modes"
 import { protocolAdapterRegistry } from "./protocol-adapter"
 
-// The four protocols with a built-in adapter registered by
+// The five protocols with a built-in adapter registered by
 // `ExternalAgentManager.registerDefaultAdapters()`. Keeping this in set-equality
 // with the registered built-ins is what prevents a fresh `codex-app-server` /
 // `a2a` config from being mislabeled `metadata.unsupported` in
@@ -25,6 +25,7 @@ export const SUPPORTED_EXTERNAL_AGENT_PROTOCOLS = [
   "acp",
   "codex-app-server",
   "opencode",
+  "opencode-v2",
   "a2a",
 ] as const
 
@@ -448,6 +449,13 @@ export function getExternalAgentExecutionBlock(
       code: "transport_blocked",
       reason:
         "Auto-spawning an OpenCode server requires the desktop (Tauri) runtime; configure a server endpoint instead.",
+    }
+  }
+  if (config.protocol === "opencode-v2" && !runtimeSupportsExternalAgents) {
+    return {
+      code: "transport_blocked",
+      reason:
+        "OpenCode V2 local-service discovery requires the desktop runtime. Start the service with `opencode2 service start`, then reconnect from Cognia desktop.",
     }
   }
   const ecosystemReadiness = getExternalAgentEcosystemReadiness(

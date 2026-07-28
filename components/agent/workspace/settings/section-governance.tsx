@@ -27,6 +27,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import { DEFAULT_TEAM_CONFIG } from "@/types/agent/agent-team"
 import type {
   AgentTeam,
   AgentTeamConfig,
@@ -50,6 +51,13 @@ const DANGEROUS_CRITICAL: ReadonlySet<TeamBudgetEscalationAction> = new Set([
 
 export interface GovernanceSectionProps {
   team: AgentTeam
+}
+
+/** Runtime defaults for the nudge guards, so the panel cannot drift from them. */
+const DEFAULT_NUDGES: Required<NonNullable<AgentTeamConfig["nudges"]>> = {
+  enabled: DEFAULT_TEAM_CONFIG.nudges?.enabled ?? true,
+  maxPerMemberPerHour: DEFAULT_TEAM_CONFIG.nudges?.maxPerMemberPerHour ?? 2,
+  busySignalWindowMs: DEFAULT_TEAM_CONFIG.nudges?.busySignalWindowMs ?? 60_000,
 }
 
 const ESCALATION_ACTIONS: ReadonlyArray<TeamBudgetEscalationAction> = [
@@ -106,6 +114,20 @@ export function GovernanceSection({ team }: GovernanceSectionProps) {
       patchPolicy({ ...policy, budget: { ...policy.budget, onCritical: action } })
     },
     [patchPolicy, policy]
+  )
+
+  // Defaults come from the type's own DEFAULT_TEAM_CONFIG so the numbers the
+  // operator sees are the numbers the runtime uses when the field is unset —
+  // hard-coding them here is how a settings panel drifts from its runtime.
+  const nudges = team.config.nudges ?? DEFAULT_NUDGES
+
+  const patchNudges = useCallback(
+    (patch: Partial<NonNullable<AgentTeamConfig["nudges"]>>) => {
+      patchConfig({
+        nudges: { ...DEFAULT_NUDGES, ...(team.config.nudges ?? {}), ...patch },
+      })
+    },
+    [patchConfig, team.config.nudges]
   )
 
   const handleOnCriticalChange = (v: string) => {
@@ -400,6 +422,55 @@ export function GovernanceSection({ team }: GovernanceSectionProps) {
             placeholder={t("refusal.patternsPlaceholder")}
             className="text-xs"
           />
+        </div>
+      </div>
+
+      {/* Guarded nudges. The runtime has honoured `config.nudges` since it was
+          added — parsing a provider rate-limit cooldown and scheduling one
+          "continue" nudge instead of aborting the wave — but no surface ever
+          exposed it, so every team silently ran on the defaults below. */}
+      <div className="space-y-2" data-testid="governance-nudges">
+        <p className="text-xs font-medium">{t("nudges.heading")}</p>
+        <p className="text-[11px] text-muted-foreground">{t("nudges.description")}</p>
+        <div className="flex items-center justify-between">
+          <Label className="text-xs">{t("nudges.enabled")}</Label>
+          <Switch
+            checked={nudges.enabled !== false}
+            onCheckedChange={(v) => patchNudges({ enabled: v })}
+            data-testid="nudges-enabled"
+          />
+        </div>
+        <div className="space-y-1">
+          <Label className="text-xs">{t("nudges.maxPerMemberPerHour")}</Label>
+          <Input
+            type="number"
+            min={0}
+            max={20}
+            value={nudges.maxPerMemberPerHour ?? DEFAULT_NUDGES.maxPerMemberPerHour}
+            onChange={(e) =>
+              patchNudges({ maxPerMemberPerHour: clamp(Number(e.target.value), 0, 20) })
+            }
+            className="h-8 text-xs"
+            disabled={nudges.enabled === false}
+            data-testid="nudges-max-per-hour"
+          />
+        </div>
+        <div className="space-y-1">
+          <Label className="text-xs">{t("nudges.busySignalWindowMs")}</Label>
+          <Input
+            type="number"
+            min={0}
+            max={600_000}
+            step={1_000}
+            value={nudges.busySignalWindowMs ?? DEFAULT_NUDGES.busySignalWindowMs}
+            onChange={(e) =>
+              patchNudges({ busySignalWindowMs: clamp(Number(e.target.value), 0, 600_000) })
+            }
+            className="h-8 text-xs"
+            disabled={nudges.enabled === false}
+            data-testid="nudges-busy-window"
+          />
+          <p className="text-[11px] text-muted-foreground">{t("nudges.busySignalHint")}</p>
         </div>
       </div>
 

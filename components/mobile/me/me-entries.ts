@@ -31,7 +31,6 @@ import {
   CalendarClockIcon,
   ChartBarIcon,
   DatabaseIcon,
-  GitMergeIcon,
   HardDriveIcon,
   HistoryIcon,
   InfoIcon,
@@ -376,15 +375,6 @@ export const ME_ENTRIES: MeEntry[] = [
       "外部 agent",
       "权限",
     ],
-  },
-  {
-    id: "github-delivery",
-    pairedOnly: true,
-    icon: GitMergeIcon,
-    labelKey: "githubDeliveryRow",
-    href: "/me/github-delivery",
-    section: "connection",
-    keywords: ["github", "delivery", "merge", "pull request", "投递", "合并", "仓库"],
   },
   {
     id: "slash-commands",

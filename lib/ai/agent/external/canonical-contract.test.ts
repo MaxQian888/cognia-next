@@ -56,9 +56,7 @@ describe("normalizeExternalAgentValiditySnapshot — reason resolution", () => {
     })
     expect(out.canonicalReasonCode).toBe("ecosystem_documented_only")
     expect(out.canonicalReason).toBe("Use the IDE extension")
-    expect(out.recoveryHints).toEqual(
-      expect.arrayContaining(["Use the linked official product workflow for this surface."])
-    )
+    expect(out.recoveryHints).toEqual(expect.arrayContaining(["useOfficialWorkflow"]))
   })
 
   it("falls back through ecosystem.recommendedActions when limitationNote is absent", () => {
@@ -99,9 +97,7 @@ describe("normalizeExternalAgentValiditySnapshot — reason resolution", () => {
     })
     expect(out.canonicalReasonCode).toBe("ecosystem_prerequisite_missing")
     expect(out.canonicalReason).toBe("Set the env var")
-    expect(out.recoveryHints).toEqual([
-      "Complete the required external-agent setup, then retry the connection.",
-    ])
+    expect(out.recoveryHints).toEqual(["completeSetupThenRetry"])
   })
 
   it("uses prerequisite.label when detail is missing", () => {
@@ -222,18 +218,18 @@ describe("normalizeExternalAgentValiditySnapshot — lifecycle stage mapping", (
 })
 
 describe("normalizeExternalAgentValiditySnapshot — recovery hints map", () => {
+  // Hints are i18n key ids, not prose: they are produced in `lib/`, which has no
+  // locale, and resolved by the renderer against `diagnostics.recoveryHint.*`.
+  // Asserting on ids is also what keeps a copy edit from breaking this suite.
   const cases: Array<[string, string]> = [
-    ["protocol_unsupported", "Switch agent protocol to ACP."],
-    ["transport_blocked", "Run Cognia in desktop (Tauri) runtime for stdio transport."],
-    ["initialization_failed", "Check ACP process command and startup arguments."],
-    ["health_check_failed", "Inspect external-agent health endpoint/logs."],
-    ["extension_unsupported", "Use operations supported by this endpoint."],
-    [
-      "session_resolution_failed",
-      "Resume with an existing session id or allow new session creation.",
-    ],
-    ["permission_denied", "Adjust permission mode or approve required actions."],
-    ["execution_failed", "Check runtime diagnostics and retry with scoped input."],
+    ["protocol_unsupported", "switchToAcp"],
+    ["transport_blocked", "useDesktopRuntime"],
+    ["initialization_failed", "checkCommandAndArgs"],
+    ["health_check_failed", "inspectHealthEndpoint"],
+    ["extension_unsupported", "useSupportedOperations"],
+    ["session_resolution_failed", "resumeWithSessionIdOrAllowNew"],
+    ["permission_denied", "adjustPermissionMode"],
+    ["execution_failed", "checkDiagnosticsAndRetry"],
   ]
 
   for (const [reason, hint] of cases) {
@@ -244,6 +240,34 @@ describe("normalizeExternalAgentValiditySnapshot — recovery hints map", () => 
       expect(out.recoveryHints).toEqual(expect.arrayContaining([hint]))
     })
   }
+
+  it("emits only ids that the diagnostics namespace can resolve", () => {
+    // The gap this closes: a hint id with no translation would render as the
+    // raw id — the same class of leak as the untranslated reason-code badge.
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const messages = require("@/i18n/messages/en.json") as {
+      diagnostics: { recoveryHint: Record<string, string> }
+    }
+    const reasons = [
+      "ecosystem_prerequisite_missing",
+      "ecosystem_documented_only",
+      "protocol_unsupported",
+      "transport_blocked",
+      "initialization_failed",
+      "health_check_failed",
+      "extension_unsupported",
+      "session_resolution_failed",
+      "permission_denied",
+      "execution_failed",
+    ]
+    const emitted = reasons.flatMap(
+      (reason) =>
+        normalizeExternalAgentValiditySnapshot({ canonicalReasonCode: reason as never })
+          .recoveryHints ?? []
+    )
+    expect(emitted.length).toBeGreaterThan(0)
+    expect(emitted.filter((id) => !(id in messages.diagnostics.recoveryHint))).toEqual([])
+  })
 
   it("prefers ecosystem.recommendedActions when present", () => {
     const out = normalizeExternalAgentValiditySnapshot({

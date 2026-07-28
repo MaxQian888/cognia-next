@@ -45,20 +45,22 @@ function baseConfig(overrides: Partial<ExternalAgentConfig> = {}): ExternalAgent
 }
 
 describe("SUPPORTED_EXTERNAL_AGENT_PROTOCOLS", () => {
-  it("contains the four registered built-in adapters", () => {
+  it("contains the five registered built-in adapters", () => {
     expect(SUPPORTED_EXTERNAL_AGENT_PROTOCOLS).toEqual([
       "acp",
       "codex-app-server",
       "opencode",
+      "opencode-v2",
       "a2a",
     ])
   })
 })
 
 describe("isSupportedExternalAgentProtocol", () => {
-  it("returns true for the four built-in protocols", () => {
+  it("returns true for the five built-in protocols", () => {
     expect(isSupportedExternalAgentProtocol("acp")).toBe(true)
     expect(isSupportedExternalAgentProtocol("opencode")).toBe(true)
+    expect(isSupportedExternalAgentProtocol("opencode-v2")).toBe(true)
     expect(isSupportedExternalAgentProtocol("codex-app-server")).toBe(true)
     expect(isSupportedExternalAgentProtocol("a2a")).toBe(true)
   })

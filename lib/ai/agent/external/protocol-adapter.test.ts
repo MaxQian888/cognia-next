@@ -27,6 +27,7 @@ class TestAdapter extends BaseProtocolAdapter {
   events: ExternalAgentEvent[] = []
   permissionRecords: AcpPermissionResponse[] = []
   cancelled: string[] = []
+  promptRecords: ExternalAgentMessage[] = []
   shouldThrowInPrompt = false
 
   async connect(_config: ExternalAgentConfig): Promise<void> {
@@ -53,9 +54,10 @@ class TestAdapter extends BaseProtocolAdapter {
   }
   async *prompt(
     _sessionId: string,
-    _message: ExternalAgentMessage,
+    message: ExternalAgentMessage,
     _options?: ExternalAgentExecutionOptions
   ): AsyncIterable<ExternalAgentEvent> {
+    this.promptRecords.push(message)
     if (this.shouldThrowInPrompt) {
       throw new Error("stream broken")
     }
@@ -69,6 +71,18 @@ class TestAdapter extends BaseProtocolAdapter {
   async cancel(sessionId: string): Promise<void> {
     this.cancelled.push(sessionId)
   }
+  getCompactionCapability(sessionId: string) {
+    return this.getAdvertisedCommandCompactionCapability(sessionId)
+  }
+  compactSession(sessionId: string, options?: { focus?: string }) {
+    return this.compactWithAdvertisedCommand(sessionId, options)
+  }
+  getProviderUndoCapability(sessionId: string) {
+    return this.getAdvertisedProviderUndoCapability(sessionId)
+  }
+  undoLastProviderChange(sessionId: string) {
+    return this.undoWithAdvertisedCommand(sessionId)
+  }
 
   // Expose protected helpers for testing
   publicUpdateSession(sessionId: string, updates: Partial<ExternalAgentSession>) {
@@ -80,6 +94,13 @@ class TestAdapter extends BaseProtocolAdapter {
 }
 
 describe("BaseProtocolAdapter — basic accessors", () => {
+  it("does not opt every subclass into provider commands implicitly", () => {
+    expect(BaseProtocolAdapter.prototype).not.toHaveProperty("getCompactionCapability")
+    expect(BaseProtocolAdapter.prototype).not.toHaveProperty("compactSession")
+    expect(BaseProtocolAdapter.prototype).not.toHaveProperty("getProviderUndoCapability")
+    expect(BaseProtocolAdapter.prototype).not.toHaveProperty("undoLastProviderChange")
+  })
+
   it("starts in disconnected state and reports it", () => {
     const a = new TestAdapter()
     expect(a.connectionStatus).toBe("disconnected")
@@ -135,6 +156,54 @@ describe("BaseProtocolAdapter — basic accessors", () => {
   it("updateSession returns undefined for a missing session", async () => {
     const a = new TestAdapter()
     expect(a.publicUpdateSession("missing", { permissionMode: "plan" })).toBeUndefined()
+  })
+})
+
+describe("BaseProtocolAdapter session commands", () => {
+  it("executes an advertised compact command and preserves optional focus", async () => {
+    const adapter = new TestAdapter()
+    const session = await adapter.createSession()
+    adapter.publicUpdateSession(session.id, {
+      metadata: {
+        availableCommands: [
+          {
+            name: "/compress",
+            description: "Compress context",
+            input: { hint: "focus" },
+          },
+        ],
+      },
+    })
+    adapter.events = [{ type: "done", success: true, timestamp: new Date() }]
+
+    expect(await adapter.getCompactionCapability(session.id)).toEqual({
+      status: "supported",
+      routes: [{ kind: "command", command: "compress", supportsFocus: true }],
+    })
+    await adapter.compactSession(session.id, { focus: "preserve API decisions" })
+
+    expect(adapter.promptRecords.at(-1)?.content).toEqual([
+      { type: "text", text: "/compress preserve API decisions" },
+    ])
+  })
+
+  it("executes provider undo only when the command is advertised", async () => {
+    const adapter = new TestAdapter()
+    const session = await adapter.createSession()
+    adapter.publicUpdateSession(session.id, {
+      metadata: {
+        availableCommands: [{ name: "undo", description: "Undo last change" }],
+      },
+    })
+    adapter.events = [{ type: "done", success: true, timestamp: new Date() }]
+
+    expect(await adapter.getProviderUndoCapability(session.id)).toEqual({
+      status: "supported",
+      command: "undo",
+    })
+    await adapter.undoLastProviderChange(session.id)
+
+    expect(adapter.promptRecords.at(-1)?.content).toEqual([{ type: "text", text: "/undo" }])
   })
 })
 

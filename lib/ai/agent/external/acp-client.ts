@@ -40,6 +40,7 @@ import {
   isExternalAgentSessionExtensionUnsupportedForMethod,
 } from "./session-extension-errors"
 import { isToolPreApproved } from "./tool-preapproval"
+import type { ExternalAgentCompactionOptions } from "./session-capabilities"
 
 const log = loggers.agent
 
@@ -1055,6 +1056,22 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
    * Create a new session
    * @see https://agentclientprotocol.com/protocol/session-setup
    */
+  getCompactionCapability(sessionId: string) {
+    return this.getAdvertisedCommandCompactionCapability(sessionId)
+  }
+
+  compactSession(sessionId: string, options?: ExternalAgentCompactionOptions) {
+    return this.compactWithAdvertisedCommand(sessionId, options)
+  }
+
+  getProviderUndoCapability(sessionId: string) {
+    return this.getAdvertisedProviderUndoCapability(sessionId)
+  }
+
+  undoLastProviderChange(sessionId: string) {
+    return this.undoWithAdvertisedCommand(sessionId)
+  }
+
   async createSession(options?: SessionCreateOptions): Promise<ExternalAgentSession> {
     if (!this.isConnected()) {
       throw new Error("Not connected to agent")

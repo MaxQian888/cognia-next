@@ -112,9 +112,9 @@ describe("GovernanceSection", () => {
   it("renders all governance switches incl. adaptive re-planning + progress ledger + refusal detect", () => {
     render(<GovernanceSection team={makeTeam()} />)
     const switches = screen.getAllByRole("switch")
-    // 12 switches: 4 approval (incl. the ADR-0071 task review) + 2 escalation
-    // + 2 adaptiveReplan + 3 progressLedger + 1 refusal detect
-    expect(switches.length).toBe(12)
+    // 13 switches: 4 approval (incl. the ADR-0071 task review) + 2 escalation
+    // + 2 adaptiveReplan + 3 progressLedger + 1 refusal detect + 1 nudges
+    expect(switches.length).toBe(13)
   })
 
   it("toggles progressLedger.enabled and patches the config", () => {
@@ -649,5 +649,78 @@ describe("GovernanceSection", () => {
         }),
       })
     )
+  })
+
+  // `config.nudges` has been honoured by the runtime since it was added but had
+  // no UI, so every team silently ran on the defaults.
+  describe("rate-limit nudges", () => {
+    it("shows the runtime defaults when the team has never set them", () => {
+      render(<GovernanceSection team={makeTeam()} />)
+      expect(screen.getByTestId("governance-nudges")).toBeInTheDocument()
+      expect(screen.getByTestId("nudges-enabled")).toBeChecked()
+      expect(screen.getByTestId("nudges-max-per-hour")).toHaveValue(2)
+      expect(screen.getByTestId("nudges-busy-window")).toHaveValue(60000)
+    })
+
+    it("reflects a team's stored overrides", () => {
+      render(
+        <GovernanceSection
+          team={makeTeam(undefined, {
+            nudges: { enabled: false, maxPerMemberPerHour: 7, busySignalWindowMs: 5_000 },
+          })}
+        />
+      )
+      expect(screen.getByTestId("nudges-enabled")).not.toBeChecked()
+      expect(screen.getByTestId("nudges-max-per-hour")).toHaveValue(7)
+      expect(screen.getByTestId("nudges-busy-window")).toHaveValue(5000)
+    })
+
+    it("disables the numeric guards while nudges are switched off", () => {
+      render(<GovernanceSection team={makeTeam(undefined, { nudges: { enabled: false } })} />)
+      expect(screen.getByTestId("nudges-max-per-hour")).toBeDisabled()
+      expect(screen.getByTestId("nudges-busy-window")).toBeDisabled()
+    })
+
+    it("persists a toggle while filling in the defaults for untouched guards", () => {
+      render(<GovernanceSection team={makeTeam()} />)
+      fireEvent.click(screen.getByTestId("nudges-enabled"))
+      expect(updateTeamConfigMock).toHaveBeenCalledWith(
+        "t1",
+        expect.objectContaining({
+          nudges: { enabled: false, maxPerMemberPerHour: 2, busySignalWindowMs: 60_000 },
+        })
+      )
+    })
+
+    it("clamps the per-hour cap into range instead of writing nonsense", () => {
+      render(<GovernanceSection team={makeTeam()} />)
+      fireEvent.change(screen.getByTestId("nudges-max-per-hour"), { target: { value: "999" } })
+      expect(updateTeamConfigMock).toHaveBeenCalledWith(
+        "t1",
+        expect.objectContaining({ nudges: expect.objectContaining({ maxPerMemberPerHour: 20 }) })
+      )
+
+      updateTeamConfigMock.mockReset()
+      fireEvent.change(screen.getByTestId("nudges-max-per-hour"), { target: { value: "-4" } })
+      expect(updateTeamConfigMock).toHaveBeenCalledWith(
+        "t1",
+        expect.objectContaining({ nudges: expect.objectContaining({ maxPerMemberPerHour: 0 }) })
+      )
+    })
+
+    it("clamps the busy-signal window and preserves the other guards", () => {
+      render(
+        <GovernanceSection
+          team={makeTeam(undefined, { nudges: { enabled: true, maxPerMemberPerHour: 5 } })}
+        />
+      )
+      fireEvent.change(screen.getByTestId("nudges-busy-window"), { target: { value: "9999999" } })
+      expect(updateTeamConfigMock).toHaveBeenCalledWith(
+        "t1",
+        expect.objectContaining({
+          nudges: { enabled: true, maxPerMemberPerHour: 5, busySignalWindowMs: 600_000 },
+        })
+      )
+    })
   })
 })

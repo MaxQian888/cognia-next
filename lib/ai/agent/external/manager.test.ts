@@ -10,6 +10,11 @@ jest.mock("./opencode-client", () => ({
     readonly protocol = "opencode"
   },
 }))
+jest.mock("./opencode-v2-client", () => ({
+  OpenCodeV2ClientAdapter: class {
+    readonly protocol = "opencode-v2"
+  },
+}))
 jest.mock("@/lib/native/external-agent", () => ({
   checkExternalAgentCommandExists: jest.fn().mockResolvedValue(true),
   onExternalAgentExit: jest.fn().mockResolvedValue(() => {}),
@@ -705,6 +710,51 @@ describe("steerSession / supportsSteering", () => {
     await expect(m.steerSession("agent-1", undefined, "hint")).rejects.toThrow(
       /no executing session/i
     )
+  })
+})
+
+describe("session compaction and provider undo routing", () => {
+  it("reports unsupported when the adapter does not implement the capability contract", async () => {
+    const manager = freshManager()
+    await manager.addAgent(buildBaseConfig())
+    await expect(manager.getCompactionCapability("agent-1", "s_1")).resolves.toEqual({
+      status: "unsupported",
+      routes: [],
+      reason: "adapter_unsupported",
+    })
+    await expect(manager.getProviderUndoCapability("agent-1", "s_1")).resolves.toEqual({
+      status: "unsupported",
+      reason: "adapter_unsupported",
+    })
+  })
+
+  it("delegates compaction options and provider undo to the live adapter", async () => {
+    const getCompactionCapability = jest.fn(async () => ({
+      status: "supported" as const,
+      routes: [{ kind: "native" as const, supportsFocus: false as const }],
+    }))
+    const compactSession = jest.fn(async () => {})
+    const getProviderUndoCapability = jest.fn(async () => ({
+      status: "supported" as const,
+      command: "undo" as const,
+    }))
+    const undoLastProviderChange = jest.fn(async () => {})
+    Object.assign(currentMock, {
+      getCompactionCapability,
+      compactSession,
+      getProviderUndoCapability,
+      undoLastProviderChange,
+    })
+
+    const manager = freshManager()
+    await manager.addAgent(buildBaseConfig())
+    await expect(manager.getCompactionCapability("agent-1", "s_1")).resolves.toMatchObject({
+      status: "supported",
+    })
+    await manager.compactSession("agent-1", "s_1", { focus: "Keep decisions" })
+    await manager.undoLastProviderChange("agent-1", "s_1")
+    expect(compactSession).toHaveBeenCalledWith("s_1", { focus: "Keep decisions" })
+    expect(undoLastProviderChange).toHaveBeenCalledWith("s_1")
   })
 })
 

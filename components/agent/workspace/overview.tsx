@@ -1,15 +1,16 @@
 "use client"
 
 import { useTranslations } from "next-intl"
-import { CoinsIcon, GaugeIcon, TimerIcon, UsersIcon } from "lucide-react"
+import { CoinsIcon, GaugeIcon, ListChecksIcon, TimerIcon, UsersIcon } from "lucide-react"
 import { Card } from "@/components/ui/card"
-import { Button } from "@/components/ui/button"
 import { Progress } from "@/components/ui/progress"
+import { cn } from "@/lib/utils"
 import { StatCard } from "@/components/scheduler/stat-card"
 import { StatusBadge } from "@/components/status-badge"
 import { formatNumber } from "./token-usage-line"
 import { EditableField } from "./editable-field"
 import { PlanApprovalPanel } from "@/components/agent/team/plan-approval-panel"
+import { TeamRunControls } from "./team-run-controls"
 import { PluginExtensionSlot } from "@/components/plugins/plugin-extension-slot"
 import { MotionReveal, useFlowMotion } from "@/components/chat/motion/motion-reveal"
 import { useUsageDisplayMode } from "@/hooks/usage/use-usage-display-mode"
@@ -33,6 +34,18 @@ export interface AgentTeamOverviewProps {
   /** Cancel a paused team for good (shutdown). */
   onStop?: () => void
   onUpdateTeam?: (updates: Partial<AgentTeam>) => void
+  /**
+   * Who draws the identity chrome — the status badge, the roster/token/duration
+   * stats, and the run controls.
+   *
+   * `"self"` (default): this component draws them. Correct for surfaces with no
+   * workspace header, i.e. the mobile workspace.
+   *
+   * `"header"`: an ancestor `WorkspaceHeader` already draws all five values, so
+   * drawing them again repeats the same numbers twice within one viewport. The
+   * desktop workspace passes this and lets the always-visible header own them.
+   */
+  chrome?: "self" | "header"
 }
 
 export function AgentTeamOverview({
@@ -45,6 +58,7 @@ export function AgentTeamOverview({
   onResume,
   onStop,
   onUpdateTeam,
+  chrome = "self",
 }: AgentTeamOverviewProps) {
   const t = useTranslations("agentTeamsWorkspace.overview")
   const { mode } = useUsageDisplayMode()
@@ -75,7 +89,10 @@ export function AgentTeamOverview({
     ? `${Math.floor(team.totalDuration / 60000)}m ${Math.floor((team.totalDuration % 60000) / 1000)}s`
     : null
 
-  // Task aggregates for the plugin panel context (ids + counts only).
+  // Task aggregates. A scalar pair on purpose: the selector re-runs on every
+  // store delta (one per streamed token during a live run) but `useShallow`
+  // only re-renders when a count actually moves. Feeds the progress tile and
+  // the plugin panel context (ids + counts only — never task bodies).
   const taskStats = useAgentTeamStore(
     useShallow((s) => {
       let total = 0
@@ -93,6 +110,7 @@ export function AgentTeamOverview({
   // optimistic store status winning only while in-flight). See ADR-0022 "PR 5".
   const liveStatus = useTeamLiveStatus(team)
   const isLive = liveStatus === "executing" || liveStatus === "planning"
+  const ownsChrome = chrome === "self"
 
   return (
     <div className="space-y-4" data-testid="workspace-overview">
@@ -118,46 +136,82 @@ export function AgentTeamOverview({
               data-testid="team-description-edit"
             />
           </div>
-          <StatusBadge
-            value={liveStatus}
-            labelNamespace="agentTeam.status"
-            pulse={isLive}
-            pulseClassName={isLive ? "bg-emerald-400 size-2" : undefined}
-            className="shrink-0"
-            data-testid="team-status"
-          />
+          {ownsChrome && (
+            <StatusBadge
+              value={liveStatus}
+              labelNamespace="agentTeam.status"
+              pulse={isLive}
+              pulseClassName={isLive ? "bg-emerald-400 size-2" : undefined}
+              className="shrink-0"
+              data-testid="team-status"
+            />
+          )}
         </div>
       </Card>
 
-      {/* Key metrics */}
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4" data-testid="overview-stats">
-        <StatCard
-          label={t("teammates")}
-          value={workers.length}
-          icon={<UsersIcon className="h-5 w-5 text-blue-500" aria-hidden />}
-          valueClassName="text-blue-500"
-          accentGradient="from-blue-500 to-sky-400"
-          iconBgClassName="bg-blue-500/10"
-          testid="overview-stat-teammates"
-        />
-        <StatCard
-          label={t("tokenUsage")}
-          value={formatNumber(tokens)}
-          icon={<CoinsIcon className="h-5 w-5 text-violet-500" aria-hidden />}
-          valueClassName="text-violet-500"
-          accentGradient="from-violet-500 to-purple-400"
-          iconBgClassName="bg-violet-500/10"
-          testid="overview-stat-tokens"
-        />
-        <StatCard
-          label={t("duration")}
-          value={duration ?? "—"}
-          icon={<TimerIcon className="h-5 w-5 text-emerald-500" aria-hidden />}
-          valueClassName="text-foreground"
-          accentGradient="from-emerald-500 to-teal-400"
-          iconBgClassName="bg-emerald-500/10"
-          testid="overview-stat-duration"
-        />
+      {/* Key metrics. Under `chrome="header"` the roster / token / duration tiles
+          are dropped: the always-visible header already carries those exact three
+          numbers, and repeating them here put the same values on screen twice
+          within one viewport. What replaces them is what the header cannot show —
+          task progress (computed below but historically only handed to plugins)
+          and budget headroom. */}
+      <div
+        className={cn("grid grid-cols-2 gap-3", ownsChrome ? "lg:grid-cols-4" : "lg:grid-cols-3")}
+        data-testid="overview-stats"
+      >
+        {ownsChrome && (
+          <>
+            <StatCard
+              label={t("teammates")}
+              value={workers.length}
+              icon={<UsersIcon className="h-5 w-5 text-blue-500" aria-hidden />}
+              valueClassName="text-blue-500"
+              accentGradient="from-blue-500 to-sky-400"
+              iconBgClassName="bg-blue-500/10"
+              testid="overview-stat-teammates"
+            />
+            <StatCard
+              label={t("tokenUsage")}
+              value={formatNumber(tokens)}
+              icon={<CoinsIcon className="h-5 w-5 text-violet-500" aria-hidden />}
+              valueClassName="text-violet-500"
+              accentGradient="from-violet-500 to-purple-400"
+              iconBgClassName="bg-violet-500/10"
+              testid="overview-stat-tokens"
+            />
+            <StatCard
+              label={t("duration")}
+              value={duration ?? "—"}
+              icon={<TimerIcon className="h-5 w-5 text-emerald-500" aria-hidden />}
+              valueClassName="text-foreground"
+              accentGradient="from-emerald-500 to-teal-400"
+              iconBgClassName="bg-emerald-500/10"
+              testid="overview-stat-duration"
+            />
+          </>
+        )}
+        {!ownsChrome && (
+          <>
+            <StatCard
+              label={t("tasksProgress")}
+              value={`${taskStats.completed}/${taskStats.total}`}
+              icon={<ListChecksIcon className="h-5 w-5 text-emerald-500" aria-hidden />}
+              valueClassName="text-emerald-500"
+              accentGradient="from-emerald-500 to-teal-400"
+              iconBgClassName="bg-emerald-500/10"
+              testid="overview-stat-tasks"
+            />
+            <StatCard
+              label={t("budget")}
+              value={budget > 0 ? `${usagePct}%` : t("unlimited")}
+              icon={<CoinsIcon className="h-5 w-5 text-violet-500" aria-hidden />}
+              valueClassName="text-violet-500"
+              accentGradient="from-violet-500 to-purple-400"
+              iconBgClassName="bg-violet-500/10"
+              testid="overview-stat-budget"
+            />
+          </>
+        )}
         <StatCard
           label={t("concurrency")}
           value={team.config.maxConcurrentTeammates ?? 5}
@@ -169,8 +223,9 @@ export function AgentTeamOverview({
         />
       </div>
 
-      {/* Config summary + Runtime */}
-      <div className="grid grid-cols-1 items-start gap-4 sm:grid-cols-2 lg:grid-cols-3">
+      {/* Config summary + Runtime — two cards, so two columns. The old
+          `lg:grid-cols-3` left a permanent empty third column at wide widths. */}
+      <div className="grid grid-cols-1 items-start gap-4 sm:grid-cols-2">
         <Card className="space-y-2 p-4">
           <p className="text-xs font-medium text-muted-foreground">{t("configSummary")}</p>
           <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-xs">
@@ -265,48 +320,22 @@ export function AgentTeamOverview({
           on any decision or abort, so the status is sufficient and correct. */}
       {lead?.status === "awaiting_approval" && <PlanApprovalPanel team={team} lead={lead} />}
 
-      {/* Actions */}
-      <div className="flex items-center justify-end gap-2">
-        {isLive ? (
-          <>
-            {onPause && (
-              <Button variant="outline" size="sm" onClick={onPause} data-testid="pause-team">
-                {t("pauseTeam")}
-              </Button>
-            )}
-            <Button variant="outline" size="sm" onClick={onAbort} data-testid="abort-team">
-              {t("abortTeam")}
-            </Button>
-          </>
-        ) : liveStatus === "paused" ? (
-          <>
-            {onStop && (
-              <Button variant="outline" size="sm" onClick={onStop} data-testid="stop-team">
-                {t("stopTeam")}
-              </Button>
-            )}
-            <Button size="sm" onClick={onResume} data-testid="resume-team">
-              {t("resumeTeam")}
-            </Button>
-          </>
-        ) : (
-          <>
-            {team.config.ultracode?.enabled && onStartUltracode && (
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={onStartUltracode}
-                data-testid="start-team-ultracode"
-              >
-                {t("startTeamUltracode")}
-              </Button>
-            )}
-            <Button size="sm" onClick={onStart} data-testid="start-team">
-              {t("startTeam")}
-            </Button>
-          </>
-        )}
-      </div>
+      {/* Actions. Rendered here only when this component owns the chrome; the
+          desktop workspace pins the same controls in the always-visible header
+          so the primary action never scrolls out of reach. */}
+      {ownsChrome && (
+        <TeamRunControls
+          className="justify-end"
+          status={liveStatus}
+          ultracodeEnabled={team.config.ultracode?.enabled}
+          onStart={onStart}
+          onStartUltracode={onStartUltracode}
+          onAbort={onAbort}
+          onPause={onPause}
+          onResume={onResume}
+          onStop={onStop}
+        />
+      )}
 
       {/* Plugin-contributed team insight / governance panels. Context carries
           ids + aggregates only (never task/message bodies). */}

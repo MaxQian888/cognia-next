@@ -96,13 +96,10 @@ describe("me-entries registry", () => {
     })
   })
 
-  it("surfaces the ADR-0056 Wave 4 MCP and GitHub Delivery entries", () => {
+  it("surfaces the ADR-0056 Wave 4 MCP entry without platform-specific integrations", () => {
     const byId = (id: string) => ME_ENTRIES.find((e) => e.id === id)
     expect(byId("mcp")).toMatchObject({ href: "/me/mcp", section: "connection" })
-    expect(byId("github-delivery")).toMatchObject({
-      href: "/me/github-delivery",
-      section: "connection",
-    })
+    expect(byId("github-delivery")).toBeUndefined()
   })
 
   it("surfaces the ADR-0056 Wave 4 read-only desktop-bound sections", () => {

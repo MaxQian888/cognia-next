@@ -2,7 +2,14 @@
 
 import { useEffect, useState } from "react"
 import { useTranslations } from "next-intl"
-import { motion, useReducedMotion } from "motion/react"
+import { AnimatePresence, motion } from "motion/react"
+import {
+  MOBILE_SPRING,
+  STAGGER_CHILD,
+  STAGGER_CONTAINER,
+  useReducedMotionTransition,
+  useReducedMotionVariants,
+} from "@/lib/ui/motion"
 import {
   KanbanIcon,
   ListIcon,
@@ -87,7 +94,6 @@ export interface AgentTeamTasksProps {
 export function AgentTeamTasks({ teamId, tasks, teammates }: AgentTeamTasksProps) {
   const t = useTranslations("agentTeamsWorkspace.tasks")
   const tPriority = useTranslations("agentPriority")
-  const prefersReducedMotion = useReducedMotion()
   const createTask = useAgentTeamStore((s) => s.createTask)
   const deleteTask = useAgentTeamStore((s) => s.deleteTask)
   const tasksView = useAgentTeamStore((s) => s.tasksView)
@@ -272,7 +278,6 @@ export function AgentTeamTasks({ teamId, tasks, teammates }: AgentTeamTasksProps
           expandedTaskId={expandedTaskId}
           setExpandedTaskId={setExpandedTaskId}
           deleteTask={deleteTask}
-          prefersReducedMotion={prefersReducedMotion === true}
         />
       )}
     </div>
@@ -286,124 +291,134 @@ function TaskListGrid({
   expandedTaskId,
   setExpandedTaskId,
   deleteTask,
-  prefersReducedMotion,
 }: {
   tasks: AgentTeamTask[]
   teammates: AgentTeammate[]
   expandedTaskId: string | null
   setExpandedTaskId: (updater: (prev: string | null) => string | null) => void
   deleteTask: (taskId: string) => void
-  prefersReducedMotion: boolean
 }) {
   const t = useTranslations("agentTeamsWorkspace.tasks")
   const tPriority = useTranslations("agentPriority")
+  // `layout` + spring so deleting a card makes the survivors flow into the gap
+  // rather than teleport; the exit variant means the deleted card leaves rather
+  // than blinking out. Both come from the shared tokens, so the reduced-motion
+  // preference collapses them without a second code path here.
+  const childVariants = useReducedMotionVariants(STAGGER_CHILD)
+  const layoutTransition = useReducedMotionTransition(MOBILE_SPRING)
   return (
-    <div className="grid gap-2 md:grid-cols-2 2xl:grid-cols-3 items-start">
-      {tasks.map((task, index) => {
-        const cfg = TASK_STATUS_CONFIG[task.status]
-        const assignee = task.assignedTo ? teammates.find((m) => m.id === task.assignedTo) : null
-        return (
-          <motion.div
-            key={task.id}
-            initial={prefersReducedMotion ? false : { opacity: 0, y: 4 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{
-              duration: 0.15,
-              ease: "easeOut",
-              delay: prefersReducedMotion ? 0 : Math.min(index * 0.03, 0.15),
-            }}
-          >
-            <Card
-              className={cn("space-y-1 border-l-2 p-3", priorityAccent(task.priority))}
-              data-testid={`task-${task.id}`}
+    <motion.div
+      className="grid gap-2 md:grid-cols-2 2xl:grid-cols-3 items-start"
+      variants={STAGGER_CONTAINER}
+      initial="initial"
+      animate="animate"
+    >
+      <AnimatePresence initial={false}>
+        {tasks.map((task) => {
+          const cfg = TASK_STATUS_CONFIG[task.status]
+          const assignee = task.assignedTo ? teammates.find((m) => m.id === task.assignedTo) : null
+          return (
+            <motion.div
+              key={task.id}
+              layout
+              variants={childVariants}
+              initial="initial"
+              animate="animate"
+              exit="exit"
+              transition={layoutTransition}
             >
-              <div className="flex items-start justify-between gap-2">
-                <div className="min-w-0 flex-1">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <p className="text-sm font-medium truncate">{task.title}</p>
-                    <StatusBadge
-                      value={cfg?.labelKey ?? task.status}
-                      labelNamespace="agentTeam.taskStatus"
-                      pulse={task.status === "in_progress" || task.status === "claimed"}
-                      className="text-[10px] shrink-0"
-                      data-testid={`task-${task.id}-status`}
-                    />
-                    {task.priority && (
-                      <Badge variant="secondary" className="text-[10px] shrink-0">
-                        {tPriority(task.priority)}
-                      </Badge>
-                    )}
-                  </div>
-                  {task.description && (
-                    <p className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">
-                      {task.description}
-                    </p>
-                  )}
-                  <div className="mt-1 flex items-center gap-3 text-[10px] text-muted-foreground">
-                    {assignee && <span>{assignee.name}</span>}
-                    {task.tags && task.tags.length > 0 && (
-                      <span className="flex gap-1">
-                        {task.tags.map((tag) => (
-                          <span key={tag} className="rounded bg-muted px-1 py-0.5">
-                            {tag}
-                          </span>
-                        ))}
-                      </span>
-                    )}
-                  </div>
-                </div>
-                <AlertDialog>
-                  <AlertDialogTrigger asChild>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="size-7 shrink-0 text-muted-foreground hover:text-destructive"
-                    >
-                      <Trash2Icon className="size-3" />
-                    </Button>
-                  </AlertDialogTrigger>
-                  <AlertDialogContent>
-                    <AlertDialogHeader>
-                      <AlertDialogTitle>{t("deleteTitle")}</AlertDialogTitle>
-                      <AlertDialogDescription>{t("deleteBody")}</AlertDialogDescription>
-                    </AlertDialogHeader>
-                    <AlertDialogFooter>
-                      <AlertDialogCancel>{t("cancel")}</AlertDialogCancel>
-                      <AlertDialogAction
-                        className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-                        onClick={() => {
-                          deleteTask(task.id)
-                          toast.success(t("taskDeleted"))
-                        }}
-                      >
-                        {t("delete")}
-                      </AlertDialogAction>
-                    </AlertDialogFooter>
-                  </AlertDialogContent>
-                </AlertDialog>
-              </div>
-              {task.error && <p className="text-xs text-destructive">{task.error}</p>}
-              {task.result && (
-                <p className="line-clamp-2 text-[11px] italic text-muted-foreground">
-                  {task.result}
-                </p>
-              )}
-              <Button
-                variant="ghost"
-                size="sm"
-                className="h-6 px-1.5 text-[11px] text-muted-foreground hover:text-foreground"
-                onClick={() => setExpandedTaskId((prev) => (prev === task.id ? null : task.id))}
-                aria-expanded={expandedTaskId === task.id}
-                data-testid={`task-${task.id}-comments-toggle`}
+              <Card
+                className={cn("space-y-1 border-l-2 p-3", priorityAccent(task.priority))}
+                data-testid={`task-${task.id}`}
               >
-                <MessageSquareIcon className="mr-1 size-3" />
-                {t("comments.count", { count: task.comments?.length ?? 0 })}
-              </Button>
-              {expandedTaskId === task.id && <TaskComments taskId={task.id} />}
-            </Card>
-          </motion.div>
-        )
-      })}
-    </div>
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <p className="text-sm font-medium truncate">{task.title}</p>
+                      <StatusBadge
+                        value={cfg?.labelKey ?? task.status}
+                        labelNamespace="agentTeam.taskStatus"
+                        pulse={task.status === "in_progress" || task.status === "claimed"}
+                        className="text-[10px] shrink-0"
+                        data-testid={`task-${task.id}-status`}
+                      />
+                      {task.priority && (
+                        <Badge variant="secondary" className="text-[10px] shrink-0">
+                          {tPriority(task.priority)}
+                        </Badge>
+                      )}
+                    </div>
+                    {task.description && (
+                      <p className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">
+                        {task.description}
+                      </p>
+                    )}
+                    <div className="mt-1 flex items-center gap-3 text-[10px] text-muted-foreground">
+                      {assignee && <span>{assignee.name}</span>}
+                      {task.tags && task.tags.length > 0 && (
+                        <span className="flex gap-1">
+                          {task.tags.map((tag) => (
+                            <span key={tag} className="rounded bg-muted px-1 py-0.5">
+                              {tag}
+                            </span>
+                          ))}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                  <AlertDialog>
+                    <AlertDialogTrigger asChild>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="size-7 shrink-0 text-muted-foreground hover:text-destructive"
+                      >
+                        <Trash2Icon className="size-3" />
+                      </Button>
+                    </AlertDialogTrigger>
+                    <AlertDialogContent>
+                      <AlertDialogHeader>
+                        <AlertDialogTitle>{t("deleteTitle")}</AlertDialogTitle>
+                        <AlertDialogDescription>{t("deleteBody")}</AlertDialogDescription>
+                      </AlertDialogHeader>
+                      <AlertDialogFooter>
+                        <AlertDialogCancel>{t("cancel")}</AlertDialogCancel>
+                        <AlertDialogAction
+                          className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                          onClick={() => {
+                            deleteTask(task.id)
+                            toast.success(t("taskDeleted"))
+                          }}
+                        >
+                          {t("delete")}
+                        </AlertDialogAction>
+                      </AlertDialogFooter>
+                    </AlertDialogContent>
+                  </AlertDialog>
+                </div>
+                {task.error && <p className="text-xs text-destructive">{task.error}</p>}
+                {task.result && (
+                  <p className="line-clamp-2 text-[11px] italic text-muted-foreground">
+                    {task.result}
+                  </p>
+                )}
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-6 px-1.5 text-[11px] text-muted-foreground hover:text-foreground"
+                  onClick={() => setExpandedTaskId((prev) => (prev === task.id ? null : task.id))}
+                  aria-expanded={expandedTaskId === task.id}
+                  data-testid={`task-${task.id}-comments-toggle`}
+                >
+                  <MessageSquareIcon className="mr-1 size-3" />
+                  {t("comments.count", { count: task.comments?.length ?? 0 })}
+                </Button>
+                {expandedTaskId === task.id && <TaskComments taskId={task.id} />}
+              </Card>
+            </motion.div>
+          )
+        })}
+      </AnimatePresence>
+    </motion.div>
   )
 }

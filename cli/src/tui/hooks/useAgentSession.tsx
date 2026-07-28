@@ -545,6 +545,7 @@ export function useAgentSession({
       hookRunner,
       checkpoint,
       getCellCount,
+      onLog,
     ]
   )
 

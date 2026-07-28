@@ -47,12 +47,15 @@ describe("EXTERNAL_AGENT_PRESETS", () => {
 })
 
 describe("BUILTIN_EXECUTABLE_PRESET_IDS", () => {
-  it("is every builtin preset except the custom sentinel", () => {
+  it("excludes custom and service-discovered preview integrations", () => {
     const expected = (
       Object.keys(EXTERNAL_AGENT_PRESETS) as Array<keyof typeof EXTERNAL_AGENT_PRESETS>
-    ).filter((id) => id !== "custom" && EXTERNAL_AGENT_PRESETS[id] !== null)
+    ).filter(
+      (id) => id !== "custom" && id !== "opencode-v2-preview" && EXTERNAL_AGENT_PRESETS[id] !== null
+    )
     expect(BUILTIN_EXECUTABLE_PRESET_IDS).toEqual(expected)
     expect(BUILTIN_EXECUTABLE_PRESET_IDS).not.toContain("custom")
+    expect(BUILTIN_EXECUTABLE_PRESET_IDS).not.toContain("opencode-v2-preview")
   })
 
   it("includes both Claude Code and Codex (the named external agents)", () => {

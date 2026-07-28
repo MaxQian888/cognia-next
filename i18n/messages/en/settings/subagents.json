@@ -8,13 +8,15 @@
     "description": "Background sub-agent lifecycle and dispatch permissions.",
     "maxAttempts": "Max auto-resume attempts",
     "maxAttemptsHint": "Cap on chained auto-resume attempts per run lineage (prevents crash loops).",
-    "save": "Save",
-    "saved": "Background task settings saved.",
     "surfaceAsks": "Surface sub-agent permission asks",
     "surfaceAsksHint": "On (default): a dispatched sub-agent's permission prompts appear in this chat. Off: they are auto-denied.",
     "title": "Background tasks & permissions"
   },
   "description": "Reusable templates and live status for sub-agents spawned by a parent agent. Templates persist across sessions; runtime data is ephemeral.",
+  "discardBody": "This panel has unsaved changes. Leaving now discards them.",
+  "discardLeave": "Discard and leave",
+  "discardStay": "Keep editing",
+  "discardTitle": "Discard unsaved changes?",
   "import": {
     "applyButton": "Import {count} agent(s)",
     "applying": "Applying…",
@@ -57,6 +59,35 @@
     "webPickFormats": "Accepts .md / .markdown / .mdc / .yaml / .yml.",
     "webPickHint": "Drop files here or click to browse."
   },
+  "nav": {
+    "clearSearch": "Clear search",
+    "emptyFiltered": "No sub-agents match the current filter.",
+    "filterAll": "All",
+    "groups": {
+      "builtinGroup": "Built-in",
+      "pluginGroup": "From plugins",
+      "policyGroup": "Policy",
+      "runtimeGroup": "Activity",
+      "userGroup": "Mine"
+    },
+    "items": {
+      "background": {
+        "description": "Auto-resume and dispatch permissions",
+        "label": "Background tasks"
+      },
+      "nesting": {
+        "description": "Depth, budget, and retry limits",
+        "label": "Nested dispatch"
+      },
+      "runtime": {
+        "description": "Live runs and their history",
+        "label": "Running now"
+      }
+    },
+    "mobileTrigger": "Sub-agents",
+    "searchPlaceholder": "Search sub-agents…",
+    "title": "Sub-agents"
+  },
   "nesting": {
     "description": "Let the chat agent dispatch sub-agents that can themselves dispatch further sub-agents, with controlled depth, budget, and cycle/timeout guards.",
     "dispatchMaxRetries": "Transient-failure retries",
@@ -65,38 +96,50 @@
     "enabledHint": "Off by default — the agent keeps the standard single-level Task tool.",
     "maxDepth": "Max nesting depth",
     "maxDepthHint": "How many levels below the chat a sub-agent may nest (1–5).",
-    "save": "Save",
-    "saved": "Nested dispatch settings saved.",
     "timeout": "Subtree timeout (seconds)",
     "timeoutHint": "Wall-clock limit per dispatch subtree. 0 = no limit.",
     "title": "Nested sub-agents",
     "tokenBudget": "Subtree token budget",
     "tokenBudgetHint": "Stop dispatching deeper once a subtree burns this many tokens. 0 = unlimited."
   },
+  "pluginSection": {
+    "descriptionLabel": "Description",
+    "disabledBadge": "Disabled",
+    "disallowedToolsLabel": "Blocked tools",
+    "externalPresetLabel": "External runtime",
+    "hiddenBadge": "Hidden",
+    "mcpLabel": "MCP servers",
+    "missingBody": "The plugin that declared this sub-agent is no longer registered.",
+    "missingTitle": "Sub-agent unavailable",
+    "promptLabel": "System prompt",
+    "readOnlyBody": "The plugin manifest is the source of truth for this sub-agent. Change it in the plugin, not here.",
+    "readOnlyTitle": "Provided by a plugin",
+    "runtimeId": "Dispatch id",
+    "toolsLabel": "Allowed tools"
+  },
   "runtime": {
     "allLogs": "All logs ({count})",
+    "backgrounded": "Background",
     "callout": {
       "body": "Sub-agents spawned by an Agent Team or chat session appear here while running. The list is in-memory and clears on app restart. Start a teammate task in Agent Teams to see this fill.",
       "cta": "Open Agent Teams",
       "title": "Live registry, populated during runs"
     },
+    "cancelAria": "Cancel run {name}",
+    "cancelRequested": "Cancelling \"{name}\"…",
+    "cancelUnreachable": "That run is not executing in this window — it may have already finished, or it was started by the SDK's own Task tool, which registers no abort handle.",
+    "clearFinished": "Clear finished ({count})",
+    "depthBadge": "Level {depth}",
     "description": "Currently-executing sub-agents and their last activity. Updates live as the orchestrator emits events.",
-    "duration": "{ms}ms",
     "emptyBody": "Sub-agents spawned by an active chat will appear here. The runtime is in-memory and resets when the app restarts.",
     "emptyTitle": "No sub-agents are running.",
-    "parent": "parent: {id}",
-    "title": "Runtime",
-    "toolsCount": "{count, plural, one {# tool} other {# tools}}",
+    "removeAria": "Remove run {name} from the list",
+    "title": "Running now",
+    "tokensSuffix": "tokens",
     "toolsRunCount": "{n, plural, one {# tool run} other {# tools run}}"
   },
-  "tabs": {
-    "runtime": "Runtime",
-    "templates": "Templates"
-  },
   "templates": {
-    "addedToast": "Added \"{name}\".",
     "builtIn": "Built-in",
-    "builtInReadOnly": "Built-in templates are read-only — duplicate first.",
     "categories": {
       "analysis": "Analysis",
       "coding": "Coding",
@@ -105,14 +148,13 @@
       "writing": "Writing"
     },
     "configTitle": "Advanced configuration",
-    "create": "Create",
-    "deleteAria": "Delete template {name}",
+    "copyName": "{name} (copy)",
     "description": "Built-in and user-created sub-agent templates. Built-ins are read-only — duplicate to fork an editable copy.",
+    "disabledBadge": "Disabled",
+    "dispatchOnlyBody": "Pinning a provider or an external runtime takes this sub-agent off the parent's runtime, so it is not offered in ordinary chat. It stays reachable through nested dispatch.",
+    "dispatchOnlyTitle": "Reachable through nested dispatch only",
     "duplicate": "Duplicate",
-    "duplicateAria": "Duplicate template {name}",
     "duplicatedToast": "Duplicated as \"{name}\".",
-    "edit": "Edit",
-    "editAria": "Edit template {name}",
     "editorAddVariable": "Add variable",
     "editorAllowNesting": "Allow nesting",
     "editorAllowNestingHint": "Let this sub-agent dispatch its own sub-agents (up to the depth cap).",
@@ -124,24 +166,19 @@
     "editorIconPlaceholder": "Search",
     "editorMaxNestingDepth": "Max nesting depth",
     "editorMaxSteps": "Max steps",
-    "editorModel": "Model",
     "editorModelClear": "Clear",
-    "editorModelPlaceholder": "e.g. claude-sonnet-4-5",
     "editorName": "Name",
     "editorNamePlaceholder": "Web research",
     "editorPriority": "Priority",
-    "editorProvider": "Provider",
     "editorProviderModel": "Provider / Model",
     "editorProviderModelHint": "Run this subagent on a specific provider + model (cross-provider). Leave unset to inherit the session's.",
-    "editorProviderPlaceholder": "e.g. anthropic",
     "editorRemoveVariable": "Remove variable",
     "editorSystemPrompt": "System prompt",
     "editorSystemPromptPlaceholder": "Custom system prompt override...",
     "editorTaskTemplate": "Task template",
     "editorTaskTemplatePlaceholder": "Research the following: '{{topic}}'",
     "editorTemperature": "Temperature",
-    "editorTimeout": "Timeout",
-    "editorTimeoutUnit": "ms",
+    "editorTimeout": "Timeout (ms)",
     "editorVariableDefaultValue": "Default value",
     "editorVariableDescription": "Description",
     "editorVariableDescriptionPlaceholder": "What this variable represents",
@@ -149,26 +186,71 @@
     "editorVariableNamePlaceholder": "topic",
     "editorVariableRequired": "Required",
     "editorVariables": "Variables",
+    "enabledHint": "Off excludes this sub-agent from dispatch, discovery, and every picker.",
+    "enabledLabel": "Enabled",
     "externalRuntimeNone": "Built-in (Cognia)",
-    "filterAll": "All",
+    "forkOnlyBody": "Built-in templates are starting points, not runnable sub-agents — the resolvers skip them. Duplicate one to get an editable, dispatchable copy.",
+    "forkOnlyTitle": "Read-only starting point",
+    "hiddenBadge": "Hidden",
+    "hiddenHint": "Stays dispatchable, but is left out of pickers and @-mention autocomplete.",
+    "hiddenLabel": "Hide from pickers",
+    "mcpHint": "MCP servers forwarded into this sub-agent's session. Inherit passes through whatever the parent has.",
+    "mcpLabel": "MCP servers",
+    "missingBody": "It may have been deleted in another window.",
+    "missingTitle": "Template not found",
     "nameRequired": "Template name is required.",
     "newTemplate": "New template",
-    "noResults": "No templates match your search.",
-    "noUserTemplates": "No user-created templates yet.",
-    "noUserTemplatesDescription": "Create a new template or duplicate a built-in one to get started.",
-    "pluginSection": {
-      "description": "Sub-agents declared via plugin manifests. The plugin owns the source of truth — these rows are read-only here.",
-      "title": "Plugin-contributed sub-agents"
+    "promptShadowedBody": "A system prompt outranks the task template, so the task template below — and the variables declared for it — will not be used. Clear the system prompt in Advanced configuration to bring them back.",
+    "promptShadowedTitle": "The task template is not being used",
+    "railBlockedBody": "This sub-agent needs the nested-dispatch rail, which is currently off. Turn on nested dispatch (or run the session in plan mode) to make it reachable.",
+    "railBlockedTitle": "Currently unreachable",
+    "reach": {
+      "direct": "Available in chat",
+      "disabled": "Disabled",
+      "dispatch-only": "Nested dispatch only",
+      "fork-only": "Fork to use"
     },
     "removeBody": "\"{name}\" will be removed.",
     "removeTitle": "Remove template?",
     "removedToast": "Removed \"{name}\".",
-    "save": "Save",
-    "searchPlaceholder": "Search templates...",
     "title": "Templates",
-    "updatedToast": "Updated \"{name}\".",
-    "variableCount": "{count, plural, =1 {1 variable} other {# variables}}",
+    "toolsHint": "Inherit gives this sub-agent the parent's tools. A custom list grants exactly those. Disable all leaves it with none.",
+    "toolsLabel": "Tool access",
+    "varsUndeclared": "Used but not declared: {names}",
+    "varsUnused": "Declared but never used: {names}",
     "variableIndex": "Variable {index}"
   },
-  "title": "Sub-agents"
+  "title": "Sub-agents",
+  "toolCatalog": {
+    "cancel": "Cancel",
+    "confirm": "Apply",
+    "description": "Pick the tools this sub-agent may call. Ids are the namespaced form the model sees.",
+    "empty": "No tools match.",
+    "groups": {
+      "builtin": "Built-in",
+      "mcp": "MCP servers",
+      "native-anthropic": "Native",
+      "plugin": "Plugins",
+      "unknown": "Granted but unavailable"
+    },
+    "loading": "Loading tools…",
+    "searchPlaceholder": "Search tools…",
+    "selectedCount": "{count, plural, =0 {Nothing selected} one {# tool selected} other {# tools selected}}",
+    "title": "Choose tools",
+    "unknownHint": "Granted earlier; its provider is not available right now. Kept unless you clear it."
+  },
+  "toolScope": {
+    "modeHints": {
+      "custom": "Only the tools listed below.",
+      "inherit": "Whatever tools the dispatching agent has.",
+      "none": "No tools at all — the sub-agent can only reason and reply."
+    },
+    "modes": {
+      "custom": "Custom list",
+      "inherit": "Inherit",
+      "none": "Disable all"
+    },
+    "pickFromCatalog": "Pick from catalog",
+    "removeTool": "Remove {tool}"
+  }
 }

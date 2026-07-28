@@ -2,9 +2,10 @@
  * @jest-environment jsdom
  */
 
-import { fireEvent, render, screen } from "@testing-library/react"
+import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { AgentTeamOverview } from "./overview"
-import type { AgentTeam, AgentTeammate } from "@/types/agent/agent-team"
+import { useAgentTeamStore } from "@/stores/agent/agent-team-store"
+import type { AgentTeam, AgentTeammate, AgentTeamTask } from "@/types/agent/agent-team"
 
 jest.mock("next-intl", () => ({
   useTranslations: () => (key: string) => key,
@@ -33,7 +34,31 @@ jest.mock("@/hooks/agent-runs/use-team-live-status", () => ({
 beforeEach(() => {
   usageMode = "standard"
   liveStatusOverride = undefined
+  useAgentTeamStore.setState({ tasks: {} })
 })
+
+/** Seed the real store so the task-progress selector has rows to fold over. */
+function seedTasks(...statuses: AgentTeamTask["status"][]): void {
+  const tasks: Record<string, AgentTeamTask> = {}
+  statuses.forEach((status, i) => {
+    const id = `task-${i}`
+    tasks[id] = {
+      id,
+      teamId: "t1",
+      title: `Task ${i}`,
+      description: "",
+      status,
+      priority: "normal",
+      dependencies: [],
+      tags: [],
+      order: i,
+      createdAt: new Date(),
+    }
+  })
+  // One task on a different team — proves the selector filters by teamId.
+  tasks["other"] = { ...tasks["task-0"], id: "other", teamId: "other-team" }
+  useAgentTeamStore.setState({ tasks })
+}
 
 const baseTeam: AgentTeam = {
   id: "t1",
@@ -78,6 +103,183 @@ describe("AgentTeamOverview", () => {
     expect(screen.getByText("Squad Alpha")).toBeInTheDocument()
     expect(screen.getByText("Primary research team")).toBeInTheDocument()
     expect(screen.getByTestId("team-status").textContent).toContain("idle")
+  })
+
+  // chrome="header": the desktop workspace pins the status badge, the
+  // roster/token/duration tiles and the run controls in WorkspaceHeader. Drawing
+  // them here too put the same five values on screen twice within one viewport.
+  describe('chrome="header"', () => {
+    it("drops the status badge, the duplicated tiles and the run controls", () => {
+      render(
+        <AgentTeamOverview
+          team={baseTeam}
+          teammates={[lead, teammate]}
+          chrome="header"
+          onStart={jest.fn()}
+          onAbort={jest.fn()}
+        />
+      )
+      expect(screen.queryByTestId("team-status")).not.toBeInTheDocument()
+      expect(screen.queryByTestId("overview-stat-teammates")).not.toBeInTheDocument()
+      expect(screen.queryByTestId("overview-stat-tokens")).not.toBeInTheDocument()
+      expect(screen.queryByTestId("overview-stat-duration")).not.toBeInTheDocument()
+      expect(screen.queryByTestId("team-run-controls")).not.toBeInTheDocument()
+      expect(screen.queryByTestId("start-team")).not.toBeInTheDocument()
+    })
+
+    it("replaces them with task progress and budget headroom", () => {
+      render(<AgentTeamOverview team={baseTeam} teammates={[lead, teammate]} chrome="header" />)
+      // No tasks in the store fixture → 0/0, but the tile is present and is the
+      // first surface to ever render taskStats (it previously only fed plugins).
+      expect(screen.getByTestId("overview-stat-tasks").textContent).toContain("0/0")
+      expect(screen.getByTestId("overview-stat-budget").textContent).toContain("unlimited")
+      // Concurrency survives — the header has no equivalent.
+      expect(screen.getByTestId("overview-stat-concurrency").textContent).toContain("2")
+    })
+
+    it("shows budget headroom as a percentage once a token budget is set", () => {
+      render(
+        <AgentTeamOverview
+          team={{ ...baseTeam, config: { ...baseTeam.config, tokenBudget: 1000 } }}
+          teammates={[lead, teammate]}
+          chrome="header"
+        />
+      )
+      // 150 / 1000 → 15%
+      expect(screen.getByTestId("overview-stat-budget").textContent).toContain("15%")
+    })
+
+    it("still renders the editable identity fields", () => {
+      render(<AgentTeamOverview team={baseTeam} teammates={[lead, teammate]} chrome="header" />)
+      expect(screen.getByTestId("team-name-edit")).toBeInTheDocument()
+      expect(screen.getByTestId("team-description-edit")).toBeInTheDocument()
+    })
+
+    it("counts only this team's tasks in the progress tile", () => {
+      seedTasks("completed", "completed", "in_progress")
+      render(<AgentTeamOverview team={baseTeam} teammates={[lead, teammate]} chrome="header" />)
+      // 2 of 3 done; the seeded task on "other-team" must not be counted.
+      expect(screen.getByTestId("overview-stat-tasks").textContent).toContain("2/3")
+    })
+  })
+
+  it("falls back to defaults for every unset config field", () => {
+    // Cast through unknown on purpose: the type marks `description` and
+    // `totalTokenUsage` as required, but the store is persisted and migrated
+    // from v1, so rehydrated rows really can arrive without them — which is why
+    // the component guards with `?.` / `??` at all. This pins those guards.
+    const bare = {
+      ...baseTeam,
+      description: undefined,
+      totalTokenUsage: undefined,
+      config: { maxTeammates: 5, displayMode: "compact" },
+    } as unknown as AgentTeam
+    render(<AgentTeamOverview team={bare} teammates={[lead, teammate]} />)
+    // executionMode → "coordinated", pattern → "manager_worker", concurrency → 5
+    expect(screen.getByText("coordinated")).toBeInTheDocument()
+    expect(screen.getByText("manager_worker")).toBeInTheDocument()
+    expect(screen.getByTestId("overview-stat-concurrency").textContent).toContain("5")
+    // No token record → the tile reads zero rather than crashing.
+    expect(screen.getByTestId("overview-stat-tokens").textContent).toContain("0")
+    // No budget → "unlimited" copy and no progress bar.
+    expect(screen.queryByTestId("token-usage-bar")).not.toBeInTheDocument()
+  })
+
+  it("hides the token split in detailed mode when both counts are zero", () => {
+    usageMode = "detailed"
+    render(
+      <AgentTeamOverview
+        team={{
+          ...baseTeam,
+          totalTokenUsage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 },
+        }}
+        teammates={[lead, teammate]}
+      />
+    )
+    expect(screen.queryByTestId("token-usage-split")).not.toBeInTheDocument()
+  })
+
+  it("uses the recommended pattern and the ultracode-on copy when nothing overrides them", () => {
+    const team: AgentTeam = {
+      ...baseTeam,
+      config: { ...baseTeam.config, ultracode: { enabled: true } },
+      routingAssessment: {
+        recommendedPattern: "manager_worker",
+        // No confidence, no reason, no selectedExecutionPattern on the team.
+        factors: {
+          taskComplexity: "simple",
+          specializationNeeded: false,
+          contextIsolationNeeded: false,
+          delegationCandidate: false,
+          budgetPressure: "low",
+        },
+        createdAt: new Date(),
+      } as AgentTeam["routingAssessment"],
+    }
+    render(<AgentTeamOverview team={team} teammates={[lead, teammate]} />)
+    const card = screen.getByTestId("routing-assessment")
+    expect(card.textContent).toContain("routing.ultracodeOn")
+    // reason absent → no third paragraph.
+    expect(card.querySelectorAll("p")).toHaveLength(2)
+  })
+
+  it("renders the duration in the tile once a run recorded one", () => {
+    render(
+      <AgentTeamOverview
+        team={{ ...baseTeam, totalDuration: 125_000 }}
+        teammates={[lead, teammate]}
+      />
+    )
+    expect(screen.getByTestId("overview-stat-duration").textContent).toContain("2m")
+  })
+
+  describe("inline identity edits", () => {
+    async function editField(testid: string, next: string): Promise<void> {
+      fireEvent.click(screen.getByTestId(testid))
+      const input = await screen.findByLabelText("editAriaLabel")
+      fireEvent.change(input, { target: { value: next } })
+      fireEvent.click(screen.getByLabelText("saveAriaLabel"))
+    }
+
+    it("commits a changed name through onUpdateTeam", async () => {
+      const onUpdateTeam = jest.fn()
+      render(
+        <AgentTeamOverview
+          team={baseTeam}
+          teammates={[lead, teammate]}
+          onUpdateTeam={onUpdateTeam}
+        />
+      )
+      await editField("team-name-edit", "Squad Beta")
+      await waitFor(() => expect(onUpdateTeam).toHaveBeenCalledWith({ name: "Squad Beta" }))
+    })
+
+    it("ignores a name edit that changes nothing or empties the field", async () => {
+      const onUpdateTeam = jest.fn()
+      render(
+        <AgentTeamOverview
+          team={baseTeam}
+          teammates={[lead, teammate]}
+          onUpdateTeam={onUpdateTeam}
+        />
+      )
+      await editField("team-name-edit", "")
+      await waitFor(() => expect(screen.getByTestId("team-name-edit")).toBeInTheDocument())
+      expect(onUpdateTeam).not.toHaveBeenCalled()
+    })
+
+    it("clears the description to undefined rather than an empty string", async () => {
+      const onUpdateTeam = jest.fn()
+      render(
+        <AgentTeamOverview
+          team={baseTeam}
+          teammates={[lead, teammate]}
+          onUpdateTeam={onUpdateTeam}
+        />
+      )
+      await editField("team-description-edit", "")
+      await waitFor(() => expect(onUpdateTeam).toHaveBeenCalledWith({ description: undefined }))
+    })
   })
 
   it("derives the badge + actions from the live run status, not a stale store status", () => {

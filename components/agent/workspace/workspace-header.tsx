@@ -4,26 +4,63 @@
  * Workspace hero header — the always-visible identity + at-a-glance strip that
  * anchors the per-team detail view above the tab shell.
  *
- * Replaces the old bare breadcrumb row. Surfaces the team avatar, name,
- * description and live status, plus a compact stat strip (members, working,
- * tokens, duration) derived from data that is available on every tab (team +
- * roster are not tab-gated, unlike tasks/messages/events). The live status is
- * read from the durable workflow run via `useTeamLiveStatus`, mirroring the
- * Overview badge so the two never disagree.
+ * Surfaces the team avatar, name, description and live status, plus a compact
+ * stat strip (members, working, tokens, duration) derived from data that is
+ * available on every tab (team + roster are not tab-gated, unlike
+ * tasks/messages/events). The live status is read from the durable workflow run
+ * via `useTeamLiveStatus`.
+ *
+ * It also owns the run controls. They used to sit at the bottom of the Overview
+ * tab, below the routing assessment, the final result and the plan-approval
+ * panel — so the longer a run got, the further the Abort button sank below the
+ * fold. Here they stay reachable from every tab, which is the whole reason this
+ * header is pinned outside the scroll container.
+ *
+ * Note the header is only rendered by the desktop workspace; the mobile
+ * workspace has no equivalent and keeps its chrome inside the Overview tab
+ * (`AgentTeamOverview chrome="self"`).
  */
 
 import { useTranslations } from "next-intl"
-import { ActivityIcon, CoinsIcon, TimerIcon, UsersIcon, type LucideIcon } from "lucide-react"
+import {
+  ActivityIcon,
+  CoinsIcon,
+  ShieldAlertIcon,
+  TimerIcon,
+  UsersIcon,
+  type LucideIcon,
+} from "lucide-react"
+
+import { useReducedMotion } from "motion/react"
 
 import { cn } from "@/lib/utils"
 import { StatusBadge } from "@/components/status-badge"
+import { useCountUp } from "@/hooks/usage/use-count-up"
 import { useTeamLiveStatus } from "@/hooks/agent-runs/use-team-live-status"
 import type { AgentTeam, AgentTeammate } from "@/types/agent/agent-team"
 import { formatNumber } from "./token-usage-line"
+import { TeamRunControls } from "./team-run-controls"
 
 export interface WorkspaceHeaderProps {
   team: AgentTeam
   teammates: AgentTeammate[]
+  onStart?: () => void
+  /** Manual ultracode run — forces the pattern composition regardless of autoMode. */
+  onStartUltracode?: () => void
+  onAbort?: () => void
+  /** Pause the live run (abort + mark paused; resumable). */
+  onPause?: () => void
+  /** Resume a paused team over its not-yet-done tasks. */
+  onResume?: () => void
+  /** Cancel a paused team for good (shutdown). */
+  onStop?: () => void
+  /**
+   * Open HITL gates waiting on this team (budget / deadlock / plan / …). Rendered
+   * as the header's loudest badge because a parked gate is the one state where
+   * the run is stopped and only the operator can restart it — every other signal
+   * in this header is informational.
+   */
+  pendingGateCount?: number
 }
 
 function formatDuration(ms: number): string {
@@ -32,16 +69,32 @@ function formatDuration(ms: number): string {
   return `${mins}m ${secs}s`
 }
 
-export function WorkspaceHeader({ team, teammates }: WorkspaceHeaderProps) {
+export function WorkspaceHeader({
+  team,
+  teammates,
+  onStart,
+  onStartUltracode,
+  onAbort,
+  onPause,
+  onResume,
+  onStop,
+  pendingGateCount = 0,
+}: WorkspaceHeaderProps) {
+  const t = useTranslations("agentTeamsWorkspace")
   const tOverview = useTranslations("agentTeamsWorkspace.overview")
+  const reduce = useReducedMotion() === true
   const liveStatus = useTeamLiveStatus(team)
   const isLive = liveStatus === "executing" || liveStatus === "planning"
+  const hasRunControls = Boolean(
+    onStart || onStartUltracode || onAbort || onPause || onResume || onStop
+  )
 
   const workers = teammates.filter((m) => m.role === "teammate").length
   const working = teammates.filter(
     (m) => m.status === "executing" || m.status === "planning"
   ).length
   const tokens = team.totalTokenUsage?.totalTokens ?? 0
+  const animatedTokens = useCountUp(tokens, { disabled: reduce })
   const duration = team.totalDuration ?? 0
   const initial = team.name.trim().charAt(0).toUpperCase() || "?"
 
@@ -75,6 +128,16 @@ export function WorkspaceHeader({ team, teammates }: WorkspaceHeaderProps) {
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
+          {pendingGateCount > 0 ? (
+            <span
+              data-testid="workspace-pending-gates"
+              className="inline-flex items-center gap-1.5 rounded-md bg-destructive/10 px-2 py-1 text-[11px] font-medium text-destructive ring-1 ring-inset ring-destructive/25"
+              title={t("gatesPending", { count: pendingGateCount })}
+            >
+              <ShieldAlertIcon className="size-3.5" aria-hidden />
+              {t("gatesPending", { count: pendingGateCount })}
+            </span>
+          ) : null}
           <StatChip
             icon={UsersIcon}
             label={tOverview("teammates")}
@@ -93,7 +156,11 @@ export function WorkspaceHeader({ team, teammates }: WorkspaceHeaderProps) {
           <StatChip
             icon={CoinsIcon}
             label={tOverview("tokenUsage")}
-            value={formatNumber(tokens)}
+            // Counts up rather than snapping. During a run this is the fastest-
+            // moving number on screen; rolling it makes the change legible
+            // instead of a digit flicker. `useCountUp` no-ops under reduced
+            // motion, so there is no second code path here.
+            value={formatNumber(Math.round(animatedTokens))}
             testid="workspace-stat-tokens"
           />
           {duration > 0 ? (
@@ -105,6 +172,20 @@ export function WorkspaceHeader({ team, teammates }: WorkspaceHeaderProps) {
             />
           ) : null}
         </div>
+
+        {hasRunControls && (
+          <TeamRunControls
+            className="ml-auto"
+            status={liveStatus}
+            ultracodeEnabled={team.config.ultracode?.enabled}
+            onStart={onStart}
+            onStartUltracode={onStartUltracode}
+            onAbort={onAbort}
+            onPause={onPause}
+            onResume={onResume}
+            onStop={onStop}
+          />
+        )}
       </div>
     </header>
   )

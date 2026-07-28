@@ -45,6 +45,10 @@ import {
   isExternalAgentMethodNotFoundError,
 } from "./session-extension-errors"
 import type {
+  ExternalAgentCompactionCapability,
+  ExternalAgentCompactionOptions,
+} from "./session-capabilities"
+import type {
   ExternalAgentConfig,
   ExternalAgentSession,
   ExternalAgentMessage,
@@ -68,6 +72,7 @@ const log = loggers.agent
 
 /** Active health-probe timeout — mirrors the ACP adapter's 5s ping. */
 const HEALTH_PROBE_TIMEOUT_MS = 5000
+const COMPACTION_COMPLETION_TIMEOUT_MS = 120_000
 
 // ============================================================================
 // Codex app-server wire types (local — kept out of the public type surface)
@@ -233,6 +238,12 @@ interface CodexThreadItem {
   path?: string
 }
 
+interface PendingCompaction {
+  resolve: () => void
+  reject: (error: Error) => void
+  timer: ReturnType<typeof setTimeout>
+}
+
 interface CodexMcpServerStatus {
   name?: string
   status?: string
@@ -346,6 +357,9 @@ export class CodexAppServerAdapter extends BaseProtocolAdapter {
   private modelCache: CodexModelInfo[] = []
   // Per-method support cache for graceful degradation on older codex CLIs.
   private unsupportedMethods = new Set<string>()
+  // `thread/compact/start` only acknowledges admission. Completion is reported
+  // later as an `item/completed` notification for `contextCompaction`.
+  private pendingCompactions = new Map<string, PendingCompaction>()
   private _sessionExtensionSupport: ExternalAgentSessionExtensionSupport =
     createDefaultCodexSessionExtensionSupport()
 
@@ -489,6 +503,11 @@ export class CodexAppServerAdapter extends BaseProtocolAdapter {
       pending.resolve({ action: "cancel", content: null, _meta: null })
     }
     this.pendingMcpElicitations.clear()
+    for (const [, pending] of this.pendingCompactions) {
+      clearTimeout(pending.timer)
+      pending.reject(new Error("Disconnected while Codex context compaction was in progress"))
+    }
+    this.pendingCompactions.clear()
     await Promise.resolve()
     await Promise.resolve()
 
@@ -929,10 +948,78 @@ export class CodexAppServerAdapter extends BaseProtocolAdapter {
 
   // Codex-specific thread housekeeping, reached via getCodexAppServerAdapter().
 
-  /** Trigger server-side context compaction for a thread. */
-  async compactSession(sessionId: string): Promise<void> {
+  async getCompactionCapability(sessionId: string): Promise<ExternalAgentCompactionCapability> {
+    const commandCapability = await this.getAdvertisedCommandCompactionCapability(sessionId)
+    const commandRoutes = commandCapability.routes.filter((route) => route.kind === "command")
+    if (!this.isConnected()) {
+      return { status: "unknown", routes: commandRoutes, reason: "not_connected" }
+    }
+    if (this.unsupportedMethods.has("thread/compact/start")) {
+      return commandRoutes.length > 0
+        ? { status: "supported", routes: commandRoutes }
+        : { status: "unsupported", routes: [], reason: "native_method_unsupported" }
+    }
+    return {
+      status: "supported",
+      routes: [{ kind: "native", supportsFocus: false }, ...commandRoutes],
+    }
+  }
+
+  /** Trigger server-side context compaction and wait for provider completion. */
+  async compactSession(sessionId: string, options?: ExternalAgentCompactionOptions): Promise<void> {
     if (!this.peer) throw new Error("Not connected to Codex app-server")
-    await this.peer.sendRequest("thread/compact/start", { threadId: sessionId })
+    if (this.pendingCompactions.has(sessionId)) {
+      throw new Error("Codex context compaction is already in progress")
+    }
+
+    const commandCapability = await this.getAdvertisedCommandCompactionCapability(sessionId)
+    const focusRoute = commandCapability.routes.find(
+      (route) => route.kind === "command" && route.supportsFocus
+    )
+    if (options?.focus) {
+      if (!focusRoute) {
+        throw new Error("Codex context compaction focus is not supported")
+      }
+      await this.compactWithAdvertisedCommand(sessionId, options)
+      return
+    }
+
+    const completion = new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.pendingCompactions.delete(sessionId)
+        reject(new Error("Timed out waiting for Codex context compaction to complete"))
+      }, COMPACTION_COMPLETION_TIMEOUT_MS)
+      this.pendingCompactions.set(sessionId, { resolve, reject, timer })
+    })
+
+    try {
+      await this.peer.sendRequest("thread/compact/start", { threadId: sessionId })
+    } catch (error) {
+      const pending = this.pendingCompactions.get(sessionId)
+      if (pending) {
+        clearTimeout(pending.timer)
+        pending.resolve()
+      }
+      this.pendingCompactions.delete(sessionId)
+      if (isExternalAgentMethodNotFoundError(error)) {
+        this.unsupportedMethods.add("thread/compact/start")
+        if (commandCapability.status === "supported") {
+          await this.compactWithAdvertisedCommand(sessionId, options)
+          return
+        }
+      }
+      throw error
+    }
+
+    await completion
+  }
+
+  getProviderUndoCapability(sessionId: string) {
+    return this.getAdvertisedProviderUndoCapability(sessionId)
+  }
+
+  undoLastProviderChange(sessionId: string) {
+    return this.undoWithAdvertisedCommand(sessionId)
   }
 
   /** Remove the last `numTurns` turns from the thread's context. */
@@ -1733,6 +1820,22 @@ export class CodexAppServerAdapter extends BaseProtocolAdapter {
               thinking: text,
             })
         }
+        return
+      }
+      case "contextCompaction": {
+        const pending = this.pendingCompactions.get(sessionId)
+        if (pending) {
+          clearTimeout(pending.timer)
+          this.pendingCompactions.delete(sessionId)
+          pending.resolve()
+        }
+        this.emit(sessionId, {
+          type: "progress",
+          sessionId,
+          timestamp: new Date(),
+          progress: 1,
+          message: "context_compaction_complete",
+        })
         return
       }
       default:

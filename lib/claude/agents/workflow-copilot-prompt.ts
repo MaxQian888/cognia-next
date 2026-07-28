@@ -100,17 +100,11 @@ export const WORKFLOW_COPILOT_DISALLOWED_TOOLS: readonly string[] = [
   "mcp__cognia-plugin-tools__wf_configure_node",
   // Plugin tools we explicitly do NOT want — anything in
   // `mcp__cognia-plugin-tools__` that isn't `wf_*`. Listing the
-  // computer-use + github-delivery prefixes covers the high-risk
-  // surfaces; finer-grained denials are handled by the implicit
+  // high-risk surfaces; finer-grained denials are handled by the implicit
   // whitelist semantics above.
   "mcp__cognia-plugin-tools__computer_use",
   "mcp__cognia-plugin-tools__bash",
   "mcp__cognia-plugin-tools__text_editor",
-  "mcp__cognia-plugin-tools__gh_open_pr",
-  "mcp__cognia-plugin-tools__gh_merge_pr",
-  "mcp__cognia-plugin-tools__gh_close_pr",
-  "mcp__cognia-plugin-tools__gh_comment_pr",
-  "mcp__cognia-plugin-tools__gh_review_pr",
 ] as const
 
 /**

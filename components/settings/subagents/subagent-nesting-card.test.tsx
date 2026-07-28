@@ -2,84 +2,112 @@
  * @jest-environment jsdom
  */
 
-import { fireEvent, render, screen } from "@testing-library/react"
-import { SubagentNestingCard } from "./subagent-nesting-card"
+import { useState } from "react"
+import { render, screen } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
+import type { AppSettings } from "@cognia/agent-config-types"
 
-const save = jest.fn().mockResolvedValue(undefined)
-let mockSettings: { subagentNesting?: unknown } = {}
+import {
+  NESTING_DEFAULTS,
+  SubagentNestingCard,
+  nestingValuesFromSettings,
+  nestingValuesToSettings,
+  type NestingPolicyValues,
+} from "./subagent-nesting-card"
 
-jest.mock("@/stores/settings", () => ({
-  useSettingsStore: (sel: (s: unknown) => unknown) => sel({ settings: mockSettings, save }),
-}))
 jest.mock("next-intl", () => ({
   useTranslations: () => (key: string) => key,
 }))
-jest.mock("sonner", () => ({ toast: { success: jest.fn(), error: jest.fn() } }))
-jest.mock("@cognia/logging", () => ({
-  createLogger: () => ({ info: jest.fn(), error: jest.fn() }),
-}))
 
-beforeEach(() => {
-  jest.clearAllMocks()
-  mockSettings = {}
+function Controlled({ initial = NESTING_DEFAULTS }: { initial?: NestingPolicyValues }) {
+  const [value, setValue] = useState(initial)
+  return (
+    <SubagentNestingCard
+      value={value}
+      onChange={(partial) => setValue((v) => ({ ...v, ...partial }))}
+    />
+  )
+}
+
+describe("nestingValuesFromSettings", () => {
+  it("falls back to defaults when the branch is absent", () => {
+    expect(nestingValuesFromSettings(undefined)).toEqual(NESTING_DEFAULTS)
+    expect(nestingValuesFromSettings({} as AppSettings)).toEqual(NESTING_DEFAULTS)
+  })
+
+  it("converts the stored timeout from ms to display seconds", () => {
+    const values = nestingValuesFromSettings({
+      subagentNesting: { enabled: true, maxDepth: 3, timeoutMs: 90_000 },
+    } as AppSettings)
+    expect(values.timeoutSeconds).toBe(90)
+    expect(values.enabled).toBe(true)
+    expect(values.maxDepth).toBe(3)
+  })
+})
+
+describe("nestingValuesToSettings", () => {
+  it("converts display seconds back to ms", () => {
+    expect(nestingValuesToSettings({ ...NESTING_DEFAULTS, timeoutSeconds: 90 }).timeoutMs).toBe(
+      90_000
+    )
+  })
+
+  it("normalises the two 'unlimited' dials to 0 rather than a negative", () => {
+    const out = nestingValuesToSettings({
+      ...NESTING_DEFAULTS,
+      tokenBudget: -5,
+      timeoutSeconds: -5,
+    })
+    expect(out.tokenBudget).toBe(0)
+    expect(out.timeoutMs).toBe(0)
+  })
+
+  it("round-trips through the settings shape", () => {
+    const values: NestingPolicyValues = {
+      enabled: true,
+      maxDepth: 4,
+      tokenBudget: 50_000,
+      timeoutSeconds: 120,
+      dispatchMaxRetries: 3,
+    }
+    expect(
+      nestingValuesFromSettings({
+        subagentNesting: nestingValuesToSettings(values),
+      } as AppSettings)
+    ).toEqual(values)
+  })
 })
 
 describe("SubagentNestingCard", () => {
-  it("defaults to disabled with the depth input disabled", () => {
-    render(<SubagentNestingCard />)
-    expect(screen.getByRole("switch", { name: "enabled" })).not.toBeChecked()
+  it("keeps the finder deep-link anchor", () => {
+    const { container } = render(<Controlled />)
+    expect(container.querySelector('[data-setting-id="subagent-nesting"]')).toBeInTheDocument()
+  })
+
+  it("reports edits upward instead of holding its own state", async () => {
+    const onChange = jest.fn()
+    render(<SubagentNestingCard value={NESTING_DEFAULTS} onChange={onChange} />)
+    await userEvent.click(screen.getByRole("switch", { name: "enabled" }))
+    expect(onChange).toHaveBeenCalledWith({ enabled: true })
+  })
+
+  it("gates the subtree dials behind the master switch", async () => {
+    render(<Controlled />)
     expect(screen.getByLabelText("maxDepth")).toBeDisabled()
+    await userEvent.click(screen.getByRole("switch", { name: "enabled" }))
+    expect(screen.getByLabelText("maxDepth")).toBeEnabled()
   })
 
-  it("hydrates from existing settings", () => {
-    mockSettings = {
-      subagentNesting: { enabled: true, maxDepth: 3, tokenBudget: 5000, timeoutMs: 60000 },
-    }
-    render(<SubagentNestingCard />)
-    expect(screen.getByRole("switch", { name: "enabled" })).toBeChecked()
-    expect(screen.getByLabelText("maxDepth")).toHaveValue(3)
-    expect(screen.getByLabelText("timeout")).toHaveValue(60) // ms → seconds
+  it("leaves the retry dial reachable while nesting is off — it also governs depth-1", () => {
+    render(<Controlled />)
+    expect(screen.getByLabelText("dispatchMaxRetries")).toBeEnabled()
   })
 
-  it("saves the config (seconds converted to ms) when enabled", () => {
-    render(<SubagentNestingCard />)
-    fireEvent.click(screen.getByRole("switch", { name: "enabled" }))
-    fireEvent.change(screen.getByLabelText("maxDepth"), { target: { value: "3" } })
-    fireEvent.change(screen.getByLabelText("timeout"), { target: { value: "30" } })
-    fireEvent.click(screen.getByRole("button", { name: "save" }))
-    expect(save).toHaveBeenCalledWith({
-      subagentNesting: {
-        enabled: true,
-        maxDepth: 3,
-        tokenBudget: 0,
-        timeoutMs: 30000,
-        dispatchMaxRetries: 1,
-      },
-    })
-  })
-
-  it("hydrates and saves the dispatch-retry knob (always enabled)", () => {
-    mockSettings = { subagentNesting: { enabled: false, maxDepth: 2, dispatchMaxRetries: 3 } }
-    render(<SubagentNestingCard />)
-    const retries = screen.getByLabelText("dispatchMaxRetries")
-    expect(retries).toHaveValue(3)
-    expect(retries).not.toBeDisabled() // retries apply even with nesting off
-    fireEvent.change(retries, { target: { value: "0" } })
-    fireEvent.click(screen.getByRole("button", { name: "save" }))
-    expect(save).toHaveBeenCalledWith(
-      expect.objectContaining({
-        subagentNesting: expect.objectContaining({ dispatchMaxRetries: 0 }),
-      })
-    )
-  })
-
-  it("clamps maxDepth to the 1–5 range", () => {
-    render(<SubagentNestingCard />)
-    fireEvent.click(screen.getByRole("switch", { name: "enabled" }))
-    fireEvent.change(screen.getByLabelText("maxDepth"), { target: { value: "9" } })
-    fireEvent.click(screen.getByRole("button", { name: "save" }))
-    expect(save).toHaveBeenCalledWith(
-      expect.objectContaining({ subagentNesting: expect.objectContaining({ maxDepth: 5 }) })
-    )
+  it("clamps out-of-range depth to the supported ceiling", async () => {
+    render(<Controlled initial={{ ...NESTING_DEFAULTS, enabled: true }} />)
+    const depth = screen.getByLabelText("maxDepth")
+    await userEvent.clear(depth)
+    await userEvent.type(depth, "99")
+    expect(depth).toHaveValue(5)
   })
 })

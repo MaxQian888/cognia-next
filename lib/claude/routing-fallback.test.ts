@@ -16,10 +16,9 @@ jest.mock("@/lib/claude/ipc", () => ({
   sendPrompt: (...args: unknown[]) => sendPromptMock(...args),
 }))
 
-jest.mock("sonner", () => ({
-  toast: {
-    message: jest.fn(),
-  },
+const dispatchDiagnosticMock = jest.fn()
+jest.mock("@/lib/diagnostics/bus", () => ({
+  dispatchDiagnostic: (...args: unknown[]) => dispatchDiagnosticMock(...args),
 }))
 
 const baseOptions = (
@@ -88,8 +87,38 @@ describe("attemptRoutingFallback", () => {
   beforeEach(() => {
     sendPromptMock.mockReset()
     sendPromptMock.mockResolvedValue(undefined)
+    dispatchDiagnosticMock.mockClear()
     useChatStore.getState().clear()
     setRoutingEnabled(true)
+  })
+
+  it("discloses the provider substitution once the retry is actually in flight", async () => {
+    // The turn is now running somewhere the user did not choose, which changes
+    // cost and output quality. The previous English `toast.message(...)` fired
+    // BEFORE the retry was issued, so it announced a swap that could still fail.
+    seedCache("s1", [
+      { providerId: "openai", modelId: "gpt-4o-mini" },
+      { providerId: "anthropic", modelId: "claude-haiku-4-5" },
+    ])
+    await attemptRoutingFallback("s1", "rate limit exceeded")
+
+    expect(dispatchDiagnosticMock).toHaveBeenCalledTimes(1)
+    expect(dispatchDiagnosticMock.mock.calls[0][0]).toMatchObject({
+      code: "degradedFallback",
+      source: "provider",
+      severity: "info",
+      meta: { sessionId: "s1", providerId: "anthropic", modelId: "claude-haiku-4-5" },
+    })
+  })
+
+  it("stays silent when the retry itself could not be issued", async () => {
+    seedCache("s1", [
+      { providerId: "openai", modelId: "gpt-4o-mini" },
+      { providerId: "anthropic", modelId: "claude-haiku-4-5" },
+    ])
+    sendPromptMock.mockRejectedValueOnce(new Error("ipc down"))
+    await attemptRoutingFallback("s1", "rate limit exceeded")
+    expect(dispatchDiagnosticMock).not.toHaveBeenCalled()
   })
 
   it("returns false when routingFallbackEnabled is false", async () => {

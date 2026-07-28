@@ -120,4 +120,31 @@ describe("AgentTeamActivity", () => {
     expect(screen.getByTestId("activity-live-task-2")).toBeInTheDocument()
     expect(screen.getAllByTestId(/activity-live-task-/)).toHaveLength(2)
   })
+
+  it("shows a starting label instead of counters before the first tool lands", () => {
+    // At phase "start" the tool/char/elapsed counters are all zero; printing
+    // "0 tools, 0 chars, 0s" reads as stalled rather than starting.
+    const starting: AgentTeamEvent = {
+      type: "progress_update",
+      teamId: "t1",
+      teammateId: "tm1",
+      taskId: "task-9",
+      timestamp: new Date(2026, 0, 3),
+      data: { phase: "start", teammateName: "Researcher" },
+    }
+    render(<AgentTeamActivity events={[starting]} />)
+    const live = screen.getByTestId("activity-live-task-9")
+    expect(live.textContent).toContain("liveProgressStarting")
+    expect(live.textContent).not.toContain("liveProgress ")
+  })
+
+  it("renders the report timeline's empty state when a run recorded no checkpoints", () => {
+    const report = { ...buildReport(), checkpoints: [] }
+    render(
+      <TooltipProvider>
+        <AgentTeamActivity events={[]} report={report} />
+      </TooltipProvider>
+    )
+    expect(screen.getByTestId("activity-report-timeline").textContent).toContain("emptyCheckpoints")
+  })
 })

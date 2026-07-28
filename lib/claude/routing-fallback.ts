@@ -11,6 +11,8 @@
 // lived in `hooks/chat/use-claude-chat.ts`.
 
 import { sendPrompt } from "@/lib/claude/ipc"
+import { createDiagnostic } from "@cognia/diagnostics"
+import { dispatchDiagnostic } from "@/lib/diagnostics/bus"
 import { useChatStore, type LastSendCacheEntry } from "@/stores/chat"
 import { useSettingsStore } from "@/stores/settings"
 import type { SendOptions } from "@cognia/agent-config-types"
@@ -20,7 +22,6 @@ import {
   isTransientErrorClass,
   type ProviderErrorMeta,
 } from "@cognia/provider-routing/error-classifier"
-import { toast } from "sonner"
 
 /**
  * Substring/regex set we treat as worth retrying. Real-world error strings
@@ -94,22 +95,30 @@ async function issueRetry(
     ...(cacheUpdate.specialAttempts ? { specialAttempts: cacheUpdate.specialAttempts } : {}),
   })
 
-  // Surface a polite toast so the user knows we retried with another
-  // provider rather than the chat freezing silently.
-  try {
-    toast.message(`Provider failed — retrying with ${nextEntry.providerId}…`, {
-      duration: 3000,
-    })
-  } catch {
-    // Toast failures are non-fatal.
-  }
-
   try {
     await sendPrompt(sessionId, cached.content, retryOptions)
     // Least-busy signal: the retry is now in flight against the next
     // provider (the failed attempt was settled by `session_ended`).
     const { useInFlightStore } = await import("@/stores/settings/in-flight-store")
     useInFlightStore.getState().begin(sessionId, nextEntry.providerId)
+    // Disclose the substitution. This turn is now running on a provider the
+    // user did not choose, which changes cost and output quality — not
+    // something to leave unsaid.
+    //
+    // Replaces a hard-coded English `toast.message(...)` that fired *before*
+    // the retry was issued: it promised a provider swap that could still fail,
+    // and being built in `lib/` it could never be shown in another language.
+    dispatchDiagnostic(
+      createDiagnostic("degradedFallback", {
+        source: "provider",
+        meta: {
+          sessionId,
+          providerId: nextEntry.providerId,
+          modelId: nextEntry.modelId,
+          attempts: cacheUpdate.attemptIndex,
+        },
+      })
+    )
     return true
   } catch (err) {
     // The next `session_ended` event will route through this function

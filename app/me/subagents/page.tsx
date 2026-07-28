@@ -57,8 +57,28 @@ function SubagentsBody() {
         list.map((tpl: SubAgentTemplate) => (
           <Item key={tpl.id} size="sm" data-testid={`subagent-row-${tpl.id}`}>
             <ItemContent>
-              <ItemTitle className="flex items-center gap-2 text-sm">
-                <span className="truncate">{tpl.name}</span>
+              <ItemTitle className="flex flex-wrap items-center gap-2 text-sm">
+                <span className={`truncate ${tpl.disabled ? "line-through opacity-60" : ""}`}>
+                  {tpl.name}
+                </span>
+                {/* Availability mirrors the desktop switches. Without these the
+                    two surfaces disagree: a template disabled on desktop is
+                    excluded from dispatch, but would still read as available
+                    here. */}
+                {tpl.disabled ? (
+                  <Badge
+                    variant="outline"
+                    className="text-[10px]"
+                    data-testid={`disabled-${tpl.id}`}
+                  >
+                    {tTpl("disabledBadge")}
+                  </Badge>
+                ) : null}
+                {tpl.hidden ? (
+                  <Badge variant="outline" className="text-[10px]" data-testid={`hidden-${tpl.id}`}>
+                    {tTpl("hiddenBadge")}
+                  </Badge>
+                ) : null}
                 {tpl.isBuiltIn ? (
                   <Badge variant="secondary" className="text-[10px]">
                     {tTpl("builtIn")}

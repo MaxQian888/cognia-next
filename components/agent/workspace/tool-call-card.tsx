@@ -11,7 +11,7 @@ import {
   TerminalIcon,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
-import { ErrorParsedView } from "@/components/chat/error-parsed-view"
+import { ErrorParsedView } from "@/components/error/error-parsed-view"
 import type { ToolCallEntry } from "@/lib/agent-team/team-runtime-dispatcher"
 
 const MAX_PREVIEW_CHARS = 800

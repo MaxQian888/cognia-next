@@ -1,8 +1,9 @@
 "use client"
 
-import { forwardRef, memo, useEffect, useRef } from "react"
+import { forwardRef, memo, useEffect, useRef, useState } from "react"
 import { useTranslations } from "next-intl"
-import { motion, useReducedMotion } from "motion/react"
+import { AnimatePresence, motion, useReducedMotion } from "motion/react"
+import { STAGGER_CHILD, STAGGER_INTERVAL, mobileTransition } from "@/lib/ui/motion"
 import { Card } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { ScrollArea } from "@/components/ui/scroll-area"
@@ -17,6 +18,7 @@ import {
 } from "@/lib/agent-team/team-runtime-dispatcher"
 import type { MentionTarget } from "@/lib/agent-team/runtime-targets"
 import { senderColor } from "./sender-color"
+import { firstUnreadId } from "./unread"
 import { RuntimeBadge } from "./runtime-badge"
 import { TeamMentionChips } from "./team-mention-chips"
 import { TeamComposer } from "./team-composer"
@@ -168,12 +170,14 @@ const ChatMessageItem = memo(function ChatMessageItem({
   const tokenUsage = readTokenUsage(msg)
   return (
     <motion.div
-      initial={animate ? { opacity: 0, y: 4 } : false}
-      animate={{ opacity: 1, y: 0 }}
+      layout
+      initial={animate ? "initial" : false}
+      animate="animate"
+      exit="exit"
+      variants={STAGGER_CHILD}
       transition={{
-        duration: 0.15,
-        ease: "easeOut",
-        delay: animate ? Math.min(animationSlot * 0.03, 0.12) : 0,
+        ...mobileTransition("fast"),
+        delay: animate ? Math.min(animationSlot * STAGGER_INTERVAL, 0.12) : 0,
       }}
     >
       <Card
@@ -305,6 +309,18 @@ export const AgentTeamChat = forwardRef<ComposerHandle, AgentTeamChatProps>(func
   const bottomRef = useRef<HTMLDivElement>(null)
   const localComposerRef = useRef<ComposerHandle | null>(null)
 
+  // Snapshot of where the unread run started, taken once per visit. The
+  // workspace marks the thread read as soon as the chat tab is active, so
+  // reading this live would render the divider for a single frame and then drop
+  // it. This component unmounts when you leave the tab, so the snapshot is
+  // naturally recomputed on the next visit.
+  const [unread] = useState(() => {
+    const anchorId = firstUnreadId(messages)
+    if (!anchorId) return null
+    const start = messages.findIndex((m) => m.id === anchorId)
+    return start < 0 ? null : { anchorId, count: messages.length - start }
+  })
+
   // Track total streaming text length so we re-scroll as deltas land. Using a
   // hash of (count, last-msg content length, last-msg streaming flag) keeps
   // the dependency cheap to compute and stable when nothing actually changes.
@@ -347,23 +363,47 @@ export const AgentTeamChat = forwardRef<ComposerHandle, AgentTeamChatProps>(func
       ) : (
         <ScrollArea className="min-h-0 flex-1">
           <div className="space-y-2" data-testid="workspace-chat">
-            {messages.map((msg, index) => {
-              // Only stagger the last few new messages — established history
-              // would otherwise flicker on every render.
-              const shouldAnimate = !prefersReducedMotion && index >= messages.length - 5
-              return (
-                <ChatMessageItem
-                  key={msg.id}
-                  msg={msg}
-                  animate={shouldAnimate}
-                  animationSlot={index - Math.max(messages.length - 5, 0)}
-                  onRetry={onRetry}
-                  onDelete={onDelete}
-                  projectRoot={projectRoot}
-                  onOpenProjectFile={onOpenProjectFile}
-                />
-              )
-            })}
+            {/* flatMap, not a Fragment per row: AnimatePresence tracks its
+                direct children via React.Children, which does NOT look inside a
+                Fragment — wrapping each row would silently kill the exit
+                animation on delete. Emitting the divider as a sibling keeps
+                every node a directly-keyed child. */}
+            <AnimatePresence initial={false}>
+              {messages.flatMap((msg, index) => {
+                // Only stagger the last few new messages — established history
+                // would otherwise flicker on every render.
+                const shouldAnimate = !prefersReducedMotion && index >= messages.length - 5
+                const row = (
+                  <ChatMessageItem
+                    key={msg.id}
+                    msg={msg}
+                    animate={shouldAnimate}
+                    animationSlot={index - Math.max(messages.length - 5, 0)}
+                    onRetry={onRetry}
+                    onDelete={onDelete}
+                    projectRoot={projectRoot}
+                    onOpenProjectFile={onOpenProjectFile}
+                  />
+                )
+                if (msg.id !== unread?.anchorId) return [row]
+                return [
+                  <div
+                    key="chat-unread-divider"
+                    className="flex items-center gap-2 pt-1"
+                    data-testid="chat-unread-divider"
+                    role="separator"
+                    aria-label={t("unreadDivider", { count: unread.count })}
+                  >
+                    <span className="h-px flex-1 bg-destructive/40" />
+                    <span className="shrink-0 text-[10px] font-medium uppercase tracking-wider text-destructive">
+                      {t("unreadDivider", { count: unread.count })}
+                    </span>
+                    <span className="h-px flex-1 bg-destructive/40" />
+                  </div>,
+                  row,
+                ]
+              })}
+            </AnimatePresence>
             <div ref={bottomRef} />
           </div>
         </ScrollArea>

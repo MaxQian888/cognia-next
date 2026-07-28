@@ -40,7 +40,7 @@ const mockAgentManual: ExternalAgentConfig = {
   ...mockAgentFromPreset,
   id: "agent-2",
   name: "Manual",
-  metadata: undefined,
+  metadata: { providerUndoWarningAcknowledged: true },
 }
 
 // A connected, HTTP-network agent carrying a rich ecosystem snapshot — exercises
@@ -149,7 +149,7 @@ jest.mock("@/lib/files/file-bridge", () => ({
   pickDirectory: () => pickDirectoryMock(),
 }))
 
-// Use the real `presets.ts` module — its registry exposes the four shipping
+// Use the real `presets.ts` module — its registry exposes the shipping
 // presets so the gallery has actual data to render. We only spy on
 // `getAvailablePresets` for one test that needs to override the list.
 jest.mock("@/lib/ai/agent/external/presets", () => {
@@ -191,13 +191,13 @@ describe("ExternalAgentSettings — preset onboarding", () => {
     render(<ExternalAgentSettings />)
     const gallery = screen.getByTestId("preset-gallery-card")
     expect(gallery).toBeInTheDocument()
-    // Four shipping presets: codex / claude-code / gemini-cli / cursor-cli.
-    // Documented-only presets are hidden by default; the four built-ins are
-    // either `official` or `guided`, so all four should render.
+    // Documented-only presets are hidden by default; supported and preview
+    // presets remain discoverable.
     expect(within(gallery).getByTestId("preset-card-codex")).toBeInTheDocument()
     expect(within(gallery).getByTestId("preset-card-claude-code")).toBeInTheDocument()
     expect(within(gallery).getByTestId("preset-card-gemini-cli")).toBeInTheDocument()
     expect(within(gallery).getByTestId("preset-card-cursor-cli")).toBeInTheDocument()
+    expect(within(gallery).getByTestId("preset-card-opencode-v2-preview")).toBeInTheDocument()
   })
 
   it("shows the native Codex app-server preset and marks it Recommended when the codex CLI is detected", async () => {
@@ -328,6 +328,44 @@ describe("ExternalAgentSettings — preset onboarding", () => {
     })
     expect(await screen.findByTestId("preset-picker")).toBeInTheDocument()
     expect(screen.queryByTestId("codex-options-section")).not.toBeInTheDocument()
+  })
+
+  it("creates the OpenCode V2 preview without persisting an endpoint or process", async () => {
+    const user = userEvent.setup()
+    render(<ExternalAgentSettings />)
+    await act(async () => {
+      await user.click(screen.getByTestId("preset-pick-opencode-v2-preview"))
+    })
+    expect(screen.queryByText(/server endpoint/i)).not.toBeInTheDocument()
+    await act(async () => {
+      await user.click(screen.getByRole("button", { name: /^add$/i }))
+    })
+    const input = addAgentMock.mock.calls[0][0]
+    expect(input).toMatchObject({
+      protocol: "opencode-v2",
+      transport: "sse",
+      metadata: {
+        preview: true,
+        localServiceDiscovery: true,
+      },
+    })
+    expect(input.process).toBeUndefined()
+    expect(input.network).toBeUndefined()
+  })
+
+  it("restores the provider undo warning for the selected agent", async () => {
+    const user = userEvent.setup()
+    render(<ExternalAgentSettings />)
+    await act(async () => {
+      await user.click(screen.getByTestId("agent-row-agent-2"))
+    })
+    const detail = await screen.findByTestId("agent-detail-agent-2")
+    await act(async () => {
+      await user.click(within(detail).getByTestId("reset-provider-undo-warning"))
+    })
+    expect(updateAgentMock).toHaveBeenCalledWith("agent-2", {
+      metadata: { providerUndoWarningAcknowledged: false },
+    })
   })
 
   it("shows the quick-start gallery in the detail pane until an agent is selected", () => {

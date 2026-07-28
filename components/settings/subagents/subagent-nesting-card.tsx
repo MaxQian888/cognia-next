@@ -1,16 +1,10 @@
 "use client"
 
-import { useEffect, useState } from "react"
-import { toast } from "sonner"
 import { useTranslations } from "next-intl"
-import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
-import { useSettingsStore } from "@/stores/settings"
-import { createLogger } from "@cognia/logging"
-
-const log = createLogger("settings.subagentNesting")
+import type { AppSettings } from "@cognia/agent-config-types"
 
 const clampInt = (value: string, min: number, max: number, fallback: number): number => {
   const n = Math.floor(Number(value))
@@ -19,65 +13,71 @@ const clampInt = (value: string, min: number, max: number, fallback: number): nu
 }
 
 /**
+ * Form values for the nested-dispatch policy. `timeoutSeconds` is the display
+ * unit; the setting stores milliseconds.
+ */
+export interface NestingPolicyValues {
+  enabled: boolean
+  maxDepth: number
+  tokenBudget: number
+  timeoutSeconds: number
+  dispatchMaxRetries: number
+}
+
+export const NESTING_DEFAULTS: NestingPolicyValues = {
+  enabled: false,
+  maxDepth: 2,
+  tokenBudget: 0,
+  timeoutSeconds: 0,
+  dispatchMaxRetries: 1,
+}
+
+export function nestingValuesFromSettings(
+  settings: AppSettings | null | undefined
+): NestingPolicyValues {
+  const cfg = settings?.subagentNesting
+  if (!cfg) return NESTING_DEFAULTS
+  return {
+    enabled: cfg.enabled ?? NESTING_DEFAULTS.enabled,
+    maxDepth: cfg.maxDepth ?? NESTING_DEFAULTS.maxDepth,
+    tokenBudget: cfg.tokenBudget ?? NESTING_DEFAULTS.tokenBudget,
+    timeoutSeconds: cfg.timeoutMs ? Math.round(cfg.timeoutMs / 1000) : 0,
+    dispatchMaxRetries: cfg.dispatchMaxRetries ?? NESTING_DEFAULTS.dispatchMaxRetries,
+  }
+}
+
+export function nestingValuesToSettings(
+  values: NestingPolicyValues
+): NonNullable<AppSettings["subagentNesting"]> {
+  return {
+    enabled: values.enabled,
+    maxDepth: values.maxDepth,
+    tokenBudget: values.tokenBudget > 0 ? values.tokenBudget : 0,
+    timeoutMs: values.timeoutSeconds > 0 ? values.timeoutSeconds * 1000 : 0,
+    dispatchMaxRetries: values.dispatchMaxRetries,
+  }
+}
+
+export interface SubagentNestingCardProps {
+  value: NestingPolicyValues
+  onChange: (partial: Partial<NestingPolicyValues>) => void
+}
+
+/**
  * App-level config for nested subagent dispatch (depth-N). Opt-in: when off,
  * the chat agent keeps the SDK-native Task tool (depth 1) and nothing changes.
- * Self-contained card with its own save — mirrors InstructionsCard.
+ *
+ * Controlled. It used to own both its state and its own Save button, hydrating
+ * from the settings store on every `settings` change — which meant a save
+ * anywhere else in the app silently discarded whatever was being typed here.
+ * The draft, the dirty set and the single save now live in the owning panel
+ * (`use-policy-draft.ts`), so that class of loss is gone.
  */
-export function SubagentNestingCard() {
+export function SubagentNestingCard({ value, onChange }: SubagentNestingCardProps) {
   const t = useTranslations("settings.subagents.nesting")
-  const settings = useSettingsStore((s) => s.settings)
-  const save = useSettingsStore((s) => s.save)
-
-  const [enabled, setEnabled] = useState(false)
-  const [maxDepth, setMaxDepth] = useState(2)
-  const [tokenBudget, setTokenBudget] = useState(0)
-  const [timeoutSeconds, setTimeoutSeconds] = useState(0)
-  const [dispatchMaxRetries, setDispatchMaxRetries] = useState(1)
-
-  useEffect(() => {
-    const cfg = settings?.subagentNesting
-    if (!cfg) return
-    /* eslint-disable react-hooks/set-state-in-effect */
-    setEnabled(cfg.enabled ?? false)
-    setMaxDepth(cfg.maxDepth ?? 2)
-    setTokenBudget(cfg.tokenBudget ?? 0)
-    setTimeoutSeconds(cfg.timeoutMs ? Math.round(cfg.timeoutMs / 1000) : 0)
-    setDispatchMaxRetries(cfg.dispatchMaxRetries ?? 1)
-    /* eslint-enable react-hooks/set-state-in-effect */
-  }, [settings])
-
-  const handleSave = async () => {
-    try {
-      await save({
-        subagentNesting: {
-          enabled,
-          maxDepth,
-          tokenBudget: tokenBudget > 0 ? tokenBudget : 0,
-          timeoutMs: timeoutSeconds > 0 ? timeoutSeconds * 1000 : 0,
-          dispatchMaxRetries,
-        },
-      })
-      log.info("subagentNesting.saved", {
-        enabled,
-        maxDepth,
-        tokenBudget,
-        timeoutSeconds,
-        dispatchMaxRetries,
-      })
-      toast.success(t("saved"))
-    } catch (err) {
-      log.error("subagentNesting.saveFailed", err)
-      toast.error(err instanceof Error ? err.message : String(err))
-    }
-  }
 
   return (
     <div className="space-y-4" data-setting-id="subagent-nesting">
-      <div className="space-y-0.5">
-        <Label className="text-sm font-medium">{t("title")}</Label>
-        <p className="text-xs text-muted-foreground">{t("description")}</p>
-      </div>
-
       <div className="flex items-center justify-between gap-4">
         <div className="space-y-0.5">
           <Label htmlFor="settings-subagent-nesting-enabled" className="text-sm">
@@ -87,8 +87,8 @@ export function SubagentNestingCard() {
         </div>
         <Switch
           id="settings-subagent-nesting-enabled"
-          checked={enabled}
-          onCheckedChange={setEnabled}
+          checked={value.enabled}
+          onCheckedChange={(enabled) => onChange({ enabled })}
           aria-label={t("enabled")}
         />
       </div>
@@ -100,9 +100,9 @@ export function SubagentNestingCard() {
           type="number"
           min={1}
           max={5}
-          value={maxDepth}
-          onChange={(e) => setMaxDepth(clampInt(e.target.value, 1, 5, 2))}
-          disabled={!enabled}
+          value={value.maxDepth}
+          onChange={(e) => onChange({ maxDepth: clampInt(e.target.value, 1, 5, 2) })}
+          disabled={!value.enabled}
           aria-label={t("maxDepth")}
         />
         <p className="text-xs text-muted-foreground">{t("maxDepthHint")}</p>
@@ -115,9 +115,9 @@ export function SubagentNestingCard() {
           type="number"
           min={0}
           step={1000}
-          value={tokenBudget}
-          onChange={(e) => setTokenBudget(clampInt(e.target.value, 0, 100_000_000, 0))}
-          disabled={!enabled}
+          value={value.tokenBudget}
+          onChange={(e) => onChange({ tokenBudget: clampInt(e.target.value, 0, 100_000_000, 0) })}
+          disabled={!value.enabled}
           aria-label={t("tokenBudget")}
         />
         <p className="text-xs text-muted-foreground">{t("tokenBudgetHint")}</p>
@@ -130,9 +130,9 @@ export function SubagentNestingCard() {
           type="number"
           min={0}
           step={10}
-          value={timeoutSeconds}
-          onChange={(e) => setTimeoutSeconds(clampInt(e.target.value, 0, 86_400, 0))}
-          disabled={!enabled}
+          value={value.timeoutSeconds}
+          onChange={(e) => onChange({ timeoutSeconds: clampInt(e.target.value, 0, 86_400, 0) })}
+          disabled={!value.enabled}
           aria-label={t("timeout")}
         />
         <p className="text-xs text-muted-foreground">{t("timeoutHint")}</p>
@@ -145,17 +145,11 @@ export function SubagentNestingCard() {
           type="number"
           min={0}
           max={5}
-          value={dispatchMaxRetries}
-          onChange={(e) => setDispatchMaxRetries(clampInt(e.target.value, 0, 5, 1))}
+          value={value.dispatchMaxRetries}
+          onChange={(e) => onChange({ dispatchMaxRetries: clampInt(e.target.value, 0, 5, 1) })}
           aria-label={t("dispatchMaxRetries")}
         />
         <p className="text-xs text-muted-foreground">{t("dispatchMaxRetriesHint")}</p>
-      </div>
-
-      <div className="flex justify-end">
-        <Button size="sm" onClick={handleSave}>
-          {t("save")}
-        </Button>
       </div>
     </div>
   )

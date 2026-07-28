@@ -47,6 +47,7 @@ import {
 import { AcpClientAdapter } from "./acp-client"
 import { CodexAppServerAdapter } from "./codex-app-server-client"
 import { OpenCodeClientAdapter } from "./opencode-client"
+import { OpenCodeV2ClientAdapter } from "./opencode-v2-client"
 import { A2aClientAdapter } from "./a2a-client"
 import { acpToolsToAgentTools } from "./translators"
 import { createExternalAgentTraceBridge } from "./agent-trace-bridge"
@@ -75,6 +76,11 @@ import {
 } from "./canonical-contract"
 import { checkExternalAgentCommandExists, onExternalAgentExit } from "@/lib/native/external-agent"
 import { isTauri } from "@/lib/tauri"
+import type {
+  ExternalAgentCompactionCapability,
+  ExternalAgentCompactionOptions,
+  ExternalAgentProviderUndoCapability,
+} from "./session-capabilities"
 
 const externalAgentManagerLogger = loggers.agent.child("external-manager")
 
@@ -330,6 +336,48 @@ export class ExternalAgentManager {
   /** Whether the agent's adapter can steer an in-flight turn. */
   supportsSteering(agentId: string): boolean {
     return typeof this.adapters.get(agentId)?.steerTurn === "function"
+  }
+
+  async getCompactionCapability(
+    agentId: string,
+    sessionId: string
+  ): Promise<ExternalAgentCompactionCapability> {
+    const adapter = this.adapters.get(agentId)
+    if (!adapter?.getCompactionCapability) {
+      return { status: "unsupported", routes: [], reason: "adapter_unsupported" }
+    }
+    return adapter.getCompactionCapability(sessionId)
+  }
+
+  async compactSession(
+    agentId: string,
+    sessionId: string,
+    options?: ExternalAgentCompactionOptions
+  ): Promise<void> {
+    const adapter = this.adapters.get(agentId)
+    if (!adapter?.compactSession) {
+      throw new Error("Agent does not support context compaction")
+    }
+    await adapter.compactSession(sessionId, options)
+  }
+
+  async getProviderUndoCapability(
+    agentId: string,
+    sessionId: string
+  ): Promise<ExternalAgentProviderUndoCapability> {
+    const adapter = this.adapters.get(agentId)
+    if (!adapter?.getProviderUndoCapability) {
+      return { status: "unsupported", reason: "adapter_unsupported" }
+    }
+    return adapter.getProviderUndoCapability(sessionId)
+  }
+
+  async undoLastProviderChange(agentId: string, sessionId: string): Promise<void> {
+    const adapter = this.adapters.get(agentId)
+    if (!adapter?.undoLastProviderChange) {
+      throw new Error("Agent does not support provider undo")
+    }
+    await adapter.undoLastProviderChange(sessionId)
   }
 
   /**
@@ -718,6 +766,7 @@ export class ExternalAgentManager {
     protocolAdapterRegistry.register("acp", () => new AcpClientAdapter())
     protocolAdapterRegistry.register("codex-app-server", () => new CodexAppServerAdapter())
     protocolAdapterRegistry.register("opencode", () => new OpenCodeClientAdapter())
+    protocolAdapterRegistry.register("opencode-v2", () => new OpenCodeV2ClientAdapter())
     protocolAdapterRegistry.register("a2a", () => new A2aClientAdapter())
     // Future: Register more adapters
     // protocolAdapterRegistry.register('http', () => new HttpClientAdapter());
