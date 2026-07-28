@@ -99,6 +99,8 @@ export interface DeclaredModalEntry {
   /** Unprefixed modal id, as declared in `manifest.modalMounts[].id`. */
   id: string
   label: string
+  /** Plugin i18n key preferred over the literal label by discovery UI. */
+  labelKey?: string
   /**
    * Presentation declared in `manifest.modalMounts[].options`, used as the base
    * layer for every open of this modal. A call-site `options` overrides it

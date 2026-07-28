@@ -8,7 +8,7 @@ describe("defineWorkflowTrigger", () => {
       typeVersion: 1,
       label: "Poll",
       description: "Emit on an interval.",
-      iconName: "timer",
+      iconName: "Timer",
       paramsSchema: { type: "object", properties: { everyMs: { type: "number" } } },
       start,
     })
@@ -22,7 +22,7 @@ describe("defineWorkflowTrigger", () => {
       typeVersion: 1,
       label: "X",
       description: "x",
-      iconName: "box",
+      iconName: "Box",
       paramsSchema: {},
       defaultParams: { everyMs: 1000 },
       desktopOnly: true,

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict"
-import { execFileSync } from "node:child_process"
+import { execFileSync, spawnSync } from "node:child_process"
 import { mkdtempSync, readFileSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -148,4 +148,23 @@ test("a real Node subprocess activates a CommonJS SDK bundle", () => {
   )
   const frame = JSON.parse(stdout.trim().replace(/^COGNIA_PLUGIN_RESULT:/, ""))
   assert.deepEqual(frame.result, { message: "cjs" })
+})
+
+test("the Node host rejects host-private imports before evaluation", () => {
+  const directory = mkdtempSync(join(tmpdir(), "cognia-node-plugin-host-private-"))
+  const entry = join(directory, "plugin.mjs")
+  writeFileSync(
+    entry,
+    `import "@/stores/private"
+     export default { activate() {} }`
+  )
+  const source = readFileSync(new URL("./node-plugin-host.mjs", import.meta.url), "utf8")
+  const result = spawnSync(
+    process.execPath,
+    ["--input-type=module", "--eval", source, "deactivate", entry, "private-demo"],
+    { encoding: "utf8" }
+  )
+
+  assert.notEqual(result.status, 0)
+  assert.match(result.stdout, /imports host-private modules: @\/stores\/private/)
 })

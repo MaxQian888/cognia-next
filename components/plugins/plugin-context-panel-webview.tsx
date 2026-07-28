@@ -18,6 +18,7 @@
 
 import { useCallback, useEffect, useRef, useSyncExternalStore } from "react"
 import { useTranslations } from "next-intl"
+import { PluginSurface } from "@/components/plugins/plugin-surface"
 import { PluginWebviewHost } from "@/components/plugins/plugin-webview-host"
 import {
   contextPanelWebviewEvent,
@@ -32,11 +33,12 @@ import type { ContextPanelRenderProps } from "@/types/context-workbench"
 import type { PluginContextPanelRenderer } from "@/types/plugin/plugin-context-panel"
 
 interface WebviewPanelProps extends ContextPanelRenderProps {
+  pluginId: string
   fullId: string
   title?: string
 }
 
-function WebviewContextPanel({ fullId, title, active }: WebviewPanelProps) {
+function WebviewContextPanel({ pluginId, fullId, title, active }: WebviewPanelProps) {
   const t = useTranslations("contextWorkbench")
   const webview = useSyncExternalStore(
     subscribeWebviews,
@@ -91,12 +93,20 @@ function WebviewContextPanel({ fullId, title, active }: WebviewPanelProps) {
   }
 
   return (
-    <PluginWebviewHost
-      fullId={fullId}
-      srcDoc={webview.srcDoc}
-      title={title ?? webview.title}
-      onFrameReady={handleFrameReady}
-    />
+    <PluginSurface
+      pluginId={pluginId}
+      surfaceId={`context-panel-webview:${fullId}`}
+      formFactor="panel"
+      variant="iframe"
+      container={false}
+    >
+      <PluginWebviewHost
+        fullId={fullId}
+        srcDoc={webview.srcDoc}
+        title={title ?? webview.title}
+        onFrameReady={handleFrameReady}
+      />
+    </PluginSurface>
   )
 }
 
@@ -111,7 +121,7 @@ export function createContextPanelWebviewRenderer(
 ): PluginContextPanelRenderer {
   const fullId = `${pluginId}:${webviewId}`
   const Renderer = (props: ContextPanelRenderProps) => (
-    <WebviewContextPanel {...props} fullId={fullId} title={title} />
+    <WebviewContextPanel {...props} pluginId={pluginId} fullId={fullId} title={title} />
   )
   Renderer.displayName = `ContextPanelWebview(${fullId})`
   return Renderer

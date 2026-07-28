@@ -1,8 +1,11 @@
+import { readFile } from "node:fs/promises"
 import { pathToFileURL } from "node:url"
 
 export const RESULT_PREFIX = "COGNIA_PLUGIN_RESULT:"
 const CALLBACK_CHAIN_PREFIX = "chain:"
 const UNSAFE_PATH_SEGMENTS = new Set(["__proto__", "prototype", "constructor"])
+const HOST_PRIVATE_IMPORT_PATTERN =
+  /(?:from\s*|import\s*\(|require\s*\(|import\s+(?=["']))\s*["'](@\/(?:lib|types|components|stores)(?:\/[^"']*)?)["']/g
 
 function writeResult(value) {
   process.stdout.write(`${RESULT_PREFIX}${JSON.stringify(value)}\n`)
@@ -151,6 +154,17 @@ export function resolvePluginDefinition(moduleExports) {
 }
 
 async function loadDefinition(entry) {
+  const source = await readFile(entry, "utf8")
+  const hostPrivateImports = [...source.matchAll(HOST_PRIVATE_IMPORT_PATTERN)].map(
+    (match) => match[1]
+  )
+  if (hostPrivateImports.length > 0) {
+    throw new Error(
+      `Marketplace plugin ${entry} imports host-private modules: ${[
+        ...new Set(hostPrivateImports),
+      ].join(", ")}`
+    )
+  }
   const moduleExports = await import(`${pathToFileURL(entry).href}?host=${Date.now()}`)
   return { definition: resolvePluginDefinition(moduleExports), moduleExports }
 }

@@ -232,7 +232,7 @@ export const REFACTOR_PIPELINE_TEMPLATE = defineWorkflowTemplate({
   description:
     "End-to-end Go backend refactor: analyze → plan → refactor → go gate (with one bounded fix-and-re-verify) → raise coverage → review → docs → commit. Set the repoPath variable to your clone.",
   category: "automation",
-  icon: "wrench",
+  icon: "Wrench",
   complexity: "advanced",
   nodes: NODES,
   edges: EDGES,

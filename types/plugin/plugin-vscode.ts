@@ -291,6 +291,29 @@ export interface VsCodeTerminalProfile {
   icon?: string
 }
 
+export interface VsCodeNotebookContribution {
+  type: string
+  displayName: string
+  selector: Array<{ filenamePattern?: string; excludeFileNamePattern?: string }>
+  priority?: "default" | "option"
+}
+
+export interface VsCodeNotebookRendererContribution {
+  id: string
+  displayName: string
+  mimeTypes?: string[]
+  entrypoint: string | { extends: string; path: string }
+  dependencies?: string[]
+  optionalDependencies?: string[]
+  requiresMessaging?: "always" | "optional" | "never"
+}
+
+export interface VsCodeNotebookPreloadContribution {
+  type: string
+  entrypoint: string
+  localResourceRoots?: string[]
+}
+
 export interface VsCodeAuthentication {
   id: string
   label: string
@@ -324,6 +347,39 @@ export interface VsCodeChatParticipant {
   description?: string
   isSticky?: boolean
   commands?: Array<{ name: string; description: string; isSticky?: boolean }>
+  when?: string
+}
+
+export interface VsCodeLanguageModelToolSet {
+  name: string
+  description: string
+  icon?: string
+  tools: string[]
+}
+
+export interface VsCodeSpeechProvider {
+  name: string
+  description?: string
+}
+
+export interface VsCodeLocalization {
+  languageId: string
+  languageName?: string
+  localizedLanguageName?: string
+  translations: Array<{ id: string; path: string }>
+}
+
+export interface VsCodeChatAgent {
+  path: string
+  when?: string
+  sessionTypes?: string[]
+}
+
+export interface VsCodeLanguageModelChatProvider {
+  vendor: string
+  displayName: string
+  configuration?: Record<string, unknown>
+  managementCommand?: string
   when?: string
 }
 
@@ -400,6 +456,8 @@ export interface VsCodeContributions {
 
   // Custom editors / debuggers / tasks / terminal
   customEditors?: VsCodeCustomEditor[]
+  notebooks?: VsCodeNotebookContribution[]
+  notebookRenderer?: VsCodeNotebookRendererContribution[]
   debuggers?: VsCodeDebugger[]
   breakpoints?: VsCodeBreakpoint[]
   taskDefinitions?: VsCodeTaskDefinition[]
@@ -410,20 +468,25 @@ export interface VsCodeContributions {
   // Authentication, AI & MCP
   authentication?: VsCodeAuthentication[]
   chatParticipants?: VsCodeChatParticipant[]
+  chatAgents?: VsCodeChatAgent[]
+  languageModelChatProviders?: VsCodeLanguageModelChatProvider[]
   mcpServerDefinitionProviders?: VsCodeMcpServerDefinitionProvider[]
   chatInstructions?: Array<{ path: string }>
   chatPromptFiles?: Array<{ path: string }>
-  chatSkills?: Array<{ id: string; name: string; description?: string }>
+  chatSkills?: Array<{ path: string; when?: string }>
   languageModelTools?: Array<{
     name: string
     displayName?: string
     modelDescription?: string
+    userDescription?: string
     toolReferenceName?: string
+    icon?: string
     tags?: string[]
     when?: string
     canBeReferencedInPrompt?: boolean
     inputSchema?: unknown
   }>
+  localizations?: VsCodeLocalization[]
 
   // Misc
   resourceLabelFormatters?: VsCodeResourceLabelFormatter[]

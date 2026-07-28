@@ -6,10 +6,10 @@ describe("defineTrayItem", () => {
     const def = defineTrayItem({
       id: "quick-note",
       label: "Quick Note",
-      icon: "sticky-note",
+      icon: "StickyNote",
       onClick,
     })
-    expect(def).toMatchObject({ id: "quick-note", label: "Quick Note", icon: "sticky-note" })
+    expect(def).toMatchObject({ id: "quick-note", label: "Quick Note", icon: "StickyNote" })
     expect(def.onClick).toBe(onClick)
   })
 })

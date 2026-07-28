@@ -1562,6 +1562,7 @@ describe("PluginManager", () => {
             },
             status: "installed",
             source: "builtin",
+            path: "db-plugin",
             config: {},
           },
         },
@@ -1839,8 +1840,7 @@ describe("PluginManager", () => {
 
     it("applies a plugin's declared Dexie tables BEFORE loadPlugin runs activate()", async () => {
       // Regression: loadPlugin runs the plugin's activate(), and activate()
-      // typically touches ctx.dexie right away (github-delivery counts its 4
-      // tables). If applyPluginTables runs AFTER loadPlugin, that first
+      // may touch ctx.dexie right away. If applyPluginTables runs AFTER loadPlugin, that first
       // db.table() throws "Table <id>:<name> does not exist" on a first-ever
       // enable (no persisted pluginDexieMeta row to restore at boot), and the
       // meta row is never written — so the plugin can never be enabled on any
@@ -1850,8 +1850,20 @@ describe("PluginManager", () => {
       }
       applyPluginTables.mockClear()
 
+      const pluginId = "dexie-order-fixture"
       const store = {
-        plugins: {} as Record<string, Plugin>,
+        plugins: {
+          [pluginId]: {
+            manifest: {
+              ...createManifest(pluginId),
+              dexie: { tables: [{ name: "items", schema: "++id" }] },
+            },
+            status: "installed",
+            source: "builtin",
+            path: pluginId,
+            config: {},
+          },
+        } as Record<string, Plugin>,
         discoverPlugin: jest.fn((manifest: PluginManifest, source: string, path: string) => {
           store.plugins[manifest.id] = {
             manifest,
@@ -1883,15 +1895,14 @@ describe("PluginManager", () => {
       mockInvoke.mockResolvedValue(undefined)
 
       const manager = new PluginManager({ pluginDirectory: "", runtimeProfile: "browser" })
-      await manager.scanPlugins()
 
-      // github-delivery declares a `dexie` block in its manifest, so
+      // The fixture declares a `dexie` block in its manifest, so
       // applyPluginTables must fire. Stub the manager's loadPlugin (which is
       // what actually runs activate()) so we can observe invocation order
       // without a real IndexedDB / module load.
       const loadSpy = jest.spyOn(manager, "loadPlugin").mockResolvedValue(undefined)
 
-      await manager.enablePlugin("github-delivery")
+      await manager.enablePlugin(pluginId)
 
       expect(applyPluginTables).toHaveBeenCalledTimes(1)
       expect(applyPluginTables.mock.calls[0][0]).toEqual(expect.any(Function))
@@ -2095,7 +2106,7 @@ describe("PluginManager", () => {
                 type: "custom",
                 name: "Mode A",
                 description: "Mode A",
-                icon: "bot",
+                icon: "Bot",
                 tools: [],
               },
             ],
@@ -2600,6 +2611,37 @@ describe("PluginManager", () => {
       expect(enableSpy).toHaveBeenCalledWith(
         "inbox-view-plugin",
         "activation:onView:inbox.sidebar.section"
+      )
+    })
+
+    it("derives onView activation from manifest extensions", async () => {
+      const extensionPlugin: Plugin = {
+        manifest: {
+          ...createManifest("extension-plugin"),
+          capabilities: ["components"],
+          permissions: ["extension:ui"],
+          extensions: [
+            {
+              point: "chat.input.actions",
+              entry: "dist/surfaces.js",
+              export: "ComposerAction",
+            },
+          ],
+        },
+        status: "installed",
+        source: "dev",
+        path: "/plugins/extension-plugin",
+        config: {},
+      }
+      mockGetState.mockReturnValue({ plugins: { "extension-plugin": extensionPlugin } })
+      const manager = new PluginManager({ pluginDirectory: "/plugins" })
+      const enableSpy = jest.spyOn(manager, "enablePlugin").mockResolvedValue(undefined)
+
+      await manager.handleActivationEvent("onView:chat.input.actions")
+
+      expect(enableSpy).toHaveBeenCalledWith(
+        "extension-plugin",
+        "activation:onView:chat.input.actions"
       )
     })
 
@@ -3874,6 +3916,49 @@ describe("PluginManager", () => {
       expect(mockInvoke).not.toHaveBeenCalledWith("plugin_python_get_tools", expect.anything())
     })
 
+    it("registers manifest i18n and extensions before activate", async () => {
+      const plugin = createTypedPlugin("surface-plugin", "frontend")
+      plugin.source = "dev"
+      plugin.manifest.capabilities = ["components"]
+      plugin.manifest.permissions = ["extension:ui"]
+      plugin.manifest.extensions = [
+        {
+          point: "chat.input.actions",
+          entry: "dist/surfaces.js",
+          export: "ComposerAction",
+        },
+      ]
+      plugin.manifest.i18n = {
+        locales: {
+          en: { "surfaces.action": "Action" },
+          "zh-CN": { "surfaces.action": "操作" },
+        },
+      }
+      const store = createLoadStore(plugin)
+      mockGetState.mockReturnValue(store)
+      const manager = new PluginManager({ pluginDirectory: "/plugins" })
+      const activate = jest.fn((context: { i18n: { t: (key: string) => string } }) => {
+        expect(getPluginExtensionRegistrationCount(plugin.manifest.id)).toBe(1)
+        expect(context.i18n.t("surfaces.action")).toBe("Action")
+      })
+      const loader = (
+        manager as unknown as {
+          loader: {
+            load: (plugin: Plugin) => Promise<unknown>
+            importEntry: (entry: string) => Promise<Record<string, unknown>>
+            isLoaded: (pluginId: string) => boolean
+          }
+        }
+      ).loader
+      loader.load = jest.fn(async () => ({ manifest: plugin.manifest, activate }))
+      loader.importEntry = jest.fn(async () => ({ ComposerAction: () => null }))
+      loader.isLoaded = jest.fn(() => false)
+
+      await manager.loadPlugin(plugin.manifest.id)
+
+      expect(activate).toHaveBeenCalledTimes(1)
+    })
+
     it("emits PLUGIN_ERROR with a bounded error class name (no message) on load failure", async () => {
       const plugin = createTypedPlugin("boom-plugin", "frontend")
       mockGetState.mockReturnValue(createLoadStore(plugin))
@@ -4320,6 +4405,25 @@ describe("PluginManager", () => {
       // dependency on the symbol so a future rename can't silently
       // drop the façade.
       expect(typeof initializePluginManager).toBe("function")
+    })
+
+    it("keeps concurrent initialization single-flight", async () => {
+      let release!: () => void
+      const gate = new Promise<void>((resolve) => {
+        release = resolve
+      })
+      const initialize = jest
+        .spyOn(PluginManager.prototype, "initialize")
+        .mockImplementation(async () => gate)
+
+      const first = initializePluginManager({ pluginDirectory: "/tmp/plugins" })
+      const second = initializePluginManager({ pluginDirectory: "/tmp/plugins" })
+
+      expect(initialize).toHaveBeenCalledTimes(1)
+      release()
+      const [firstManager, secondManager] = await Promise.all([first, second])
+      expect(firstManager).toBe(secondManager)
+      initialize.mockRestore()
     })
   })
 

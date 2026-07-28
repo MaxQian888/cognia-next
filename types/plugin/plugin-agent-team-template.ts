@@ -23,6 +23,7 @@ import type {
   TeammateCapabilityOverlay,
   TeamGovernancePolicy,
 } from "@/types/agent/agent-team"
+import type { PluginIconName } from "./plugin-icon"
 import type { SubAgentPriority } from "@/types/agent/sub-agent"
 
 // Re-exported so plugin authors building rich teammate seeds need a single import.
@@ -123,7 +124,7 @@ export interface PluginAgentTeamTemplateDef {
   /** Default team config overrides. */
   config?: Partial<AgentTeamConfig>
   /** Lucide icon name shown on the template card. */
-  icon?: string
+  icon?: PluginIconName
   /**
    * Cross-capability dependencies. Missing dependencies surface as warnings
    * via `validateTemplateRequires(def)` — non-blocking. The UI shows a

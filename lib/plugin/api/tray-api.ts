@@ -68,10 +68,12 @@ export function createTrayAPI({ pluginId, capabilities }: CreateTrayAPIArgs): Pl
       id: fullId,
       pluginId,
       label: item.label,
+      labelKey: item.labelKey,
       icon: item.icon,
       when: item.when,
       category: item.category,
       accelerator: item.accelerator,
+      run: item.onClick,
     })
 
     const listener = () => {

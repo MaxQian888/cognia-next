@@ -16,17 +16,29 @@ let mockConfigComponentResult: React.ComponentType<{
   onSave: (next: Record<string, unknown>) => Promise<void>
   pluginId: string
 }> | null = null
+const importPluginEntryMock = jest.fn(async (_entry: string, _pluginId?: string) => ({}))
 
 jest.mock("@/lib/plugin/bridge/config-component-bridge", () => ({
-  loadConfigComponent: jest.fn(async () => mockConfigComponentResult),
+  loadConfigComponent: jest.fn(
+    async (
+      _manifest: unknown,
+      _installRoot: string,
+      options?: { importer?: (entry: string) => Promise<Record<string, unknown>> }
+    ) => {
+      await options?.importer?.("resolved-entry")
+      return mockConfigComponentResult
+    }
+  ),
 }))
 
 jest.mock("@/lib/plugin/core/manager", () => ({
-  getPluginManager: () => ({ importPluginEntry: async () => ({}) }),
+  getPluginManager: () => ({
+    importPluginEntry: (...args: [string, string?]) => importPluginEntryMock(...args),
+  }),
 }))
 
-jest.mock("@/components/plugins/plugin-extension-slot", () => ({
-  PluginExtensionBoundary: ({ children }: { children: React.ReactNode }) => children,
+jest.mock("@/components/plugins/plugin-surface", () => ({
+  PluginSurface: ({ children }: { children: React.ReactNode }) => children,
 }))
 
 jest.mock("next-intl", () => ({
@@ -88,6 +100,7 @@ beforeEach(() => {
   mockPlugin = schemaPlugin
   mockConfigComponentResult = null
   setPluginConfigMock.mockClear()
+  importPluginEntryMock.mockClear()
 })
 
 describe("PluginConfigFormContent", () => {
@@ -380,6 +393,7 @@ describe("PluginConfigFormContent", () => {
     )
     renderForm()
     expect(await screen.findByTestId("custom-config")).toHaveTextContent("custom:hi")
+    expect(importPluginEntryMock).toHaveBeenCalledWith("resolved-entry", "p_conf")
   })
 
   it("custom configComponent onSave persists via setPluginConfig", async () => {

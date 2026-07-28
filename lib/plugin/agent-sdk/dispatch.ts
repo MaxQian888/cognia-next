@@ -192,6 +192,10 @@ export async function dispatchSubagent(
       // Live progress: stream the child's tool-call/result events into the
       // subagent runtime store so its card updates while the run is in flight.
       ...(options._onEvent ? { onEvent: options._onEvent } : {}),
+      // Managed/headless projections have no Cognia chat pane to own approval
+      // requests. Thread their correlated responder into the canonical
+      // executor permission seam instead of creating a second tool gate.
+      ...(options._canUseTool ? { canUseTool: options._canUseTool } : {}),
       // Permission-ask routing: surface the child's asks in the PARENT chat
       // session (instead of the legacy silent auto-deny against the unopened
       // ephemeral session).
@@ -372,6 +376,32 @@ async function runExternalSubagent(
     ...(options.cwd ? { workingDirectory: options.cwd } : {}),
     ...(options.abortSignal ? { signal: options.abortSignal } : {}),
     ...(onEvent ? { onEvent } : {}),
+    ...(options._canUseTool
+      ? {
+          onPermissionRequest: async (
+            request: import("@/types/agent/external-agent").AcpPermissionRequest
+          ) => {
+            const decision = await options._canUseTool!(
+              request.toolInfo.name,
+              request.rawInput ?? {},
+              { signal: options.abortSignal }
+            )
+            const granted = decision.behavior === "allow"
+            const selected = request.options?.find((option) =>
+              granted
+                ? option.kind === "allow_once" || option.kind === "allow_always"
+                : option.kind === "reject_once" || option.kind === "reject_always"
+            )
+            return {
+              requestId: request.requestId ?? request.id,
+              granted,
+              ...(selected ? { optionId: selected.optionId } : {}),
+              ...(decision.behavior === "deny" ? { reason: decision.message } : {}),
+              scope: "once" as const,
+            }
+          },
+        }
+      : {}),
   })
 
   if (!result.success) {

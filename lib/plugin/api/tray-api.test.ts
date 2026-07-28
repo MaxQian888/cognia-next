@@ -40,6 +40,7 @@ describe("createTrayAPI", () => {
     api.register({
       id: "capture",
       label: "Capture",
+      labelKey: "tray.capture",
       category: "screenshot",
       onClick: () => {},
     })
@@ -54,6 +55,7 @@ describe("createTrayAPI", () => {
     expect(items).toHaveLength(1)
     expect(items[0].id).toBe("shot:capture")
     expect(items[0].pluginId).toBe("shot")
+    expect(items[0].labelKey).toBe("tray.capture")
   })
 
   it("disposer unregisters on both sides and removes the DOM listener", () => {

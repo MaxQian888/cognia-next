@@ -58,6 +58,11 @@ describe("barrel", () => {
       "CardHeader",
       "CardTitle",
       "Checkbox",
+      "Dialog",
+      "DialogContent",
+      "DialogTitle",
+      "Form",
+      "FormField",
       "Input",
       "Label",
       "Select",
@@ -73,6 +78,8 @@ describe("barrel", () => {
       "TooltipContent",
       "TooltipProvider",
       "TooltipTrigger",
+      "Toaster",
+      "toast",
       "cn",
     ]) {
       expect(kit).toHaveProperty(name)

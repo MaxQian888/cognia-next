@@ -50,6 +50,18 @@ export {
 export { Checkbox } from "./checkbox"
 export { Collapsible, CollapsibleContent, CollapsibleTrigger } from "./collapsible"
 export {
+  Dialog,
+  DialogClose,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogOverlay,
+  DialogPortal,
+  DialogTitle,
+  DialogTrigger,
+} from "./dialog"
+export {
   Command,
   CommandEmpty,
   CommandGroup,
@@ -96,6 +108,16 @@ export {
 export { HoverCard, HoverCardContent, HoverCardTrigger } from "./hover-card"
 export { Input } from "./input"
 export { Label } from "./label"
+export {
+  Form,
+  FormControl,
+  FormDescription,
+  FormField,
+  FormItem,
+  FormLabel,
+  FormMessage,
+  useFormField,
+} from "./form"
 // Motion. Deliberately only the facade — the raw `MOBILE_*` tokens in
 // `./motion-tokens` keep the host's historical names and are not a contract we
 // want to owe plugins; `motionTokens` covers every read-only need. The host
@@ -155,6 +177,7 @@ export {
   SheetTrigger,
 } from "./sheet"
 export { Skeleton } from "./skeleton"
+export { Toaster, toast } from "./sonner"
 export { Slider } from "./slider"
 export { Switch } from "./switch"
 export {

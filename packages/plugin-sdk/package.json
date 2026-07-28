@@ -51,6 +51,12 @@
       "require": "./dist/connector.cjs",
       "default": "./dist/connector.js"
     },
+    "./api/integration": {
+      "types": "./dist/integration.d.ts",
+      "import": "./dist/integration.js",
+      "require": "./dist/integration.cjs",
+      "default": "./dist/integration.js"
+    },
     "./api/context-panel": {
       "types": "./dist/context-panel.d.ts",
       "import": "./dist/context-panel.js",
@@ -118,6 +124,7 @@
     "@types/react": "^19.0.0",
     "ai": "^6.0.0",
     "dexie": "^4.0.0",
+    "lucide-react": "^1.25.0",
     "react": "^19.0.0",
     "typescript": ">=5.0.0"
   },

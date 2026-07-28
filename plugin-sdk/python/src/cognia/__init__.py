@@ -81,6 +81,7 @@ from .providers import (
     define_lsp_server,
     define_ocr_provider,
 )
+from .integrations import Integration, define_integration
 from .workflow import (
     ConfigSchema,
     ScheduledTask,
@@ -239,6 +240,8 @@ __all__ = [
     "define_cli_tool",
     "Connector",
     "define_connector",
+    "Integration",
+    "define_integration",
     # workflow / scheduler / configuration manifest mirrors
     "WorkflowTemplate",
     "define_workflow_template",

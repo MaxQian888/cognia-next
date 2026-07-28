@@ -135,6 +135,15 @@ export interface InstallationProgress {
   error?: string
 }
 
+export interface StagedPluginUpdate {
+  transactionId: string
+  pluginId: string
+  version: string
+  stagedPath: string
+  manifest: PluginManifest
+  sizeBytes: number
+}
+
 export type MarketplaceErrorCategory =
   | "network"
   | "auth"
@@ -1062,6 +1071,72 @@ export class PluginMarketplace {
         retryable: normalized.retryable,
       }
     }
+  }
+
+  /**
+   * Download, authenticate, extract, and validate an update into host-owned
+   * transaction storage. The current plugin directory is not modified.
+   */
+  async stagePluginUpdate(
+    pluginId: string,
+    version: PluginVersionInfo
+  ): Promise<StagedPluginUpdate> {
+    if (!isTauri()) {
+      throw new Error("Plugin update staging requires the Cognia desktop app")
+    }
+    const { invoke } = await import("@tauri-apps/api/core")
+    const { getPluginSignatureVerifier } = await import("@/lib/plugin/security/signature")
+    const staged = await invoke<StagedPluginUpdate>("plugin_stage_version", {
+      pluginId,
+      version: version.version,
+      downloadUrl: version.downloadUrl,
+      checksum: version.checksum,
+      signatureHex: version.signature,
+      publicKeyHex: version.publicKey,
+      requireSignature: getPluginSignatureVerifier().getConfig().requireSignatures,
+    })
+    if (
+      staged.pluginId !== pluginId ||
+      staged.version !== version.version ||
+      !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+        staged.transactionId
+      )
+    ) {
+      throw new Error("Host returned an invalid staged update descriptor")
+    }
+    const validation = validatePluginManifest(staged.manifest)
+    if (!validation.valid) {
+      await invoke("plugin_discard_staged_update", {
+        pluginId,
+        transactionId: staged.transactionId,
+      }).catch(() => undefined)
+      throw new Error(`Staged plugin manifest is invalid: ${validation.errors.join(", ")}`)
+    }
+    return staged
+  }
+
+  async commitStagedPluginUpdate(staged: StagedPluginUpdate): Promise<void> {
+    const { invoke } = await import("@tauri-apps/api/core")
+    await invoke("plugin_commit_staged_update", {
+      pluginId: staged.pluginId,
+      transactionId: staged.transactionId,
+    })
+  }
+
+  async discardStagedPluginUpdate(staged: StagedPluginUpdate): Promise<void> {
+    const { invoke } = await import("@tauri-apps/api/core")
+    await invoke("plugin_discard_staged_update", {
+      pluginId: staged.pluginId,
+      transactionId: staged.transactionId,
+    })
+  }
+
+  async finalizeStagedPluginUpdate(staged: StagedPluginUpdate): Promise<void> {
+    const { invoke } = await import("@tauri-apps/api/core")
+    await invoke("plugin_finalize_staged_update", {
+      pluginId: staged.pluginId,
+      transactionId: staged.transactionId,
+    })
   }
 
   /**

@@ -1,4 +1,4 @@
-import type { FullPluginContext } from "./index"
+import type { FullPluginContext, PluginContext } from "./index"
 
 describe("public FullPluginContext", () => {
   it("requires every API mounted by the full host context", () => {
@@ -10,5 +10,23 @@ describe("public FullPluginContext", () => {
     const assertNever = <Value extends never>(): Value | undefined => undefined
 
     expect(assertNever<UnexpectedOptionalKeys>()).toBeUndefined()
+  })
+
+  it("exposes formerly hidden namespaces on PluginContext itself", () => {
+    type RequiredKeys =
+      | "extensions"
+      | "theme"
+      | "i18n"
+      | "notifications"
+      | "canvas"
+      | "artifact"
+      | "messagePart"
+      | "toolResult"
+      | "session"
+      | "permissions"
+    type MissingKeys = Exclude<RequiredKeys, keyof PluginContext>
+    const assertNever = <Value extends never>(): Value | undefined => undefined
+
+    expect(assertNever<MissingKeys>()).toBeUndefined()
   })
 })

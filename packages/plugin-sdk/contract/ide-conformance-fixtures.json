@@ -1,0 +1,627 @@
+{
+  "schemaVersion": 1,
+  "catalogHash": "sha256:53cf23036ed2e14693f284778d7f2b0cd7cd5802ee63bb42c573063f40f86fb3",
+  "contributions": {
+    "commands": { "classified": true },
+    "menus": { "classified": true },
+    "submenus": { "classified": true },
+    "keybindings": { "classified": true },
+    "configuration": { "classified": true },
+    "configurationDefaults": { "classified": true },
+    "jsonValidation": { "classified": true },
+    "languages": { "classified": true },
+    "grammars": { "classified": true },
+    "snippets": { "classified": true },
+    "semanticTokenTypes": { "classified": true },
+    "semanticTokenModifiers": { "classified": true },
+    "semanticTokenScopes": { "classified": true },
+    "themes": { "classified": true },
+    "iconThemes": { "classified": true },
+    "productIconThemes": { "classified": true },
+    "colors": { "classified": true },
+    "icons": { "classified": true },
+    "views": { "classified": true },
+    "viewsContainers": { "classified": true },
+    "viewsWelcome": { "classified": true },
+    "walkthroughs": { "classified": true },
+    "customEditors": { "classified": true },
+    "notebooks": { "classified": true },
+    "notebookRenderer": { "classified": true },
+    "debuggers": { "classified": true },
+    "breakpoints": { "classified": true },
+    "taskDefinitions": { "classified": true },
+    "problemMatchers": { "classified": true },
+    "problemPatterns": { "classified": true },
+    "terminal": { "classified": true },
+    "authentication": { "classified": true },
+    "localizations": { "classified": true },
+    "chatAgents": { "classified": true },
+    "chatParticipants": { "classified": true },
+    "languageModelChatProviders": { "classified": true },
+    "mcpServerDefinitionProviders": { "classified": true },
+    "chatInstructions": { "classified": true },
+    "chatPromptFiles": { "classified": true },
+    "chatSkills": { "classified": true },
+    "languageModelTools": { "classified": true },
+    "resourceLabelFormatters": { "classified": true },
+    "typescriptServerPlugins": { "classified": true }
+  },
+  "providers": {
+    "command": { "permission": null, "targets": ["monaco", "pro-ide"], "classified": true },
+    "completion": {
+      "permission": "editor:read",
+      "targets": ["monaco", "pro-ide"],
+      "classified": true
+    },
+    "hover": { "permission": "editor:read", "targets": ["monaco", "pro-ide"], "classified": true },
+    "definition": {
+      "permission": "editor:read",
+      "targets": ["monaco", "pro-ide"],
+      "classified": true
+    },
+    "declaration": {
+      "permission": "editor:read",
+      "targets": ["monaco", "pro-ide"],
+      "classified": true
+    },
+    "type-definition": {
+      "permission": "editor:read",
+      "targets": ["monaco", "pro-ide"],
+      "classified": true
+    },
+    "implementation": {
+      "permission": "editor:read",
+      "targets": ["monaco", "pro-ide"],
+      "classified": true
+    },
+    "references": {
+      "permission": "editor:read",
+      "targets": ["monaco", "pro-ide"],
+      "classified": true
+    },
+    "document-highlight": {
+      "permission": "editor:read",
+      "targets": ["monaco", "pro-ide"],
+      "classified": true
+    },
+    "document-symbol": {
+      "permission": "editor:read",
+      "targets": ["monaco", "pro-ide"],
+      "classified": true
+    },
+    "workspace-symbol": {
+      "permission": "project:read",
+      "targets": ["monaco", "pro-ide"],
+      "classified": true
+    },
+    "code-action": {
+      "permission": "editor:write",
+      "targets": ["monaco", "pro-ide"],
+      "classified": true
+    },
+    "code-lens": {
+      "permission": "editor:read",
+      "targets": ["monaco", "pro-ide"],
+      "classified": true
+    },
+    "document-link": {
+      "permission": "editor:read",
+      "targets": ["monaco", "pro-ide"],
+      "classified": true
+    },
+    "document-color": {
+      "permission": "editor:read",
+      "targets": ["monaco", "pro-ide"],
+      "classified": true
+    },
+    "format-document": {
+      "permission": "editor:write",
+      "targets": ["monaco", "pro-ide"],
+      "classified": true
+    },
+    "format-range": {
+      "permission": "editor:write",
+      "targets": ["monaco", "pro-ide"],
+      "classified": true
+    },
+    "format-on-type": {
+      "permission": "editor:write",
+      "targets": ["monaco", "pro-ide"],
+      "classified": true
+    },
+    "rename": {
+      "permission": "editor:write",
+      "targets": ["monaco", "pro-ide"],
+      "classified": true
+    },
+    "folding-range": {
+      "permission": "editor:read",
+      "targets": ["monaco", "pro-ide"],
+      "classified": true
+    },
+    "selection-range": {
+      "permission": "editor:read",
+      "targets": ["monaco", "pro-ide"],
+      "classified": true
+    },
+    "signature-help": {
+      "permission": "editor:read",
+      "targets": ["monaco", "pro-ide"],
+      "classified": true
+    },
+    "semantic-tokens-document": {
+      "permission": "editor:read",
+      "targets": ["monaco", "pro-ide"],
+      "classified": true
+    },
+    "semantic-tokens-range": {
+      "permission": "editor:read",
+      "targets": ["monaco", "pro-ide"],
+      "classified": true
+    },
+    "inline-completion": {
+      "permission": "editor:read",
+      "targets": ["monaco", "pro-ide"],
+      "classified": true
+    },
+    "inline-values": {
+      "permission": "editor:read",
+      "targets": ["monaco", "pro-ide"],
+      "classified": true
+    },
+    "inlay-hints": {
+      "permission": "editor:read",
+      "targets": ["monaco", "pro-ide"],
+      "classified": true
+    },
+    "linked-editing-range": {
+      "permission": "editor:read",
+      "targets": ["monaco", "pro-ide"],
+      "classified": true
+    },
+    "call-hierarchy": {
+      "permission": "editor:read",
+      "targets": ["monaco", "pro-ide"],
+      "classified": true
+    },
+    "type-hierarchy": {
+      "permission": "editor:read",
+      "targets": ["monaco", "pro-ide"],
+      "classified": true
+    },
+    "evaluatable-expression": {
+      "permission": "debug:control",
+      "targets": ["pro-ide"],
+      "classified": true
+    },
+    "document-drop-edit": {
+      "permission": "editor:write",
+      "targets": ["pro-ide"],
+      "classified": true
+    },
+    "document-paste-edit": {
+      "permission": "editor:write",
+      "targets": ["pro-ide"],
+      "classified": true
+    },
+    "text-document-content": {
+      "permission": "editor:read",
+      "targets": ["monaco", "pro-ide"],
+      "classified": true
+    },
+    "file-system": {
+      "permission": "filesystem:read",
+      "targets": ["monaco", "pro-ide"],
+      "classified": true
+    },
+    "tree-data": {
+      "permission": "extension:ui",
+      "targets": ["monaco", "pro-ide"],
+      "classified": true
+    },
+    "status-bar-item": {
+      "permission": "extension:ui",
+      "targets": ["monaco", "pro-ide"],
+      "classified": true
+    },
+    "text-editor-decoration": {
+      "permission": "editor:read",
+      "targets": ["monaco", "pro-ide"],
+      "classified": true
+    },
+    "file-decoration": { "permission": "project:read", "targets": ["pro-ide"], "classified": true },
+    "language-status-item": {
+      "permission": "editor:read",
+      "targets": ["pro-ide"],
+      "classified": true
+    },
+    "webview-view": {
+      "permission": "extension:ui",
+      "targets": ["monaco", "pro-ide"],
+      "classified": true
+    },
+    "custom-editor": { "permission": "extension:ui", "targets": ["pro-ide"], "classified": true },
+    "webview-panel-serializer": {
+      "permission": "extension:ui",
+      "targets": ["pro-ide"],
+      "classified": true
+    },
+    "terminal-profile": {
+      "permission": "terminal:spawn",
+      "targets": ["pro-ide"],
+      "classified": true
+    },
+    "terminal-link": {
+      "permission": "terminal:completion",
+      "targets": ["pro-ide"],
+      "classified": true
+    },
+    "task": { "permission": "shell:execute", "targets": ["pro-ide"], "classified": true },
+    "source-control": {
+      "permission": "git:read",
+      "targets": ["monaco", "pro-ide"],
+      "classified": true
+    },
+    "debug-configuration": {
+      "permission": "debug:control",
+      "targets": ["pro-ide"],
+      "classified": true
+    },
+    "debug-adapter": { "permission": "debug:control", "targets": ["pro-ide"], "classified": true },
+    "debug-tracker": { "permission": "debug:control", "targets": ["pro-ide"], "classified": true },
+    "test-controller": { "permission": "tests:run", "targets": ["pro-ide"], "classified": true },
+    "notebook-serializer": {
+      "permission": "editor:read",
+      "targets": ["pro-ide"],
+      "classified": true
+    },
+    "notebook-controller": {
+      "permission": "notebook:execute",
+      "targets": ["pro-ide"],
+      "classified": true
+    },
+    "notebook-cell-status-bar": {
+      "permission": "editor:read",
+      "targets": ["pro-ide"],
+      "classified": true
+    },
+    "comment-controller": {
+      "permission": "editor:write",
+      "targets": ["monaco", "pro-ide"],
+      "classified": true
+    },
+    "authentication": {
+      "permission": "auth:provide",
+      "targets": ["monaco", "pro-ide"],
+      "classified": true
+    },
+    "uri-handler": {
+      "permission": "extension:ui",
+      "targets": ["monaco", "pro-ide"],
+      "classified": true
+    },
+    "chat-participant": {
+      "permission": "agent:control",
+      "targets": ["monaco", "pro-ide"],
+      "classified": true
+    },
+    "language-model-chat-provider": {
+      "permission": "network:fetch",
+      "targets": ["monaco", "pro-ide"],
+      "classified": true
+    },
+    "language-model-tool": {
+      "permission": "agent:control",
+      "targets": ["monaco", "pro-ide"],
+      "classified": true
+    },
+    "mcp-server-definition": {
+      "permission": "process:spawn",
+      "targets": ["monaco", "pro-ide"],
+      "classified": true
+    }
+  },
+  "exclusions": {
+    "proposed-api": "IDE_PROPOSED_API_UNSUPPORTED",
+    "internal-api": "IDE_INTERNAL_API_UNSUPPORTED",
+    "remote-authority": "IDE_REMOTE_AUTHORITY_UNSUPPORTED",
+    "extension-management": "IDE_EXTENSION_MANAGEMENT_UNSUPPORTED",
+    "windows-host": "IDE_PLATFORM_UNSUPPORTED",
+    "third-party-extension-dependency": "IDE_EXTENSION_DEPENDENCY_UNSUPPORTED"
+  },
+  "upstreamExtensionPoints": {
+    "authentication": { "classification": "supported" },
+    "breakpoints": { "classification": "supported" },
+    "chatAgents": { "classification": "supported" },
+    "chatInstructions": { "classification": "supported" },
+    "chatParticipants": { "classification": "supported" },
+    "chatPromptFiles": { "classification": "supported" },
+    "chatSkills": { "classification": "supported" },
+    "colors": { "classification": "supported" },
+    "commands": { "classification": "supported" },
+    "configuration": { "classification": "supported" },
+    "configurationDefaults": { "classification": "supported" },
+    "customEditors": { "classification": "supported" },
+    "debuggers": { "classification": "supported" },
+    "grammars": { "classification": "supported" },
+    "iconThemes": { "classification": "supported" },
+    "icons": { "classification": "supported" },
+    "jsonValidation": { "classification": "supported" },
+    "keybindings": { "classification": "supported" },
+    "languageModelChatProviders": { "classification": "supported" },
+    "languageModelTools": { "classification": "supported" },
+    "languages": { "classification": "supported" },
+    "localizations": { "classification": "supported" },
+    "mcpServerDefinitionProviders": { "classification": "supported" },
+    "menus": { "classification": "supported" },
+    "notebookRenderer": { "classification": "supported" },
+    "notebooks": { "classification": "supported" },
+    "problemMatchers": { "classification": "supported" },
+    "problemPatterns": { "classification": "supported" },
+    "productIconThemes": { "classification": "supported" },
+    "resourceLabelFormatters": { "classification": "supported" },
+    "semanticTokenModifiers": { "classification": "supported" },
+    "semanticTokenScopes": { "classification": "supported" },
+    "semanticTokenTypes": { "classification": "supported" },
+    "snippets": { "classification": "supported" },
+    "submenus": { "classification": "supported" },
+    "taskDefinitions": { "classification": "supported" },
+    "terminal": { "classification": "supported" },
+    "themes": { "classification": "supported" },
+    "typescriptServerPlugins": { "classification": "supported" },
+    "views": { "classification": "supported" },
+    "viewsContainers": { "classification": "supported" },
+    "viewsWelcome": { "classification": "supported" },
+    "walkthroughs": { "classification": "supported" },
+    "chatContext": { "classification": "excluded", "exclusion": "proposed-api" },
+    "chatOutputRenderers": { "classification": "excluded", "exclusion": "proposed-api" },
+    "chatPlugins": { "classification": "excluded", "exclusion": "internal-api" },
+    "chatSessions": { "classification": "excluded", "exclusion": "proposed-api" },
+    "chatViewsWelcome": { "classification": "excluded", "exclusion": "internal-api" },
+    "continueEditSession": { "classification": "excluded", "exclusion": "proposed-api" },
+    "css": { "classification": "excluded", "exclusion": "proposed-api" },
+    "debugVisualizers": { "classification": "excluded", "exclusion": "proposed-api" },
+    "languageModelToolSets": { "classification": "excluded", "exclusion": "proposed-api" },
+    "notebookPreload": { "classification": "excluded", "exclusion": "proposed-api" },
+    "remoteCodingAgents": { "classification": "excluded", "exclusion": "proposed-api" },
+    "remoteHelp": { "classification": "excluded", "exclusion": "remote-authority" },
+    "speechProviders": { "classification": "excluded", "exclusion": "proposed-api" },
+    "statusBarItems": { "classification": "excluded", "exclusion": "proposed-api" },
+    "terminalQuickFixes": { "classification": "excluded", "exclusion": "proposed-api" }
+  },
+  "upstreamProviderApis": {
+    "commands.registerCommand": { "classification": "supported", "providerKind": "command" },
+    "commands.registerTextEditorCommand": {
+      "classification": "supported",
+      "providerKind": "command"
+    },
+    "languages.registerCompletionItemProvider": {
+      "classification": "supported",
+      "providerKind": "completion"
+    },
+    "languages.registerHoverProvider": { "classification": "supported", "providerKind": "hover" },
+    "languages.registerDefinitionProvider": {
+      "classification": "supported",
+      "providerKind": "definition"
+    },
+    "languages.registerDeclarationProvider": {
+      "classification": "supported",
+      "providerKind": "declaration"
+    },
+    "languages.registerTypeDefinitionProvider": {
+      "classification": "supported",
+      "providerKind": "type-definition"
+    },
+    "languages.registerImplementationProvider": {
+      "classification": "supported",
+      "providerKind": "implementation"
+    },
+    "languages.registerReferenceProvider": {
+      "classification": "supported",
+      "providerKind": "references"
+    },
+    "languages.registerDocumentHighlightProvider": {
+      "classification": "supported",
+      "providerKind": "document-highlight"
+    },
+    "languages.registerDocumentSymbolProvider": {
+      "classification": "supported",
+      "providerKind": "document-symbol"
+    },
+    "languages.registerWorkspaceSymbolProvider": {
+      "classification": "supported",
+      "providerKind": "workspace-symbol"
+    },
+    "languages.registerCodeActionsProvider": {
+      "classification": "supported",
+      "providerKind": "code-action"
+    },
+    "languages.registerCodeLensProvider": {
+      "classification": "supported",
+      "providerKind": "code-lens"
+    },
+    "languages.registerDocumentLinkProvider": {
+      "classification": "supported",
+      "providerKind": "document-link"
+    },
+    "languages.registerColorProvider": {
+      "classification": "supported",
+      "providerKind": "document-color"
+    },
+    "languages.registerDocumentFormattingEditProvider": {
+      "classification": "supported",
+      "providerKind": "format-document"
+    },
+    "languages.registerDocumentRangeFormattingEditProvider": {
+      "classification": "supported",
+      "providerKind": "format-range"
+    },
+    "languages.registerOnTypeFormattingEditProvider": {
+      "classification": "supported",
+      "providerKind": "format-on-type"
+    },
+    "languages.registerRenameProvider": { "classification": "supported", "providerKind": "rename" },
+    "languages.registerFoldingRangeProvider": {
+      "classification": "supported",
+      "providerKind": "folding-range"
+    },
+    "languages.registerSelectionRangeProvider": {
+      "classification": "supported",
+      "providerKind": "selection-range"
+    },
+    "languages.registerSignatureHelpProvider": {
+      "classification": "supported",
+      "providerKind": "signature-help"
+    },
+    "languages.registerDocumentSemanticTokensProvider": {
+      "classification": "supported",
+      "providerKind": "semantic-tokens-document"
+    },
+    "languages.registerDocumentRangeSemanticTokensProvider": {
+      "classification": "supported",
+      "providerKind": "semantic-tokens-range"
+    },
+    "languages.registerInlineCompletionItemProvider": {
+      "classification": "supported",
+      "providerKind": "inline-completion"
+    },
+    "languages.registerInlineValuesProvider": {
+      "classification": "supported",
+      "providerKind": "inline-values"
+    },
+    "languages.registerInlayHintsProvider": {
+      "classification": "supported",
+      "providerKind": "inlay-hints"
+    },
+    "languages.registerLinkedEditingRangeProvider": {
+      "classification": "supported",
+      "providerKind": "linked-editing-range"
+    },
+    "languages.registerCallHierarchyProvider": {
+      "classification": "supported",
+      "providerKind": "call-hierarchy"
+    },
+    "languages.registerTypeHierarchyProvider": {
+      "classification": "supported",
+      "providerKind": "type-hierarchy"
+    },
+    "languages.registerEvaluatableExpressionProvider": {
+      "classification": "supported",
+      "providerKind": "evaluatable-expression"
+    },
+    "languages.registerDocumentDropEditProvider": {
+      "classification": "supported",
+      "providerKind": "document-drop-edit"
+    },
+    "languages.registerDocumentPasteEditProvider": {
+      "classification": "supported",
+      "providerKind": "document-paste-edit"
+    },
+    "workspace.registerTextDocumentContentProvider": {
+      "classification": "supported",
+      "providerKind": "text-document-content"
+    },
+    "workspace.registerFileSystemProvider": {
+      "classification": "supported",
+      "providerKind": "file-system"
+    },
+    "window.registerTreeDataProvider": {
+      "classification": "supported",
+      "providerKind": "tree-data"
+    },
+    "window.createTreeView": { "classification": "supported", "providerKind": "tree-data" },
+    "window.createStatusBarItem": {
+      "classification": "supported",
+      "providerKind": "status-bar-item"
+    },
+    "window.createTextEditorDecorationType": {
+      "classification": "supported",
+      "providerKind": "text-editor-decoration"
+    },
+    "window.registerFileDecorationProvider": {
+      "classification": "supported",
+      "providerKind": "file-decoration"
+    },
+    "languages.createLanguageStatusItem": {
+      "classification": "supported",
+      "providerKind": "language-status-item"
+    },
+    "window.registerWebviewViewProvider": {
+      "classification": "supported",
+      "providerKind": "webview-view"
+    },
+    "window.registerCustomEditorProvider": {
+      "classification": "supported",
+      "providerKind": "custom-editor"
+    },
+    "window.registerWebviewPanelSerializer": {
+      "classification": "supported",
+      "providerKind": "webview-panel-serializer"
+    },
+    "window.registerTerminalProfileProvider": {
+      "classification": "supported",
+      "providerKind": "terminal-profile"
+    },
+    "window.registerTerminalLinkProvider": {
+      "classification": "supported",
+      "providerKind": "terminal-link"
+    },
+    "tasks.registerTaskProvider": { "classification": "supported", "providerKind": "task" },
+    "scm.createSourceControl": { "classification": "supported", "providerKind": "source-control" },
+    "debug.registerDebugConfigurationProvider": {
+      "classification": "supported",
+      "providerKind": "debug-configuration"
+    },
+    "debug.registerDebugAdapterDescriptorFactory": {
+      "classification": "supported",
+      "providerKind": "debug-adapter"
+    },
+    "debug.registerDebugAdapterTrackerFactory": {
+      "classification": "supported",
+      "providerKind": "debug-tracker"
+    },
+    "tests.createTestController": {
+      "classification": "supported",
+      "providerKind": "test-controller"
+    },
+    "workspace.registerNotebookSerializer": {
+      "classification": "supported",
+      "providerKind": "notebook-serializer"
+    },
+    "notebooks.createNotebookController": {
+      "classification": "supported",
+      "providerKind": "notebook-controller"
+    },
+    "notebooks.registerNotebookCellStatusBarItemProvider": {
+      "classification": "supported",
+      "providerKind": "notebook-cell-status-bar"
+    },
+    "comments.createCommentController": {
+      "classification": "supported",
+      "providerKind": "comment-controller"
+    },
+    "authentication.registerAuthenticationProvider": {
+      "classification": "supported",
+      "providerKind": "authentication"
+    },
+    "window.registerUriHandler": { "classification": "supported", "providerKind": "uri-handler" },
+    "chat.createChatParticipant": {
+      "classification": "supported",
+      "providerKind": "chat-participant"
+    },
+    "lm.registerLanguageModelChatProvider": {
+      "classification": "supported",
+      "providerKind": "language-model-chat-provider"
+    },
+    "lm.registerTool": { "classification": "supported", "providerKind": "language-model-tool" },
+    "lm.registerMcpServerDefinitionProvider": {
+      "classification": "supported",
+      "providerKind": "mcp-server-definition"
+    },
+    "window.registerTerminalQuickFixProvider": {
+      "classification": "excluded",
+      "providerKind": "terminal-quick-fix",
+      "exclusion": "proposed-api"
+    }
+  }
+}

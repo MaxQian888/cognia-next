@@ -57,7 +57,7 @@ const researchPair = defineAgentTeamTemplate({
   name: "Research Pair",
   description: "A researcher feeds a coder — investigate, then implement.",
   category: "research",
-  icon: "search",
+  icon: "Search",
   teammates: [
     {
       name: "Researcher",
@@ -100,7 +100,7 @@ const tddTrio = defineAgentTeamTemplate({
   name: "TDD Trio",
   description: "Researcher + coder + tester running a test-driven loop.",
   category: "development",
-  icon: "flask-conical",
+  icon: "FlaskConical",
   config: {
     governancePolicy: {
       approval: { requirePlanApproval: true, requireDelegationApproval: false },

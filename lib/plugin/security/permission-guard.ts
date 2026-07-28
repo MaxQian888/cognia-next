@@ -118,7 +118,15 @@ export const PERMISSION_GROUPS: Record<string, PluginPermission[]> = {
   ],
   companion: ["companion:read", "companion:control", "companion:goal-control"],
   native: ["native:input", "native:screen", "native:filesystem", "native:process"],
-  dangerous: ["shell:execute", "process:spawn", "python:execute", "terminal:spawn"],
+  dangerous: [
+    "shell:execute",
+    "process:spawn",
+    "python:execute",
+    "terminal:spawn",
+    "debug:control",
+    "tests:run",
+    "notebook:execute",
+  ],
 }
 
 export const PERMISSION_DESCRIPTIONS: Record<PluginPermission, string> = {
@@ -151,6 +159,9 @@ export const PERMISSION_DESCRIPTIONS: Record<PluginPermission, string> = {
   "editor:read":
     "See what you are looking at in the project editor — the focused file, your selection, and its diagnostics",
   "editor:write": "Open files and reveal edits in the project editor",
+  "debug:control": "Start, inspect, and control debug sessions",
+  "tests:run": "Discover and run tests through the IDE",
+  "notebook:execute": "Execute notebook cells and notebook kernels",
   "vector:read": "Search the vector store",
   "vector:write": "Add to and delete from the vector store",
   "ai:chat": "Send prompts to a language model on your account (consumes your quota)",
@@ -220,6 +231,10 @@ export const PERMISSION_DESCRIPTIONS: Record<PluginPermission, string> = {
   "events:subscribe": "Listen for events other plugins emit",
   "auth:provide": "Register a native auth/OAuth provider other plugins can use",
   "auth:consume": "Consume sessions from a registered auth provider",
+  "integrations:read": "Read Integration definitions, accounts, subscriptions, and job status",
+  "integrations:events": "Publish normalized Integration events to workflows and Inbox",
+  "integrations:execute": "Run Integration actions and authenticated platform requests",
+  "integrations:manage": "Manage Integration accounts, subscriptions, ingress, and migrations",
   "pet:read": "Read the desktop pet's public state and subscribe to its events",
   "pet:interact": "Care for the desktop pet and grant budget-capped rewards",
   "hooks:chat-intercept":
@@ -233,6 +248,9 @@ export const DANGEROUS_PERMISSIONS: PluginPermission[] = [
   "shell:execute",
   "process:spawn",
   "python:execute",
+  "debug:control",
+  "tests:run",
+  "notebook:execute",
   "filesystem:write",
   "secrets:write",
   // Network egress reaches any host and can carry whatever the plugin can read

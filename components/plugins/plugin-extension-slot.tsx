@@ -7,13 +7,8 @@
 // `priority` order. Each plugin is wrapped in its own ErrorBoundary so a
 // throwing extension can't take down the host UI.
 
-import {
-  Component,
-  useEffect,
-  useSyncExternalStore,
-  type CSSProperties,
-  type ReactNode,
-} from "react"
+import { useEffect, useSyncExternalStore, type ReactNode } from "react"
+import { PluginSurface } from "@/components/plugins/plugin-surface"
 import {
   getExtensionsForPoint,
   getExtensionRevision,
@@ -111,10 +106,11 @@ export function PluginExtensionSlot({ point, className, limit, fallback, context
           context?: Record<string, unknown>
         }>
         return (
-          <PluginExtensionBoundary
+          <PluginSurface
             key={ext.id}
             pluginId={ext.pluginId}
-            extensionId={ext.id}
+            surfaceId={ext.id}
+            formFactor={formFactor}
             minWidth={ext.options.minWidth}
             maxWidth={ext.options.maxWidth}
           >
@@ -124,7 +120,7 @@ export function PluginExtensionSlot({ point, className, limit, fallback, context
               formFactor={formFactor}
               context={context}
             />
-          </PluginExtensionBoundary>
+          </PluginSurface>
         )
       })}
     </div>
@@ -144,118 +140,4 @@ export function usePluginSlotHasExtensions(point: CanonicalExtensionPoint): bool
   useSyncExternalStore(subscribeExtensionChanges, getExtensionRevision, () => 0)
   useSyncExternalStore(subscribeContextKeys, getContextKeyRevision, () => 0)
   return getExtensionsForPoint(point).length > 0
-}
-
-/** Hoisted so the wrapper's style prop keeps a stable identity across renders. */
-const DISPLAY_CONTENTS = { display: "contents" } as const
-
-/**
- * Memoised by hint pair for the same reason `DISPLAY_CONTENTS` is hoisted: the
- * wrapper re-renders on every registry and context-key revision, and a fresh
- * style object each time would rewrite the inline `style` attribute for no
- * reason. Bounded by the number of distinct hint pairs actually registered.
- */
-const widthHintStyles = new Map<string, CSSProperties>()
-
-/**
- * Turn a plugin's width hints into a style for the boundary wrapper.
- *
- * The clamping is the whole point of the feature living here rather than in
- * plugin CSS: `min(<hint>, 100%)` resolves against the slot's content box, so
- * whatever number a plugin declares, the box it gets can never be wider than
- * the region the host gave it. A ceiling of `100%` is applied even when only a
- * floor was declared — the floor is what would otherwise push the box past the
- * slot edge under flex pressure.
- *
- * With no hints the wrapper stays `display: contents`, which is load-bearing:
- * the element exists only as the `@scope` root for the plugin's
- * `manifest.styles` sheet, and generating a box would make a contribution to a
- * flex toolbar lay out as a nested child instead of a direct one. Declaring a
- * hint is opting into that box, and nothing else in the slot changes.
- */
-function widthHintStyle(minWidth?: number, maxWidth?: number): CSSProperties {
-  if (minWidth === undefined && maxWidth === undefined) return DISPLAY_CONTENTS
-  const key = `${minWidth ?? ""}|${maxWidth ?? ""}`
-  const cached = widthHintStyles.get(key)
-  if (cached) return cached
-  const style: CSSProperties = {
-    display: "block",
-    minWidth: minWidth === undefined ? undefined : `min(${minWidth}px, 100%)`,
-    maxWidth: maxWidth === undefined ? "100%" : `min(${maxWidth}px, 100%)`,
-  }
-  widthHintStyles.set(key, style)
-  return style
-}
-
-interface BoundaryProps {
-  pluginId: string
-  extensionId: string
-  /** Plugin-declared inline-size floor in px, already sanitised by `extension-api`. */
-  minWidth?: number
-  /** Plugin-declared inline-size ceiling in px, already sanitised by `extension-api`. */
-  maxWidth?: number
-  children: ReactNode
-}
-
-interface BoundaryState {
-  hasError: boolean
-}
-
-export class PluginExtensionBoundary extends Component<BoundaryProps, BoundaryState> {
-  constructor(props: BoundaryProps) {
-    super(props)
-    this.state = { hasError: false }
-  }
-
-  static getDerivedStateFromError(): BoundaryState {
-    return { hasError: true }
-  }
-
-  componentDidCatch(error: unknown) {
-    const errorMessage = error instanceof Error ? error.message : String(error)
-    // Plug into the analytics event stream rather than console.error so the
-    // /plugins panel can surface the failure later. Importing analytics lazily
-    // avoids pulling that module into every host page.
-    void import("@/lib/plugin/utils/analytics").then((mod) => {
-      mod.trackPluginEvent?.({
-        pluginId: this.props.pluginId,
-        eventType: "error",
-        success: false,
-        errorMessage,
-        metadata: { extensionId: this.props.extensionId, scope: "extension.render_error" },
-      })
-    })
-    // Also record a runtime diagnostic so the render failure shows up in the
-    // plugin diagnostics panel + per-plugin badge alongside load/conflict/
-    // dependency failures — not only in the analytics stream (C4).
-    void import("@/lib/plugin/contracts/diagnostics-store").then((mod) => {
-      mod.recordPluginPointDiagnostic(this.props.pluginId, {
-        code: "plugin.silent-failure",
-        severity: "error",
-        pointKind: "ui-slot",
-        pointId: this.props.extensionId,
-        message: `Extension "${this.props.extensionId}" crashed while rendering and was removed from its slot: ${errorMessage}`,
-        hint: "The rest of the UI is unaffected. Check the plugin's component for a runtime error.",
-      })
-    })
-  }
-
-  render() {
-    if (this.state.hasError) return null
-    // `data-plugin-root` is the bound for the plugin's `manifest.styles` sheet
-    // (`lib/plugin/styles/plugin-stylesheet.ts` wraps it in `@scope`). It needs
-    // a real element, but `display: contents` keeps that element from
-    // generating a layout box — so a plugin contributing a button to a flex
-    // toolbar still lays out as a direct child of that flex container. A
-    // width-hinted extension trades that away for a sizeable box; see
-    // `widthHintStyle`.
-    return (
-      <div
-        data-plugin-root={this.props.pluginId}
-        style={widthHintStyle(this.props.minWidth, this.props.maxWidth)}
-      >
-        {this.props.children}
-      </div>
-    )
-  }
 }

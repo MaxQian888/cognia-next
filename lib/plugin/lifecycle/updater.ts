@@ -35,7 +35,10 @@ import { getPluginMarketplace } from "../package/marketplace"
 import { loggers } from "../core/logger"
 import { getPluginBackupManager } from "./backup"
 import { getPluginManager } from "../core/manager"
-import type { PluginManifest } from "@/types/plugin"
+import { codeServerClient, type CodeServerProxyArtifact } from "@/lib/codeserver/client"
+import { stageManagedIdeProxy } from "../ide/proxy-manager"
+import type { Plugin, PluginManifest } from "@/types/plugin"
+import type { StagedPluginUpdate } from "../package/marketplace"
 // Type-only: erased at compile time, so the Open VSX modules stay behind the
 // dynamic imports in `checkOpenVsxUpdates` and out of the default bundle.
 import type { OpenVsxClient } from "@/lib/plugin/vscode-shim/openvsx-client"
@@ -63,6 +66,11 @@ export interface UpdateResult {
   duration: number
   error?: string
   requiresRestart?: boolean
+  rollback?: {
+    attempted: boolean
+    succeeded: boolean
+    error?: string
+  }
 }
 
 export interface UpdateProgress {
@@ -422,6 +430,14 @@ export class PluginUpdater {
 
     const currentVersion = updateInfo?.currentVersion || this.getPluginVersion(pluginId) || ""
     let targetVersion = options.version || updateInfo?.latestVersion || ""
+    const initialStatus = usePluginStore.getState().plugins[pluginId]?.status
+    const shouldReactivate = new Set(["loading", "loaded", "enabling", "enabled", "suspended"]).has(
+      initialStatus || ""
+    )
+    let backupId: string | undefined
+    let packageMutationStarted = false
+    let stagedUpdate: StagedPluginUpdate | undefined
+    let stagedProxy: CodeServerProxyArtifact | null = null
     if (!targetVersion) {
       const latest = await marketplace.getPlugin(pluginId)
       targetVersion = latest?.latestVersion || ""
@@ -432,25 +448,8 @@ export class PluginUpdater {
         throw new Error(`No target version available for plugin ${pluginId}`)
       }
 
-      // Step 1: Backup if configured
-      if (options.backup ?? this.config.backupBeforeUpdate) {
-        this.emitProgress({
-          pluginId,
-          stage: "backing_up",
-          progress: 10,
-          message: "Creating backup...",
-        })
-
-        const backupResult = await getPluginBackupManager().createBackup(pluginId, {
-          reason: "pre-update",
-          metadata: { targetVersion },
-        })
-        if (!backupResult.success) {
-          throw new Error(backupResult.error || "Backup creation failed")
-        }
-      }
-
-      // Step 2: Download new version
+      // Step 1: Stage and authenticate the new package without touching the
+      // working install.
       this.emitProgress({
         pluginId,
         stage: "downloading",
@@ -463,8 +462,49 @@ export class PluginUpdater {
       if (!matchedVersion) {
         throw new Error(`Version ${targetVersion} is not available in marketplace`)
       }
+      stagedUpdate = await marketplace.stagePluginUpdate(pluginId, matchedVersion)
+      this.validateUpdatePreflight(
+        usePluginStore.getState().plugins[pluginId]?.manifest,
+        stagedUpdate.manifest
+      )
+      stagedProxy = await stageManagedIdeProxy({
+        manifest: stagedUpdate.manifest,
+        path: stagedUpdate.stagedPath,
+      } as Plugin)
 
-      // Step 3: Install
+      // Step 2: Snapshot package + host-owned state only after package/proxy
+      // validation and the declarative migration dry run succeed.
+      this.emitProgress({
+        pluginId,
+        stage: "backing_up",
+        progress: 45,
+        message: "Creating backup...",
+      })
+
+      const backupResult = await getPluginBackupManager().createBackup(pluginId, {
+        reason: "pre-update",
+        metadata: {
+          targetVersion,
+          transactionId: stagedUpdate.transactionId,
+          proxySha256: stagedProxy?.sha256,
+        },
+      })
+      if (!backupResult.success || !backupResult.backup) {
+        throw new Error(backupResult.error || "Backup creation failed")
+      }
+      backupId = backupResult.backup.id
+
+      // Step 3: Quiesce the old runtime before the host atomically replaces
+      // its package tree. This also tears down the old managed proxy providers.
+      const manager = getPluginManager()
+      if (shouldReactivate) {
+        if (initialStatus === "enabled" || initialStatus === "suspended") {
+          await manager.disablePlugin(pluginId, "transactional-update")
+        }
+        await manager.unloadPlugin(pluginId)
+      }
+
+      // Step 4: Commit the exact staged tree with a same-filesystem rename.
       this.emitProgress({
         pluginId,
         stage: "installing",
@@ -472,15 +512,12 @@ export class PluginUpdater {
         message: "Installing update...",
       })
 
-      const installResult = await marketplace.installPlugin(pluginId, matchedVersion.version)
-      if (!installResult.success) {
-        throw new Error(installResult.error || "Plugin installation failed")
-      }
+      packageMutationStarted = true
+      await marketplace.commitStagedPluginUpdate(stagedUpdate)
 
-      this.projectPluginVersion(pluginId, matchedVersion.version)
       await this.refreshRuntimePlugins()
 
-      // Step 4: Verify
+      // Step 5: Verify the package projection before live activation.
       if (this.config.verifyAfterUpdate) {
         this.emitProgress({
           pluginId,
@@ -494,6 +531,15 @@ export class PluginUpdater {
           throw new Error("Update verification failed")
         }
       }
+
+      // Step 6: Live activation performs the runtime/proxy handshake. The
+      // code-server host first attempts a hot activation, restarts only the
+      // extension host if necessary, and restores the old proxy on failure.
+      if (shouldReactivate) {
+        if (stagedProxy) await codeServerClient.activateProxy(stagedProxy)
+        await manager.enablePlugin(pluginId)
+      }
+      await marketplace.finalizeStagedPluginUpdate(stagedUpdate)
 
       // Complete
       this.emitProgress({
@@ -517,7 +563,74 @@ export class PluginUpdater {
       this.updateHistory.push(result)
       return result
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error)
+      const originalError = error instanceof Error ? error.message : String(error)
+      let errorMessage = originalError
+      let rollback: UpdateResult["rollback"]
+      let requiresRestart = false
+
+      if (!packageMutationStarted && stagedUpdate) {
+        await marketplace.discardStagedPluginUpdate(stagedUpdate).catch((discardError) => {
+          errorMessage = `${originalError}; discard staged update: ${String(discardError)}`
+        })
+      } else if (packageMutationStarted && backupId) {
+        rollback = { attempted: true, succeeded: false }
+        const failures: string[] = []
+        let packageRestored = false
+        try {
+          const manager = getPluginManager()
+          const liveStatus = usePluginStore.getState().plugins[pluginId]?.status
+          if (liveStatus === "enabled" || liveStatus === "suspended") {
+            await manager
+              .disablePlugin(pluginId, "transactional-update-rollback")
+              .catch((rollbackError) =>
+                failures.push(`disable updated runtime: ${String(rollbackError)}`)
+              )
+          }
+          await manager
+            .unloadPlugin(pluginId)
+            .catch((rollbackError) =>
+              failures.push(`unload updated runtime: ${String(rollbackError)}`)
+            )
+          const restored = await getPluginBackupManager().restore(backupId)
+          if (!restored.success) {
+            failures.push(restored.error || "host backup restore failed")
+          } else {
+            packageRestored = true
+            await this.refreshRuntimePlugins()
+            if (shouldReactivate) {
+              try {
+                await manager.enablePlugin(pluginId)
+              } catch (rollbackError) {
+                failures.push(`reactivate previous version: ${String(rollbackError)}`)
+                // A full workbench restart is offered only after the old
+                // package/state are known to be back in place.
+                requiresRestart = true
+              }
+            }
+          }
+        } catch (rollbackError) {
+          failures.push(String(rollbackError))
+        }
+        rollback = {
+          attempted: true,
+          succeeded: packageRestored && failures.length === 0,
+          ...(failures.length > 0 ? { error: failures.join("; ") } : {}),
+        }
+        if (failures.length > 0) {
+          errorMessage = `${originalError}; rollback: ${failures.join("; ")}`
+        }
+        if (stagedUpdate) {
+          await marketplace.finalizeStagedPluginUpdate(stagedUpdate).catch((finalizeError) => {
+            const cleanup = `finalize rolled-back transaction: ${String(finalizeError)}`
+            rollback = {
+              attempted: true,
+              succeeded: false,
+              error: rollback?.error ? `${rollback.error}; ${cleanup}` : cleanup,
+            }
+            errorMessage = `${errorMessage}; ${cleanup}`
+          })
+        }
+      }
 
       this.emitProgress({
         pluginId,
@@ -534,6 +647,8 @@ export class PluginUpdater {
         newVersion: targetVersion,
         duration: Date.now() - startTime,
         error: errorMessage,
+        requiresRestart,
+        ...(rollback ? { rollback } : {}),
       }
 
       this.updateHistory.push(result)
@@ -579,6 +694,47 @@ export class PluginUpdater {
 
   private async verifyInstallation(pluginId: string, expectedVersion: string): Promise<boolean> {
     return this.getPluginVersion(pluginId) === expectedVersion
+  }
+
+  private validateUpdatePreflight(current: PluginManifest | undefined, next: PluginManifest): void {
+    if (!current) throw new Error(`Installed plugin manifest is unavailable for ${next.id}`)
+    const currentPermissions = new Set(current.permissions || [])
+    const addedPermissions = (next.permissions || []).filter(
+      (permission) => !currentPermissions.has(permission)
+    )
+    if (addedPermissions.length > 0) {
+      throw new Error(
+        `PLUGIN_UPDATE_PERMISSION_REVIEW_REQUIRED: ${addedPermissions.sort().join(", ")}`
+      )
+    }
+
+    const currentTables = new Map(
+      (current.dexie?.tables || []).map((table) => [table.name, table.schema])
+    )
+    const nextTables = new Map(
+      (next.dexie?.tables || []).map((table) => [table.name, table.schema])
+    )
+    const destructiveSchemaChange = [...currentTables].some(
+      ([name, schema]) => nextTables.get(name) !== schema
+    )
+    if (!destructiveSchemaChange) return
+
+    const currentMajor = Number.parseInt(current.version.split(".")[0] || "", 10)
+    const nextMajor = Number.parseInt(next.version.split(".")[0] || "", 10)
+    if (
+      !Number.isInteger(currentMajor) ||
+      !Number.isInteger(nextMajor) ||
+      nextMajor <= currentMajor
+    ) {
+      throw new Error(
+        "PLUGIN_UPDATE_MIGRATION_REQUIRED: destructive Dexie schema changes require a new major version"
+      )
+    }
+    if (!next.dexie?.migrations?.some((migration) => migration.toVersion === nextMajor)) {
+      throw new Error(
+        `PLUGIN_UPDATE_MIGRATION_REQUIRED: no migration targets schema version ${nextMajor}`
+      )
+    }
   }
 
   private async requiresRestart(): Promise<boolean> {
@@ -730,31 +886,9 @@ export class PluginUpdater {
   }
 
   private async refreshRuntimePlugins(): Promise<void> {
-    try {
-      await getPluginManager().scanPlugins()
-      await getPluginManager().syncRuntimeState()
-    } catch (error) {
-      loggers.manager.debug("[Updater] Runtime refresh skipped:", error)
-    }
-  }
-
-  private projectPluginVersion(pluginId: string, version: string): void {
-    usePluginStore.setState((state) => {
-      const current = state.plugins[pluginId]
-      if (!current) return state
-      return {
-        plugins: {
-          ...state.plugins,
-          [pluginId]: {
-            ...current,
-            manifest: {
-              ...current.manifest,
-              version,
-            },
-          },
-        },
-      }
-    })
+    const manager = getPluginManager()
+    await manager.scanPlugins()
+    await manager.syncRuntimeState()
   }
 
   // ===========================================================================

@@ -19,6 +19,8 @@ export function findForbiddenAuthorImports(source) {
     if (
       specifier.startsWith("@/lib") ||
       specifier.startsWith("@/types") ||
+      specifier.startsWith("@/components") ||
+      specifier.startsWith("@/stores") ||
       specifier === "@cognia/plugin-sdk/host" ||
       specifier.startsWith("@cognia/plugin-sdk/host/")
     ) {
@@ -39,9 +41,9 @@ function sourceFiles(root) {
   return files
 }
 
-export function checkAuthorImports(repoRoot = process.cwd()) {
+export function checkAuthorImports(repoRoot = process.cwd(), roots = AUTHOR_ROOTS) {
   const violations = []
-  for (const root of AUTHOR_ROOTS.map((path) => resolve(repoRoot, path))) {
+  for (const root of roots.map((path) => resolve(repoRoot, path))) {
     for (const file of sourceFiles(root)) {
       for (const specifier of findForbiddenAuthorImports(readFileSync(file, "utf8"))) {
         violations.push(`${relative(repoRoot, file)} imports ${specifier}`)
@@ -52,7 +54,11 @@ export function checkAuthorImports(repoRoot = process.cwd()) {
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1]).href) {
-  const violations = checkAuthorImports()
+  const requestedRoots = process.argv.slice(2)
+  const violations = checkAuthorImports(
+    process.cwd(),
+    requestedRoots.length > 0 ? requestedRoots : AUTHOR_ROOTS
+  )
   if (violations.length > 0) {
     console.error(violations.join("\n"))
     process.exitCode = 1

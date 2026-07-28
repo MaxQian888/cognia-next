@@ -1,0 +1,323 @@
+{
+  "source": {
+    "repository": "https://github.com/microsoft/vscode",
+    "tag": "1.128.0",
+    "commit": "fc3def6774c76082adf699d366f31a557ce5573f",
+    "stableDts": "src/vscode-dts/vscode.d.ts",
+    "stableDtsSha256": "ee11e767c8ab76f6c0de8dc88222796147a6f0bc82f3a1ec644e41b39b52f2cd",
+    "capturedAt": "2026-07-28"
+  },
+  "providerApis": [
+    { "api": "commands.registerCommand", "providerKind": "command", "classification": "supported" },
+    {
+      "api": "commands.registerTextEditorCommand",
+      "providerKind": "command",
+      "classification": "supported"
+    },
+    {
+      "api": "languages.registerCompletionItemProvider",
+      "providerKind": "completion",
+      "classification": "supported"
+    },
+    {
+      "api": "languages.registerHoverProvider",
+      "providerKind": "hover",
+      "classification": "supported"
+    },
+    {
+      "api": "languages.registerDefinitionProvider",
+      "providerKind": "definition",
+      "classification": "supported"
+    },
+    {
+      "api": "languages.registerDeclarationProvider",
+      "providerKind": "declaration",
+      "classification": "supported"
+    },
+    {
+      "api": "languages.registerTypeDefinitionProvider",
+      "providerKind": "type-definition",
+      "classification": "supported"
+    },
+    {
+      "api": "languages.registerImplementationProvider",
+      "providerKind": "implementation",
+      "classification": "supported"
+    },
+    {
+      "api": "languages.registerReferenceProvider",
+      "providerKind": "references",
+      "classification": "supported"
+    },
+    {
+      "api": "languages.registerDocumentHighlightProvider",
+      "providerKind": "document-highlight",
+      "classification": "supported"
+    },
+    {
+      "api": "languages.registerDocumentSymbolProvider",
+      "providerKind": "document-symbol",
+      "classification": "supported"
+    },
+    {
+      "api": "languages.registerWorkspaceSymbolProvider",
+      "providerKind": "workspace-symbol",
+      "classification": "supported"
+    },
+    {
+      "api": "languages.registerCodeActionsProvider",
+      "providerKind": "code-action",
+      "classification": "supported"
+    },
+    {
+      "api": "languages.registerCodeLensProvider",
+      "providerKind": "code-lens",
+      "classification": "supported"
+    },
+    {
+      "api": "languages.registerDocumentLinkProvider",
+      "providerKind": "document-link",
+      "classification": "supported"
+    },
+    {
+      "api": "languages.registerColorProvider",
+      "providerKind": "document-color",
+      "classification": "supported"
+    },
+    {
+      "api": "languages.registerDocumentFormattingEditProvider",
+      "providerKind": "format-document",
+      "classification": "supported"
+    },
+    {
+      "api": "languages.registerDocumentRangeFormattingEditProvider",
+      "providerKind": "format-range",
+      "classification": "supported"
+    },
+    {
+      "api": "languages.registerOnTypeFormattingEditProvider",
+      "providerKind": "format-on-type",
+      "classification": "supported"
+    },
+    {
+      "api": "languages.registerRenameProvider",
+      "providerKind": "rename",
+      "classification": "supported"
+    },
+    {
+      "api": "languages.registerFoldingRangeProvider",
+      "providerKind": "folding-range",
+      "classification": "supported"
+    },
+    {
+      "api": "languages.registerSelectionRangeProvider",
+      "providerKind": "selection-range",
+      "classification": "supported"
+    },
+    {
+      "api": "languages.registerSignatureHelpProvider",
+      "providerKind": "signature-help",
+      "classification": "supported"
+    },
+    {
+      "api": "languages.registerDocumentSemanticTokensProvider",
+      "providerKind": "semantic-tokens-document",
+      "classification": "supported"
+    },
+    {
+      "api": "languages.registerDocumentRangeSemanticTokensProvider",
+      "providerKind": "semantic-tokens-range",
+      "classification": "supported"
+    },
+    {
+      "api": "languages.registerInlineCompletionItemProvider",
+      "providerKind": "inline-completion",
+      "classification": "supported"
+    },
+    {
+      "api": "languages.registerInlineValuesProvider",
+      "providerKind": "inline-values",
+      "classification": "supported"
+    },
+    {
+      "api": "languages.registerInlayHintsProvider",
+      "providerKind": "inlay-hints",
+      "classification": "supported"
+    },
+    {
+      "api": "languages.registerLinkedEditingRangeProvider",
+      "providerKind": "linked-editing-range",
+      "classification": "supported"
+    },
+    {
+      "api": "languages.registerCallHierarchyProvider",
+      "providerKind": "call-hierarchy",
+      "classification": "supported"
+    },
+    {
+      "api": "languages.registerTypeHierarchyProvider",
+      "providerKind": "type-hierarchy",
+      "classification": "supported"
+    },
+    {
+      "api": "languages.registerEvaluatableExpressionProvider",
+      "providerKind": "evaluatable-expression",
+      "classification": "supported"
+    },
+    {
+      "api": "languages.registerDocumentDropEditProvider",
+      "providerKind": "document-drop-edit",
+      "classification": "supported"
+    },
+    {
+      "api": "languages.registerDocumentPasteEditProvider",
+      "providerKind": "document-paste-edit",
+      "classification": "supported"
+    },
+    {
+      "api": "workspace.registerTextDocumentContentProvider",
+      "providerKind": "text-document-content",
+      "classification": "supported"
+    },
+    {
+      "api": "workspace.registerFileSystemProvider",
+      "providerKind": "file-system",
+      "classification": "supported"
+    },
+    {
+      "api": "window.registerTreeDataProvider",
+      "providerKind": "tree-data",
+      "classification": "supported"
+    },
+    { "api": "window.createTreeView", "providerKind": "tree-data", "classification": "supported" },
+    {
+      "api": "window.createStatusBarItem",
+      "providerKind": "status-bar-item",
+      "classification": "supported"
+    },
+    {
+      "api": "window.createTextEditorDecorationType",
+      "providerKind": "text-editor-decoration",
+      "classification": "supported"
+    },
+    {
+      "api": "window.registerFileDecorationProvider",
+      "providerKind": "file-decoration",
+      "classification": "supported"
+    },
+    {
+      "api": "languages.createLanguageStatusItem",
+      "providerKind": "language-status-item",
+      "classification": "supported"
+    },
+    {
+      "api": "window.registerWebviewViewProvider",
+      "providerKind": "webview-view",
+      "classification": "supported"
+    },
+    {
+      "api": "window.registerCustomEditorProvider",
+      "providerKind": "custom-editor",
+      "classification": "supported"
+    },
+    {
+      "api": "window.registerWebviewPanelSerializer",
+      "providerKind": "webview-panel-serializer",
+      "classification": "supported"
+    },
+    {
+      "api": "window.registerTerminalProfileProvider",
+      "providerKind": "terminal-profile",
+      "classification": "supported"
+    },
+    {
+      "api": "window.registerTerminalLinkProvider",
+      "providerKind": "terminal-link",
+      "classification": "supported"
+    },
+    { "api": "tasks.registerTaskProvider", "providerKind": "task", "classification": "supported" },
+    {
+      "api": "scm.createSourceControl",
+      "providerKind": "source-control",
+      "classification": "supported"
+    },
+    {
+      "api": "debug.registerDebugConfigurationProvider",
+      "providerKind": "debug-configuration",
+      "classification": "supported"
+    },
+    {
+      "api": "debug.registerDebugAdapterDescriptorFactory",
+      "providerKind": "debug-adapter",
+      "classification": "supported"
+    },
+    {
+      "api": "debug.registerDebugAdapterTrackerFactory",
+      "providerKind": "debug-tracker",
+      "classification": "supported"
+    },
+    {
+      "api": "tests.createTestController",
+      "providerKind": "test-controller",
+      "classification": "supported"
+    },
+    {
+      "api": "workspace.registerNotebookSerializer",
+      "providerKind": "notebook-serializer",
+      "classification": "supported"
+    },
+    {
+      "api": "notebooks.createNotebookController",
+      "providerKind": "notebook-controller",
+      "classification": "supported"
+    },
+    {
+      "api": "notebooks.registerNotebookCellStatusBarItemProvider",
+      "providerKind": "notebook-cell-status-bar",
+      "classification": "supported"
+    },
+    {
+      "api": "comments.createCommentController",
+      "providerKind": "comment-controller",
+      "classification": "supported"
+    },
+    {
+      "api": "authentication.registerAuthenticationProvider",
+      "providerKind": "authentication",
+      "classification": "supported"
+    },
+    {
+      "api": "window.registerUriHandler",
+      "providerKind": "uri-handler",
+      "classification": "supported"
+    },
+    {
+      "api": "chat.createChatParticipant",
+      "providerKind": "chat-participant",
+      "classification": "supported"
+    },
+    {
+      "api": "lm.registerLanguageModelChatProvider",
+      "providerKind": "language-model-chat-provider",
+      "classification": "supported"
+    },
+    {
+      "api": "lm.registerTool",
+      "providerKind": "language-model-tool",
+      "classification": "supported"
+    },
+    {
+      "api": "lm.registerMcpServerDefinitionProvider",
+      "providerKind": "mcp-server-definition",
+      "classification": "supported"
+    },
+    {
+      "api": "window.registerTerminalQuickFixProvider",
+      "providerKind": "terminal-quick-fix",
+      "classification": "excluded",
+      "exclusion": "proposed-api",
+      "sourceDts": "src/vscode-dts/vscode.proposed.terminalQuickFixProvider.d.ts",
+      "sourceDtsSha256": "9743939bd3657cd1a3e326a004586b3bafecc9cbb4079d1c9b955f7c6ede56f7"
+    }
+  ]
+}

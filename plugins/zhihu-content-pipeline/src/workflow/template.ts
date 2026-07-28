@@ -119,7 +119,7 @@ export const TOPIC_DISCOVERY_TEMPLATE = defineWorkflowTemplate({
   description:
     "每天抓知乎热榜 → 聚类打分 → 把候选选题写入流水线数据库，供审阅面板做选题确认。前段自动化，选题/写作走人工 + 团队对话。",
   category: "automation",
-  icon: "newspaper",
+  icon: "Newspaper",
   complexity: "intermediate",
   nodes: NODES,
   edges: EDGES,

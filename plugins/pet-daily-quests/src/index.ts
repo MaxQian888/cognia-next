@@ -15,7 +15,6 @@
 
 import type { PluginContext, PluginDefinition } from "@/types/plugin"
 import type { PluginHooksAll } from "@/types/plugin/plugin-hooks"
-import type { FullPluginContext } from "@/lib/plugin/core/context"
 import type { QuestState } from "./quest-engine"
 import { configureQuestStore, disposeQuestStore, handleQuestEvent } from "./quest-store"
 import { I18N_MESSAGES } from "./i18n"
@@ -50,27 +49,22 @@ const definition: PluginDefinition = {
     configureQuestStore(stored, {
       persist: (state) => ctx.storage.set(STORAGE_KEY, state),
       reward: async (reward) =>
-        (await ctx.pet?.emitEvent("workflowRun", {
+        (await ctx.pet.emitEvent("workflowRun", {
           xp: reward.xp,
           coins: reward.coins,
           meta: { questId: "daily" },
         })) ?? { grantedXp: 0, grantedCoins: 0 },
-      getRemainingBudget: () => ctx.pet?.getRemainingBudget() ?? { xp: 0, coins: 0 },
+      getRemainingBudget: () => ctx.pet.getRemainingBudget(),
     })
 
     // Direct care interactions advance quests regardless of who performed
     // them (user / another plugin / a workflow) — the pet only gets fed once.
     disposeEvents =
-      ctx.pet?.onEvent((event) => {
+      ctx.pet.onEvent((event) => {
         if (INTERACTION_KINDS.has(event.kind)) handleQuestEvent(event.kind)
       }) ?? null
 
-    // `extensions` lives on the full context (the manager always activates
-    // with one); the narrow cast keeps the definition typed as PluginContext.
-    disposeExtension = (ctx as FullPluginContext).extensions.registerExtension(
-      "pet.console.tab",
-      QuestsTab
-    )
+    disposeExtension = ctx.extensions.registerExtension("pet.console.tab", QuestsTab)
 
     ctx.logger?.info("pet-daily-quests activated")
     return hooks

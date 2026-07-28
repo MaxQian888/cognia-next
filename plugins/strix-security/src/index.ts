@@ -15,7 +15,6 @@
  */
 
 import type { PluginContext, PluginDefinition } from "@/types/plugin"
-import type { FullPluginContext } from "@/lib/plugin/core/context"
 import { registerView, unregisterViewsByPlugin } from "@/lib/plugin/registries/tree-view-registry"
 import { useUIStore } from "@/stores/ui"
 import manifest from "../plugin.json"
@@ -37,10 +36,9 @@ const definition: PluginDefinition = {
   manifest: { ...(manifest as object), i18n: { locales: I18N_MESSAGES } } as never,
 
   activate: async (ctx: PluginContext) => {
-    const full = ctx as FullPluginContext
     const dexie = ctx.dexie
     if (dexie) {
-      setStrixRuntime({ terminal: full.terminal, dexie })
+      setStrixRuntime({ terminal: ctx.terminal, dexie })
     } else {
       ctx.logger?.error?.("strix-security: ctx.dexie unavailable — panel will be inert")
     }

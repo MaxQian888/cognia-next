@@ -1,5 +1,5 @@
 import { contextPanelRegistry } from "@/lib/context-workbench/panel-registry"
-import { CONTEXT_PANEL_ICONS } from "@/lib/context-workbench/panel-icons"
+import { icons } from "lucide-react"
 import {
   resetActiveContextForTesting,
   setActiveContextForHost,
@@ -122,7 +122,7 @@ describe("plugin context panel API", () => {
       label: "Outline",
       labelKey: "plugin.outline",
       resourceKinds: ["canvas-document"],
-      icon: "search-code",
+      icon: "SearchCode",
       getBadge: () => 4,
       requiresChatScope: true,
       renderer: () => null,
@@ -135,7 +135,7 @@ describe("plugin context panel API", () => {
       capabilities: [],
     }
     const registered = contextPanelRegistry.get("plugin-a:outline")
-    expect(registered?.icon).toBe(CONTEXT_PANEL_ICONS["search-code"])
+    expect(registered?.icon).toBe(icons.SearchCode)
     expect(registered?.requiresChatScope).toBe(true)
     expect(registered?.getBadge?.(resource)).toBe(4)
 

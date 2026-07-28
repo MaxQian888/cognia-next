@@ -19,6 +19,8 @@ export interface PluginWebviewDef {
   containerId?: string
   /** Optional section title shown above the webview. */
   title?: string
+  /** Plugin i18n key preferred over `title` when present for the active locale. */
+  titleKey?: string
   /** Inline HTML body. Mutually exclusive with `entry`/`export`. */
   html?: string
   /** Relative module path whose `export` is an HTML string or `() => string`. */
@@ -38,6 +40,7 @@ export interface ResolvedPluginWebview {
   /** Namespaced container id; absent for panel-only (context-panel) webviews. */
   containerId?: string
   title?: string
+  titleKey?: string
   when?: string
   surface: PluginWebviewSurface
   /** Full document (`srcDoc`) with CSP meta + `acquireCogniaWebviewApi` polyfill. */

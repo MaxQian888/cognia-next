@@ -25,6 +25,7 @@ import {
 } from "../launcher/launchPluginJs"
 import { resolvePluginPath } from "./plugin-path"
 import { createPluginRequire, primeSharedModules } from "./shared-modules"
+import { assertNoHostPrivateImports } from "../security/import-boundary"
 
 const pluginLoaderLogger = loggers.plugin.child("loader")
 
@@ -705,6 +706,8 @@ export class PluginLoader {
    * have to already be in hand by the time the bundle runs.
    */
   private evaluatePluginCode(code: string, originalPath: string): unknown {
+    assertNoHostPrivateImports(code, originalPath)
+
     // Create a module-like environment for the plugin
     const pluginExports: Record<string, unknown> = {}
     const pluginModule: { exports: Record<string, unknown> } = { exports: pluginExports }
@@ -733,6 +736,8 @@ export class PluginLoader {
     absolutePath: string
   ): Promise<unknown> {
     if (pluginRoot.startsWith("builtin://")) {
+      const restoredExports = this.loadedModules.get(pluginId)?.exports
+      if (restoredExports) return restoredExports
       return this.importModule(absolutePath)
     }
     if (!isTauri()) {

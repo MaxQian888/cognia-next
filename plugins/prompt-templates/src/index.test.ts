@@ -105,7 +105,7 @@ describe("prompt-templates (built-in)", () => {
         id: "templates",
         activity: "templates",
         resourceKinds: ["session"],
-        icon: "file-text",
+        icon: "FileText",
       })
     )
   })

@@ -159,7 +159,7 @@ export const AGENT_TURN_NODE = defineWorkflowNode({
   label: "Refactor Agent Turn",
   description:
     "Run a role persona as a synchronous, tool-enabled Claude turn scoped to the target repo. This is the node that actually edits code.",
-  iconName: "bot",
+  iconName: "Bot",
   keywords: ["refactor", "agent", "claude", "code", "edit", "go"],
   desktopOnly: true,
   retryable: false,

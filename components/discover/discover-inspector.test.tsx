@@ -438,29 +438,6 @@ describe("<DiscoverInspector />", () => {
     expect(link).toHaveAttribute("href", "#")
   })
 
-  it("routes the GitHub beta connector to GitHub Delivery settings instead of native adapters", () => {
-    const github = {
-      type: "github" as const,
-      iconName: "Github",
-      status: "beta" as const,
-      oauth: true,
-      richMessages: false,
-    }
-    render(
-      <DiscoverInspector
-        category="connectors"
-        itemId={github.type}
-        items={[{ kind: "connector", id: github.type, data: github }]}
-        onClose={jest.fn()}
-      />
-    )
-    expect(screen.getByText("connectorStatus.beta")).toBeInTheDocument()
-    expect(screen.queryByTestId("discover-inspector-connector-count")).not.toBeInTheDocument()
-    const link = screen.getByTestId("discover-inspector-open-connector")
-    expect(link).toHaveAttribute("href", "/settings/github-delivery")
-    expect(link).not.toHaveAttribute("aria-disabled", "true")
-  })
-
   it("renders the OCR provider inspector with the credential hint when required", () => {
     const provider = {
       id: "anthropic-vision",

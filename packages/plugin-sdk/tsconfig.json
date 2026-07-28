@@ -18,6 +18,8 @@
       "@cognia/rag/*": ["../../packages/rag/src/*"],
       "@cognia/error-parsers": ["../../packages/error-parsers/src/index.ts"],
       "@cognia/error-parsers/*": ["../../packages/error-parsers/src/*"],
+      "@cognia/diagnostics": ["../../packages/diagnostics/src/index.ts"],
+      "@cognia/diagnostics/*": ["../../packages/diagnostics/src/*"],
       "@cognia/vector": ["../../packages/vector/src/index.ts"],
       "@cognia/vector/*": ["../../packages/vector/src/*"],
       "@cognia/document": ["../../packages/document/src/index.ts"],

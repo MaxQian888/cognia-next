@@ -116,6 +116,10 @@ import {
   registerContextPanelsForPlugin,
   unregisterContextPanelsForPlugin,
 } from "@/lib/plugin/bridge/context-panels-bridge"
+import {
+  registerIntegrationsForPlugin,
+  unregisterIntegrationsForPlugin,
+} from "@/lib/plugin/bridge/integrations-bridge"
 
 /**
  * Everything a module-bridge descriptor may need to register a plugin's
@@ -227,6 +231,14 @@ export const MODULE_BRIDGE_CAPABILITIES = {
       await registerPluginAdapters(ctx.pluginId, ctx.manifest, ctx.moduleExports)
     },
     unregister: unregisterPluginAdapters,
+  },
+  integrations: {
+    key: "integrations",
+    manifestField: "integrations",
+    register: async (ctx) => {
+      await registerIntegrationsForPlugin(ctx.pluginId, ctx.manifest, ctx.moduleExports)
+    },
+    unregister: unregisterIntegrationsForPlugin,
   },
   fonts: {
     key: "fonts",

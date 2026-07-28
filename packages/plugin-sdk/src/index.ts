@@ -2,9 +2,13 @@
 
 export type * from "./manifest"
 export type * from "./context"
+export * from "./ide"
 export type * from "./hooks"
 export type * from "./permissions"
 export type * from "./extensions"
+export type * from "./api/integration"
+export type { PluginModalProps } from "./api/modal-mount"
+export type { PluginViewProps, TreeDataProvider } from "./api/view"
 export type {
   BusEvent,
   EventFilter,
@@ -44,6 +48,7 @@ export { defineTool } from "./define/define-tool"
 export { defineGuardrail } from "./define/define-guardrail"
 export { defineContextProvider } from "./define/define-context-provider"
 export { defineContextPanel } from "./define/define-context-panel"
+export { defineExtension } from "./define/define-extension"
 /**
  * `ctx.editor` has no manifest field to define — it is a pure runtime API — so
  * only its types surface here. The full contract lives in `./api/editor`.
@@ -88,6 +93,7 @@ export { defineThemePack } from "./define/define-theme-pack"
 export { defineFontContribution } from "./define/define-font-contribution"
 export { defineWallpaper } from "./define/define-wallpaper"
 export { defineConnector } from "./define/define-connector"
+export { defineIntegration } from "./define/define-integration"
 export { defineWorkflowNode } from "./define/define-workflow-node"
 export { defineWorkflowTrigger } from "./define/define-workflow-trigger"
 export { defineExporter } from "./define/define-exporter"

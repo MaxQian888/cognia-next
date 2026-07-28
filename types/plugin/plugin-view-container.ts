@@ -7,16 +7,20 @@
 // added in B2/B3). Declarative data only — no React factory here; the panel
 // host reads the registry and renders the views registered for the container.
 
+import type { PluginIconName } from "./plugin-icon"
+
 export interface PluginViewContainerDef {
   /** Stable id, namespaced to the plugin at registration (`<pluginId>:<id>`). */
   id: string
   /** Human-readable title shown in the rail tooltip + panel header. */
   title: string
+  /** Plugin i18n key preferred over `title` when present for the active locale. */
+  titleKey?: string
   /**
    * Icon-name hint resolved by `lib/plugin/bridge/icons-bridge.ts` (a lucide
    * id or a registered plugin icon). Falls back to a generic puzzle glyph.
    */
-  icon?: string
+  icon?: PluginIconName
   /**
    * Where the container mounts. `rail` (default) adds a rail button that swaps
    * the middle column; `panel` registers the container without a rail button

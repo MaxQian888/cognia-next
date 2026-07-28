@@ -35,4 +35,12 @@ describe("plugin-sdk: extensions", () => {
     }
     expect(props.formFactor).toBe("row")
   })
+
+  it("publishes an exhaustive form-factor map", () => {
+    expect(Object.keys(sdk.EXTENSION_POINT_FORM_FACTORS).sort()).toEqual(
+      [...sdk.CANONICAL_EXTENSION_POINTS].sort()
+    )
+    expect(sdk.EXTENSION_POINT_FORM_FACTORS["statusbar.right"]).toBe("icon")
+    expect(sdk.EXTENSION_POINT_FORM_FACTORS["sidebar.right.top"]).toBe("panel")
+  })
 })

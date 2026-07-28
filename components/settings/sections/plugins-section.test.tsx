@@ -84,6 +84,12 @@ describe("PluginsSection (workspace launcher)", () => {
     expect(link).toHaveAttribute("href", "/plugins?section=governance&gov=permissions")
   })
 
+  it("links to the host-owned Integrations Hub", () => {
+    render(<PluginsSection />)
+    const link = screen.getByText("openIntegrations").closest("a")
+    expect(link).toHaveAttribute("href", "/integrations")
+  })
+
   it("does not render the removed jump-board cards or policy controls", () => {
     render(<PluginsSection />)
     expect(screen.queryByText("installedCard.title")).not.toBeInTheDocument()

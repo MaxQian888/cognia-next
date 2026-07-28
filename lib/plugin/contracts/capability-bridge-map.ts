@@ -38,6 +38,7 @@ import type {
   PluginExternalAgentPresetDef,
   PluginSubagentDef,
   PluginAgentTeamTemplateDef,
+  PluginManifestTrayItemDef,
 } from "@/types/plugin"
 import type { PluginCharacterPackDef } from "@/types/plugin/plugin-character-pack"
 import type { PluginSharedMemoryAdapterDef } from "@/types/plugin/plugin-shared-memory-adapter"
@@ -122,6 +123,7 @@ import {
   unregisterPetItemsByPlugin,
 } from "@/lib/plugin/registries/pet-item-registry"
 import type { PluginQuickActionDef, PluginAuthProviderDef } from "@/types/plugin"
+import { registerTrayItem, unregisterTrayItemsByPlugin } from "@/lib/tray/registry"
 import type { PluginPetAchievementDef, PluginPetItemDef } from "@/types/plugin/plugin-pet"
 
 /**
@@ -408,6 +410,17 @@ export const OVERLAY_REGISTRY_CAPABILITIES = {
       registerQuickAction(ctx.pluginId, def)
     },
     unregisterAllByPlugin: unregisterQuickActionsByPlugin,
+  }),
+  tray: defineOverlayCapability<PluginManifestTrayItemDef>({
+    manifestField: "trayItems",
+    registerEntry: (def, ctx) => {
+      registerTrayItem({
+        ...def,
+        id: `${ctx.pluginId}:${def.id}`,
+        pluginId: ctx.pluginId,
+      })
+    },
+    unregisterAllByPlugin: unregisterTrayItemsByPlugin,
   }),
   "workflow-template": defineOverlayCapability<PluginWorkflowTemplateDef>({
     // ADR-0017/0032. Plugin contributes complete visual-workflow blueprints —

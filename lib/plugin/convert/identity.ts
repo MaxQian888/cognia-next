@@ -71,7 +71,7 @@ export function deriveId(stem: string, suffix: string): string {
   return `${slug}-${suffix}`
 }
 
-/** Title-case a slug for display: `github-delivery` → `Github Delivery`. */
+/** Title-case a slug for display: `demo-delivery` → `Demo Delivery`. */
 export function titleize(raw: string): string {
   return slugify(raw)
     .split("-")

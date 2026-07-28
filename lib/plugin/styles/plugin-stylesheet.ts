@@ -181,6 +181,8 @@ export interface LoadPluginStylesOptions {
   pluginRoot: string
   /** `manifest.styles` — repo-relative path to the stylesheet. */
   stylesEntry: string | undefined
+  /** CSS compiled into a built-in plugin's registry entry. */
+  bundledCss?: string
   /** Injected for tests; defaults to the Tauri contained-read command. */
   readFile?: (pluginId: string, pluginRoot: string, entry: string) => Promise<string>
 }
@@ -197,12 +199,18 @@ export async function loadPluginStyles({
   pluginId,
   pluginRoot,
   stylesEntry,
+  bundledCss,
   readFile = readPluginFileViaTauri,
 }: LoadPluginStylesOptions): Promise<boolean> {
   if (!stylesEntry) return false
-  // Built-ins are compiled into the app bundle and have no fetchable install
-  // directory, so there is nothing to read. They style themselves with Tailwind.
   if (pluginRoot.startsWith("builtin://")) {
+    if (bundledCss !== undefined) {
+      injectPluginStyles(pluginId, bundledCss)
+      return true
+    }
+    // Most built-ins use host Tailwind classes and have no fetchable install
+    // directory. A built-in that declares manifest.styles must provide its
+    // source through the browser registry.
     stylesLogger.debug("skipping styles for builtin plugin", { pluginId })
     return false
   }

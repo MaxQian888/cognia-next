@@ -74,7 +74,7 @@ const definition: PluginDefinition = {
       label: "Prompt Templates",
       labelKey: "panel.templates",
       resourceKinds: ["session"],
-      icon: "file-text",
+      icon: "FileText",
       order: 20,
       retention: "stateful",
       renderer: createTemplatesPanel(ctx),

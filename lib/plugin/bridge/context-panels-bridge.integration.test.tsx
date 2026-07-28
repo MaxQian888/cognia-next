@@ -54,6 +54,12 @@ function manifestFor(overrides: Record<string, unknown> = {}): PluginManifest {
     main: "dist/index.js",
     permissions: ["extension:ui", "session:read"],
     capabilities: ["context-panel"],
+    i18n: {
+      locales: {
+        en: { "panels.notes": "Session Notes" },
+        "zh-CN": { "panels.notes": "会话笔记" },
+      },
+    },
     contextPanels: [
       {
         id: "notes",
@@ -66,7 +72,7 @@ function manifestFor(overrides: Record<string, unknown> = {}): PluginManifest {
         activity: "inspect",
         labelKey: "panels.notes",
         label: "Session Notes",
-        icon: "file-text",
+        icon: "FileText",
         ...overrides,
       },
     ],
@@ -204,6 +210,12 @@ describe("declarative webview-backed panels, manifest to iframe", () => {
       main: "dist/index.js",
       permissions: ["extension:ui", "session:read"],
       capabilities: ["context-panel", "webview"],
+      i18n: {
+        locales: {
+          en: { "panels.notes": "Webview Notes" },
+          "zh-CN": { "panels.notes": "网页视图笔记" },
+        },
+      },
       webviews: [{ id: "notes-view", html: "<main>notes-webview-body</main>" }],
       contextPanels: [
         {
@@ -213,7 +225,7 @@ describe("declarative webview-backed panels, manifest to iframe", () => {
           activity: "inspect",
           labelKey: "panels.notes",
           label: "Webview Notes",
-          icon: "search-code",
+          icon: "SearchCode",
         },
       ],
     } as unknown as PluginManifest

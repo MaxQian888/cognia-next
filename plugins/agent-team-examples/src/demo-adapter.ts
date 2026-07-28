@@ -33,7 +33,7 @@ export const demoSharedMemoryAdapter: PluginSharedMemoryAdapterDef = {
   id: ADAPTER_ID,
   name: "In-Memory (demo)",
   description: "Volatile, process-local mirror demonstrating the adapter contract.",
-  icon: "database",
+  icon: "Database",
   async write(teamId, entry) {
     teamMap(teamId).set(entry.key, entry)
   },

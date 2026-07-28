@@ -9,7 +9,7 @@ it("preserves a declarative Context Workbench panel definition", () => {
     activity: "inspect",
     labelKey: "panels.outline",
     label: "Outline",
-    icon: "file-text",
+    icon: "FileText",
     preferredMode: "wide",
     retention: "stateful",
   })

@@ -9,7 +9,7 @@ describe("defineWorkflowNode", () => {
       category: "plugin",
       label: "Fetch Page",
       description: "Fetch a URL and return its text.",
-      iconName: "globe",
+      iconName: "Globe",
       paramsSchema: { type: "object", properties: { url: { type: "string" } } },
       execute,
     })
@@ -24,7 +24,7 @@ describe("defineWorkflowNode", () => {
       category: "plugin",
       label: "X",
       description: "x",
-      iconName: "box",
+      iconName: "Box",
       paramsSchema: {},
       retryable: false,
       timeoutMs: 5000,

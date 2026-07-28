@@ -2,8 +2,8 @@
 
 // Renders a plugin `TreeDataProvider` (B2) as an interactive tree: lazy child
 // loading on expand, refresh on `onDidChangeTreeData`, and command dispatch on
-// node click. Wrapped by the container panel in a PluginExtensionBoundary so a
-// throwing provider can't take down the host.
+// node click. `PluginViewHost` owns the shared surface boundary so a throwing
+// provider cannot take down the host.
 
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { ChevronDownIcon, ChevronRightIcon } from "lucide-react"

@@ -143,8 +143,11 @@ import {
   type LoadOrderPluginInput,
   type LoadOrderBlockReason,
 } from "@/lib/plugin/core/load-order"
-import { getBrowserBuiltinRegistry } from "./browser-builtin-registry"
-import { buildWasmNodeDefs, buildWasmToolDefinitions } from "./wasm-loader"
+import {
+  getBrowserBuiltinRegistry,
+  getBrowserBuiltinRegistryEntry,
+} from "./browser-builtin-registry"
+import { buildWasmNodeDefs, buildWasmToolDefinitions, callWasmExport } from "./wasm-loader"
 // PR-D — overlay-registry capabilities (skills / mcp-server-preset /
 // native-anthropic-tool / external-agent-preset) now flow through the
 // codified `CAPABILITY_BRIDGE_MAP`. Bespoke capabilities (modes,
@@ -171,6 +174,7 @@ import { invalidateConfigComponentForPlugin } from "@/lib/plugin/bridge/config-c
 // other three capabilities via the disable loop.
 import { unregisterSkillsByPlugin } from "@/lib/plugin/registries/skill-registry"
 import { registerPluginI18n, unregisterPluginI18n } from "@/lib/i18n/plugin-i18n-registry"
+import { registerExtensionsForPlugin } from "@/lib/plugin/bridge/extension-bridge"
 import { clearCustomThemesForPluginContext } from "@/lib/plugin/api/theme-api"
 import { dispatchPluginError } from "@/lib/plugin/error-bus"
 
@@ -458,6 +462,7 @@ export interface PluginEnableFailedEventDetail {
 // =============================================================================
 
 let pluginManagerInstance: PluginManager | null = null
+let pluginManagerInitialization: Promise<PluginManager> | null = null
 
 export function getPluginManager(): PluginManager {
   if (!pluginManagerInstance) {
@@ -479,13 +484,24 @@ export function createPluginManager(config: PluginManagerConfig): PluginManager 
 }
 
 export async function initializePluginManager(config: PluginManagerConfig): Promise<PluginManager> {
-  if (pluginManagerInstance) {
+  if (pluginManagerInitialization) {
+    return pluginManagerInitialization
+  }
+  if (pluginManagerInstance?.isInitialized()) {
     return pluginManagerInstance
   }
 
-  pluginManagerInstance = createPluginManager(config)
-  await pluginManagerInstance.initialize()
-  return pluginManagerInstance
+  const manager = pluginManagerInstance ?? createPluginManager(config)
+  pluginManagerInstance = manager
+  pluginManagerInitialization = manager.initialize().then(() => manager)
+  try {
+    return await pluginManagerInitialization
+  } catch (error) {
+    if (pluginManagerInstance === manager) pluginManagerInstance = null
+    throw error
+  } finally {
+    pluginManagerInitialization = null
+  }
 }
 
 /**
@@ -501,6 +517,7 @@ export function __resetPluginManagerForTesting(): void {
   }
   pluginManagerInstance?.stopIdleSweep()
   pluginManagerInstance = null
+  pluginManagerInitialization = null
 }
 
 /**
@@ -512,6 +529,7 @@ export function __resetPluginManagerForTesting(): void {
 export function disposePluginManager(): void {
   pluginManagerInstance?.stopIdleSweep()
   pluginManagerInstance = null
+  pluginManagerInitialization = null
 }
 
 /**
@@ -952,7 +970,7 @@ export class PluginManager {
     // launch, so the namespaced stores recorded in pluginDexieMeta are absent
     // from db.tables until re-declared — without this, applyPluginTables takes
     // its idempotent early-return and the plugin's activate() throws
-    // "Table <id>:<name> does not exist" (e.g. github-delivery:repos).
+    // "Table <id>:<name> does not exist" (e.g. demo-delivery:resources).
     await this.restorePluginDexieTables()
 
     // Restore plugin runtime state from persisted config and activation rules.
@@ -2070,6 +2088,55 @@ export class PluginManager {
       const context = createFullPluginContext(plugin, this, { enableDebug })
       this.contexts.set(pluginId, context)
 
+      const i18nLocales = plugin.manifest.i18n?.locales
+      if (i18nLocales) {
+        const prefixed: Partial<Record<string, Record<string, string>>> = {}
+        for (const [locale, dict] of Object.entries(i18nLocales)) {
+          if (!dict) continue
+          prefixed[locale] = Object.fromEntries(
+            Object.entries(dict).map(([key, value]) => [`plugin.${pluginId}.${key}`, value])
+          )
+        }
+        registerPluginI18n({ pluginId, messages: prefixed })
+      }
+
+      // Declarative UI becomes visible before activate(), so its stylesheet
+      // must be present before any bridge publishes a renderable contribution.
+      const stylesRoot = plugin.path?.startsWith("builtin://")
+        ? plugin.path
+        : plugin.descriptor?.installRoot.path
+      if (plugin.manifest.styles && stylesRoot) {
+        await loadPluginStyles({
+          pluginId,
+          pluginRoot: stylesRoot,
+          stylesEntry: plugin.manifest.styles,
+          bundledCss: getBrowserBuiltinRegistryEntry(pluginId)?.bundledStyles,
+        })
+      }
+
+      if (plugin.manifest.extensions?.length) {
+        const result = await registerExtensionsForPlugin(plugin.manifest, plugin.path ?? "", {
+          importer: (entry) => this.loader.importEntry(entry, pluginId, plugin.path),
+          hasPermission: (permission) =>
+            context.permissions.hasPermission(permission as PluginPermission),
+        })
+        if (result.errors.length > 0) {
+          for (const extensionError of result.errors) {
+            recordPluginPointDiagnostic(pluginId, {
+              code: "plugin.silent-failure",
+              severity: "error",
+              pointKind: "ui-slot",
+              pointId: extensionError.point,
+              message: extensionError.message,
+              hint: "Check the declarative extension entry path and named export.",
+            })
+          }
+          loggers.manager.warn(
+            `[plugin:${pluginId}] ${result.errors.length} declarative extension(s) failed; ${result.registered} registered.`
+          )
+        }
+      }
+
       // Activate the plugin. Bounded (W6.1): a hanging activate() would
       // otherwise wedge this plugin's lifecycle queue and any dependent
       // lazy activation forever.
@@ -2125,6 +2192,9 @@ export class PluginManager {
         successful: true,
       })
     } catch (error) {
+      clearPluginExtensions(pluginId)
+      unregisterPluginI18n(pluginId)
+      removePluginStyles(pluginId)
       recordLoadFailure(pluginId, error, Date.now())
       store.setPluginError(pluginId, String(error))
       // Surface the failure on the plugin message bus alongside the four sibling
@@ -2219,7 +2289,7 @@ export class PluginManager {
 
       // Apply any declared Dexie tables BEFORE loadPlugin. loadPlugin runs the
       // plugin's activate() (see loadPlugin → definition.activate), and
-      // activate() typically touches ctx.dexie right away (e.g. github-delivery
+      // activate() typically touches ctx.dexie right away (e.g. a delivery
       // counts its tables to surface mis-declared schemas). If the namespaced
       // stores aren't in the live schema yet, that first db.table() throws
       // "Table <id>:<name> does not exist" and enable fails. Worse, it fails
@@ -2245,24 +2315,6 @@ export class PluginManager {
         !this.loader.isLoaded(pluginId)
       ) {
         await this.loadPlugin(pluginId)
-      }
-
-      // Register plugin-provided i18n strings so the next render of any
-      // useTranslations() consumer sees the new `plugin.<id>.<key>` entries.
-      // Done before activate() so plugin code that itself calls into the
-      // host UI (rare but possible via hooks) can resolve its own keys.
-      const i18nLocales = plugin.manifest.i18n?.locales
-      if (i18nLocales) {
-        const prefixed: Partial<Record<string, Record<string, string>>> = {}
-        for (const [locale, dict] of Object.entries(i18nLocales)) {
-          if (!dict) continue
-          const entries: Record<string, string> = {}
-          for (const [key, value] of Object.entries(dict)) {
-            entries[`plugin.${pluginId}.${key}`] = value
-          }
-          prefixed[locale] = entries
-        }
-        registerPluginI18n({ pluginId, messages: prefixed })
       }
 
       // Enable the plugin
@@ -3036,9 +3088,10 @@ export class PluginManager {
   }
 
   private parseActivationSpec(manifest: PluginManifest): ParsedActivationSpec {
-    const rawEvents = (manifest.activationEvents || []).filter(
-      (event): event is PluginActivationEvent => typeof event === "string"
-    )
+    const rawEvents = [
+      ...(manifest.activationEvents || []),
+      ...(manifest.extensions ?? []).map((extension) => `onView:${extension.point}` as const),
+    ].filter((event): event is PluginActivationEvent => typeof event === "string")
 
     const startup = Boolean(
       manifest.activateOnStartup || rawEvents.includes("startup") || rawEvents.includes("onStartup")
@@ -3669,18 +3722,9 @@ export class PluginManager {
     const context = this.contexts.get(pluginId)
 
     if (!plugin || !context) return
-
-    // `manifest.styles` — injected before any contribution can render, so a
-    // panel never paints one frame unstyled. Scoped to the plugin's own
-    // subtree; see `lib/plugin/styles/plugin-stylesheet.ts`. Non-fatal: a
-    // broken stylesheet must not stop the plugin's behaviour from registering.
-    const stylesRoot = plugin.descriptor?.installRoot.path
-    if (plugin.manifest.styles && stylesRoot) {
-      await loadPluginStyles({
-        pluginId,
-        pluginRoot: stylesRoot,
-        stylesEntry: plugin.manifest.styles,
-      })
+    if (plugin.manifest.ide?.targets.includes("pro-ide")) {
+      const { prepareManagedIdeProxy } = await import("@/lib/plugin/ide/proxy-manager")
+      await prepareManagedIdeProxy(plugin)
     }
 
     // Note: Tool implementations are provided by the plugin's activate function
@@ -4030,8 +4074,15 @@ export class PluginManager {
    * the module-bridge loop does, instead of a bare `import()` that mishandles
    * Tauri asset paths.
    */
-  importPluginEntry(entry: string): Promise<Record<string, unknown>> {
-    return this.loader.importEntry(entry)
+  importPluginEntry(entry: string, pluginId?: string): Promise<Record<string, unknown>> {
+    if (!pluginId) return this.loader.importEntry(entry)
+    const plugin = usePluginStore.getState().plugins[pluginId]
+    if (!plugin) throw new Error(`Plugin not found: ${pluginId}`)
+    if (plugin.path?.startsWith("builtin://")) {
+      const moduleExports = this.loader.getModuleExports(pluginId)
+      if (moduleExports) return Promise.resolve(moduleExports)
+    }
+    return this.loader.importEntry(entry, pluginId, plugin.path)
   }
 
   private async unregisterPluginContributions(pluginId: string): Promise<void> {
@@ -4550,6 +4601,31 @@ export class PluginManager {
       functionName,
       args,
     })
+  }
+
+  /**
+   * Invoke a provider declared by `manifest.ide`.
+   *
+   * The generated VSIX contains no plugin business logic. This is the single
+   * runtime seam used by Monaco and Pro IDE projections, so frontend, Python,
+   * and WASM plugins execute their provider handler exactly once in Cognia.
+   */
+  async invokeIdeProvider<T>(pluginId: string, handler: string, args: unknown[]): Promise<T> {
+    const plugin = usePluginStore.getState().plugins[pluginId]
+    if (!plugin || plugin.status !== "enabled") {
+      throw new Error(`IDE_PLUGIN_NOT_ACTIVE: ${pluginId}`)
+    }
+    if (plugin.manifest.type === "python") {
+      return this.callPythonFunction<T>(pluginId, handler, args)
+    }
+    if (plugin.manifest.type === "wasm") {
+      return callWasmExport<T>(pluginId, handler, { arguments: args })
+    }
+    const exported = this.loader.getModuleExports(pluginId)?.[handler]
+    if (typeof exported !== "function") {
+      throw new Error(`IDE_PROVIDER_HANDLER_MISSING: ${pluginId}.${handler}`)
+    }
+    return (await exported(...args)) as T
   }
 
   /**

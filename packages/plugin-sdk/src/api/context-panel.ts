@@ -2,7 +2,6 @@
 
 export { defineContextPanel } from "../define/define-context-panel"
 /** The safe icon set, for authors enumerating what a rail button may show. */
-export { PLUGIN_CONTEXT_PANEL_ICONS } from "@/types/plugin/plugin-context-panel"
 export type {
   PluginContextPanelDef,
   PluginContextPanelIcon,

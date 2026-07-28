@@ -49,6 +49,7 @@ use std::sync::Arc;
 use parking_lot::Mutex;
 use rusqlite::types::ValueRef;
 use rusqlite::{Connection, OptionalExtension};
+use sha2::{Digest, Sha256};
 
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -700,6 +701,298 @@ fn handle_secrets(
     }
 }
 
+const MAX_MANAGED_IDE_STATE_BYTES: usize = 5 * 1024 * 1024;
+const MAX_MANAGED_IDE_KEY_BYTES: usize = 1024;
+
+fn managed_ide_partition(payload: &Value) -> std::result::Result<String, PluginApiError> {
+    let scope = payload
+        .get("scope")
+        .and_then(Value::as_object)
+        .ok_or_else(|| PluginApiError::invalid("managed IDE scope must be an object"))?;
+    let mut hasher = Sha256::new();
+    for field in ["userId", "hostId", "workspaceRoot", "area"] {
+        let value = scope
+            .get(field)
+            .and_then(Value::as_str)
+            .filter(|value| !value.is_empty() && value.len() <= 16 * 1024)
+            .ok_or_else(|| {
+                PluginApiError::invalid(format!("managed IDE scope.{field} is invalid"))
+            })?;
+        hasher.update((value.len() as u64).to_be_bytes());
+        hasher.update(value.as_bytes());
+    }
+    Ok(hex::encode(hasher.finalize()))
+}
+
+fn managed_ide_key(payload: &Value) -> std::result::Result<String, PluginApiError> {
+    payload_str(payload, "key").and_then(|key| {
+        if key.is_empty() || key.len() > MAX_MANAGED_IDE_KEY_BYTES || key.contains('\0') {
+            Err(PluginApiError::invalid("managed IDE state key is invalid"))
+        } else {
+            Ok(key)
+        }
+    })
+}
+
+fn managed_ide_state_connection(
+    state: &PluginRuntimeState,
+    plugin_id: &str,
+) -> std::result::Result<Connection, PluginApiError> {
+    let data_dir = state.plugin_host_state_dir(plugin_id);
+    std::fs::create_dir_all(&data_dir)
+        .map_err(|error| PluginApiError::internal(format!("managed IDE state mkdir: {error}")))?;
+    let connection = Connection::open(data_dir.join("managed-ide-state.db"))
+        .map_err(|error| PluginApiError::internal(format!("managed IDE state open: {error}")))?;
+    connection
+        .execute_batch(
+            "PRAGMA journal_mode = WAL;
+             CREATE TABLE IF NOT EXISTS managed_ide_state (
+               partition TEXT NOT NULL,
+               key TEXT NOT NULL,
+               value_json TEXT NOT NULL,
+               updated_at INTEGER NOT NULL,
+               PRIMARY KEY (partition, key)
+             );
+             CREATE TABLE IF NOT EXISTS managed_ide_secret_keys (
+               partition TEXT NOT NULL,
+               key TEXT NOT NULL,
+               PRIMARY KEY (partition, key)
+             );",
+        )
+        .map_err(|error| PluginApiError::internal(format!("managed IDE state schema: {error}")))?;
+    Ok(connection)
+}
+
+fn handle_managed_ide_state(
+    state: &PluginRuntimeState,
+    plugin_id: &str,
+    op: &str,
+    payload: &Value,
+) -> std::result::Result<Value, PluginApiError> {
+    let partition = managed_ide_partition(payload)?;
+    let mut connection = managed_ide_state_connection(state, plugin_id)?;
+    match op {
+        "get" => {
+            let key = managed_ide_key(payload)?;
+            let value = connection
+                .query_row(
+                    "SELECT value_json FROM managed_ide_state WHERE partition = ?1 AND key = ?2",
+                    (&partition, &key),
+                    |row| row.get::<_, String>(0),
+                )
+                .optional()
+                .map_err(|error| {
+                    PluginApiError::internal(format!("managed IDE state get: {error}"))
+                })?;
+            value
+                .map(|raw| {
+                    serde_json::from_str(&raw).map_err(|error| {
+                        PluginApiError::internal(format!(
+                            "managed IDE state contains invalid JSON: {error}"
+                        ))
+                    })
+                })
+                .transpose()
+                .map(|value| value.unwrap_or(Value::Null))
+        }
+        "set" => {
+            let key = managed_ide_key(payload)?;
+            let value = payload.get("value").cloned().unwrap_or(Value::Null);
+            let encoded = serde_json::to_string(&value)
+                .map_err(|error| PluginApiError::invalid(format!("encode state value: {error}")))?;
+            if encoded.len() > MAX_MANAGED_IDE_STATE_BYTES {
+                return Err(PluginApiError::invalid(format!(
+                    "managed IDE state value exceeds {MAX_MANAGED_IDE_STATE_BYTES} bytes"
+                )));
+            }
+            let transaction = connection.transaction().map_err(|error| {
+                PluginApiError::internal(format!("managed IDE state transaction: {error}"))
+            })?;
+            let current_usage: i64 = transaction
+                .query_row(
+                    "SELECT COALESCE(SUM(length(value_json)), 0) FROM managed_ide_state
+                     WHERE partition = ?1 AND key <> ?2",
+                    (&partition, &key),
+                    |row| row.get(0),
+                )
+                .map_err(|error| {
+                    PluginApiError::internal(format!("managed IDE state usage: {error}"))
+                })?;
+            if current_usage.saturating_add(encoded.len() as i64)
+                > MAX_MANAGED_IDE_STATE_BYTES as i64
+            {
+                return Err(PluginApiError::invalid(format!(
+                    "managed IDE state partition exceeds {MAX_MANAGED_IDE_STATE_BYTES} bytes"
+                )));
+            }
+            transaction
+                .execute(
+                    "INSERT INTO managed_ide_state (partition, key, value_json, updated_at)
+                     VALUES (?1, ?2, ?3, ?4)
+                     ON CONFLICT(partition, key) DO UPDATE SET
+                       value_json = excluded.value_json,
+                       updated_at = excluded.updated_at",
+                    (
+                        &partition,
+                        &key,
+                        &encoded,
+                        chrono::Utc::now().timestamp_millis(),
+                    ),
+                )
+                .map_err(|error| {
+                    PluginApiError::internal(format!("managed IDE state set: {error}"))
+                })?;
+            transaction.commit().map_err(|error| {
+                PluginApiError::internal(format!("managed IDE state commit: {error}"))
+            })?;
+            Ok(Value::Null)
+        }
+        "delete" => {
+            let key = managed_ide_key(payload)?;
+            connection
+                .execute(
+                    "DELETE FROM managed_ide_state WHERE partition = ?1 AND key = ?2",
+                    (&partition, &key),
+                )
+                .map_err(|error| {
+                    PluginApiError::internal(format!("managed IDE state delete: {error}"))
+                })?;
+            Ok(Value::Null)
+        }
+        "keys" => {
+            let mut statement = connection
+                .prepare("SELECT key FROM managed_ide_state WHERE partition = ?1 ORDER BY key ASC")
+                .map_err(|error| {
+                    PluginApiError::internal(format!("managed IDE state keys: {error}"))
+                })?;
+            let keys = statement
+                .query_map([partition.as_str()], |row| row.get::<_, String>(0))
+                .map_err(|error| {
+                    PluginApiError::internal(format!("managed IDE state keys: {error}"))
+                })?
+                .collect::<rusqlite::Result<Vec<_>>>()
+                .map_err(|error| {
+                    PluginApiError::internal(format!("managed IDE state keys: {error}"))
+                })?;
+            Ok(json!(keys))
+        }
+        "clear" => {
+            connection
+                .execute(
+                    "DELETE FROM managed_ide_state WHERE partition = ?1",
+                    [partition],
+                )
+                .map_err(|error| {
+                    PluginApiError::internal(format!("managed IDE state clear: {error}"))
+                })?;
+            Ok(Value::Null)
+        }
+        _ => Err(PluginApiError::not_supported(&format!(
+            "managedIdeState:{op}"
+        ))),
+    }
+}
+
+fn handle_managed_ide_secrets(
+    state: &PluginRuntimeState,
+    plugin_id: &str,
+    op: &str,
+    payload: &Value,
+) -> std::result::Result<Value, PluginApiError> {
+    let partition = managed_ide_partition(payload)?;
+    let namespace = format!("plugin-ide:{plugin_id}:{partition}");
+    let connection = managed_ide_state_connection(state, plugin_id)?;
+    match op {
+        "get" => {
+            let key = managed_ide_key(payload)?;
+            cognia_secrets::keyring_secrets::get(&namespace, &key)
+                .map(|value| value.map_or(Value::Null, Value::String))
+                .map_err(|error| {
+                    PluginApiError::internal(format!("managed IDE secrets get: {error}"))
+                })
+        }
+        "set" => {
+            let key = managed_ide_key(payload)?;
+            let value = payload_str(payload, "value")?;
+            cognia_secrets::keyring_secrets::set(&namespace, &key, &value).map_err(|error| {
+                PluginApiError::internal(format!("managed IDE secrets set: {error}"))
+            })?;
+            if let Err(error) = connection.execute(
+                "INSERT OR IGNORE INTO managed_ide_secret_keys (partition, key) VALUES (?1, ?2)",
+                (&partition, &key),
+            ) {
+                let _ = cognia_secrets::keyring_secrets::clear(&namespace, &key);
+                return Err(PluginApiError::internal(format!(
+                    "managed IDE secret index set: {error}"
+                )));
+            }
+            Ok(Value::Null)
+        }
+        "delete" => {
+            let key = managed_ide_key(payload)?;
+            cognia_secrets::keyring_secrets::clear(&namespace, &key).map_err(|error| {
+                PluginApiError::internal(format!("managed IDE secrets delete: {error}"))
+            })?;
+            connection
+                .execute(
+                    "DELETE FROM managed_ide_secret_keys WHERE partition = ?1 AND key = ?2",
+                    (&partition, &key),
+                )
+                .map_err(|error| {
+                    PluginApiError::internal(format!("managed IDE secret index delete: {error}"))
+                })?;
+            Ok(Value::Null)
+        }
+        "keys" => {
+            let mut statement = connection
+                .prepare(
+                    "SELECT key FROM managed_ide_secret_keys WHERE partition = ?1 ORDER BY key ASC",
+                )
+                .map_err(|error| {
+                    PluginApiError::internal(format!("managed IDE secret index keys: {error}"))
+                })?;
+            let keys = statement
+                .query_map([partition.as_str()], |row| row.get::<_, String>(0))
+                .map_err(|error| {
+                    PluginApiError::internal(format!("managed IDE secret index keys: {error}"))
+                })?
+                .collect::<rusqlite::Result<Vec<_>>>()
+                .map_err(|error| {
+                    PluginApiError::internal(format!("managed IDE secret index keys: {error}"))
+                })?;
+            drop(statement);
+            let mut live_keys = Vec::with_capacity(keys.len());
+            for key in keys {
+                match cognia_secrets::keyring_secrets::get(&namespace, &key) {
+                    Ok(Some(_)) => live_keys.push(key),
+                    Ok(None) => {
+                        connection
+                            .execute(
+                                "DELETE FROM managed_ide_secret_keys
+                                 WHERE partition = ?1 AND key = ?2",
+                                (&partition, &key),
+                            )
+                            .map_err(|error| {
+                                PluginApiError::internal(format!(
+                                    "managed IDE secret index reconcile: {error}"
+                                ))
+                            })?;
+                    }
+                    Err(error) => {
+                        return Err(PluginApiError::internal(format!(
+                            "managed IDE secrets enumerate: {error}"
+                        )));
+                    }
+                }
+            }
+            Ok(json!(live_keys))
+        }
+        _ => Err(PluginApiError::not_supported(&format!(
+            "managedIdeSecrets:{op}"
+        ))),
+    }
+}
+
 async fn handle_clipboard(
     app: &AppHandle,
     op: &str,
@@ -1130,6 +1423,8 @@ fn required_permission(domain: &str, op: &str) -> Option<&'static str> {
         }
         ("secrets", "get") => Some("secrets:read"),
         ("secrets", "set" | "delete") => Some("secrets:write"),
+        ("managedIdeSecrets", "get" | "keys") => Some("secrets:read"),
+        ("managedIdeSecrets", "set" | "delete") => Some("secrets:write"),
         ("clipboard", "readText" | "hasText") => Some("clipboard:read"),
         ("clipboard", "writeText" | "clear") => Some("clipboard:write"),
         ("network", "fetch" | "download" | "upload") => Some("network:fetch"),
@@ -1168,6 +1463,8 @@ async fn dispatch(
     match domain {
         "fs" => handle_fs(state, plugin_id, op, payload),
         "secrets" => handle_secrets(plugin_id, op, payload),
+        "managedIdeState" => handle_managed_ide_state(state, plugin_id, op, payload),
+        "managedIdeSecrets" => handle_managed_ide_secrets(state, plugin_id, op, payload),
         "clipboard" => match app {
             Some(app) => handle_clipboard(app, op, payload).await,
             None => Err(PluginApiError::not_supported(api)),
@@ -1392,6 +1689,15 @@ fn capability_table() -> Vec<PluginApiCapability> {
         cap("secrets:get", true, true, &["secrets:read"]),
         cap("secrets:set", true, true, &["secrets:write"]),
         cap("secrets:delete", true, true, &["secrets:write"]),
+        cap("managedIdeState:get", true, false, &[]),
+        cap("managedIdeState:set", true, false, &[]),
+        cap("managedIdeState:delete", true, false, &[]),
+        cap("managedIdeState:keys", true, false, &[]),
+        cap("managedIdeState:clear", true, false, &[]),
+        cap("managedIdeSecrets:get", true, true, &["secrets:read"]),
+        cap("managedIdeSecrets:set", true, true, &["secrets:write"]),
+        cap("managedIdeSecrets:delete", true, true, &["secrets:write"]),
+        cap("managedIdeSecrets:keys", true, true, &["secrets:read"]),
         cap("clipboard:readText", true, false, &["clipboard:read"]),
         cap("clipboard:writeText", true, false, &["clipboard:write"]),
         cap("clipboard:hasText", true, false, &["clipboard:read"]),
@@ -1487,6 +1793,109 @@ mod tests {
             },
         );
         state
+    }
+
+    fn ide_scope(user_id: &str, host_id: &str, workspace_root: &str, area: &str) -> Value {
+        json!({
+            "scope": {
+                "userId": user_id,
+                "hostId": host_id,
+                "workspaceRoot": workspace_root,
+                "area": area,
+            }
+        })
+    }
+
+    #[test]
+    fn managed_ide_state_is_host_owned_and_partitioned() {
+        let tmp = TempDir::new().unwrap();
+        let state = seeded_state(&tmp);
+        let workspace_a = ide_scope("acct_a", "local", "/workspace/a", "workspace");
+        let workspace_b = ide_scope("acct_a", "local", "/workspace/b", "workspace");
+        let set_a = json!({
+            "scope": workspace_a["scope"],
+            "key": "selection",
+            "value": { "line": 7 }
+        });
+        handle_managed_ide_state(&state, "demo", "set", &set_a).unwrap();
+
+        let get_a = json!({ "scope": workspace_a["scope"], "key": "selection" });
+        let get_b = json!({ "scope": workspace_b["scope"], "key": "selection" });
+        assert_eq!(
+            handle_managed_ide_state(&state, "demo", "get", &get_a).unwrap(),
+            json!({ "line": 7 })
+        );
+        assert_eq!(
+            handle_managed_ide_state(&state, "demo", "get", &get_b).unwrap(),
+            Value::Null
+        );
+        assert!(state
+            .plugin_host_state_dir("demo")
+            .join("managed-ide-state.db")
+            .is_file());
+        assert!(!state
+            .plugin_dir("demo")
+            .join("data/managed-ide-state.db")
+            .exists());
+    }
+
+    #[test]
+    fn managed_ide_state_validates_keys_and_enforces_partition_quota() {
+        let tmp = TempDir::new().unwrap();
+        let state = seeded_state(&tmp);
+        let scope = ide_scope("acct_a", "local", "/workspace/a", "global");
+        let invalid = json!({ "scope": scope["scope"], "key": "", "value": true });
+        assert!(handle_managed_ide_state(&state, "demo", "set", &invalid).is_err());
+
+        let oversized = json!({
+            "scope": scope["scope"],
+            "key": "large",
+            "value": "x".repeat(MAX_MANAGED_IDE_STATE_BYTES + 1)
+        });
+        assert!(handle_managed_ide_state(&state, "demo", "set", &oversized).is_err());
+    }
+
+    #[test]
+    fn managed_ide_secrets_are_keyring_backed_indexed_and_partitioned() {
+        let tmp = TempDir::new().unwrap();
+        let state = seeded_state(&tmp);
+        let workspace_a = ide_scope("acct_a", "local", "/workspace/a", "secrets");
+        let workspace_b = ide_scope("acct_a", "local", "/workspace/b", "secrets");
+        let key = format!("token-{}", uuid::Uuid::new_v4());
+        let set = json!({ "scope": workspace_a["scope"], "key": key.clone(), "value": "secret" });
+        handle_managed_ide_secrets(&state, "demo", "set", &set).unwrap();
+
+        let get_a = json!({ "scope": workspace_a["scope"], "key": key.clone() });
+        let get_b = json!({ "scope": workspace_b["scope"], "key": key.clone() });
+        assert_eq!(
+            handle_managed_ide_secrets(&state, "demo", "get", &get_a).unwrap(),
+            Value::String("secret".into())
+        );
+        assert_eq!(
+            handle_managed_ide_secrets(&state, "demo", "get", &get_b).unwrap(),
+            Value::Null
+        );
+        assert_eq!(
+            handle_managed_ide_secrets(
+                &state,
+                "demo",
+                "keys",
+                &json!({ "scope": workspace_a["scope"] })
+            )
+            .unwrap(),
+            json!([key.clone()])
+        );
+        handle_managed_ide_secrets(&state, "demo", "delete", &get_a).unwrap();
+        assert_eq!(
+            handle_managed_ide_secrets(
+                &state,
+                "demo",
+                "keys",
+                &json!({ "scope": workspace_a["scope"] })
+            )
+            .unwrap(),
+            json!([])
+        );
     }
 
     #[test]

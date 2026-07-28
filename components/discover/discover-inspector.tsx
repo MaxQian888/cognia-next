@@ -519,21 +519,17 @@ function McpServerInspector({ server }: { server: McpServer }) {
 function ConnectorInspector({ connector }: { connector: ConnectorMeta }) {
   const t = useTranslations("discover")
   const planned = connector.status === "planned"
-  const githubDelivery = connector.type === "github"
-  const settingsHref = githubDelivery
-    ? "/settings/github-delivery"
-    : `/settings/connections?platform=${connector.type}`
+  const settingsHref = `/settings/connections?platform=${connector.type}`
   // Live count of configured adapter instances for this platform — drives
   // the "N configured" badge so the user sees current state without
   // navigating to /settings/connections. Skip the read entirely for
-  // `planned` platforms (no adapter row will ever exist) and GitHub Delivery
-  // (plugin-owned delivery surface, not a native adapter-registry instance).
+  // `planned` platforms because no adapter row can exist.
   const instances = useLiveQuery<readonly AdapterInstanceRow[]>(
     () =>
-      planned || githubDelivery
+      planned
         ? Promise.resolve<readonly AdapterInstanceRow[]>([])
         : listAdapterInstancesByType(connector.type),
-    [connector.type, planned, githubDelivery]
+    [connector.type, planned]
   )
   const instanceCount = instances?.length ?? 0
   return (
@@ -550,7 +546,7 @@ function ConnectorInspector({ connector }: { connector: ConnectorMeta }) {
         {/* i18n-exempt: A2UI is a protocol proper noun */}
         {connector.richMessages ? <Badge variant="outline">A2UI</Badge> : null}
       </div>
-      {!planned && !githubDelivery ? (
+      {!planned ? (
         <p
           className="text-xs text-muted-foreground"
           data-testid="discover-inspector-connector-count"

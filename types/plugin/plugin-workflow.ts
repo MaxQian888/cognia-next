@@ -23,6 +23,7 @@ import type {
   WorkflowNodeCategory,
 } from "@/types/workflow/visual"
 import type { CapabilityId } from "@/lib/platform/capabilities"
+import type { PluginIconName } from "./plugin-icon"
 
 /** Node executor function — same shape as built-in node executors. */
 export type PluginNodeExecuteFn = (ctx: StepExecutionContext) => Promise<StepExecutionResult>
@@ -61,7 +62,7 @@ export interface PluginNodeDef {
    */
   description: string
   /** lucide-react icon name; falls back to `Box` when missing. */
-  iconName: string
+  iconName: PluginIconName
   /** Search keywords beyond label/description. Optional. */
   keywords?: string[]
   /**
@@ -136,7 +137,7 @@ export interface PluginTriggerDef {
   label: string
   /** Catalog description (fallback). Localize via `"workflow.nodes.<kind>.description"`. */
   description: string
-  iconName: string
+  iconName: PluginIconName
   paramsSchema: Record<string, unknown>
   defaultParams?: Record<string, unknown>
   desktopOnly?: boolean
@@ -155,7 +156,7 @@ export interface PluginManifestNodeDef {
   category: WorkflowNodeCategory | "plugin"
   label: string
   description: string
-  iconName: string
+  iconName: PluginIconName
   keywords?: string[]
   paramsSchema: Record<string, unknown>
   defaultParams?: Record<string, unknown>
@@ -171,7 +172,7 @@ export interface PluginManifestTriggerDef {
   typeVersion: number
   label: string
   description: string
-  iconName: string
+  iconName: PluginIconName
   paramsSchema: Record<string, unknown>
   defaultParams?: Record<string, unknown>
   desktopOnly?: boolean

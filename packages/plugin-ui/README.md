@@ -34,7 +34,8 @@ bundle contains neither. At load time the host resolves
 ## Why this is a fork, not a re-export
 
 The host has ~59 shadcn/ui primitives in `components/ui/`. This package carries
-its own copies of ten of them instead of re-exporting, for two reasons:
+a curated set of 30 primitives instead of re-exporting every host component,
+for two reasons:
 
 1. **It must resolve standalone.** A plugin author outside this repo installs
    the package and typechecks against it; a `@/components/ui/...` import would
@@ -51,4 +52,7 @@ When you _do_ want to pull an upstream change across, copy the file and swap
 `react-dom` is deliberately absent from the host's shared-module whitelist, so
 there is no `createPortal`. A plugin renders inside the slot or panel it was
 mounted into and cannot escape it. Components in this package that need layering
-(`Select`, `Tooltip`) use Radix's own portal, which the host mounts and controls.
+(`Dialog`, `Select`, `Sheet`, `Tooltip`) use Radix's own portal, which the host
+mounts and controls. Dialogs must include `DialogTitle`; pass localized
+`closeLabel` text because this standalone package cannot read the host's
+`next-intl` catalog.

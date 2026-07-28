@@ -66,6 +66,11 @@ export interface BilingualString {
 export interface BuiltInSkillContext {
   /** The chat session this invocation belongs to. */
   sessionId: string
+  /**
+   * Effective working directory resolved from the session or its linked
+   * workspace. Filesystem-backed desktop skills are confined to this root.
+   */
+  workspaceRoot?: string
   /** Platform binding when the session is connector-bound. */
   imBinding?: {
     adapterId: string

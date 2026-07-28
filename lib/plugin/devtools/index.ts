@@ -59,3 +59,9 @@ export {
   type PluginBuildResult,
 } from "./dev-server"
 export { usePluginDevServer } from "./dev-server.client"
+
+export {
+  ManagedIdeDevMode,
+  type ManagedIdeDevModeDependencies,
+  type ManagedIdeManifestDiagnostic,
+} from "./managed-ide-dev-mode"

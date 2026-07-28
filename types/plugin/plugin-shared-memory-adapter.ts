@@ -15,6 +15,7 @@
  */
 
 import type { SharedMemoryEntry } from "@/types/agent/agent-team"
+import type { PluginIconName } from "./plugin-icon"
 
 export interface SharedMemoryAdapterChangeSet {
   /** Remote entries changed since the requested cursor. */
@@ -30,7 +31,7 @@ export interface PluginSharedMemoryAdapterDef {
   name: string
   description?: string
   /** Optional lucide icon name for the picker. */
-  icon?: string
+  icon?: PluginIconName
   /** Mirror a single entry write to the external store. */
   write(teamId: string, entry: SharedMemoryEntry): Promise<void>
   /** Read a single entry back from the external store. */

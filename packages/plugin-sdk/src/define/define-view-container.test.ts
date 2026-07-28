@@ -2,8 +2,8 @@ import { defineViewContainer } from "./define-view-container"
 
 describe("defineViewContainer", () => {
   it("returns the container definition unchanged (pure pass-through)", () => {
-    const c = defineViewContainer({ id: "explorer", title: "Explorer", icon: "folder-tree" })
-    expect(c).toEqual({ id: "explorer", title: "Explorer", icon: "folder-tree" })
+    const c = defineViewContainer({ id: "explorer", title: "Explorer", icon: "FolderTree" })
+    expect(c).toEqual({ id: "explorer", title: "Explorer", icon: "FolderTree" })
   })
 
   it("preserves optional location/order/when fields", () => {

@@ -869,6 +869,23 @@ describe("PluginLoader", () => {
       ).rejects.toThrow(/outside the declared root/i)
     })
 
+    it("resolves built-in secondary entries from restored module exports", async () => {
+      const definition: PluginDefinition = {
+        manifest: createMockManifest("builtin-reference"),
+        activate: jest.fn(),
+      }
+      const moduleExports = { default: definition, ReferencePanel: jest.fn() }
+      loader.restoreModule("builtin-reference", definition, moduleExports)
+
+      await expect(
+        loader.importEntry(
+          "builtin://ui-surface-reference/src/index.tsx",
+          "builtin-reference",
+          "builtin://ui-surface-reference"
+        )
+      ).resolves.toBe(moduleExports)
+    })
+
     it("restores module definitions and exports", () => {
       const definition: PluginDefinition = {
         manifest: createMockManifest("restored"),

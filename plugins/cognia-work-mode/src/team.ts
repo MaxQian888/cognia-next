@@ -8,7 +8,7 @@ export const KNOWLEDGE_WORK_TEAM = defineAgentTeamTemplate({
   description:
     "Planner, researcher, analyst, and editor collaborate from an approved brief to a reviewed deliverable.",
   category: "analysis",
-  icon: "briefcase-business",
+  icon: "BriefcaseBusiness",
   config: {
     governancePolicy: {
       approval: { requirePlanApproval: true, requireDelegationApproval: false },

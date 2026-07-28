@@ -24,12 +24,21 @@ beforeEach(() => {
 describe("modal-mount-bridge", () => {
   it("registers declared modals from the manifest", async () => {
     await registerModalMountsForPlugin(
-      manifest([{ id: "wizard", label: "Wizard", entry: "dist/m.js", export: "Modal" }]),
+      manifest([
+        {
+          id: "wizard",
+          label: "Wizard",
+          labelKey: "modals.wizard",
+          entry: "dist/m.js",
+          export: "Modal",
+        },
+      ]),
       "/p/demo",
       { importer: async () => ({ Modal }) }
     )
     expect(listDeclaredModals()).toHaveLength(1)
     expect(getDeclaredModal("demo", "wizard")?.label).toBe("Wizard")
+    expect(getDeclaredModal("demo", "wizard")?.labelKey).toBe("modals.wizard")
   })
 
   it("skips malformed entries (missing id/entry/export)", async () => {

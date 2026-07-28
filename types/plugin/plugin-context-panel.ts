@@ -1,4 +1,5 @@
 import type { ComponentType } from "react"
+import type { PluginIconName } from "./plugin-icon"
 import type {
   CanonicalContextActivity,
   ContextCapability,
@@ -17,21 +18,8 @@ import type {
  * validator's allowlist — and only two of them were checked against each other.
  * Names only, so the validator never has to pull `lucide-react` in.
  */
-export const PLUGIN_CONTEXT_PANEL_ICONS = [
-  "blocks",
-  "bot",
-  "file-text",
-  "history",
-  "info",
-  "message-square",
-  "panel-right",
-  "play",
-  "search-code",
-  "settings",
-  "wrench",
-] as const
-
-export type PluginContextPanelIcon = (typeof PLUGIN_CONTEXT_PANEL_ICONS)[number]
+/** @deprecated Use `PluginIconName`; kept as a source-compatible alias. */
+export type PluginContextPanelIcon = PluginIconName
 
 interface PluginContextPanelDefBase {
   id: string

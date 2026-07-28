@@ -218,6 +218,12 @@ export interface PluginDispatchSubagentOptions {
    */
   _onEvent?: (event: import("@/lib/claude/run-and-capture").CaptureStreamEvent) => void
   /**
+   * Headless permission responder for managed host projections. Unlike
+   * `_approvalRoute`, this is used when no Cognia chat pane owns the run and
+   * the embedding surface (for example Pro IDE Chat) must answer the ask.
+   */
+  _canUseTool?: PluginToolPermissionFn
+  /**
    * Permission-ask routing for the child run, populated by the host's
    * `dispatch_agent` tool. Registered under the child's ephemeral session id so
    * a `permission_request` from the child surfaces in the PARENT chat session

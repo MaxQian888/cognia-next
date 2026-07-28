@@ -27,7 +27,7 @@ const manifest = {
       activity: "inspect",
       labelKey: "panels.outline",
       label: "Outline",
-      icon: "file-text",
+      icon: "FileText",
       requiredCapabilities: ["inspect"],
       retention: "stateful",
     },

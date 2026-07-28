@@ -68,6 +68,9 @@ import type { PluginProtocolAdapterDef } from "./plugin-protocol-adapter"
 import type { PluginExternalAgentAdapterDef } from "./plugin-external-agent-adapter"
 import type { PluginSessionImporterDef } from "./plugin-session-importer"
 import type { PluginContextPanelDef } from "./plugin-context-panel"
+import type { PluginExtensionDef } from "./plugin-extension"
+import type { PluginIdeManifest } from "./plugin-ide"
+import type { PluginIntegrationDef, PluginIntegrationsAPI } from "./plugin-integration"
 // Re-exported so the SDK manifest barrel (`@cognia/plugin-sdk/manifest`) can
 // source it from this module, the documented source of truth.
 export type { PluginExternalAgentAdapterDef } from "./plugin-external-agent-adapter"
@@ -78,10 +81,9 @@ import type { PluginToolRouteDef } from "./plugin-tool-route"
 // the runtime parser in lockstep — historically a local alias was used to
 // avoid a dep cycle, but the contracts module has no upward imports so the
 // real type is safe to bring in here.
-import type {
-  ActivationEventDeclaration,
-  PluginPointFormFactor,
-} from "@/lib/plugin/contracts/plugin-points"
+import type { ActivationEventDeclaration } from "@/lib/plugin/contracts/plugin-points"
+import type { PluginSurfaceFormFactor } from "./plugin-surface"
+import type { PluginIconName } from "./plugin-icon"
 import type { VsCodeExtensionBlock, VsCodeLanguage } from "./plugin-vscode"
 import type {
   Artifact,
@@ -183,6 +185,7 @@ export type PluginCapability =
   | "session-importer" // cognia-next: contributes external-agent session-history importers (Cursor / Cline / Windsurf / …)
   | "mcp-server-preset" // Contributes MCP server presets to the gallery
   | "connectors" // Provides Platform Connector adapters (Task 110)
+  | "integrations" // Provides Marketplace service integrations (events/actions/resources)
   | "workflow" // Contributes custom workflow node executors (ADR 0017)
   | "workflow-trigger" // Contributes custom workflow trigger sources (ADR 0017)
   | "tray" // Contributes items to the desktop system tray menu (ADR-pending)
@@ -418,6 +421,9 @@ export type PluginPermission =
   | "workflow:read" // Read workflow metadata and selection
   | "editor:read" // Read what the user is looking at in the project editor
   | "editor:write" // Open files and reflect edits in the project editor
+  | "debug:control" // Start, inspect, and control debug sessions
+  | "tests:run" // Discover and run tests through an IDE test controller
+  | "notebook:execute" // Execute notebook cells or notebook-backed kernels
   | "vector:read" // Query the vector store
   | "vector:write" // Write to and delete from the vector store
   | "ai:chat" // Send prompts to a language model on the user's account
@@ -465,6 +471,10 @@ export type PluginPermission =
   | "connectors:read" // List connector adapters + subscribe to inbound bus events
   | "connectors:send" // Send outbound messages through a connector adapter
   | "connectors:manage" // Create / update / delete / enable connector adapter instances
+  | "integrations:read" // Read Integration definitions, accounts, subscriptions, jobs, and audit
+  | "integrations:events" // Publish verified normalized Integration events
+  | "integrations:execute" // Queue Integration actions through host risk policy
+  | "integrations:manage" // Create/update/remove Integration accounts and subscriptions
   | "share:read" // Read the local mirror of created public share links + their stats
   | "share:create" // Create / revoke public share links (publishes data to the share worker)
   | "backup:read" // Build + read encrypted backup packages and the backup history
@@ -655,6 +665,12 @@ export interface PluginManifest {
   vscodeExtension?: VsCodeExtensionBlock
 
   /**
+   * Versioned, engine-neutral IDE contribution contract. The host normalizes
+   * this block before projecting it to Monaco or a managed code-server proxy.
+   */
+  ide?: PluginIdeManifest
+
+  /**
    * VS Code `contributes.languages[]` projected onto the cognia manifest at
    * install time (`manifest-adapter.ts`). The plugin manager registers these
    * through `languages-bridge` on enable so contributed language ids surface
@@ -826,9 +842,21 @@ export interface PluginManifest {
    */
   quickActions?: PluginQuickActionDef[]
 
+  /**
+   * Declarative native tray items. Requires the `"tray"` capability and a
+   * dispatch target (`command` or `slash`).
+   */
+  trayItems?: PluginManifestTrayItemDef[]
+
   // Activation
   /** Activation events - when to load the plugin */
   activationEvents?: PluginActivationEvent[]
+
+  /**
+   * React components contributed to canonical host UI extension points.
+   * The host derives `onView:<point>` activation events from these entries.
+   */
+  extensions?: PluginExtensionDef[]
 
   /** Whether plugin should be loaded at startup */
   activateOnStartup?: boolean
@@ -852,6 +880,14 @@ export interface PluginManifest {
    * instantiate a `PlatformAdapter`.
    */
   connectors?: PluginConnectorDef[]
+
+  /**
+   * Marketplace service integrations. Unlike connectors, these model external
+   * resources, webhook events, typed actions, and optional Inbox projections.
+   */
+  integrations?: PluginIntegrationDef[]
+  /** One-major compatibility aliases resolved only while this plugin is enabled. */
+  workflowKindAliases?: Record<string, string>
 
   // Plugin-first Computer Use plumbing (M1·T1)
   /** MCP server presets contributed by this plugin (mcp-server-preset capability). */
@@ -1542,7 +1578,7 @@ export interface A2UIPluginComponentDef {
   category?: "layout" | "form" | "display" | "data" | "custom"
 
   /** Icon (Lucide name) */
-  icon?: string
+  icon?: PluginIconName
 
   /** JSON Schema for component props */
   propsSchema?: Record<string, unknown>
@@ -1571,7 +1607,7 @@ export interface A2UITemplateDef {
   category?: string
 
   /** Icon */
-  icon?: string
+  icon?: PluginIconName
 
   /** Surface type */
   surfaceType: A2UISurfaceType
@@ -1718,7 +1754,7 @@ export interface PluginModeDef {
   description: string
 
   /** Icon (Lucide name) */
-  icon: string
+  icon: PluginIconName
 
   /** System prompt */
   systemPrompt?: string
@@ -1747,7 +1783,7 @@ export interface PluginManifestCommandDef {
   description?: string
 
   /** Icon (Lucide name) */
-  icon?: string
+  icon?: PluginIconName
 
   /** Optional slash command aliases */
   aliases?: string[]
@@ -1778,10 +1814,12 @@ export interface PluginQuickActionDef {
   id: string
   /** Display title (literal string, shown verbatim on every surface). */
   title: string
+  /** Plugin i18n key preferred over `title` when present for the active locale. */
+  labelKey?: string
   /** One-line description shown in the palette. */
   description?: string
   /** Lucide icon name; resolved by the renderer. */
-  icon?: string
+  icon?: PluginIconName
   /** Tray bucket (see `lib/tray/all-commands.ts`). Defaults to "plugins". */
   category?: string
   /** `when` expression evaluated by `lib/tray/when.ts` before rendering. */
@@ -2076,7 +2114,7 @@ export interface PluginCommand {
   description?: string
 
   /** Icon */
-  icon?: string
+  icon?: PluginIconName
 
   /** Keyboard shortcut */
   shortcut?: string
@@ -2095,7 +2133,7 @@ export interface PluginCommand {
 /**
  * Context provided to plugins
  */
-export interface PluginContext {
+export interface PluginBaseContext {
   /** Plugin ID */
   pluginId: string
 
@@ -2233,6 +2271,45 @@ export interface PluginContext {
   pet?: import("@/lib/plugin/api/pet-api").PluginPetAPI
 }
 
+/** Host-mounted namespaces present on every activated plugin context. */
+export interface PluginHostContextAPI {
+  ocr: import("@/lib/plugin/api/ocr-api").PluginOcrAPI
+  workspace: import("@/lib/plugin/api/workspace-api").PluginWorkspaceAPI
+  modal: import("@/lib/plugin/api/modal-api").PluginModalAPI
+  webview: import("@/lib/plugin/api/webview-api").PluginWebviewAPI
+  auth: import("@/lib/plugin/api/auth-api").PluginAuthAPI
+  uri: import("@/lib/plugin/api/uri-api").PluginUriAPI
+  chat: import("@/lib/plugin/api/chat-api").PluginChatAPI
+  capabilities: import("@/lib/plugin/api/capabilities-api").PluginCapabilitiesAPI
+  git: import("@/lib/plugin/api/git-api").PluginGitAPI
+  goals: import("@/lib/plugin/api/goal-api").PluginGoalAPI
+  memory: import("@/lib/plugin/api/memory-api").PluginMemoryAPI
+  team: import("@/lib/plugin/api/team-api").PluginTeamAPI
+  subscription: import("@/lib/plugin/api/subscription-api").PluginSubscriptionAPI
+  terminal: import("@/lib/plugin/api/terminal-api").PluginTerminalAPI
+  perf: import("@/lib/plugin/api/perf-api").PluginPerfAPI
+  connectors: import("@/lib/plugin/api/connectors-api").PluginConnectorsAPI
+  integrations: PluginIntegrationsAPI
+  share: import("@/lib/plugin/api/share-api").PluginShareAPI
+  backup: import("@/lib/plugin/api/backup-api").PluginBackupAPI
+  automation: import("@/lib/plugin/api/automation-api").PluginAutomationAPI
+  companion: import("@/lib/plugin/api/companion-api").PluginCompanionAPI
+  pet: import("@/lib/plugin/api/pet-api").PluginPetAPI
+}
+
+/**
+ * Complete public context passed to `activate` and `deactivate`.
+ *
+ * `PluginBaseContext` exists only for the host's construction pipeline;
+ * plugin authors always receive this fully mounted contract.
+ */
+export type PluginContext = Omit<
+  PluginBaseContext,
+  keyof PluginContextAPI | keyof PluginHostContextAPI
+> &
+  PluginContextAPI &
+  PluginHostContextAPI
+
 /**
  * Plugin-facing API for contributing workflow nodes and triggers to the
  * editor catalog + runtime. Each `register*` returns an unsubscribe
@@ -2329,7 +2406,7 @@ export interface PluginNotification {
   body?: string
   message?: string
   type?: "info" | "success" | "warning" | "error"
-  icon?: string
+  icon?: PluginIconName
   timeout?: number
   actions?: Array<{ label: string; action: string }>
 }
@@ -2788,21 +2865,29 @@ export interface ShortcutRegistration {
 }
 
 /**
+ * Declarative tray contribution stored in `manifest.trayItems[]`.
+ */
+export interface PluginManifestTrayItemDef {
+  /** Local id — the host prefixes it with the plugin id. */
+  id: string
+  label: string
+  /** Plugin i18n key preferred over `label` for the active locale. */
+  labelKey?: string
+  icon?: PluginIconName
+  when?: string
+  category?: string
+  accelerator?: string
+  command?: string
+  slash?: string
+}
+
+/**
  * Tray menu item contributed by a plugin. Mirrors `ContextMenuItem` but
  * targets the system-tray surface rather than the right-click context menu.
  */
-export interface PluginTrayItemInput {
+export interface PluginTrayItemInput extends Omit<PluginManifestTrayItemDef, "command" | "slash"> {
   /** Local id — the host prefixes it with the plugin id before recording. */
   id: string
-  label: string
-  /** Optional Lucide icon name; resolved by the renderer. */
-  icon?: string
-  /** Optional `when` expression evaluated by `lib/tray/when.ts`. */
-  when?: string
-  /** Free-form category used by `lib/tray/all-commands.ts` for grouping. */
-  category?: string
-  /** Optional accelerator hint, cosmetic. */
-  accelerator?: string
   /** Click handler — invoked by the renderer when the tray dispatches. */
   onClick: () => void
 }
@@ -2831,7 +2916,7 @@ export interface PluginContextMenuAPI {
 export interface ContextMenuItem {
   id: string
   label: string
-  icon?: string
+  icon?: PluginIconName
   /** Which zone(s) this item targets. `undefined` = every zone. */
   when?: ContextMenuContext | ContextMenuContext[]
   /**
@@ -4353,7 +4438,7 @@ export interface NotificationOptions {
   message: string
   type?: "info" | "success" | "warning" | "error"
   duration?: number
-  icon?: string
+  icon?: PluginIconName
   actions?: NotificationAction[]
   persistent?: boolean
   progress?: number
@@ -4445,6 +4530,12 @@ export interface PluginStorageAPI {
   clear(): Promise<void>
   /** Get storage usage in bytes (approximate) */
   getUsage(): Promise<number>
+  /** Store a value encrypted at rest with the host-managed plugin key. */
+  setSecure<T = unknown>(key: string, value: T): Promise<void>
+  /** Retrieve and decrypt a value previously written by `setSecure`. */
+  getSecure<T = unknown>(key: string): Promise<T | undefined>
+  /** Check whether the stored value uses the encrypted envelope. */
+  isEncrypted(key: string): Promise<boolean>
 }
 
 // =============================================================================
@@ -4510,7 +4601,7 @@ export interface AIProviderDefinition {
   id: string
   name: string
   description: string
-  icon?: string
+  icon?: PluginIconName
   models: AIModel[]
   chat: (messages: AIChatMessage[], options?: AIChatOptions) => AsyncIterable<AIChatChunk>
   embed?: (texts: string[]) => Promise<number[][]>
@@ -4557,6 +4648,8 @@ export type ExtensionPoint = CanonicalExtensionPoint
  */
 export interface ExtensionOptions {
   priority?: number
+  /** Plugin i18n key used by contribution discovery UI. */
+  labelKey?: string
   condition?: () => boolean
   /**
    * Declarative `when` clause evaluated against the context-key store
@@ -4604,7 +4697,7 @@ export interface ExtensionProps {
   pluginId: string
   extensionId: string
   /** Host-declared shape of the slot receiving this contribution. */
-  formFactor: PluginPointFormFactor
+  formFactor: PluginSurfaceFormFactor
 }
 
 /**
@@ -4767,7 +4860,7 @@ export interface PluginContextAPI {
    * compiling; new code should use it instead of trying to monkey-patch
    * the chat renderer.
    */
-  messagePart?: import("@/lib/plugin/api/message-part-api").PluginMessagePartAPI
+  messagePart: import("@/lib/plugin/api/message-part-api").PluginMessagePartAPI
 
   /**
    * Tool-result renderer API — register the React card that renders this
@@ -4777,5 +4870,5 @@ export interface PluginContextAPI {
    * to the generic content-blocks card. Optional for the same back-compat
    * reason as `messagePart`.
    */
-  toolResult?: import("@/lib/plugin/api/tool-result-api").PluginToolResultAPI
+  toolResult: import("@/lib/plugin/api/tool-result-api").PluginToolResultAPI
 }

@@ -64,6 +64,7 @@ export type { PluginStorageAPI } from "./storage-api"
 // the surface + its types from the canonical `@/lib/plugin/api` barrel rather
 // than deep-importing the implementation module.
 export { createConnectorsAPI } from "./connectors-api"
+export { createIntegrationsAPI } from "./integrations-api"
 export type {
   PluginConnectorsAPI,
   PluginConnectorAdapterInfo,

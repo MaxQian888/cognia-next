@@ -92,6 +92,7 @@ async function resolveView(
     viewId: def.id,
     containerId,
     title: def.title,
+    titleKey: def.titleKey,
     when: def.when,
   } as const
 

@@ -9,6 +9,8 @@
  * (`lib/plugin/registries/pet-achievement-registry.ts`).
  */
 
+import type { PluginIconName } from "./plugin-icon"
+
 /** Declarative unlock condition, interpreted by the host. */
 export type PluginPetAchievementCondition =
   /** Activity-ledger counter: `counters[kind] >= gte` (kind = PetEventKind). */
@@ -29,7 +31,7 @@ export interface PluginPetAchievementDef {
   /** Optional per-locale descriptions (same keying as `labels`). */
   descriptions?: Record<string, string>
   /** Lucide icon name; the achievements tab falls back to Sparkles. */
-  icon?: string
+  icon?: PluginIconName
   condition: PluginPetAchievementCondition
 }
 
@@ -41,7 +43,7 @@ export interface PluginPetItemDef {
   /** Optional per-locale descriptions. */
   descriptions?: Record<string, string>
   /** Lucide icon name; the shop falls back to Sparkles. */
-  icon?: string
+  icon?: PluginIconName
   /** Shop grouping — mirrors the host catalog categories. */
   category: "food" | "toy" | "decor"
   /** Price in coins (> 0). */

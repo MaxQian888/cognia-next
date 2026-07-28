@@ -21,7 +21,7 @@ describe("PLUGIN_SHARED_MODULES", () => {
 
   it("shares the plugin SDK and UI kit", () => {
     expect(PLUGIN_SHARED_MODULES).toEqual(
-      expect.arrayContaining(["@cognia/plugin-sdk", "@cognia/plugin-ui"])
+      expect.arrayContaining(["@cognia/plugin-sdk", "@cognia/plugin-ui", "lucide-react"])
     )
   })
 
@@ -76,6 +76,14 @@ describe("createPluginRequire", () => {
     const kit = req("@cognia/plugin-ui") as Record<string, unknown>
     expect(typeof kit.Button).toBe("function")
     expect(typeof kit.cn).toBe("function")
+  })
+
+  it("hands back the host lucide registry", async () => {
+    await primeSharedModules()
+    const req = createPluginRequire("/plugins/demo/dist/index.js")
+    const lucide = req("lucide-react") as Record<string, unknown>
+    expect(lucide.Search).toBeDefined()
+    expect(typeof lucide.icons).toBe("object")
   })
 
   it("throws for a non-whitelisted specifier and names it", async () => {

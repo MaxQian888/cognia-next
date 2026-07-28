@@ -61,6 +61,15 @@ export interface BackupContents {
   files: string[]
 }
 
+interface HostBackupPayload {
+  backupId: string
+  pluginId: string
+  label?: string | null
+  createdAt: string
+  sizeBytes: number
+  path: string
+}
+
 // =============================================================================
 // Plugin Backup Manager
 // =============================================================================
@@ -245,26 +254,26 @@ export class PluginBackupManager {
       if (!sourcePath) {
         throw new Error(`Plugin path not found for ${pluginId}`)
       }
-      const backupPath = `${this.config.backupPath}/${pluginId}/${Date.now()}-${version}`
 
-      // Create backup via Tauri
-      await invoke("plugin_backup_create", {
+      // The host snapshots both the immutable package and its host-owned state.
+      // Only stable identifiers cross this boundary; callers never choose a
+      // filesystem destination.
+      const payload = await invoke<HostBackupPayload>("plugin_backup_create", {
         pluginId,
-        sourcePath,
-        backupPath,
+        label: options.reason || "manual",
       })
-
-      // Get backup size
-      const size = await this.calculatePathSize(backupPath)
+      if (payload.pluginId !== pluginId || !payload.backupId.startsWith(`${pluginId}-`)) {
+        throw new Error("Host returned an invalid plugin backup descriptor")
+      }
 
       const backup: PluginBackup = {
-        id: this.generateBackupId(),
+        id: payload.backupId,
         pluginId,
         version,
-        createdAt: new Date(),
+        createdAt: new Date(payload.createdAt),
         reason: options.reason || "manual",
-        size,
-        path: backupPath,
+        size: payload.sizeBytes,
+        path: payload.path,
         metadata: options.metadata,
       }
 
@@ -352,13 +361,12 @@ export class PluginBackupManager {
 
     try {
       // Restore via Tauri
-      const targetPath = this.getPluginRuntime(backup.pluginId)?.path
-      if (!targetPath) {
+      if (!this.getPluginRuntime(backup.pluginId)?.path) {
         throw new Error(`Plugin path not found for ${backup.pluginId}`)
       }
       await invoke("plugin_backup_restore", {
-        sourcePath: backup.path,
-        targetPath,
+        pluginId: backup.pluginId,
+        backupId: backup.id,
       })
 
       return {
@@ -441,7 +449,10 @@ export class PluginBackupManager {
         const backup = backups[index]
 
         try {
-          await invoke("plugin_backup_delete", { path: backup.path })
+          await invoke("plugin_backup_delete", {
+            pluginId,
+            backupId: backup.id,
+          })
           backups.splice(index, 1)
           this.backups.set(pluginId, backups)
           await this.saveBackupIndex()

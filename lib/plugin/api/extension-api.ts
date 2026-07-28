@@ -151,6 +151,7 @@ export function createExtensionAPI(
         component,
         options: {
           priority: extensionOptions.priority || 0,
+          labelKey: extensionOptions.labelKey,
           condition: extensionOptions.condition,
           when: extensionOptions.when,
           // An inverted pair is a typo, not an intent. Left as-is, CSS resolves

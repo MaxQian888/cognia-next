@@ -12,5 +12,5 @@ export default defineConfig({
   sourcemap: true,
   clean: true,
   target: "es2022",
-  external: ["react", "react/jsx-runtime", "radix-ui", "lucide-react"],
+  external: ["react", "react/jsx-runtime", "radix-ui", "lucide-react", "react-hook-form", "sonner"],
 })

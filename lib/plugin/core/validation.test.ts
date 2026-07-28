@@ -31,6 +31,180 @@ describe("Plugin Validation", () => {
       expect(result.errors).toHaveLength(0)
     })
 
+    it("validates manifest.ide through the locked Code 1.128 catalog", () => {
+      const manifest = createValidManifest()
+      manifest.permissions = ["editor:read"]
+      manifest.ide = {
+        schemaVersion: 1,
+        targets: ["monaco", "pro-ide"],
+        providers: [{ id: "hover", kind: "hover", handler: "provideHover" }],
+      }
+      expect(validatePluginManifest(manifest).valid).toBe(true)
+
+      manifest.ide.contributions = { proposedViews: [] } as never
+      const result = validatePluginManifest(manifest)
+      expect(result.valid).toBe(false)
+      expect(result.diagnostics).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            code: "manifest.ide.ide_contribution_unclassified",
+            severity: "error",
+          }),
+        ])
+      )
+    })
+
+    it("accepts a complete Marketplace Integration contribution", () => {
+      const manifest = createValidManifest()
+      manifest.capabilities = ["integrations"]
+      manifest.permissions = [
+        "integrations:read",
+        "integrations:events",
+        "integrations:execute",
+        "integrations:manage",
+      ]
+      manifest.integrations = [
+        {
+          id: "github",
+          label: "GitHub",
+          authStrategies: [
+            {
+              id: "oauth",
+              type: "oauth2",
+              label: "OAuth",
+              providerId: "github",
+              scopes: ["repo"],
+              requestAuth: { type: "bearer" },
+            },
+          ],
+          resourceKinds: ["repository", "issue"],
+          eventTypes: [
+            {
+              id: "issue.updated",
+              label: "Issue updated",
+              resourceKinds: ["issue"],
+            },
+          ],
+          actions: [
+            {
+              id: "issue.comment",
+              label: "Comment",
+              handler: "commentIssue",
+              inputSchema: { type: "object" },
+              risk: "write",
+              idempotency: "required",
+            },
+          ],
+          allowedOrigins: ["https://api.github.com"],
+        },
+      ]
+
+      expect(validatePluginManifest(manifest).valid).toBe(true)
+    })
+
+    it("rejects unsafe or incomplete Marketplace Integration definitions", () => {
+      const manifest = createValidManifest()
+      manifest.capabilities = ["integrations"]
+      manifest.integrations = [
+        {
+          id: "github",
+          label: "GitHub",
+          authStrategies: [],
+          resourceKinds: ["issue"],
+          eventTypes: [],
+          actions: [
+            {
+              id: "issue.delete",
+              label: "Delete",
+              handler: "",
+              inputSchema: {},
+              risk: "admin" as never,
+              idempotency: "sometimes" as never,
+            },
+          ],
+          allowedOrigins: ["http://github.example"],
+        },
+      ]
+
+      expect(validatePluginManifest(manifest).diagnostics).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ field: "integrations[0].actions[0].handler" }),
+          expect.objectContaining({ field: "integrations[0].actions[0].risk" }),
+          expect.objectContaining({ field: "integrations[0].actions[0].idempotency" }),
+          expect.objectContaining({ field: "integrations[0].allowedOrigins[0]" }),
+        ])
+      )
+    })
+
+    it("rejects malformed Integration auth strategies and credential injection", () => {
+      const manifest = createValidManifest()
+      manifest.capabilities = ["integrations"]
+      manifest.integrations = [
+        {
+          id: "gitlab",
+          label: "GitLab",
+          authStrategies: [
+            {
+              id: "token",
+              type: "personal-access-token",
+              label: "Token",
+              providerId: "gitlab-token",
+              requestAuth: { type: "header", name: "bad header" },
+            },
+            {
+              id: "token",
+              type: "unknown" as never,
+              label: "",
+              providerId: "",
+              scopes: ["", 42 as never],
+            },
+          ],
+          resourceKinds: [],
+          eventTypes: [],
+          actions: [],
+        },
+      ]
+
+      expect(validatePluginManifest(manifest).diagnostics).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            field: "integrations[0].authStrategies[0].requestAuth",
+          }),
+          expect.objectContaining({
+            field: "integrations[0].authStrategies[1].id",
+          }),
+          expect.objectContaining({
+            field: "integrations[0].authStrategies[1].type",
+          }),
+          expect.objectContaining({
+            field: "integrations[0].authStrategies[1].providerId",
+          }),
+          expect.objectContaining({
+            field: "integrations[0].authStrategies[1].scopes",
+          }),
+        ])
+      )
+    })
+
+    it("restricts workflow kind alias targets to the owning Integration plugin", () => {
+      const manifest = createValidManifest()
+      manifest.id = "github-delivery"
+      manifest.workflowKindAliases = {
+        "trigger.github.webhook": "trigger.integration.event",
+        "action.github.openPr": "github-delivery.action.openPr",
+      }
+      expect(validatePluginManifest(manifest).valid).toBe(true)
+
+      manifest.workflowKindAliases["action.github.mergePr"] = "other-plugin.action.mergePr"
+      expect(validatePluginManifest(manifest).diagnostics).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            code: "manifest.workflow_kind_aliases.target_outside_plugin",
+          }),
+        ])
+      )
+    })
+
     it("enforces capability minimums through engines.cognia", () => {
       const manifest = createValidManifest()
       manifest.engines = { cognia: ">=0.0.9" }
@@ -270,6 +444,12 @@ describe("Plugin Validation", () => {
           activity: "inspect",
         },
       ]
+      manifest.i18n = {
+        locales: {
+          en: { "panels.outline": "Outline" },
+          "zh-CN": { "panels.outline": "大纲" },
+        },
+      }
 
       const result = validatePluginManifest(manifest, { governanceMode: "warn" })
 
@@ -295,6 +475,12 @@ describe("Plugin Validation", () => {
           activity: "inspect",
         },
       ]
+      manifest.i18n = {
+        locales: {
+          en: { "panels.inspector": "Inspector" },
+          "zh-CN": { "panels.inspector": "检查器" },
+        },
+      }
 
       const result = validatePluginManifest(manifest, { governanceMode: "warn" })
 
@@ -1255,6 +1441,12 @@ describe("Plugin Validation", () => {
           manifest.capabilities = [capability] as PluginManifest["capabilities"]
           if (capability === "context-panel") {
             manifest.permissions = ["extension:ui", "canvas:read"]
+            manifest.i18n = {
+              locales: {
+                en: { "panels.outline": "Outline" },
+                "zh-CN": { "panels.outline": "大纲" },
+              },
+            }
           }
           ;(manifest as unknown as Record<string, unknown>)[field] = value
 
@@ -1926,6 +2118,138 @@ describe("Plugin Validation", () => {
         expect(result.valid).toBe(false)
         expect(result.diagnostics!.some((d) => d.code === "manifest.i18n.too_many_keys")).toBe(true)
       })
+
+      it("rejects a UI label key missing from any declared locale", () => {
+        const manifest = createValidManifest()
+        manifest.quickActions = [
+          {
+            id: "open",
+            title: "Open",
+            labelKey: "actions.open",
+            command: "open",
+          },
+        ]
+        manifest.i18n = {
+          locales: {
+            en: { "actions.open": "Open" },
+            "zh-CN": {},
+          },
+        }
+
+        const result = validatePluginManifest(manifest)
+
+        expect(result.diagnostics).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({
+              field: "quickActions[0].labelKey",
+              code: "manifest.i18n.key.missing",
+              severity: "error",
+            }),
+          ])
+        )
+      })
+    })
+
+    describe("manifest.extensions", () => {
+      it("accepts a canonical declarative extension with localized metadata", () => {
+        const manifest = createValidManifest()
+        manifest.capabilities = ["components"]
+        manifest.permissions = ["extension:ui"]
+        manifest.extensions = [
+          {
+            point: "chat.input.actions",
+            entry: "dist/surfaces.js",
+            export: "ComposerAction",
+            minWidth: 24,
+            maxWidth: 48,
+            labelKey: "surfaces.composerAction",
+          },
+        ]
+        manifest.i18n = {
+          locales: {
+            en: { "surfaces.composerAction": "Reference action" },
+            "zh-CN": { "surfaces.composerAction": "参考操作" },
+          },
+        }
+
+        expect(validatePluginManifest(manifest).valid).toBe(true)
+      })
+
+      it("rejects unknown points, unsafe entries, and missing UI permission", () => {
+        const manifest = createValidManifest() as unknown as Record<string, unknown>
+        manifest.extensions = [
+          {
+            point: "chat.unknown",
+            entry: "../outside.js",
+            export: "Bad export",
+          },
+        ]
+
+        const result = validatePluginManifest(manifest)
+
+        expect(result.diagnostics).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({ code: "manifest.extensions.point.invalid" }),
+            expect.objectContaining({ code: "manifest.extensions.entry.traversal" }),
+            expect.objectContaining({ code: "manifest.extensions.export.invalid" }),
+          ])
+        )
+      })
+    })
+
+    describe("manifest.trayItems", () => {
+      it("accepts a localized tray item with one dispatch target", () => {
+        const manifest = createValidManifest()
+        manifest.capabilities = ["tray"]
+        manifest.trayItems = [
+          {
+            id: "open",
+            label: "Open",
+            labelKey: "tray.open",
+            icon: "PanelTop",
+            command: "reference.open",
+          },
+        ]
+        manifest.i18n = {
+          locales: {
+            en: { "tray.open": "Open" },
+            "zh-CN": { "tray.open": "打开" },
+          },
+        }
+
+        expect(validatePluginManifest(manifest).valid).toBe(true)
+      })
+
+      it("rejects tray items without exactly one dispatch target", () => {
+        const manifest = createValidManifest()
+        manifest.capabilities = ["tray"]
+        manifest.trayItems = [{ id: "open", label: "Open" }]
+
+        const result = validatePluginManifest(manifest)
+
+        expect(result.diagnostics).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({ code: "manifest.trayItems.dispatch.invalid" }),
+          ])
+        )
+      })
+    })
+
+    it("rejects unknown Lucide names across native manifest icon fields", () => {
+      const manifest = createValidManifest()
+      manifest.commands = [{ id: "run", name: "Run", icon: "NotARealLucideIcon" as never }]
+
+      const result = validatePluginManifest(manifest)
+
+      expect(result.diagnostics).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            field: "commands[0].icon",
+            code: "manifest.icon.invalid",
+            severity: "error",
+          }),
+        ])
+      )
     })
 
     // -----------------------------------------------------------------------

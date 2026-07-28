@@ -10,6 +10,8 @@
  * these definitions to avoid contract drift.
  */
 
+import type { PluginSurfaceFormFactor } from "@/types/plugin/plugin-surface"
+
 export type PluginPointKind = "ui-slot" | "hook" | "activation" | "runtime"
 export type PluginPointStability = "stable" | "experimental" | "deprecated"
 export type PluginPointStatus = "implemented" | "virtual" | "deprecated"
@@ -33,7 +35,8 @@ export type PluginPointHostKind = "jsx-mount" | "registration"
  *   - `block`  full-width band stacked with host content; any height
  *   - `panel`  an owned region with its own scroll; render a whole view
  */
-export type PluginPointFormFactor = "icon" | "row" | "block" | "panel"
+/** @deprecated Use `PluginSurfaceFormFactor`; this alias remains source-compatible. */
+export type PluginPointFormFactor = PluginSurfaceFormFactor
 
 export interface PluginPointContract {
   id: string
@@ -348,7 +351,10 @@ const REGISTRATION_HOST_EXTENSION_POINTS = new Set<CanonicalExtensionPoint>([
  * ~24px-tall bar, `chat.input.actions` into the composer's flex button row,
  * `sidebar.right.*` into the context workbench's scrollable column.
  */
-const EXTENSION_POINT_FORM_FACTORS: Record<CanonicalExtensionPoint, PluginPointFormFactor> = {
+export const EXTENSION_POINT_FORM_FACTORS: Record<
+  CanonicalExtensionPoint,
+  PluginSurfaceFormFactor
+> = {
   // Icon rails and bars — square controls, no room for a label.
   "sidebar.left.top": "icon",
   "sidebar.left.bottom": "icon",
@@ -416,7 +422,9 @@ const EXTENSION_POINT_FORM_FACTORS: Record<CanonicalExtensionPoint, PluginPointF
 }
 
 /** The shape a slot expects its contributions to take. */
-export function getExtensionPointFormFactor(point: CanonicalExtensionPoint): PluginPointFormFactor {
+export function getExtensionPointFormFactor(
+  point: CanonicalExtensionPoint
+): PluginSurfaceFormFactor {
   return EXTENSION_POINT_FORM_FACTORS[point]
 }
 
@@ -1380,6 +1388,13 @@ export function auditPluginPointContracts(): PluginPointProofAudit[] {
 
 const extensionPointSet = new Set<string>(CANONICAL_EXTENSION_POINTS)
 const hookPointSet = new Set<string>(CANONICAL_HOOK_POINTS)
+const contextWorkbenchResourceKinds = new Set([
+  "canvas-document",
+  "project-file",
+  "artifact",
+  "workflow",
+  "session",
+])
 
 export function getExtensionPointContract(point: CanonicalExtensionPoint): PluginPointContract {
   return extensionPointContracts[point]
@@ -1566,6 +1581,22 @@ export function validateActivationEvent(
 ): PluginPointValidationOutcome {
   const mode = options.governanceMode || "warn"
   const diagnostics: PluginPointDiagnostic[] = []
+
+  if (event.startsWith("onView:context-workbench:")) {
+    const resourceKind = event.slice("onView:context-workbench:".length)
+    if (!contextWorkbenchResourceKinds.has(resourceKind)) {
+      diagnostics.push({
+        code: "plugin.point.unknown",
+        severity: toSeverity(mode),
+        message: `Unknown context-workbench resource kind "${resourceKind}".`,
+        hint: 'Use one of "canvas-document", "project-file", "artifact", "workflow", or "session".',
+        pointKind: "activation",
+        pointId: event,
+      })
+      return { allowed: mode !== "block", diagnostics }
+    }
+  }
+
   const pattern = resolveActivationPattern(event)
 
   if (!pattern) {

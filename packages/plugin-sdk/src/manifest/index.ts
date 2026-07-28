@@ -66,6 +66,7 @@ export type {
   PluginManifestCommandDef,
   PluginQuickActionDef,
   PluginQuickActionSurface,
+  PluginManifestTrayItemDef,
   PluginA2UIAction,
   PluginA2UIDataChange,
   PluginAgentStep,
@@ -86,6 +87,7 @@ export type {
   PluginDensityPresetContribution,
   PluginLspServerDef,
 } from "@/types/plugin/plugin"
+export type * from "@/types/plugin/plugin-ide"
 
 export function definePlugin(definition: PluginDefinition): PluginDefinition {
   return definition
@@ -107,6 +109,8 @@ export type {
 } from "@/types/plugin/plugin-context-panel"
 export type { PluginDeploymentFilterDef } from "@/types/plugin/plugin-deployment-filter"
 export type { PluginImRateSourceDef } from "@/types/plugin/plugin-im-rate-source"
+export type { PluginIconName } from "@/types/plugin/plugin-icon"
+export type { PluginExtensionDef } from "@/types/plugin/plugin-extension"
 export type { PluginLimitsSourceDef } from "@/types/plugin/plugin-limits-source"
 export type { PluginMcpServerPresetDef } from "@/types/plugin/plugin-mcp-preset"
 export type { PluginMessageRendererDef } from "@/types/plugin/plugin-message-renderer"
@@ -131,6 +135,13 @@ export type { PluginWebviewDef } from "@/types/plugin/plugin-webview"
 export type { PluginManifestWorkflowsBlock } from "@/types/plugin/plugin-workflow"
 export type { PluginWorkflowTemplateDef } from "@/types/plugin/plugin-workflow-template"
 export type { PluginWorkspaceBackendDef } from "@/types/plugin/plugin-workspace-backend"
+export type {
+  IntegrationActionDef,
+  IntegrationAuthStrategy,
+  IntegrationEventEnvelope,
+  IntegrationInboxProjectionDef,
+  PluginIntegrationDef,
+} from "@/types/plugin/plugin-integration"
 
 export type {
   CronTrigger,

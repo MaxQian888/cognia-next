@@ -13,6 +13,7 @@ import { getPluginSecurityPosture } from "@/lib/plugin/security/security-posture
 import type {
   Plugin,
   PluginManifest,
+  PluginBaseContext,
   PluginContext,
   PluginPermission,
   PluginCapability,
@@ -131,31 +132,31 @@ import { createEditorAPI } from "../api/editor-api"
 import { createMessagePartAPI } from "../api/message-part-api"
 import { createToolResultAPI } from "../api/tool-result-api"
 import { createDexieAPI } from "../api/dexie-api"
-import { createOcrAPI, type PluginOcrAPI } from "../api/ocr-api"
-import { createWorkspaceAPI, type PluginWorkspaceAPI } from "../api/workspace-api"
-import { createModalAPI, type PluginModalAPI } from "../api/modal-api"
+import { createOcrAPI } from "../api/ocr-api"
+import { createWorkspaceAPI } from "../api/workspace-api"
+import { createModalAPI } from "../api/modal-api"
 import { createWebviewAPI } from "../api/webview-api"
 import { createAuthAPI } from "../api/auth-api"
 import { createUriAPI } from "../api/uri-api"
-import { createChatAPI, type PluginChatAPI } from "../api/chat-api"
-import { createCapabilitiesAPI, type PluginCapabilitiesAPI } from "../api/capabilities-api"
-import { createGitAPI, type PluginGitAPI } from "../api/git-api"
-import { createGoalAPI, type PluginGoalAPI } from "../api/goal-api"
-import { createMemoryAPI, type PluginMemoryAPI } from "../api/memory-api"
-import { createTeamAPI, type PluginTeamAPI } from "../api/team-api"
-import { createSubscriptionAPI, type PluginSubscriptionAPI } from "../api/subscription-api"
-import { createTerminalAPI, type PluginTerminalAPI } from "../api/terminal-api"
-import { createPerfAPI, type PluginPerfAPI } from "../api/perf-api"
-import { createConnectorsAPI, type PluginConnectorsAPI } from "../api/connectors-api"
-import { createShareAPI, type PluginShareAPI } from "../api/share-api"
-import { createBackupAPI, type PluginBackupAPI } from "../api/backup-api"
-import { createAutomationAPI, type PluginAutomationAPI } from "../api/automation-api"
-import { createCompanionAPI, type PluginCompanionAPI } from "../api/companion-api"
-import { createPetAPI, type PluginPetAPI } from "../api/pet-api"
+import { createChatAPI } from "../api/chat-api"
+import { createCapabilitiesAPI } from "../api/capabilities-api"
+import { createGitAPI } from "../api/git-api"
+import { createGoalAPI } from "../api/goal-api"
+import { createMemoryAPI } from "../api/memory-api"
+import { createTeamAPI } from "../api/team-api"
+import { createSubscriptionAPI } from "../api/subscription-api"
+import { createTerminalAPI } from "../api/terminal-api"
+import { createPerfAPI } from "../api/perf-api"
+import { createConnectorsAPI } from "../api/connectors-api"
+import { createIntegrationsAPI } from "../api/integrations-api"
+import { createShareAPI } from "../api/share-api"
+import { createBackupAPI } from "../api/backup-api"
+import { createAutomationAPI } from "../api/automation-api"
+import { createCompanionAPI } from "../api/companion-api"
+import { createPetAPI } from "../api/pet-api"
 import { getDb } from "@/lib/db/schema"
 import { createIPCAPI } from "../messaging/ipc"
 import { createEventAPI } from "../messaging/message-bus"
-import { getPluginI18nLoader } from "../utils/i18n-loader"
 import { getPluginDebugger } from "../devtools/debugger"
 import {
   invokePluginApi,
@@ -194,56 +195,8 @@ import type {
 } from "@/types/plugin/plugin-agent-sdk"
 import type { FullPluginContext as PublicFullPluginContext } from "@cognia/plugin-sdk/context"
 
-/**
- * Full plugin context combining the base and host-mounted APIs.
- * The runtime storage API intentionally replaces the legacy async storage shape.
- *
- * ADR-0026 v2 namespaces (`ocr`, `workspace`) are intersected at the end so
- * the existing `PluginContextAPI` interface stays untouched — plugins gain
- * the new namespaces without breaking any structural-type consumers in the
- * SDK or sidecar that already type the existing keys.
- */
-export type FullPluginContext = Omit<PluginContext, "storage"> &
-  Omit<PluginContextAPI, "storage"> & {
-    storage: PluginContextAPI["storage"]
-  } & {
-    /** OCR provider registration (ADR-0026 §2 §A). */
-    ocr: PluginOcrAPI
-    /** Workspace backend registration (ADR-0026 §2 §D). */
-    workspace: PluginWorkspaceAPI
-    /** Modal stack push/close (ADR-0026 §3 §A). */
-    modal: PluginModalAPI
-    /** Chat-middleware registration (ADR-0026 §4 §A). */
-    chat: PluginChatAPI
-    /** Read-only platform-capability flags (ADR-0026 §5 §C). */
-    capabilities: PluginCapabilitiesAPI
-    /** Active source-control repository read/write (gated `git:read`/`git:write`). */
-    git: PluginGitAPI
-    /** Self-driving goal read/drive (gated `goal:read`/`goal:write`). */
-    goals: PluginGoalAPI
-    /** Long-term memory search/store (gated `memory:read`/`memory:write`; never procedural). */
-    memory: PluginMemoryAPI
-    /** Agent-Team board read + guarded task writes (gated `team:read`/`team:write`; no run control). */
-    team: PluginTeamAPI
-    /** Read-only subscription plan + usage metrics (gated `subscription:read`). */
-    subscription: PluginSubscriptionAPI
-    /** Integrated-terminal dock spawn/write/kill (gated `terminal:*`, ownership-checked). */
-    terminal: PluginTerminalAPI
-    /** Read-only performance dashboard snapshots + live samples (gated `perf:read`). */
-    perf: PluginPerfAPI
-    /** Connector adapter list + outbound send (gated `connectors:read`/`connectors:send`). */
-    connectors: PluginConnectorsAPI
-    /** Public share-link create/revoke/inspect (gated `share:read`/`share:create`). */
-    share: PluginShareAPI
-    /** Encrypted backup build/restore/history (gated `backup:read`/`backup:write`; never the API key). */
-    backup: PluginBackupAPI
-    /** Desktop automation / Computer Use action surface (gated `automation:*`, all DANGEROUS). */
-    automation: PluginAutomationAPI
-    /** Paired-device + remote-control + host goal-loop steering (gated `companion:*`). */
-    companion: PluginCompanionAPI
-    /** Desktop pet nurture surface (capability "pet"; gated `pet:read`/`pet:interact`). */
-    pet: PluginPetAPI
-  }
+/** @deprecated `PluginContext` is now the complete activated context. */
+export type FullPluginContext = PluginContext
 
 // =============================================================================
 // Create Plugin Context
@@ -253,10 +206,10 @@ export function createPluginContext(
   plugin: Plugin,
   manager: PluginManager,
   options?: { enableDebug?: boolean }
-): PluginContext {
+): PluginBaseContext {
   const pluginId = plugin.manifest.id
 
-  const baseContext: PluginContext = {
+  const baseContext: PluginBaseContext = {
     pluginId,
     pluginPath: plugin.path,
     config: plugin.config,
@@ -365,9 +318,6 @@ export function createFullPluginContext(
   // Add new communication and utility APIs to base context
   const ipcAPI = createIPCAPI(pluginId)
   const eventAPI = createEventAPI(pluginId)
-  const i18nLoader = getPluginI18nLoader()
-  const pluginI18n = i18nLoader.createPluginAPI(pluginId)
-
   // Merge IPC and events into the base context events
   const enhancedEvents = {
     ...baseContext.events,
@@ -375,17 +325,13 @@ export function createFullPluginContext(
     bus: eventAPI,
   }
 
-  // Enhanced i18n combining base API with loader
+  // Keep the compatibility aliases on the same shared overlay-backed API.
+  // Using the legacy i18n loader for `t` here would hide manifest messages
+  // registered by PluginManager immediately before activate().
   const enhancedI18n = {
     ...contextAPI.i18n,
-    t: pluginI18n.t,
-    getLocale: pluginI18n.getLocale,
-    hasKey: pluginI18n.hasKey,
-    // Wrap onLocaleChange to match PluginI18nAPI signature (Locale instead of string)
-    onLocaleChange: (handler: (locale: import("@/types/plugin/plugin").Locale) => void) =>
-      pluginI18n.onLocaleChange((locale: string) =>
-        handler(locale as import("@/types/plugin/plugin").Locale)
-      ),
+    getLocale: contextAPI.i18n.getCurrentLocale,
+    hasKey: contextAPI.i18n.hasTranslation,
   }
 
   // Combine base and feature API contexts with enhanced APIs + ADR-0026
@@ -415,6 +361,9 @@ export function createFullPluginContext(
     terminal: createTerminalAPI(pluginId),
     perf: createPerfAPI(pluginId),
     connectors: createConnectorsAPI(pluginId),
+    integrations: createIntegrationsAPI(pluginId, (permission) =>
+      permissionsAPI.hasPermission(permission as never)
+    ),
     share: createShareAPI(pluginId),
     backup: createBackupAPI(pluginId),
     automation: createAutomationAPI(pluginId),
@@ -426,7 +375,9 @@ export function createFullPluginContext(
 /**
  * Check if a context is a full plugin context
  */
-export function isFullPluginContext(context: PluginContext): context is FullPluginContext {
+export function isFullPluginContext(
+  context: PluginBaseContext | PluginContext
+): context is FullPluginContext {
   return "session" in context && "project" in context && "vector" in context
 }
 

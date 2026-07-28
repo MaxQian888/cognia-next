@@ -158,6 +158,7 @@ async function resolveWebview(
     viewId: def.id,
     containerId: def.containerId ? `${pluginId}:${def.containerId}` : undefined,
     title: def.title,
+    titleKey: def.titleKey,
     when: def.when,
     surface: def.surface ?? "panel",
     srcDoc,

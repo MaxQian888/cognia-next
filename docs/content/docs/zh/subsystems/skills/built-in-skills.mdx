@@ -1,11 +1,11 @@
 ---
 title: 内置技能
-description: ADR-0026 的类型化工具层级——一个经过代码审查的 MCP 工具注册表（40 个 Lark 技能），助手可直接调用，由 PII/白名单/IM 访问/HITL 分发器把守，并在确认卡片获批后通过连接器总线重新触发。
+description: ADR-0026 的类型化工具层级——经过代码审查、由助手直接调用的 MCP 工具注册表，包含桌面插件转换与连接器操作，并受 PII、访问控制和 HITL 保护。
 ---
 
 # 内置技能
 
-<Status variant="beta">ADR-0026 — lib/skills/built-in · 40 个 Lark 技能 · 经 A2UI 确认卡片实现 HITL</Status>
+<Status variant="beta">ADR-0026 — lib/skills/built-in · 类型化 MCP 工具 · 桌面与连接器 HITL</Status>
 
 <TLDR>
   内置技能是**模型调用的类型化 MCP 工具**，而不是一段提示词片段。每个技能都是一个冻结的
@@ -17,7 +17,8 @@ description: ADR-0026 的类型化工具层级——一个经过代码审查的 
   绑定（`a2ui-mapper.ts:171`），并在用户点击确认后通过连接器总线（`bus.ts:893`）重新进入。这 40 个 Lark 技能
   会调用用户已安装的 `lark-cli`（`exec-lark-cli.ts:101`），OAuth 凭据从已有的 Lark 连接器
   拉取（`auth-bridge.ts:86`）。运行时接线位于
-  `build-options.ts:895` 和 `plugin-tool-ipc.ts:144`。
+  `build-options.ts` 和 `plugin-tool-ipc.ts`。仅桌面可用的 `plugin.conversion` 家族则复用应用内
+  确定性转换器，并把所有路径限制在当前工作区。
 </TLDR>
 
 <Callout type="warn" title="与种子化的 `skill_builtin_*` 行不是一回事">
@@ -39,6 +40,8 @@ description: ADR-0026 的类型化工具层级——一个经过代码审查的 
 | `lib/skills/built-in/dispatcher.ts` | `runBuiltInSkill`——6 道闸门的信任流水线；永不抛出 |
 | `lib/skills/built-in/index.ts` | 公共桶文件；`import "./lark"` 触发所有注册 |
 | `lib/skills/built-in/lark/` | 跨 6 个家族（family）的 40 个 Lark 技能 + lark-cli 执行/鉴权桥 |
+| `lib/skills/built-in/plugin-conversion/` | 仅桌面可用的整插件确定性转换 inspect/apply 工具 |
+| `lib/plugin/convert/agent-service.ts` | 源快照、过期计划、空目标校验和文件系统写入适配器 |
 | `lib/claude/build-options.ts:895` | 闸门 + 清单构建 + 折叠进 `allowedTools` / `pluginTools` |
 | `lib/claude/plugin-tool-ipc.ts:144` | 渲染端 IPC 回退：MCP 工具名 → `runBuiltInSkill` |
 | `lib/connectors/bus.ts:893` | `skill_invoke` 回调短路（HITL 确认重新触发） |
@@ -187,10 +190,9 @@ Goal 和连接器自动模式的同一条红线。
 // lib/skills/built-in/dispatcher.ts:338 — the mutation → HITL decision
 function computeHitlRequired(skill, isImSession, requireHitlForWrites, bypass): boolean {
   if (bypass) return false                  // callback re-fire after Confirm
-  if (!isImSession) return false            // desktop in-app: no confirm card
   if (skill.mutation === "read") return false
   if (skill.mutation === "destructive") return true   // always — channel toggle ignored
-  return requireHitlForWrites !== false     // write: default true
+  return requireHitlForWrites !== false     // write: desktop + IM default true
 }
 ```
 
@@ -233,6 +235,26 @@ sequenceDiagram
   CLI-->>D: { status: "ok", data }
   D->>A: surfaces skill result through the chat loop
 ```
+
+## 插件转换家族
+
+`plugin.conversion` 把种子提示技能（`skills/built-in/plugin-conversion/SKILL.md`）与两个类型化工具组合起来：
+
+| 工具 | 变更等级 | 契约 |
+| --- | --- | --- |
+| `inspect_plugin_conversion` | `read` | 检测源生态、运行规范转换器、返回保真度/问题/文件清单，并在不写盘的情况下创建限时计划 |
+| `apply_plugin_conversion` | `write` | 重新读取源，拒绝过期计划、非空或重叠目标，经桌面确认后只写入确定性转换产物 |
+
+两个工具都声明 `imAccess: "blocked"`。仅当提示技能已激活（或选择加入的 `Skill` 自加载器可在本轮
+激活它）、桌面会话存在工作区 cwd 且工作区文件系统后端可用时，`resolveSendOptions` 才会暴露它们。
+源目录与输出目录都必须相对工作区；Rust 工作区文件命令会在落盘边界再次执行路径包含校验。
+
+计划将 `workspaceRoot + sourceDir + target` 绑定到源快照摘要，并在 15 分钟后过期。成功写入后计划
+即被消费。源发生变化、计划未知或过期、输出非空、源与输出重叠都会关闭式失败。不支持的能力保留在
+结构化 `blocking` 报告中；Agent 被明确禁止近似实现或自行生成转换后的运行时代码。
+
+整包转换支持 Claude Code、Codex 或 Gemini CLI → Cognia，以及 Cognia → 这三种生态中的任意一种。
+外部生态 → 外部生态刻意不支持。
 
 ## Lark CLI 桥
 
@@ -316,6 +338,11 @@ const builtInSkillsRequested =
   Boolean(session?.platformBinding?.adapterId) || character?.enableBuiltInSkills === true
 ```
 
+`plugin.conversion` 被刻意放在这个宽泛开关之外。它的条目会从通用桌面清单中移除，只在
+`builtin:plugin-conversion` 提示技能已激活或 `Skill` 自加载器启用时单独追加。这样，仅仅启用了其他
+连接器内置技能的角色不会意外获得文件系统写工具。它也位于 `disablePluginTools` 之外，因为该标志
+控制第三方插件工具，而非第一方转换能力。
+
 ### 渲染端分发回退
 
 sidecar 把每次 `cognia-builtin-skills` 工具调用通过已有的 `plugin_tool_exec` IPC
@@ -377,8 +404,8 @@ channel: lark.calendar (read+write), …` 的句子，让模型知道它在该�
     `binary_not_found` 错误（`exec-lark-cli.ts:118`），而非崩溃。
   - 审计是尽力而为：`safeAppendAudit`（`dispatcher.ts:387`）吞掉 Dexie 失败，因此缺失的审计
     存储绝不会破坏技能。
-  - 桌面应用内聊天目前运行写技能时**不**弹出确认卡片（`dispatcher.ts:345`）——用户
-    已经在盯着聊天；桌面同意覆盖层是已记录的未来钩子。
+  - 桌面写操作会暂停在标准工具审批对话框。`apply_plugin_conversion` 必须经用户批准才能写盘；
+    取消或超时会返回结构化拒绝。
 </Callout>
 
 ## 相关

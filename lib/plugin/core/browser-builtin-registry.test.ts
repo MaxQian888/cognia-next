@@ -43,7 +43,6 @@ describe("browser-builtin-registry", () => {
       "cognia-work-mode",
       "cognia-workflow-ai",
       "cognia-workspace-tools",
-      "github-delivery",
       "pet-daily-quests",
       "ripgrep-tools",
       "strix-security",
@@ -75,6 +74,46 @@ describe("browser-builtin-registry", () => {
   it("getBrowserBuiltinRegistryEntry resolves by plugin id", () => {
     const entry = getBrowserBuiltinRegistryEntry("cognia-screenshot")
     expect(entry?.path).toBe("builtin://cognia-screenshot")
+  })
+
+  it("hides the reference plugin outside the E2E runtime", () => {
+    expect(getBrowserBuiltinRegistryEntry("ui-surface-reference")).toBeUndefined()
+    expect(getBrowserBuiltinRegistry().map((entry) => entry.manifest.id)).not.toContain(
+      "ui-surface-reference"
+    )
+  })
+
+  it("bundles the reference plugin and stylesheet in the E2E runtime", () => {
+    const env = jest.replaceProperty(process, "env", {
+      ...process.env,
+      NEXT_PUBLIC_E2E: "1",
+    })
+    try {
+      expect(getBrowserBuiltinRegistryEntry("ui-surface-reference")?.bundledStyles).toContain(
+        ".ref-badge"
+      )
+      expect(getBrowserBuiltinRegistry().map((entry) => entry.manifest.id)).toContain(
+        "ui-surface-reference"
+      )
+    } finally {
+      env.restore()
+    }
+  })
+
+  it("isolates the surface harness from unrelated builtin schema contributions", () => {
+    const env = jest.replaceProperty(process, "env", {
+      ...process.env,
+      NEXT_PUBLIC_E2E: "1",
+    })
+    window.history.replaceState({}, "", "/e2e/plugin-ui-surfaces")
+    try {
+      expect(getBrowserBuiltinRegistry().map((entry) => entry.manifest.id)).toEqual([
+        "ui-surface-reference",
+      ])
+    } finally {
+      window.history.replaceState({}, "", "/")
+      env.restore()
+    }
   })
 
   it("returns undefined for unknown ids", () => {

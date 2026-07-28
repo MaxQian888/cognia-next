@@ -8,7 +8,7 @@
 
 use std::fs::{self, File};
 use std::io::Read;
-use std::path::PathBuf;
+use std::path::{Component, Path, PathBuf};
 
 use chrono::Utc;
 use flate2::read::GzDecoder;
@@ -55,6 +55,7 @@ pub async fn plugin_backup_create_for_state(
     plugin_id: String,
     label: Option<String>,
 ) -> Result<BackupPayload> {
+    crate::validate_plugin_id_path_component(&plugin_id)?;
     let plugin_dir = state.plugin_dir(&plugin_id);
     if !plugin_dir.exists() {
         return Err(PluginError::NotFound(plugin_id));
@@ -69,6 +70,12 @@ pub async fn plugin_backup_create_for_state(
     builder
         .append_dir_all(&plugin_id, &plugin_dir)
         .map_err(|e| PluginError::Internal(format!("tar append: {e}")))?;
+    let host_state_dir = state.plugin_host_state_dir(&plugin_id);
+    if host_state_dir.exists() {
+        builder
+            .append_dir_all(Path::new(".host-state").join(&plugin_id), &host_state_dir)
+            .map_err(|e| PluginError::Internal(format!("tar host state: {e}")))?;
+    }
     builder
         .into_inner()
         .map_err(|e| PluginError::Internal(format!("gzip finalize: {e}")))?
@@ -100,21 +107,106 @@ pub async fn plugin_backup_restore_for_state(
     plugin_id: String,
     backup_id: String,
 ) -> Result<()> {
+    crate::validate_plugin_id_path_component(&plugin_id)?;
+    let expected_prefix = format!("{plugin_id}-");
+    if !backup_id.starts_with(&expected_prefix)
+        || backup_id
+            .chars()
+            .any(|character| character == '/' || character == '\\' || character.is_control())
+    {
+        return Err(PluginError::InvalidArgument(
+            "backup_id must be a plugin-scoped identifier".into(),
+        ));
+    }
     let archive_path = backups_dir(&state).join(format!("{backup_id}.tar.gz"));
     if !archive_path.exists() {
         return Err(PluginError::NotFound(format!("backup {backup_id}")));
     }
+    fs::create_dir_all(&state.plugin_install_dir)?;
+    let staging = tempfile::tempdir_in(&state.plugin_install_dir)?;
     let plugin_dir = state.plugin_dir(&plugin_id);
-    if plugin_dir.exists() {
-        fs::remove_dir_all(&plugin_dir)?;
-    }
+    let host_state_dir = state.plugin_host_state_dir(&plugin_id);
     let archive_file = File::open(&archive_path)?;
     let decoder = GzDecoder::new(archive_file);
     let mut archive = tar::Archive::new(decoder);
-    archive
-        .unpack(&state.plugin_install_dir)
-        .map_err(|e| PluginError::Internal(format!("tar unpack: {e}")))?;
+    for entry in archive
+        .entries()
+        .map_err(|e| PluginError::Internal(format!("read backup entries: {e}")))?
+    {
+        let mut entry =
+            entry.map_err(|e| PluginError::Internal(format!("read backup entry: {e}")))?;
+        let path = entry
+            .path()
+            .map_err(|e| PluginError::Internal(format!("backup entry path: {e}")))?
+            .into_owned();
+        if path.components().any(|component| {
+            matches!(
+                component,
+                Component::ParentDir | Component::RootDir | Component::Prefix(_)
+            )
+        }) {
+            return Err(PluginError::InvalidArgument(
+                "backup contains an unsafe path".into(),
+            ));
+        }
+        let entry_type = entry.header().entry_type();
+        if !entry_type.is_file() && !entry_type.is_dir() {
+            return Err(PluginError::InvalidArgument(
+                "backup entries must be regular files or directories".into(),
+            ));
+        }
+        entry
+            .unpack_in(staging.path())
+            .map_err(|e| PluginError::Internal(format!("unpack backup entry: {e}")))?;
+    }
+
+    let staged_plugin = staging.path().join(&plugin_id);
+    if !staged_plugin.is_dir() {
+        return Err(PluginError::InvalidArgument(
+            "backup does not contain the requested plugin".into(),
+        ));
+    }
+    let staged_host_state = staging.path().join(".host-state").join(&plugin_id);
+    let rollback_plugin = staging.path().join(".rollback-package");
+    let rollback_host_state = staging.path().join(".rollback-host-state");
+
+    if plugin_dir.exists() {
+        fs::rename(&plugin_dir, &rollback_plugin)?;
+    }
+    if host_state_dir.exists() {
+        fs::rename(&host_state_dir, &rollback_host_state)?;
+    }
+
+    if let Err(error) = fs::rename(&staged_plugin, &plugin_dir) {
+        let _ = restore_renamed_tree(&rollback_plugin, &plugin_dir);
+        let _ = restore_renamed_tree(&rollback_host_state, &host_state_dir);
+        return Err(PluginError::Io(error));
+    }
+    if staged_host_state.exists() {
+        if let Some(parent) = host_state_dir.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        if let Err(error) = fs::rename(&staged_host_state, &host_state_dir) {
+            let _ = fs::remove_dir_all(&plugin_dir);
+            let _ = restore_renamed_tree(&rollback_plugin, &plugin_dir);
+            let _ = restore_renamed_tree(&rollback_host_state, &host_state_dir);
+            return Err(PluginError::Io(error));
+        }
+    }
     Ok(())
+}
+
+fn restore_renamed_tree(source: &Path, target: &Path) -> std::io::Result<()> {
+    if !source.exists() {
+        return Ok(());
+    }
+    if target.exists() {
+        fs::remove_dir_all(target)?;
+    }
+    if let Some(parent) = target.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    fs::rename(source, target)
 }
 
 #[tauri::command]
@@ -132,9 +224,14 @@ pub async fn plugin_backup_delete_for_state(
     plugin_id: String,
     backup_id: String,
 ) -> Result<()> {
-    if !backup_id.starts_with(&plugin_id) {
+    crate::validate_plugin_id_path_component(&plugin_id)?;
+    if !backup_id.starts_with(&format!("{plugin_id}-"))
+        || backup_id
+            .chars()
+            .any(|character| character == '/' || character == '\\' || character.is_control())
+    {
         return Err(PluginError::InvalidArgument(
-            "backup_id must start with plugin_id".into(),
+            "backup_id must be a plugin-scoped identifier".into(),
         ));
     }
     let archive_path = backups_dir(&state).join(format!("{backup_id}.tar.gz"));
@@ -229,5 +326,58 @@ mod tests {
         assert!(matches!(err, Some(PluginError::InvalidArgument(_))));
         // Original archive untouched.
         assert!(archive_path.exists());
+    }
+
+    #[tokio::test]
+    async fn host_owned_state_is_snapshotted_and_restored_with_the_package() {
+        let tmp = TempDir::new().unwrap();
+        let state = make_state(&tmp);
+        seed_plugin_dir(&state, "demo", "{\"id\":\"demo\",\"version\":\"1.0.0\"}");
+        let host_state = state.plugin_host_state_dir("demo");
+        fs::create_dir_all(&host_state).unwrap();
+        fs::write(host_state.join("managed-ide-state.db"), b"state-v1").unwrap();
+
+        let backup = plugin_backup_create_for_state(
+            &state,
+            "demo".to_string(),
+            Some("pre-update".to_string()),
+        )
+        .await
+        .unwrap();
+        fs::write(
+            state.plugin_dir("demo").join("manifest.json"),
+            b"{\"id\":\"demo\",\"version\":\"2.0.0\"}",
+        )
+        .unwrap();
+        fs::write(host_state.join("managed-ide-state.db"), b"state-v2").unwrap();
+
+        plugin_backup_restore_for_state(&state, "demo".to_string(), backup.backup_id)
+            .await
+            .unwrap();
+
+        assert_eq!(
+            fs::read_to_string(state.plugin_dir("demo").join("manifest.json")).unwrap(),
+            "{\"id\":\"demo\",\"version\":\"1.0.0\"}"
+        );
+        assert_eq!(
+            fs::read(
+                state
+                    .plugin_host_state_dir("demo")
+                    .join("managed-ide-state.db")
+            )
+            .unwrap(),
+            b"state-v1"
+        );
+    }
+
+    #[tokio::test]
+    async fn restore_rejects_a_backup_identifier_outside_the_plugin_namespace() {
+        let tmp = TempDir::new().unwrap();
+        let state = make_state(&tmp);
+        let error =
+            plugin_backup_restore_for_state(&state, "demo".to_string(), "../other".to_string())
+                .await
+                .unwrap_err();
+        assert!(matches!(error, PluginError::InvalidArgument(_)));
     }
 }

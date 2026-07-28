@@ -82,6 +82,75 @@ export const CANONICAL_EXTENSION_POINTS = [
 
 export type CanonicalExtensionPoint = (typeof CANONICAL_EXTENSION_POINTS)[number]
 
+export type PluginSurfaceFormFactor = "icon" | "row" | "block" | "panel"
+
+/**
+ * Exhaustive host-shape contract for every canonical extension point.
+ * Kept literal and dependency-free so plugin author tooling can consume it.
+ */
+export const EXTENSION_POINT_FORM_FACTORS: Record<
+  CanonicalExtensionPoint,
+  PluginSurfaceFormFactor
+> = {
+  "sidebar.left.top": "icon",
+  "sidebar.left.bottom": "icon",
+  "toolbar.left": "icon",
+  "toolbar.center": "icon",
+  "toolbar.right": "icon",
+  "statusbar.left": "icon",
+  "statusbar.center": "icon",
+  "statusbar.right": "icon",
+  "vscode.activity-bar": "icon",
+  "chat.input.actions": "row",
+  "chat.input.menu": "row",
+  "chat.message.actions": "row",
+  "chat.message.footer": "row",
+  "chat.tool-call.actions": "row",
+  "chat.message-part.actions": "row",
+  "artifact.toolbar": "row",
+  "artifact.actions": "row",
+  "canvas.toolbar": "row",
+  "goal.toolbar": "row",
+  "goal.detail.actions": "row",
+  "pet.panel.actions": "row",
+  "terminal.toolbar": "row",
+  "agent.teammate.actions": "row",
+  "agent.team.task.actions": "row",
+  "agent.team.board.toolbar": "row",
+  "agent.external-session.toolbar": "row",
+  "panel.header": "row",
+  "panel.footer": "row",
+  "inbox.conversation.actions": "row",
+  "inbox.composer.actions": "row",
+  "inbox.draft.actions": "row",
+  "chat.header": "block",
+  "chat.footer": "block",
+  "chat.input.above": "block",
+  "chat.input.below": "block",
+  "chat.message.before": "block",
+  "chat.message.after": "block",
+  "twin.panel.header": "block",
+  "twin.settings.cards": "block",
+  "settings.general": "block",
+  "settings.appearance": "block",
+  "settings.ai": "block",
+  "settings.plugins": "block",
+  "command-palette": "block",
+  "inbox.sidebar.section": "block",
+  "vscode.terminal.output": "block",
+  "sidebar.right.top": "panel",
+  "sidebar.right.bottom": "panel",
+  "canvas.sidebar": "panel",
+  "pet.console.tab": "panel",
+  "perf.panel": "panel",
+  "agent.team.panel": "panel",
+  "agent.team.report": "panel",
+  "twin.persona.panel": "panel",
+  "twin.overview.panel": "panel",
+  "vscode.sidebar.view": "panel",
+  "vscode.webview.panel": "panel",
+}
+
 export type {
   ExtensionPoint,
   ExtensionOptions,

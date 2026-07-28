@@ -6,7 +6,6 @@ import type {
 
 import clipboardHistoryManifest from "@/plugins/clipboard-history/plugin.json"
 import clipboardToolsManifest from "@/plugins/clipboard-tools/plugin.json"
-import githubDeliveryManifest from "@/plugins/github-delivery/plugin.json"
 import promptTemplatesManifest from "@/plugins/prompt-templates/plugin.json"
 import screenshotManifest from "@/plugins/screenshot/plugin.json"
 import webCloneManifest from "@/plugins/web-clone/plugin.json"
@@ -38,6 +37,7 @@ import browserToolsManifest from "@/plugins/browser-tools/plugin.json"
 import petDailyQuestsManifest from "@/plugins/pet-daily-quests/plugin.json"
 import strixSecurityManifest from "@/plugins/strix-security/plugin.json"
 import contextInspectorManifest from "@/plugins/context-inspector/plugin.json"
+import uiSurfaceReferenceManifest from "@/plugins/ui-surface-reference/plugin.json"
 
 // Static imports for built-in plugin modules
 import clipboardToolsModule from "@/plugins/clipboard-tools/src/index"
@@ -49,11 +49,6 @@ import ocrModule from "@/plugins/ocr/src/index"
 import evalModule from "@/plugins/eval/src/index"
 import promptTemplatesModule from "@/plugins/prompt-templates/src/index"
 import clipboardHistoryModule from "@/plugins/clipboard-history/src/index"
-import githubDeliveryModule from "@/plugins/github-delivery/src/index"
-// Namespace import: the connectors bridge looks up the adapter factory
-// (`createGithubAdapterForBridge`) by name in the module's exports, so the
-// loader must cache the full export namespace — not just `{ default }`.
-import * as githubDeliveryExports from "@/plugins/github-delivery/src/index"
 import workflowAiModule from "@/plugins/workflow-ai/src/index"
 import agentTeamExamplesModule from "@/plugins/agent-team-examples/src/index"
 import backendRefactorModule from "@/plugins/cognia-backend-refactor/src/index"
@@ -78,6 +73,7 @@ import browserToolsModule from "@/plugins/browser-tools/src/index"
 import petDailyQuestsModule from "@/plugins/pet-daily-quests/src/index"
 import strixSecurityModule from "@/plugins/strix-security/src/index"
 import contextInspectorModule from "@/plugins/context-inspector/src/index"
+import * as uiSurfaceReferenceModule from "@/plugins/ui-surface-reference/src/index"
 
 export interface BrowserBuiltinRegistryEntry {
   manifest: PluginManifest
@@ -92,6 +88,8 @@ export interface BrowserBuiltinRegistryEntry {
    * which drops the named factory functions and the bridge skips them.
    */
   moduleExports?: Record<string, unknown>
+  /** Bundled source for a built-in manifest.styles entry. */
+  bundledStyles?: string
 }
 
 function resolvePluginModule(mod: unknown): PluginDefinition {
@@ -184,21 +182,18 @@ const browserBuiltins: BrowserBuiltinRegistryEntry[] = [
     load: async () => resolvePluginModule(contextInspectorModule),
   },
   {
+    manifest: builtinManifest(uiSurfaceReferenceManifest, uiSurfaceReferenceModule),
+    path: "builtin://ui-surface-reference",
+    compatibilityDiagnostics: [],
+    load: async () => resolvePluginModule(uiSurfaceReferenceModule),
+    moduleExports: uiSurfaceReferenceModule as unknown as Record<string, unknown>,
+    bundledStyles: uiSurfaceReferenceModule.REFERENCE_PLUGIN_CSS,
+  },
+  {
     manifest: builtinManifest(clipboardHistoryManifest, clipboardHistoryModule),
     path: "builtin://cognia-clipboard-history",
     compatibilityDiagnostics: [],
     load: async () => resolvePluginModule(clipboardHistoryModule),
-  },
-  {
-    manifest: builtinManifest(githubDeliveryManifest, githubDeliveryModule),
-    path: "builtin://github-delivery",
-    compatibilityDiagnostics: [],
-    load: async () => resolvePluginModule(githubDeliveryModule),
-    // github-delivery declares a `connectors[]` factory; the loader must keep
-    // the named export (`createGithubAdapterForBridge`) so connectors-bridge
-    // can resolve it. Without this it caches only `{ default }` and the bridge
-    // logs "factory … not found in exports — skipping".
-    moduleExports: githubDeliveryExports as unknown as Record<string, unknown>,
   },
   {
     manifest: builtinManifest(workflowAiManifest, workflowAiModule),
@@ -387,8 +382,19 @@ const browserBuiltins: BrowserBuiltinRegistryEntry[] = [
   },
 ]
 
+function isBrowserBuiltinAvailable(entry: BrowserBuiltinRegistryEntry): boolean {
+  if (
+    process.env.NEXT_PUBLIC_E2E === "1" &&
+    typeof window !== "undefined" &&
+    window.location.pathname === "/e2e/plugin-ui-surfaces"
+  ) {
+    return entry.manifest.id === "ui-surface-reference"
+  }
+  return entry.manifest.id !== "ui-surface-reference" || process.env.NEXT_PUBLIC_E2E === "1"
+}
+
 export function getBrowserBuiltinRegistry(): BrowserBuiltinRegistryEntry[] {
-  return browserBuiltins.map((entry) => ({
+  return browserBuiltins.filter(isBrowserBuiltinAvailable).map((entry) => ({
     ...entry,
     compatibilityDiagnostics: [...entry.compatibilityDiagnostics],
   }))
@@ -397,5 +403,7 @@ export function getBrowserBuiltinRegistry(): BrowserBuiltinRegistryEntry[] {
 export function getBrowserBuiltinRegistryEntry(
   pluginId: string
 ): BrowserBuiltinRegistryEntry | undefined {
-  return browserBuiltins.find((entry) => entry.manifest.id === pluginId)
+  return browserBuiltins.find(
+    (entry) => entry.manifest.id === pluginId && isBrowserBuiltinAvailable(entry)
+  )
 }

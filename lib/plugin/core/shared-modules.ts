@@ -34,6 +34,7 @@ export const PLUGIN_SHARED_MODULES = [
   "react/jsx-dev-runtime",
   "@cognia/plugin-sdk",
   "@cognia/plugin-ui",
+  "lucide-react",
 ] as const
 
 export type PluginSharedModule = (typeof PLUGIN_SHARED_MODULES)[number]
@@ -63,6 +64,7 @@ export function primeSharedModules(): Promise<void> {
         ["react/jsx-dev-runtime", () => import("react/jsx-dev-runtime")],
         ["@cognia/plugin-sdk", () => import("@cognia/plugin-sdk")],
         ["@cognia/plugin-ui", () => import("@cognia/plugin-ui")],
+        ["lucide-react", () => import("lucide-react")],
       ]
 
       await Promise.all(

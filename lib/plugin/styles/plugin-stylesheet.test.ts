@@ -258,6 +258,23 @@ describe("loadPluginStyles", () => {
     expect(readFile).not.toHaveBeenCalled()
   })
 
+  it("injects styles bundled with a built-in registry entry", async () => {
+    const readFile = jest.fn()
+    const injected = await loadPluginStyles({
+      pluginId: "reference",
+      pluginRoot: "builtin://reference",
+      stylesEntry: "styles.css",
+      bundledCss: ".ref-badge { color: red }",
+      readFile,
+    })
+
+    expect(injected).toBe(true)
+    expect(readFile).not.toHaveBeenCalled()
+    expect(
+      document.head.querySelector(`style[${PLUGIN_STYLE_ATTRIBUTE}="reference"]`)?.textContent
+    ).toContain(".ref-badge")
+  })
+
   it("keeps the plugin loadable when the stylesheet is unreadable", async () => {
     const readFile = jest.fn(async () => {
       throw new Error("ENOENT")

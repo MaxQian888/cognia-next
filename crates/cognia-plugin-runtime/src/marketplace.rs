@@ -36,6 +36,35 @@ pub struct DownloadPayload {
     pub size_bytes: u64,
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StagedDownloadPayload {
+    pub transaction_id: String,
+    pub plugin_id: String,
+    pub version: String,
+    pub staged_path: String,
+    pub manifest: serde_json::Value,
+    pub size_bytes: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct StagedUpdateMetadata {
+    transaction_id: String,
+    plugin_id: String,
+    version: String,
+    size_bytes: u64,
+    manifest: serde_json::Value,
+}
+
+#[derive(Debug, Clone, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateRecoveryReport {
+    pub recovered_transactions: usize,
+    pub discarded_transactions: usize,
+    pub failures: Vec<String>,
+}
+
 /// Filename of the per-plugin verification receipt written host-side after a
 /// successful integrity/signature check at install time. The TS load gate
 /// (`PluginSignatureVerifier.verify`) consults it via `plugin_read_verification`
@@ -58,6 +87,210 @@ pub struct VerificationReceipt {
 
 fn cache_dir(state: &PluginRuntimeState) -> PathBuf {
     state.plugin_install_dir.join("_marketplace_cache")
+}
+
+fn update_transactions_dir(state: &PluginRuntimeState) -> PathBuf {
+    state.plugin_state_dir.join("update-transactions")
+}
+
+fn update_transaction_dir(
+    state: &PluginRuntimeState,
+    plugin_id: &str,
+    transaction_id: &str,
+) -> Result<PathBuf> {
+    crate::validate_plugin_id_path_component(plugin_id)?;
+    let parsed = uuid::Uuid::parse_str(transaction_id)
+        .map_err(|_| PluginError::InvalidArgument("invalid update transaction id".into()))?;
+    if parsed.hyphenated().to_string() != transaction_id {
+        return Err(PluginError::InvalidArgument(
+            "invalid update transaction id".into(),
+        ));
+    }
+    Ok(update_transactions_dir(state)
+        .join(plugin_id)
+        .join(transaction_id))
+}
+
+fn installed_package_matches(package_dir: &Path, plugin_id: &str, version: &str) -> Result<bool> {
+    let manifest_path = package_dir.join("plugin.json");
+    if !manifest_path.is_file() {
+        return Ok(false);
+    }
+    let manifest: serde_json::Value = serde_json::from_slice(&fs::read(manifest_path)?)?;
+    Ok(
+        manifest.get("id").and_then(serde_json::Value::as_str) == Some(plugin_id)
+            && manifest.get("version").and_then(serde_json::Value::as_str) == Some(version),
+    )
+}
+
+fn recover_update_transaction(
+    state: &PluginRuntimeState,
+    plugin_id: &str,
+    transaction_id: &str,
+) -> Result<bool> {
+    let transaction_dir = update_transaction_dir(state, plugin_id, transaction_id)?;
+    if fs::symlink_metadata(&transaction_dir)?
+        .file_type()
+        .is_symlink()
+    {
+        return Err(PluginError::InvalidArgument(
+            "update transaction directory cannot be a symlink".into(),
+        ));
+    }
+    let metadata: StagedUpdateMetadata =
+        serde_json::from_slice(&fs::read(transaction_dir.join("transaction.json"))?)?;
+    if metadata.plugin_id != plugin_id || metadata.transaction_id != transaction_id {
+        return Err(PluginError::InvalidArgument(
+            "update transaction descriptor mismatch".into(),
+        ));
+    }
+
+    let staged = transaction_dir.join("package");
+    let previous = transaction_dir.join("previous-package");
+    let committed = transaction_dir.join("committed").is_file();
+    let promotion_started = previous.exists() || !staged.exists();
+    if !committed && !promotion_started {
+        fs::remove_dir_all(&transaction_dir)?;
+        return Ok(false);
+    }
+
+    let plugin_dir = state.plugin_dir(plugin_id);
+    let interrupted_package = transaction_dir.join("interrupted-package");
+    if interrupted_package.exists() {
+        return Err(PluginError::InvalidArgument(
+            "update recovery already contains an interrupted package".into(),
+        ));
+    }
+    if plugin_dir.exists() {
+        if fs::symlink_metadata(&plugin_dir)?.file_type().is_symlink()
+            || !installed_package_matches(&plugin_dir, plugin_id, &metadata.version)?
+        {
+            return Err(PluginError::InvalidArgument(format!(
+                "refusing to replace an unknown package while recovering {plugin_id}"
+            )));
+        }
+        fs::rename(&plugin_dir, &interrupted_package)?;
+    }
+
+    if previous.exists() {
+        if fs::symlink_metadata(&previous)?.file_type().is_symlink() {
+            if interrupted_package.exists() {
+                fs::rename(&interrupted_package, &plugin_dir)?;
+            }
+            return Err(PluginError::InvalidArgument(
+                "previous update package cannot be a symlink".into(),
+            ));
+        }
+        if let Err(error) = fs::rename(&previous, &plugin_dir) {
+            if interrupted_package.exists() {
+                fs::rename(&interrupted_package, &plugin_dir)?;
+            }
+            return Err(PluginError::Io(error));
+        }
+    }
+
+    fs::remove_dir_all(&transaction_dir)?;
+    Ok(true)
+}
+
+/// Roll back update transactions that were interrupted before the frontend
+/// verified the new runtime/proxy handshake. Transactions which never began
+/// promotion are discarded; promoted packages are restored to the previous
+/// package. Unknown canonical packages are preserved and reported for manual
+/// intervention rather than being overwritten.
+pub fn recover_update_transactions_for_state(state: &PluginRuntimeState) -> UpdateRecoveryReport {
+    let root = update_transactions_dir(state);
+    let mut report = UpdateRecoveryReport::default();
+    let plugin_entries = match fs::read_dir(&root) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return report,
+        Err(error) => {
+            report
+                .failures
+                .push(format!("read update transaction root: {error}"));
+            return report;
+        }
+    };
+
+    for plugin_entry in plugin_entries {
+        let plugin_entry = match plugin_entry {
+            Ok(entry) => entry,
+            Err(error) => {
+                report
+                    .failures
+                    .push(format!("read update transaction plugin entry: {error}"));
+                continue;
+            }
+        };
+        let plugin_id = match plugin_entry.file_name().into_string() {
+            Ok(plugin_id) => plugin_id,
+            Err(_) => {
+                report
+                    .failures
+                    .push("update transaction plugin directory is not UTF-8".into());
+                continue;
+            }
+        };
+        if let Err(error) = crate::validate_plugin_id_path_component(&plugin_id) {
+            report.failures.push(format!(
+                "invalid update transaction plugin {plugin_id}: {error}"
+            ));
+            continue;
+        }
+        let plugin_metadata = match plugin_entry.metadata() {
+            Ok(metadata) if metadata.is_dir() && !metadata.file_type().is_symlink() => metadata,
+            Ok(_) => {
+                report.failures.push(format!(
+                    "update transaction plugin path is not a directory: {plugin_id}"
+                ));
+                continue;
+            }
+            Err(error) => {
+                report.failures.push(format!(
+                    "inspect update transaction plugin {plugin_id}: {error}"
+                ));
+                continue;
+            }
+        };
+        drop(plugin_metadata);
+        let transaction_entries = match fs::read_dir(plugin_entry.path()) {
+            Ok(entries) => entries,
+            Err(error) => {
+                report
+                    .failures
+                    .push(format!("read update transactions for {plugin_id}: {error}"));
+                continue;
+            }
+        };
+        for transaction_entry in transaction_entries {
+            let transaction_id = match transaction_entry.and_then(|entry| {
+                entry.file_name().into_string().map_err(|_| {
+                    std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        "transaction directory is not UTF-8",
+                    )
+                })
+            }) {
+                Ok(transaction_id) => transaction_id,
+                Err(error) => {
+                    report
+                        .failures
+                        .push(format!("read update transaction for {plugin_id}: {error}"));
+                    continue;
+                }
+            };
+            match recover_update_transaction(state, &plugin_id, &transaction_id) {
+                Ok(true) => report.recovered_transactions += 1,
+                Ok(false) => report.discarded_transactions += 1,
+                Err(error) => report.failures.push(format!(
+                    "recover update transaction {plugin_id}/{transaction_id}: {error}"
+                )),
+            }
+        }
+        let _ = fs::remove_dir(plugin_entry.path());
+    }
+    let _ = fs::remove_dir(root);
+    report
 }
 
 fn http_client() -> Result<reqwest::Client> {
@@ -341,63 +574,232 @@ pub(crate) fn install_archive_into_plugin_dir(
     bytes: &[u8],
     integrity: &DownloadIntegrity,
 ) -> Result<DownloadPayload> {
+    fs::create_dir_all(&state.plugin_install_dir)
+        .map_err(|e| PluginError::Internal(format!("create plugin install root: {e}")))?;
+    let transaction = tempfile::Builder::new()
+        .prefix(".cognia-update-")
+        .tempdir_in(&state.plugin_install_dir)
+        .map_err(|e| PluginError::Internal(format!("create update transaction: {e}")))?;
+    let prepared = transaction.path().join("package");
+    let (plugin_id, _) =
+        prepare_archive_package(expected_plugin_id, version, bytes, integrity, &prepared)?;
+
+    let plugin_dir = state.plugin_dir(&plugin_id);
+    let previous = transaction.path().join("previous");
+    if plugin_dir.exists() {
+        fs::rename(&plugin_dir, &previous)
+            .map_err(|e| PluginError::Internal(format!("stage previous {plugin_dir:?}: {e}")))?;
+    }
+    if let Err(error) = fs::rename(&prepared, &plugin_dir) {
+        if previous.exists() {
+            fs::rename(&previous, &plugin_dir).map_err(|rollback| {
+                PluginError::Internal(format!(
+                    "commit update failed ({error}); package rollback failed: {rollback}"
+                ))
+            })?;
+        }
+        return Err(PluginError::Internal(format!(
+            "commit plugin package: {error}"
+        )));
+    }
+
+    Ok(DownloadPayload {
+        plugin_id,
+        version: version.to_string(),
+        local_path: plugin_dir.to_string_lossy().into_owned(),
+        size_bytes: bytes.len() as u64,
+    })
+}
+
+fn prepare_archive_package(
+    expected_plugin_id: &str,
+    version: &str,
+    bytes: &[u8],
+    integrity: &DownloadIntegrity,
+    destination: &Path,
+) -> Result<(String, serde_json::Value)> {
     verify_download_integrity(expected_plugin_id, version, bytes, integrity)?;
-
-    let staging =
+    let extraction =
         tempfile::tempdir().map_err(|e| PluginError::Internal(format!("create temp dir: {e}")))?;
-    extract_tar_gz(bytes, staging.path()).map_err(PluginError::Internal)?;
-
-    let manifest_path = find_plugin_manifest(staging.path())
+    extract_tar_gz(bytes, extraction.path()).map_err(PluginError::Internal)?;
+    let manifest_path = find_plugin_manifest(extraction.path())
         .ok_or_else(|| PluginError::Internal("archive is missing plugin.json".into()))?;
     let plugin_root = manifest_path
         .parent()
         .map(Path::to_path_buf)
-        .unwrap_or_else(|| staging.path().to_path_buf());
+        .unwrap_or_else(|| extraction.path().to_path_buf());
     let (manifest_value, parsed) = read_manifest(&manifest_path).map_err(PluginError::Internal)?;
-
-    // Defend against a registry serving the wrong plugin under a given id.
     if !expected_plugin_id.is_empty() && parsed.id != expected_plugin_id {
         return Err(PluginError::Internal(format!(
             "archive plugin id '{}' does not match requested '{}'",
             parsed.id, expected_plugin_id
         )));
     }
+    let manifest_version = manifest_value
+        .get("version")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default();
+    if manifest_version != version {
+        return Err(PluginError::InvalidManifest(format!(
+            "archive plugin version '{}' does not match requested '{}'",
+            manifest_version, version
+        )));
+    }
     crate::contract::validate_manifest_contract(&manifest_value).map_err(PluginError::Internal)?;
     crate::contract::validate_existing_manifest_paths(&plugin_root, &manifest_value)
         .map_err(PluginError::Internal)?;
     validate_no_build(&plugin_root, &parsed).map_err(PluginError::Internal)?;
-
-    let plugin_dir = state.plugin_dir(&parsed.id);
-    if plugin_dir.exists() {
-        fs::remove_dir_all(&plugin_dir)
-            .map_err(|e| PluginError::Internal(format!("clear {plugin_dir:?}: {e}")))?;
-    }
-    fs::create_dir_all(&plugin_dir)
-        .map_err(|e| PluginError::Internal(format!("mkdir {plugin_dir:?}: {e}")))?;
-    copy_plugin_tree(&plugin_root, &plugin_dir).map_err(PluginError::Internal)?;
-    crate::contract::validate_existing_manifest_paths(&plugin_dir, &manifest_value)
+    copy_plugin_tree(&plugin_root, destination).map_err(PluginError::Internal)?;
+    crate::contract::validate_existing_manifest_paths(destination, &manifest_value)
         .map_err(PluginError::Internal)?;
-
-    // Persist a verification receipt so the TS load gate can confirm this
-    // install cleared an integrity/signature check. Only written when a claim
-    // was actually validated above; an install with no integrity material
-    // leaves none (and thus fails a require-signature policy on load).
     if let Some(verified_via) = integrity.verified_via() {
         let receipt = VerificationReceipt {
             verified_via: verified_via.to_string(),
             version: version.to_string(),
             verified_at: chrono::Utc::now().to_rfc3339(),
         };
-        let json = serde_json::to_string(&receipt)?;
-        fs::write(plugin_dir.join(VERIFICATION_RECEIPT_FILE), json)?;
+        fs::write(
+            destination.join(VERIFICATION_RECEIPT_FILE),
+            serde_json::to_string(&receipt)?,
+        )?;
     }
+    Ok((parsed.id, manifest_value))
+}
 
-    Ok(DownloadPayload {
-        plugin_id: parsed.id,
+pub(crate) fn stage_archive_update_for_state(
+    state: &PluginRuntimeState,
+    plugin_id: &str,
+    version: &str,
+    bytes: &[u8],
+    integrity: &DownloadIntegrity,
+) -> Result<StagedDownloadPayload> {
+    crate::validate_plugin_id_path_component(plugin_id)?;
+    let transaction_id = uuid::Uuid::new_v4().hyphenated().to_string();
+    let transaction_dir = update_transaction_dir(state, plugin_id, &transaction_id)?;
+    fs::create_dir_all(&transaction_dir)?;
+    let staged_path = transaction_dir.join("package");
+    let prepared = prepare_archive_package(plugin_id, version, bytes, integrity, &staged_path);
+    let (actual_plugin_id, manifest) = match prepared {
+        Ok(prepared) => prepared,
+        Err(error) => {
+            let _ = fs::remove_dir_all(&transaction_dir);
+            return Err(error);
+        }
+    };
+    let metadata = StagedUpdateMetadata {
+        transaction_id: transaction_id.clone(),
+        plugin_id: actual_plugin_id.clone(),
         version: version.to_string(),
-        local_path: plugin_dir.to_string_lossy().into_owned(),
+        size_bytes: bytes.len() as u64,
+        manifest: manifest.clone(),
+    };
+    persist_staged_update_metadata(&transaction_dir, &metadata)?;
+    Ok(StagedDownloadPayload {
+        transaction_id,
+        plugin_id: actual_plugin_id,
+        version: version.to_string(),
+        staged_path: staged_path.to_string_lossy().into_owned(),
+        manifest,
         size_bytes: bytes.len() as u64,
     })
+}
+
+fn persist_staged_update_metadata(
+    transaction_dir: &Path,
+    metadata: &StagedUpdateMetadata,
+) -> Result<()> {
+    let metadata_path = transaction_dir.join("transaction.json");
+    let result = (|| {
+        let bytes = serde_json::to_vec_pretty(metadata)?;
+        fs::write(&metadata_path, bytes).map_err(|error| {
+            PluginError::Internal(format!(
+                "write staged update descriptor {}: {error}",
+                metadata_path.display()
+            ))
+        })
+    })();
+    if result.is_err() {
+        if let Err(cleanup_error) = fs::remove_dir_all(transaction_dir) {
+            log::warn!(
+                "failed to clean staged update transaction {}: {cleanup_error}",
+                transaction_dir.display()
+            );
+        }
+    }
+    result
+}
+
+pub fn commit_staged_update_for_state(
+    state: &PluginRuntimeState,
+    plugin_id: &str,
+    transaction_id: &str,
+) -> Result<DownloadPayload> {
+    let transaction_dir = update_transaction_dir(state, plugin_id, transaction_id)?;
+    let metadata: StagedUpdateMetadata =
+        serde_json::from_slice(&fs::read(transaction_dir.join("transaction.json"))?)?;
+    if metadata.plugin_id != plugin_id || metadata.transaction_id != transaction_id {
+        return Err(PluginError::InvalidArgument(
+            "update transaction descriptor mismatch".into(),
+        ));
+    }
+    let staged_path = transaction_dir.join("package");
+    crate::contract::validate_existing_manifest_paths(&staged_path, &metadata.manifest)
+        .map_err(PluginError::Internal)?;
+    let plugin_dir = state.plugin_dir(plugin_id);
+    let previous = transaction_dir.join("previous-package");
+    if previous.exists() {
+        return Err(PluginError::InvalidArgument(
+            "update transaction was already committed".into(),
+        ));
+    }
+    if plugin_dir.exists() {
+        fs::rename(&plugin_dir, &previous)?;
+    }
+    if let Err(error) = fs::rename(&staged_path, &plugin_dir) {
+        if previous.exists() {
+            fs::rename(&previous, &plugin_dir)?;
+        }
+        return Err(PluginError::Io(error));
+    }
+    fs::write(transaction_dir.join("committed"), b"1")?;
+    Ok(DownloadPayload {
+        plugin_id: plugin_id.to_string(),
+        version: metadata.version,
+        local_path: plugin_dir.to_string_lossy().into_owned(),
+        size_bytes: metadata.size_bytes,
+    })
+}
+
+pub fn discard_staged_update_for_state(
+    state: &PluginRuntimeState,
+    plugin_id: &str,
+    transaction_id: &str,
+) -> Result<()> {
+    let transaction_dir = update_transaction_dir(state, plugin_id, transaction_id)?;
+    if transaction_dir.join("committed").exists() {
+        return Err(PluginError::InvalidArgument(
+            "cannot discard a committed update transaction".into(),
+        ));
+    }
+    if transaction_dir.exists() {
+        fs::remove_dir_all(transaction_dir)?;
+    }
+    Ok(())
+}
+
+pub fn finalize_staged_update_for_state(
+    state: &PluginRuntimeState,
+    plugin_id: &str,
+    transaction_id: &str,
+) -> Result<()> {
+    let transaction_dir = update_transaction_dir(state, plugin_id, transaction_id)?;
+    if !transaction_dir.join("committed").exists() {
+        return Err(PluginError::InvalidArgument(
+            "cannot finalize an uncommitted update transaction".into(),
+        ));
+    }
+    fs::remove_dir_all(transaction_dir)?;
+    Ok(())
 }
 
 #[tauri::command]
@@ -412,6 +814,31 @@ pub async fn plugin_download_version(
     public_key_hex: Option<String>,
     require_signature: Option<bool>,
 ) -> Result<DownloadPayload> {
+    let (bytes, integrity) = download_verified_archive(
+        &plugin_id,
+        &version,
+        &download_url,
+        checksum,
+        signature_hex,
+        public_key_hex,
+        require_signature,
+    )
+    .await?;
+    let cache = cache_dir(&state);
+    let _ = fs::create_dir_all(&cache);
+    let _ = fs::write(cache.join(format!("{plugin_id}-{version}.tar.gz")), &bytes);
+    install_archive_into_plugin_dir(state.inner(), &plugin_id, &version, &bytes, &integrity)
+}
+
+async fn download_verified_archive(
+    plugin_id: &str,
+    version: &str,
+    download_url: &str,
+    checksum: Option<String>,
+    signature_hex: Option<String>,
+    public_key_hex: Option<String>,
+    require_signature: Option<bool>,
+) -> Result<(Vec<u8>, DownloadIntegrity)> {
     crate::validate_plugin_id_path_component(&plugin_id)?;
     if download_url.trim().is_empty() {
         return Err(PluginError::Internal(
@@ -441,14 +868,87 @@ pub async fn plugin_download_version(
     };
     // Validate the raw bytes BEFORE caching or unpacking — a tampered archive
     // must not be written anywhere on disk.
-    verify_download_integrity(&plugin_id, &version, &bytes, &integrity)?;
+    verify_download_integrity(plugin_id, version, &bytes, &integrity)?;
+    Ok((bytes, integrity))
+}
 
-    // Keep the (now verified) raw archive around for diagnostics / re-checks.
-    let cache = cache_dir(&state);
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+pub async fn plugin_stage_version(
+    state: State<'_, PluginRuntimeState>,
+    plugin_id: String,
+    version: String,
+    download_url: String,
+    checksum: Option<String>,
+    signature_hex: Option<String>,
+    public_key_hex: Option<String>,
+    require_signature: Option<bool>,
+) -> Result<StagedDownloadPayload> {
+    plugin_stage_version_for_state(
+        state.inner(),
+        plugin_id,
+        version,
+        download_url,
+        checksum,
+        signature_hex,
+        public_key_hex,
+        require_signature,
+    )
+    .await
+}
+
+#[allow(clippy::too_many_arguments)]
+pub async fn plugin_stage_version_for_state(
+    state: &PluginRuntimeState,
+    plugin_id: String,
+    version: String,
+    download_url: String,
+    checksum: Option<String>,
+    signature_hex: Option<String>,
+    public_key_hex: Option<String>,
+    require_signature: Option<bool>,
+) -> Result<StagedDownloadPayload> {
+    let (bytes, integrity) = download_verified_archive(
+        &plugin_id,
+        &version,
+        &download_url,
+        checksum,
+        signature_hex,
+        public_key_hex,
+        require_signature,
+    )
+    .await?;
+    let cache = cache_dir(state);
     let _ = fs::create_dir_all(&cache);
     let _ = fs::write(cache.join(format!("{plugin_id}-{version}.tar.gz")), &bytes);
+    stage_archive_update_for_state(state, &plugin_id, &version, &bytes, &integrity)
+}
 
-    install_archive_into_plugin_dir(state.inner(), &plugin_id, &version, &bytes, &integrity)
+#[tauri::command]
+pub async fn plugin_commit_staged_update(
+    state: State<'_, PluginRuntimeState>,
+    plugin_id: String,
+    transaction_id: String,
+) -> Result<DownloadPayload> {
+    commit_staged_update_for_state(state.inner(), &plugin_id, &transaction_id)
+}
+
+#[tauri::command]
+pub async fn plugin_discard_staged_update(
+    state: State<'_, PluginRuntimeState>,
+    plugin_id: String,
+    transaction_id: String,
+) -> Result<()> {
+    discard_staged_update_for_state(state.inner(), &plugin_id, &transaction_id)
+}
+
+#[tauri::command]
+pub async fn plugin_finalize_staged_update(
+    state: State<'_, PluginRuntimeState>,
+    plugin_id: String,
+    transaction_id: String,
+) -> Result<()> {
+    finalize_staged_update_for_state(state.inner(), &plugin_id, &transaction_id)
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -552,6 +1052,320 @@ mod tests {
         let dir = state.plugin_dir("demo.market");
         assert!(dir.join("plugin.json").exists());
         assert!(dir.join("index.js").exists());
+    }
+
+    #[test]
+    fn update_promotes_a_fully_validated_tree_and_removes_the_previous_package() {
+        let tmp = TempDir::new().unwrap();
+        let state = make_state(&tmp);
+        let plugin_dir = state.plugin_dir("demo.market");
+        fs::create_dir_all(&plugin_dir).unwrap();
+        fs::write(
+            plugin_dir.join("plugin.json"),
+            br#"{"id":"demo.market","name":"Demo","version":"1.0.0","type":"frontend","main":"index.js"}"#,
+        )
+        .unwrap();
+        fs::write(plugin_dir.join("old-only.txt"), b"old").unwrap();
+        fs::write(plugin_dir.join("index.js"), b"old code").unwrap();
+        let archive = make_tar_gz(&[
+            (
+                "demo.market/plugin.json",
+                br#"{"id":"demo.market","name":"Demo","version":"2.0.0","type":"frontend","main":"index.js"}"#,
+            ),
+            ("demo.market/index.js", b"new code"),
+        ]);
+
+        install_archive_into_plugin_dir(
+            &state,
+            "demo.market",
+            "2.0.0",
+            &archive,
+            &DownloadIntegrity::none(),
+        )
+        .unwrap();
+
+        assert_eq!(
+            fs::read_to_string(plugin_dir.join("index.js")).unwrap(),
+            "new code"
+        );
+        assert!(!plugin_dir.join("old-only.txt").exists());
+        assert!(fs::read_dir(&state.plugin_install_dir)
+            .unwrap()
+            .all(|entry| !entry
+                .unwrap()
+                .file_name()
+                .to_string_lossy()
+                .starts_with(".cognia-update-")));
+    }
+
+    #[test]
+    fn staged_update_leaves_the_working_package_untouched_until_commit() {
+        let tmp = TempDir::new().unwrap();
+        let state = make_state(&tmp);
+        let plugin_dir = state.plugin_dir("demo.market");
+        fs::create_dir_all(&plugin_dir).unwrap();
+        fs::write(
+            plugin_dir.join("plugin.json"),
+            br#"{"id":"demo.market","name":"Demo","version":"1.0.0","type":"frontend","main":"index.js"}"#,
+        )
+        .unwrap();
+        fs::write(plugin_dir.join("index.js"), b"old code").unwrap();
+        let archive = make_tar_gz(&[
+            (
+                "demo.market/plugin.json",
+                br#"{"id":"demo.market","name":"Demo","version":"2.0.0","type":"frontend","main":"index.js"}"#,
+            ),
+            ("demo.market/index.js", b"new code"),
+        ]);
+
+        let staged = stage_archive_update_for_state(
+            &state,
+            "demo.market",
+            "2.0.0",
+            &archive,
+            &DownloadIntegrity::none(),
+        )
+        .unwrap();
+        assert_eq!(
+            fs::read_to_string(plugin_dir.join("index.js")).unwrap(),
+            "old code"
+        );
+        assert_eq!(
+            fs::read_to_string(Path::new(&staged.staged_path).join("index.js")).unwrap(),
+            "new code"
+        );
+
+        let committed =
+            commit_staged_update_for_state(&state, "demo.market", &staged.transaction_id).unwrap();
+        assert_eq!(committed.version, "2.0.0");
+        assert_eq!(
+            fs::read_to_string(plugin_dir.join("index.js")).unwrap(),
+            "new code"
+        );
+        finalize_staged_update_for_state(&state, "demo.market", &staged.transaction_id).unwrap();
+        assert!(!update_transactions_dir(&state)
+            .join("demo.market")
+            .join(staged.transaction_id)
+            .exists());
+    }
+
+    #[test]
+    fn metadata_write_failure_removes_the_staged_transaction() {
+        let tmp = TempDir::new().unwrap();
+        let transaction_dir = tmp.path().join("transaction");
+        fs::create_dir_all(transaction_dir.join("package")).unwrap();
+        fs::create_dir(transaction_dir.join("transaction.json")).unwrap();
+        let metadata = StagedUpdateMetadata {
+            transaction_id: "tx-1".into(),
+            plugin_id: "demo.market".into(),
+            version: "2.0.0".into(),
+            size_bytes: 3,
+            manifest: serde_json::json!({ "id": "demo.market" }),
+        };
+
+        let error = persist_staged_update_metadata(&transaction_dir, &metadata).unwrap_err();
+
+        assert!(error.to_string().contains("transaction.json"));
+        assert!(!transaction_dir.exists());
+    }
+
+    #[test]
+    fn discarded_staged_update_never_changes_the_working_package() {
+        let tmp = TempDir::new().unwrap();
+        let state = make_state(&tmp);
+        let plugin_dir = state.plugin_dir("demo.market");
+        fs::create_dir_all(&plugin_dir).unwrap();
+        fs::write(
+            plugin_dir.join("plugin.json"),
+            br#"{"id":"demo.market","name":"Demo","version":"1.0.0","type":"frontend","main":"index.js"}"#,
+        )
+        .unwrap();
+        fs::write(plugin_dir.join("index.js"), b"old code").unwrap();
+        let archive = make_tar_gz(&[
+            (
+                "demo.market/plugin.json",
+                br#"{"id":"demo.market","name":"Demo","version":"2.0.0","type":"frontend","main":"index.js"}"#,
+            ),
+            ("demo.market/index.js", b"new code"),
+        ]);
+        let staged = stage_archive_update_for_state(
+            &state,
+            "demo.market",
+            "2.0.0",
+            &archive,
+            &DownloadIntegrity::none(),
+        )
+        .unwrap();
+
+        discard_staged_update_for_state(&state, "demo.market", &staged.transaction_id).unwrap();
+        assert_eq!(
+            fs::read_to_string(plugin_dir.join("index.js")).unwrap(),
+            "old code"
+        );
+        assert!(!Path::new(&staged.staged_path).exists());
+    }
+
+    #[test]
+    fn startup_recovery_discards_an_update_that_never_started_promotion() {
+        let tmp = TempDir::new().unwrap();
+        let state = make_state(&tmp);
+        let plugin_dir = state.plugin_dir("demo.market");
+        fs::create_dir_all(&plugin_dir).unwrap();
+        fs::write(
+            plugin_dir.join("plugin.json"),
+            br#"{"id":"demo.market","name":"Demo","version":"1.0.0","type":"frontend","main":"index.js"}"#,
+        )
+        .unwrap();
+        fs::write(plugin_dir.join("index.js"), b"old code").unwrap();
+        let archive = make_tar_gz(&[
+            (
+                "demo.market/plugin.json",
+                br#"{"id":"demo.market","name":"Demo","version":"2.0.0","type":"frontend","main":"index.js"}"#,
+            ),
+            ("demo.market/index.js", b"new code"),
+        ]);
+        let staged = stage_archive_update_for_state(
+            &state,
+            "demo.market",
+            "2.0.0",
+            &archive,
+            &DownloadIntegrity::none(),
+        )
+        .unwrap();
+
+        let recovered = make_state(&tmp);
+        assert_eq!(
+            fs::read_to_string(recovered.plugin_dir("demo.market").join("index.js")).unwrap(),
+            "old code"
+        );
+        assert!(!Path::new(&staged.staged_path).exists());
+    }
+
+    #[test]
+    fn startup_recovery_rolls_back_a_committed_but_unverified_update() {
+        let tmp = TempDir::new().unwrap();
+        let state = make_state(&tmp);
+        let plugin_dir = state.plugin_dir("demo.market");
+        fs::create_dir_all(&plugin_dir).unwrap();
+        fs::write(
+            plugin_dir.join("plugin.json"),
+            br#"{"id":"demo.market","name":"Demo","version":"1.0.0","type":"frontend","main":"index.js"}"#,
+        )
+        .unwrap();
+        fs::write(plugin_dir.join("index.js"), b"old code").unwrap();
+        let archive = make_tar_gz(&[
+            (
+                "demo.market/plugin.json",
+                br#"{"id":"demo.market","name":"Demo","version":"2.0.0","type":"frontend","main":"index.js"}"#,
+            ),
+            ("demo.market/index.js", b"new code"),
+        ]);
+        let staged = stage_archive_update_for_state(
+            &state,
+            "demo.market",
+            "2.0.0",
+            &archive,
+            &DownloadIntegrity::none(),
+        )
+        .unwrap();
+        commit_staged_update_for_state(&state, "demo.market", &staged.transaction_id).unwrap();
+
+        let recovered = make_state(&tmp);
+        assert_eq!(
+            fs::read_to_string(recovered.plugin_dir("demo.market").join("index.js")).unwrap(),
+            "old code"
+        );
+        assert!(!update_transactions_dir(&recovered)
+            .join("demo.market")
+            .join(staged.transaction_id)
+            .exists());
+    }
+
+    #[test]
+    fn startup_recovery_restores_the_old_package_if_promotion_was_interrupted() {
+        let tmp = TempDir::new().unwrap();
+        let state = make_state(&tmp);
+        let plugin_dir = state.plugin_dir("demo.market");
+        fs::create_dir_all(&plugin_dir).unwrap();
+        fs::write(
+            plugin_dir.join("plugin.json"),
+            br#"{"id":"demo.market","name":"Demo","version":"1.0.0","type":"frontend","main":"index.js"}"#,
+        )
+        .unwrap();
+        fs::write(plugin_dir.join("index.js"), b"old code").unwrap();
+        let archive = make_tar_gz(&[
+            (
+                "demo.market/plugin.json",
+                br#"{"id":"demo.market","name":"Demo","version":"2.0.0","type":"frontend","main":"index.js"}"#,
+            ),
+            ("demo.market/index.js", b"new code"),
+        ]);
+        let staged = stage_archive_update_for_state(
+            &state,
+            "demo.market",
+            "2.0.0",
+            &archive,
+            &DownloadIntegrity::none(),
+        )
+        .unwrap();
+        let transaction_dir =
+            update_transaction_dir(&state, "demo.market", &staged.transaction_id).unwrap();
+        fs::rename(&plugin_dir, transaction_dir.join("previous-package")).unwrap();
+
+        let recovered = make_state(&tmp);
+        assert_eq!(
+            fs::read_to_string(recovered.plugin_dir("demo.market").join("index.js")).unwrap(),
+            "old code"
+        );
+        assert!(!transaction_dir.exists());
+    }
+
+    #[test]
+    fn startup_recovery_preserves_an_unknown_canonical_package() {
+        let tmp = TempDir::new().unwrap();
+        let state = make_state(&tmp);
+        let plugin_dir = state.plugin_dir("demo.market");
+        fs::create_dir_all(&plugin_dir).unwrap();
+        fs::write(
+            plugin_dir.join("plugin.json"),
+            br#"{"id":"demo.market","name":"Demo","version":"1.0.0","type":"frontend","main":"index.js"}"#,
+        )
+        .unwrap();
+        fs::write(plugin_dir.join("index.js"), b"old code").unwrap();
+        let archive = make_tar_gz(&[
+            (
+                "demo.market/plugin.json",
+                br#"{"id":"demo.market","name":"Demo","version":"2.0.0","type":"frontend","main":"index.js"}"#,
+            ),
+            ("demo.market/index.js", b"new code"),
+        ]);
+        let staged = stage_archive_update_for_state(
+            &state,
+            "demo.market",
+            "2.0.0",
+            &archive,
+            &DownloadIntegrity::none(),
+        )
+        .unwrap();
+        commit_staged_update_for_state(&state, "demo.market", &staged.transaction_id).unwrap();
+        fs::write(
+            plugin_dir.join("plugin.json"),
+            br#"{"id":"demo.market","name":"Demo","version":"3.0.0","type":"frontend","main":"index.js"}"#,
+        )
+        .unwrap();
+        fs::write(plugin_dir.join("index.js"), b"unrelated code").unwrap();
+
+        let report = recover_update_transactions_for_state(&state);
+        assert_eq!(report.recovered_transactions, 0);
+        assert_eq!(report.failures.len(), 1);
+        assert_eq!(
+            fs::read_to_string(plugin_dir.join("index.js")).unwrap(),
+            "unrelated code"
+        );
+        assert!(update_transactions_dir(&state)
+            .join("demo.market")
+            .join(staged.transaction_id)
+            .exists());
     }
 
     #[test]

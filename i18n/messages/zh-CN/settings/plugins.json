@@ -35,6 +35,7 @@
     "badgeUpdates": "{count} 可更新",
     "hint": "在工作台中管理、安装、配置并治理插件。",
     "manageGovernance": "管理治理",
+    "openIntegrations": "进入 Integrations",
     "openWorkspace": "进入插件工作台"
   },
   "title": "插件"

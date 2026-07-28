@@ -105,7 +105,9 @@ describe("PluginModalRoot", () => {
     act(() => {
       usePluginModalStore.getState().open({ pluginId: "p1", component: Broken })
     })
-    expect(screen.getByText(/Plugin modal failed to render/)).toBeInTheDocument()
+    expect(screen.getByRole("alert")).toHaveTextContent("p1 could not render")
+    expect(screen.getByRole("alert")).toHaveTextContent("plugin boom")
+    expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument()
     consoleError.mockRestore()
   })
 
@@ -198,7 +200,8 @@ describe("PluginModalRoot", () => {
           .getState()
           .open({ pluginId: "p1", component: Broken, options: { variant: "sheet-bottom" } })
       })
-      expect(screen.getByText(/Plugin modal failed to render/)).toBeInTheDocument()
+      expect(screen.getByRole("alert")).toHaveTextContent("p1 could not render")
+      expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument()
       consoleError.mockRestore()
     })
   })

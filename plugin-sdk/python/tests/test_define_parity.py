@@ -86,6 +86,7 @@ PYTHON_MIRRORS: dict[str, str] = {
     "lsp-server": "define_lsp_server",
     "cli-tool": "define_cli_tool",
     "connector": "define_connector",
+    "integration": "define_integration",
     # workflow / scheduler / configuration family
     "workflow-template": "define_workflow_template",
     "scheduled-task": "define_scheduled_task",

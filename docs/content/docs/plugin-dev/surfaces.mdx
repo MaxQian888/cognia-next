@@ -15,20 +15,43 @@ or your first hook will throw.
 
 ## Mounting a component
 
-Register in `activate()`. The call returns a disposer; the host also drops every
-registration automatically when your plugin is disabled.
+Prefer a declarative `extensions[]` entry. The host validates the canonical
+point, derives `onView:<point>` activation, imports the named component, and
+registers it before `activate()` runs.
+
+```json title="plugin.json"
+{
+  "permissions": ["extension:ui"],
+  "capabilities": ["components"],
+  "extensions": [
+    {
+      "point": "chat.input.actions",
+      "entry": "dist/index.js",
+      "export": "SummarizeAction",
+      "priority": 10,
+      "when": "chat.active && !chat.streaming",
+      "labelKey": "actions.summarize"
+    }
+  ]
+}
+```
+
+Imperative registration remains available for runtime-defined contributions.
+The disposer and automatic disable cleanup behave the same way.
 
 ```tsx title="src/index.tsx"
-import { definePlugin, type FullPluginContext, type PluginContext } from "@cognia/plugin-sdk"
+import { definePlugin, type PluginContext } from "@cognia/plugin-sdk"
 import { Button } from "@cognia/plugin-ui"
+
+export function SummarizeAction({ formFactor }) {
+  return <Button size={formFactor === "icon" ? "icon-sm" : "sm"}>Summarize</Button>
+}
 
 export default definePlugin({
   manifest: {
     /* … */
   },
-  activate: async (base: PluginContext) => {
-    const ctx = base as unknown as FullPluginContext
-
+  activate: async (ctx: PluginContext) => {
     ctx.extensions.registerExtension(
       "chat.input.actions",
       ({ formFactor }) => <Button size="sm">Summarize</Button>,
@@ -39,10 +62,8 @@ export default definePlugin({
 ```
 
 <Callout>
-  `activate` is declared against the narrow `PluginContext`, but the host always
-  passes a `FullPluginContext` — that is where `extensions`, `theme` and the
-  other v2 namespaces live. Narrow once at the top of `activate` rather than
-  reaching for optional chaining at every call site.
+  `PluginContext` contains the complete host API. `FullPluginContext` remains
+  only as a deprecated compatibility alias; new plugins do not need a cast.
 </Callout>
 
 `extensions.registerExtension(point, component, options?)`:
@@ -55,8 +76,11 @@ export default definePlugin({
 | `when`      | Declarative visibility clause over the context-key store, e.g. `"chat.active"`. Re-evaluated automatically. |
 | `condition` | Imperative predicate. Prefer `when` — it re-renders on state change without your own subscription.          |
 
-Your component is wrapped in an error boundary: if it throws, it is removed from
-the slot and the rest of the UI is unaffected.
+Every contribution is wrapped by the host's `PluginSurface`. It stamps the
+plugin/style boundary, applies width hints and records render failures. Failure
+behavior follows the form factor: compact `icon` and `row` contributions are
+removed silently, while `block` and `panel` surfaces show a localized inline
+diagnostic with a retry action.
 
 ## Form factors
 
@@ -106,9 +130,34 @@ an unshared specifier fails at load with a message naming it.
 ### Components
 
 `@cognia/plugin-ui` is the component surface: `Button`, `Badge`, `Card`,
-`Input`, `Label`, `Checkbox`, `Select`, `Tabs`, `Tooltip`, `Alert`, plus `cn`.
-They carry no literal colors, so they follow the user's theme, density and
-motion settings with no work from you.
+`Input`, `Label`, `Checkbox`, `Select`, `Tabs`, `Tooltip`, `Alert`, `Dialog`,
+`Sonner`/`toast`, react-hook-form helpers, plus `cn`. `Dialog` portals into the
+host document and requires a localized `closeLabel`; `Form` uses the shared
+`react-hook-form` context. These components carry no literal colors, so they
+follow the user's theme, density and motion settings with no work from you.
+
+### Labels, icons and locale changes
+
+Manifest UI labels accept a fallback literal plus a plugin-local key:
+`views[].titleKey`, `viewsContainers[].titleKey`, `webviews[].titleKey`,
+`quickActions[].labelKey`, `trayItems[].labelKey`, `modalMounts[].labelKey`,
+`contextPanels[].labelKey` and `extensions[].labelKey`. Every declared locale
+must contain every referenced key. `ctx.i18n.t("actions.summarize")` reads the
+same `manifest.i18n.locales` registry the host uses, and
+`registerTranslations()` updates that shared registry at runtime.
+
+Native icon fields use `PluginIconName`, the exported name of a
+`lucide-react` icon such as `"PanelRight"` or `"Sparkles"`. Unknown names fail
+manifest validation rather than silently falling back. VS Code light/dark icon
+resources and character-pack emoji/color metadata remain separate contracts.
+
+### Context panels and view containers
+
+Use `contextPanels[]` for a resource-scoped right workbench panel. Use
+`viewsContainers[]` for a top-level rail destination, then place `views[]`
+(`tree` or custom React) and `webviews[]` inside that container. The host
+unifies the view hosts inside a container; it does not treat a context panel
+and a rail container as interchangeable navigation.
 
 ## Design tokens
 

@@ -26,8 +26,8 @@
  * ADR-0026 §3 §A.
  */
 
-import { Component, type ErrorInfo, type ReactNode } from "react"
-import { useTranslations } from "next-intl"
+import type { ReactNode } from "react"
+import { PluginSurface } from "@/components/plugins/plugin-surface"
 import { Dialog, DialogContent } from "@/components/ui/dialog"
 import { Sheet, SheetContent } from "@/components/ui/sheet"
 import { cn } from "@/lib/utils"
@@ -37,46 +37,6 @@ import {
   type PluginModalEntry,
   type PluginModalSize,
 } from "@/types/plugin/plugin-modal"
-
-interface ModalBoundaryProps {
-  pluginId: string
-  modalId: string
-  children: ReactNode
-}
-
-interface ModalBoundaryState {
-  hasError: boolean
-}
-
-function ModalErrorFallback(): ReactNode {
-  const t = useTranslations("plugins.modalRoot")
-  return <div className="p-6 text-sm text-destructive">{t("errorFallback")}</div>
-}
-
-class PluginModalErrorBoundary extends Component<ModalBoundaryProps, ModalBoundaryState> {
-  state: ModalBoundaryState = { hasError: false }
-
-  static getDerivedStateFromError(): ModalBoundaryState {
-    return { hasError: true }
-  }
-
-  componentDidCatch(error: Error, info: ErrorInfo): void {
-    // The plugin-system logger is not React-aware; downgrade to console.
-
-    console.error(
-      `[plugin-modal] ${this.props.pluginId} threw rendering modal ${this.props.modalId}`,
-      error,
-      info
-    )
-  }
-
-  render(): ReactNode {
-    if (this.state.hasError) {
-      return <ModalErrorFallback />
-    }
-    return this.props.children
-  }
-}
 
 /**
  * Size presets, one map per variant because the axis a size controls differs:
@@ -118,9 +78,14 @@ function renderEntry(entry: PluginModalEntry): ReactNode {
     usePluginModalStore.getState().close(entry.modalId)
   }
   const body = (
-    <PluginModalErrorBoundary pluginId={entry.pluginId} modalId={entry.modalId}>
+    <PluginSurface
+      pluginId={entry.pluginId}
+      surfaceId={`modal:${entry.modalId}`}
+      formFactor="panel"
+      container={false}
+    >
       <Component modalId={entry.modalId} args={entry.args} onClose={handleClose} />
-    </PluginModalErrorBoundary>
+    </PluginSurface>
   )
   const handleOpenChange = (open: boolean): void => {
     if (!open) handleClose()

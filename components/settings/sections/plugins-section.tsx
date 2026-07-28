@@ -9,7 +9,7 @@
 import Link from "next/link"
 import { useLiveQuery } from "dexie-react-hooks"
 import { useTranslations } from "next-intl"
-import { ArrowRightIcon, BoxesIcon, ShieldCheckIcon } from "lucide-react"
+import { ArrowRightIcon, BoxesIcon, PlugZapIcon, ShieldCheckIcon } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
@@ -68,6 +68,12 @@ export function PluginsSection({ onClose }: Props) {
             <Link href="/plugins?section=governance&gov=permissions">
               <ShieldCheckIcon className="mr-1.5 size-3.5" />
               {tOverview("manageGovernance")}
+            </Link>
+          </Button>
+          <Button asChild size="sm" variant="outline" onClick={() => onClose?.()}>
+            <Link href="/integrations">
+              <PlugZapIcon className="mr-1.5 size-3.5" />
+              {tOverview("openIntegrations")}
             </Link>
           </Button>
         </div>

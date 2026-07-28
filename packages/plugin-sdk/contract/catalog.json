@@ -1,6 +1,6 @@
 {
   "$schema": "./catalog.schema.json",
-  "schemaVersion": 3,
+  "schemaVersion": 4,
   "minimumHostVersion": "0.1.0",
   "pluginTypes": ["frontend", "python", "hybrid", "wasm", "vscode-extension"],
   "permissions": [
@@ -32,6 +32,9 @@
     "workflow:read",
     "editor:read",
     "editor:write",
+    "debug:control",
+    "tests:run",
+    "notebook:execute",
     "vector:read",
     "vector:write",
     "ai:chat",
@@ -79,6 +82,10 @@
     "connectors:read",
     "connectors:send",
     "connectors:manage",
+    "integrations:read",
+    "integrations:events",
+    "integrations:execute",
+    "integrations:manage",
     "share:read",
     "share:create",
     "backup:read",
@@ -112,7 +119,7 @@
     {
       "id": "components",
       "support": "supported",
-      "manifestFields": ["a2uiComponents"],
+      "manifestFields": ["a2uiComponents", "extensions"],
       "introducedIn": "0.1.0",
       "minimumHostVersion": "0.1.0"
     },
@@ -425,6 +432,13 @@
       "minimumHostVersion": "0.1.0"
     },
     {
+      "id": "integrations",
+      "support": "supported",
+      "manifestFields": ["integrations"],
+      "introducedIn": "0.1.0",
+      "minimumHostVersion": "0.1.0"
+    },
+    {
       "id": "workflow",
       "support": "supported",
       "manifestFields": ["workflows"],
@@ -476,7 +490,7 @@
     {
       "id": "tray",
       "support": "supported",
-      "manifestFields": [],
+      "manifestFields": ["trayItems"],
       "introducedIn": "0.1.0",
       "minimumHostVersion": "0.1.0"
     },
@@ -697,6 +711,12 @@
     },
     {
       "path": "messageRenderers[].entry",
+      "runtime": "javascript",
+      "requiredFor": [],
+      "executable": true
+    },
+    {
+      "path": "extensions[].entry",
       "runtime": "javascript",
       "requiredFor": [],
       "executable": true
@@ -928,6 +948,12 @@
       "entryPath": "messageRenderers[].entry"
     },
     {
+      "field": "extensions",
+      "capabilities": ["components"],
+      "execution": "javascript",
+      "entryPath": "extensions[].entry"
+    },
+    {
       "field": "toolRenderers",
       "capabilities": ["tool-renderer"],
       "execution": "javascript",
@@ -1081,6 +1107,12 @@
       "pythonExecution": "experimental"
     },
     {
+      "field": "integrations",
+      "capabilities": ["integrations"],
+      "execution": "javascript",
+      "pythonExecution": "unsupported"
+    },
+    {
       "field": "workflows",
       "capabilities": ["workflow", "workflow-trigger"],
       "execution": "host"
@@ -1103,6 +1135,11 @@
     {
       "field": "quickActions",
       "capabilities": ["quick-action"],
+      "execution": "host"
+    },
+    {
+      "field": "trayItems",
+      "capabilities": ["tray"],
       "execution": "host"
     },
     {

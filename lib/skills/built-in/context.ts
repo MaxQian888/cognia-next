@@ -15,12 +15,27 @@
  */
 
 import type { BuiltInSkillContext } from "./types"
+import { primaryRootOf } from "@/lib/workspace/roots"
 
 export async function resolveBuiltInSkillContext(sessionId: string): Promise<BuiltInSkillContext> {
   const ctx: BuiltInSkillContext = { sessionId }
   try {
     const { getDb } = await import("@/lib/db/schema")
-    const session = await getDb().sessions.get(sessionId)
+    const db = getDb()
+    const session = await db.sessions.get(sessionId)
+    const sessionRoot = session?.workingDir?.trim()
+    if (sessionRoot) {
+      ctx.workspaceRoot = sessionRoot
+    } else if (session?.projectId) {
+      try {
+        const project = await db.projects.get(session.projectId)
+        const projectRoot = project ? primaryRootOf(project)?.path.trim() : undefined
+        if (projectRoot) ctx.workspaceRoot = projectRoot
+      } catch {
+        // A missing project row leaves the skill unavailable; connector
+        // binding hydration below must still proceed.
+      }
+    }
     const binding = session?.platformBinding
     if (!binding?.conversationKey) return ctx
     ctx.imBinding = {

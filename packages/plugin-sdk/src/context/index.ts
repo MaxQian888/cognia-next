@@ -14,28 +14,6 @@
  */
 
 import type { PluginContext as CtxPluginContext } from "@/types/plugin/plugin"
-import type { PluginContextAPI as CtxPluginContextAPI } from "@/types/plugin/plugin"
-import type { PluginOcrAPI as CtxPluginOcrAPI } from "@/lib/plugin/api/ocr-api"
-import type { PluginWorkspaceAPI as CtxPluginWorkspaceAPI } from "@/lib/plugin/api/workspace-api"
-import type { PluginModalAPI as CtxPluginModalAPI } from "@/lib/plugin/api/modal-api"
-import type { PluginChatAPI as CtxPluginChatAPI } from "@/lib/plugin/api/chat-api"
-import type { PluginCapabilitiesAPI as CtxPluginCapabilitiesAPI } from "@/lib/plugin/api/capabilities-api"
-import type { PluginConnectorsAPI as CtxPluginConnectorsAPI } from "@/lib/plugin/api/connectors-api"
-import type { PluginTeamAPI as CtxPluginTeamAPI } from "@/lib/plugin/api/team-api"
-import type { PluginGitAPI as CtxPluginGitAPI } from "@/lib/plugin/api/git-api"
-import type { PluginGoalAPI as CtxPluginGoalAPI } from "@/lib/plugin/api/goal-api"
-import type { PluginSubscriptionAPI as CtxPluginSubscriptionAPI } from "@/lib/plugin/api/subscription-api"
-import type { PluginTerminalAPI as CtxPluginTerminalAPI } from "@/lib/plugin/api/terminal-api"
-import type { PluginPerfAPI as CtxPluginPerfAPI } from "@/lib/plugin/api/perf-api"
-import type { PluginShareAPI as CtxPluginShareAPI } from "@/lib/plugin/api/share-api"
-import type { PluginBackupAPI as CtxPluginBackupAPI } from "@/lib/plugin/api/backup-api"
-import type { PluginAutomationAPI as CtxPluginAutomationAPI } from "@/lib/plugin/api/automation-api"
-import type { PluginCompanionAPI as CtxPluginCompanionAPI } from "@/lib/plugin/api/companion-api"
-import type { PluginMemoryAPI as CtxPluginMemoryAPI } from "@/lib/plugin/api/memory-api"
-import type { PluginPetAPI as CtxPluginPetAPI } from "@/lib/plugin/api/pet-api"
-import type { PluginWebviewAPI as CtxPluginWebviewAPI } from "@/lib/plugin/api/webview-api"
-import type { PluginAuthAPI as CtxPluginAuthAPI } from "@/lib/plugin/api/auth-api"
-import type { PluginUriAPI as CtxPluginUriAPI } from "@/lib/plugin/api/uri-api"
 
 // =============================================================================
 // Core PluginContext + per-field APIs (from types/plugin/plugin.ts)
@@ -170,6 +148,7 @@ export type {
   BootstrapConversationInput,
   BootstrapConversationResult,
 } from "@/lib/plugin/api/connectors-api"
+export type { PluginIntegrationsAPI } from "@/types/plugin/plugin-integration"
 export type {
   PluginTeamAPI,
   PluginTeamTaskCreateInput,
@@ -227,34 +206,8 @@ export type {
   PluginContextWorkbenchState,
 } from "@/lib/plugin/api/context-panel-api"
 
-export type FullPluginContext = Omit<
-  CtxPluginContext,
-  "storage" | "webview" | "auth" | "uri" | "pet"
-> &
-  Omit<CtxPluginContextAPI, "storage"> & {
-    storage: CtxPluginContextAPI["storage"]
-    ocr: CtxPluginOcrAPI
-    workspace: CtxPluginWorkspaceAPI
-    modal: CtxPluginModalAPI
-    chat: CtxPluginChatAPI
-    capabilities: CtxPluginCapabilitiesAPI
-    git: CtxPluginGitAPI
-    goals: CtxPluginGoalAPI
-    subscription: CtxPluginSubscriptionAPI
-    terminal: CtxPluginTerminalAPI
-    perf: CtxPluginPerfAPI
-    connectors: CtxPluginConnectorsAPI
-    team: CtxPluginTeamAPI
-    share: CtxPluginShareAPI
-    backup: CtxPluginBackupAPI
-    automation: CtxPluginAutomationAPI
-    companion: CtxPluginCompanionAPI
-    memory: CtxPluginMemoryAPI
-    pet: CtxPluginPetAPI
-    webview: CtxPluginWebviewAPI
-    auth: CtxPluginAuthAPI
-    uri: CtxPluginUriAPI
-  }
+/** @deprecated `PluginContext` is now the complete activated context. */
+export type FullPluginContext = CtxPluginContext
 
 // =============================================================================
 // Scheduler runtime API (separate file for the manifest types; this is the

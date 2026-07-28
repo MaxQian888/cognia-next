@@ -18,7 +18,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { useTranslations } from "next-intl"
 import { useLiveQuery } from "dexie-react-hooks"
-import { PluginExtensionBoundary } from "@/components/plugins/plugin-extension-slot"
+import { PluginSurface } from "@/components/plugins/plugin-surface"
 import {
   loadConfigComponent,
   type ConfigComponent,
@@ -530,7 +530,7 @@ type CustomLoadState =
  * The bridge caches the resolved component per pluginId.
  *
  * States: `loading` → header + spinner text; `ready` → header + the custom
- * component wrapped in the shared `PluginExtensionBoundary` (a render crash
+ * component wrapped in the shared `PluginSurface` (a render crash
  * records a `plugin.silent-failure` diagnostic and collapses to nothing,
  * never taking down the panel); `fallback` → the generic `SchemaConfigBody`
  * (load returned null: no component, or the import errored).
@@ -556,7 +556,7 @@ function CustomConfigBody({
         const Component = await loadConfigComponent(
           plugin.manifest as unknown as PluginManifest,
           plugin.path ?? "",
-          { importer: (entry) => manager.importPluginEntry(entry) }
+          { importer: (entry) => manager.importPluginEntry(entry, pluginId) }
         )
         if (cancelled) return
         setState(Component ? { status: "ready", Component } : { status: "fallback" })
@@ -595,9 +595,13 @@ function CustomConfigBody({
   return (
     <>
       <FormHeader title={plugin.name} version={plugin.version} description={t("description")} />
-      <PluginExtensionBoundary pluginId={pluginId} extensionId={`${pluginId}:configComponent`}>
+      <PluginSurface
+        pluginId={pluginId}
+        surfaceId={`${pluginId}:configComponent`}
+        formFactor="block"
+      >
         <Component config={plugin.config ?? {}} onSave={handleSave} pluginId={pluginId} />
-      </PluginExtensionBoundary>
+      </PluginSurface>
     </>
   )
 }

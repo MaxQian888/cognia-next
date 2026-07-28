@@ -7,6 +7,7 @@ import { PluginUpdater, getPluginUpdater, resetPluginUpdater } from "./updater"
 jest.mock("@/stores/plugin-runtime", () => ({
   usePluginStore: {
     getState: jest.fn(),
+    setState: jest.fn(),
   },
 }))
 
@@ -18,8 +19,33 @@ jest.mock("../package/marketplace", () => {
     latestVersion: "2.0.0",
     updatedAt: new Date(),
   })
+  const installPlugin = jest.fn().mockResolvedValue({ success: true })
+  const stagePluginUpdate = jest.fn().mockResolvedValue({
+    transactionId: "123e4567-e89b-42d3-a456-426614174000",
+    pluginId: "plugin-a",
+    version: "2.0.0",
+    stagedPath: "/host-state/update-transactions/plugin-a/package",
+    manifest: {
+      id: "plugin-a",
+      name: "Plugin A",
+      version: "2.0.0",
+      description: "Plugin A",
+      type: "frontend",
+      capabilities: [],
+      main: "index.js",
+    },
+    sizeBytes: 1024,
+  })
+  const commitStagedPluginUpdate = jest.fn().mockResolvedValue(undefined)
+  const discardStagedPluginUpdate = jest.fn().mockResolvedValue(undefined)
+  const finalizeStagedPluginUpdate = jest.fn().mockResolvedValue(undefined)
   return {
     __getPluginSpy: getPlugin,
+    __installPluginSpy: installPlugin,
+    __stagePluginUpdateSpy: stagePluginUpdate,
+    __commitStagedPluginUpdateSpy: commitStagedPluginUpdate,
+    __discardStagedPluginUpdateSpy: discardStagedPluginUpdate,
+    __finalizeStagedPluginUpdateSpy: finalizeStagedPluginUpdate,
     getPluginMarketplace: () => ({
       getPlugin,
       getVersions: jest.fn().mockResolvedValue([
@@ -29,9 +55,11 @@ jest.mock("../package/marketplace", () => {
           downloadUrl: "https://example.com/plugin-a-2.0.0.zip",
         },
       ]),
-      installPlugin: jest.fn().mockResolvedValue({
-        success: true,
-      }),
+      installPlugin,
+      stagePluginUpdate,
+      commitStagedPluginUpdate,
+      discardStagedPluginUpdate,
+      finalizeStagedPluginUpdate,
     }),
   }
 })
@@ -47,19 +75,90 @@ jest.mock("@/lib/plugin/vscode-shim/openvsx-cache", () => ({
 }))
 
 jest.mock("./backup", () => ({
-  getPluginBackupManager: () => ({
-    createBackup: jest.fn().mockResolvedValue({ success: true }),
+  __createBackupSpy: jest.fn().mockResolvedValue({
+    success: true,
+    backup: { id: "plugin-a-before-update", pluginId: "plugin-a", version: "1.0.0" },
   }),
+  __restoreBackupSpy: jest.fn().mockResolvedValue({ success: true }),
+  getPluginBackupManager() {
+    const mockedBackup = jest.requireMock("./backup") as {
+      __createBackupSpy: jest.Mock
+      __restoreBackupSpy: jest.Mock
+    }
+    return {
+      createBackup: mockedBackup.__createBackupSpy,
+      restore: mockedBackup.__restoreBackupSpy,
+    }
+  },
+}))
+
+jest.mock("../core/manager", () => ({
+  __disablePluginSpy: jest.fn().mockResolvedValue(undefined),
+  __unloadPluginSpy: jest.fn().mockResolvedValue(undefined),
+  __scanPluginsSpy: jest.fn().mockResolvedValue([]),
+  __syncRuntimeStateSpy: jest.fn().mockResolvedValue(undefined),
+  __enablePluginSpy: jest.fn().mockResolvedValue(undefined),
+  getPluginManager() {
+    const mockedManager = jest.requireMock("../core/manager") as Record<string, jest.Mock>
+    return {
+      disablePlugin: mockedManager.__disablePluginSpy,
+      unloadPlugin: mockedManager.__unloadPluginSpy,
+      scanPlugins: mockedManager.__scanPluginsSpy,
+      syncRuntimeState: mockedManager.__syncRuntimeStateSpy,
+      enablePlugin: mockedManager.__enablePluginSpy,
+    }
+  },
+}))
+
+jest.mock("../ide/proxy-manager", () => ({
+  __stageManagedIdeProxySpy: jest.fn().mockResolvedValue(null),
+  stageManagedIdeProxy(plugin: unknown) {
+    const mocked = jest.requireMock("../ide/proxy-manager") as {
+      __stageManagedIdeProxySpy: jest.Mock
+    }
+    return mocked.__stageManagedIdeProxySpy(plugin)
+  },
+}))
+
+jest.mock("@/lib/codeserver/client", () => ({
+  codeServerClient: {
+    activateProxy: jest.fn().mockResolvedValue(true),
+  },
 }))
 
 import { usePluginStore } from "@/stores/plugin-runtime"
+import { codeServerClient } from "@/lib/codeserver/client"
 import { getOpenVsxClient } from "@/lib/plugin/vscode-shim/openvsx-client"
 import { getCached, putCached } from "@/lib/plugin/vscode-shim/openvsx-cache"
 
 const marketplaceModule = jest.requireMock("../package/marketplace") as {
   __getPluginSpy: jest.Mock
+  __installPluginSpy: jest.Mock
+  __stagePluginUpdateSpy: jest.Mock
+  __commitStagedPluginUpdateSpy: jest.Mock
+  __discardStagedPluginUpdateSpy: jest.Mock
+  __finalizeStagedPluginUpdateSpy: jest.Mock
 }
 const cogniaGetPlugin = marketplaceModule.__getPluginSpy
+const cogniaInstallPlugin = marketplaceModule.__installPluginSpy
+const stagePluginUpdate = marketplaceModule.__stagePluginUpdateSpy
+const commitStagedPluginUpdate = marketplaceModule.__commitStagedPluginUpdateSpy
+const discardStagedPluginUpdate = marketplaceModule.__discardStagedPluginUpdateSpy
+const finalizeStagedPluginUpdate = marketplaceModule.__finalizeStagedPluginUpdateSpy
+const proxyManagerModule = jest.requireMock("../ide/proxy-manager") as {
+  __stageManagedIdeProxySpy: jest.Mock
+}
+const backupModule = jest.requireMock("./backup") as {
+  __createBackupSpy: jest.Mock
+  __restoreBackupSpy: jest.Mock
+}
+const managerModule = jest.requireMock("../core/manager") as {
+  __disablePluginSpy: jest.Mock
+  __unloadPluginSpy: jest.Mock
+  __scanPluginsSpy: jest.Mock
+  __syncRuntimeStateSpy: jest.Mock
+  __enablePluginSpy: jest.Mock
+}
 const getOpenVsxClientMock = getOpenVsxClient as jest.Mock
 const getCachedMock = getCached as jest.Mock
 const putCachedMock = putCached as jest.Mock
@@ -67,6 +166,7 @@ const putCachedMock = putCached as jest.Mock
 const mockGetStoreState = usePluginStore.getState as jest.MockedFunction<
   typeof usePluginStore.getState
 >
+const mockSetStoreState = usePluginStore.setState as jest.Mock
 
 /** A store entry shaped like the runtime's `PluginRegistration`. */
 function storePlugin(manifest: Record<string, unknown>) {
@@ -86,14 +186,50 @@ describe("PluginUpdater", () => {
       updatedAt: new Date(),
     })
     getCachedMock.mockResolvedValue(undefined)
-    mockGetStoreState.mockReturnValue({
+    const runtimeState = {
       plugins: {
         "plugin-a": {
           manifest: { id: "plugin-a", version: "1.0.0" },
           status: "installed",
         },
       },
-    } as never)
+    }
+    mockGetStoreState.mockImplementation(() => runtimeState as never)
+    mockSetStoreState.mockImplementation((updater) => {
+      const patch = typeof updater === "function" ? updater(runtimeState) : updater
+      if (patch && typeof patch === "object") Object.assign(runtimeState, patch)
+    })
+    backupModule.__createBackupSpy.mockResolvedValue({
+      success: true,
+      backup: {
+        id: "plugin-a-before-update",
+        pluginId: "plugin-a",
+        version: "1.0.0",
+      },
+    })
+    backupModule.__restoreBackupSpy.mockResolvedValue({ success: true })
+    managerModule.__enablePluginSpy.mockResolvedValue(undefined)
+    cogniaInstallPlugin.mockResolvedValue({ success: true })
+    stagePluginUpdate.mockResolvedValue({
+      transactionId: "123e4567-e89b-42d3-a456-426614174000",
+      pluginId: "plugin-a",
+      version: "2.0.0",
+      stagedPath: "/host-state/update-transactions/plugin-a/package",
+      manifest: {
+        id: "plugin-a",
+        name: "Plugin A",
+        version: "2.0.0",
+        description: "Plugin A",
+        type: "frontend",
+        capabilities: [],
+        main: "index.js",
+      },
+      sizeBytes: 1024,
+    })
+    commitStagedPluginUpdate.mockResolvedValue(undefined)
+    discardStagedPluginUpdate.mockResolvedValue(undefined)
+    finalizeStagedPluginUpdate.mockResolvedValue(undefined)
+    proxyManagerModule.__stageManagedIdeProxySpy.mockResolvedValue(null)
   })
 
   describe("Update Checking", () => {
@@ -397,6 +533,213 @@ describe("PluginUpdater", () => {
 
       expect(result.pluginId).toBe("plugin-a")
       expect(result.newVersion).toBe("2.0.0")
+    })
+
+    it("unloads an active plugin before commit and re-enables it after verification", async () => {
+      const state = mockGetStoreState() as never as {
+        plugins: Record<string, { manifest: { version: string }; status: string }>
+      }
+      state.plugins["plugin-a"].status = "enabled"
+      commitStagedPluginUpdate.mockImplementationOnce(async () => {
+        state.plugins["plugin-a"].manifest.version = "2.0.0"
+        return { success: true }
+      })
+
+      const result = await updater.update("plugin-a", { force: true, version: "2.0.0" })
+
+      expect(result.success).toBe(true)
+      expect(managerModule.__disablePluginSpy).toHaveBeenCalledWith(
+        "plugin-a",
+        "transactional-update"
+      )
+      expect(managerModule.__unloadPluginSpy).toHaveBeenCalledWith("plugin-a")
+      expect(managerModule.__enablePluginSpy).toHaveBeenCalledWith("plugin-a")
+      expect(managerModule.__unloadPluginSpy.mock.invocationCallOrder[0]).toBeLessThan(
+        commitStagedPluginUpdate.mock.invocationCallOrder[0]
+      )
+      expect(stagePluginUpdate.mock.invocationCallOrder[0]).toBeLessThan(
+        backupModule.__createBackupSpy.mock.invocationCallOrder[0]
+      )
+      expect(proxyManagerModule.__stageManagedIdeProxySpy.mock.invocationCallOrder[0]).toBeLessThan(
+        backupModule.__createBackupSpy.mock.invocationCallOrder[0]
+      )
+      expect(finalizeStagedPluginUpdate).toHaveBeenCalledTimes(1)
+    })
+
+    it("requires permission review before snapshot or commit when an update expands authority", async () => {
+      const state = mockGetStoreState() as never as {
+        plugins: Record<string, { manifest: Record<string, unknown>; status: string }>
+      }
+      state.plugins["plugin-a"].manifest.permissions = ["storage:read"]
+      stagePluginUpdate.mockResolvedValueOnce({
+        transactionId: "123e4567-e89b-42d3-a456-426614174000",
+        pluginId: "plugin-a",
+        version: "2.0.0",
+        stagedPath: "/host-state/update-transactions/plugin-a/package",
+        manifest: {
+          id: "plugin-a",
+          name: "Plugin A",
+          version: "2.0.0",
+          description: "Plugin A",
+          type: "frontend",
+          capabilities: [],
+          main: "index.js",
+          permissions: ["storage:read", "shell:execute"],
+        },
+        sizeBytes: 1024,
+      })
+
+      const result = await updater.update("plugin-a", { force: true, version: "2.0.0" })
+
+      expect(result).toMatchObject({
+        success: false,
+        error: expect.stringContaining("PLUGIN_UPDATE_PERMISSION_REVIEW_REQUIRED"),
+      })
+      expect(discardStagedPluginUpdate).toHaveBeenCalledTimes(1)
+      expect(backupModule.__createBackupSpy).not.toHaveBeenCalled()
+      expect(commitStagedPluginUpdate).not.toHaveBeenCalled()
+    })
+
+    it("dry-runs the migration declaration before snapshotting a destructive schema change", async () => {
+      const state = mockGetStoreState() as never as {
+        plugins: Record<string, { manifest: Record<string, unknown>; status: string }>
+      }
+      state.plugins["plugin-a"].manifest.dexie = {
+        tables: [{ name: "records", schema: "++id, createdAt" }],
+      }
+      stagePluginUpdate.mockResolvedValueOnce({
+        transactionId: "123e4567-e89b-42d3-a456-426614174000",
+        pluginId: "plugin-a",
+        version: "2.0.0",
+        stagedPath: "/host-state/update-transactions/plugin-a/package",
+        manifest: {
+          id: "plugin-a",
+          name: "Plugin A",
+          version: "2.0.0",
+          description: "Plugin A",
+          type: "frontend",
+          capabilities: [],
+          main: "index.js",
+          dexie: {
+            tables: [{ name: "records", schema: "++id, &externalId" }],
+          },
+        },
+        sizeBytes: 1024,
+      })
+
+      const result = await updater.update("plugin-a", { force: true, version: "2.0.0" })
+
+      expect(result.error).toContain("PLUGIN_UPDATE_MIGRATION_REQUIRED")
+      expect(discardStagedPluginUpdate).toHaveBeenCalledTimes(1)
+      expect(backupModule.__createBackupSpy).not.toHaveBeenCalled()
+    })
+
+    it("activates the exact staged proxy after package commit", async () => {
+      const state = mockGetStoreState() as never as {
+        plugins: Record<string, { manifest: { version: string }; status: string }>
+      }
+      state.plugins["plugin-a"].status = "enabled"
+      commitStagedPluginUpdate.mockImplementationOnce(async () => {
+        state.plugins["plugin-a"].manifest.version = "2.0.0"
+      })
+      const artifact = { pluginId: "plugin-a", sha256: "proxy-v2" }
+      proxyManagerModule.__stageManagedIdeProxySpy.mockResolvedValueOnce(artifact)
+
+      const result = await updater.update("plugin-a", { force: true, version: "2.0.0" })
+
+      expect(result.success).toBe(true)
+      expect(codeServerClient.activateProxy).toHaveBeenCalledWith(artifact)
+      expect(commitStagedPluginUpdate.mock.invocationCallOrder[0]).toBeLessThan(
+        (codeServerClient.activateProxy as jest.Mock).mock.invocationCallOrder[0]
+      )
+    })
+
+    it("restores package and host state when live activation rejects the update", async () => {
+      const state = mockGetStoreState() as never as {
+        plugins: Record<string, { manifest: { version: string }; status: string }>
+      }
+      state.plugins["plugin-a"].status = "enabled"
+      commitStagedPluginUpdate.mockImplementationOnce(async () => {
+        state.plugins["plugin-a"].manifest.version = "2.0.0"
+        return { success: true }
+      })
+      backupModule.__restoreBackupSpy.mockImplementationOnce(async () => {
+        state.plugins["plugin-a"].manifest.version = "1.0.0"
+        return { success: true }
+      })
+      managerModule.__enablePluginSpy
+        .mockRejectedValueOnce(new Error("proxy handshake failed"))
+        .mockResolvedValueOnce(undefined)
+
+      const result = await updater.update("plugin-a", { force: true, version: "2.0.0" })
+
+      expect(result).toMatchObject({
+        success: false,
+        rollback: { attempted: true, succeeded: true },
+        requiresRestart: false,
+      })
+      expect(backupModule.__restoreBackupSpy).toHaveBeenCalledWith("plugin-a-before-update")
+      expect(managerModule.__enablePluginSpy).toHaveBeenCalledTimes(2)
+      expect(state.plugins["plugin-a"].manifest.version).toBe("1.0.0")
+    })
+
+    it("does not request a restart when the old package could not be restored", async () => {
+      const state = mockGetStoreState() as never as {
+        plugins: Record<string, { manifest: { version: string }; status: string }>
+      }
+      state.plugins["plugin-a"].status = "enabled"
+      commitStagedPluginUpdate.mockImplementationOnce(async () => {
+        state.plugins["plugin-a"].manifest.version = "2.0.0"
+        return { success: true }
+      })
+      managerModule.__enablePluginSpy.mockRejectedValueOnce(new Error("proxy handshake failed"))
+      backupModule.__restoreBackupSpy.mockResolvedValueOnce({
+        success: false,
+        error: "backup checksum mismatch",
+      })
+
+      const result = await updater.update("plugin-a", { force: true, version: "2.0.0" })
+
+      expect(result).toMatchObject({
+        success: false,
+        requiresRestart: false,
+        rollback: {
+          attempted: true,
+          succeeded: false,
+          error: expect.stringContaining("backup checksum mismatch"),
+        },
+      })
+    })
+
+    it("requests a restart only after restoring the old package when reactivation fails", async () => {
+      const state = mockGetStoreState() as never as {
+        plugins: Record<string, { manifest: { version: string }; status: string }>
+      }
+      state.plugins["plugin-a"].status = "enabled"
+      commitStagedPluginUpdate.mockImplementationOnce(async () => {
+        state.plugins["plugin-a"].manifest.version = "2.0.0"
+        return { success: true }
+      })
+      backupModule.__restoreBackupSpy.mockImplementationOnce(async () => {
+        state.plugins["plugin-a"].manifest.version = "1.0.0"
+        return { success: true }
+      })
+      managerModule.__enablePluginSpy
+        .mockRejectedValueOnce(new Error("new proxy rejected"))
+        .mockRejectedValueOnce(new Error("extension host unavailable"))
+
+      const result = await updater.update("plugin-a", { force: true, version: "2.0.0" })
+
+      expect(result).toMatchObject({
+        success: false,
+        requiresRestart: true,
+        rollback: {
+          attempted: true,
+          succeeded: false,
+          error: expect.stringContaining("reactivate previous version"),
+        },
+      })
+      expect(state.plugins["plugin-a"].manifest.version).toBe("1.0.0")
     })
 
     it("cancelUpdate clears a queued pending update", async () => {

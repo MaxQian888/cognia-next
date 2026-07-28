@@ -38,7 +38,7 @@ const definition: PluginDefinition = {
         activity: "inspect",
         labelKey: "panel.inspector",
         label: "Context Inspector",
-        icon: "search-code",
+        icon: "SearchCode",
         order: 40,
         retention: "stateful",
       },

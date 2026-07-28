@@ -25,7 +25,7 @@ export const REVIEW_BOARD_TEMPLATE = defineAgentTeamTemplate({
   description:
     "Architect, analyst, and reviewer deliberate on the refactor plan and review the result. Use for the reasoning phases; edits run via the agent.turn workflow node.",
   category: "review",
-  icon: "users",
+  icon: "Users",
   teammates: [
     {
       name: "Architect",

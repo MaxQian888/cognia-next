@@ -500,7 +500,7 @@ const DESKTOP_AUTOMATION_TEMPLATE = defineAgentTeamTemplate({
   name: "Desktop Automation",
   description: "A screen-watcher observes while a GUI driver executes UI steps.",
   category: "development",
-  icon: "monitor",
+  icon: "Monitor",
   teammates: [
     {
       name: "Screen Watcher",

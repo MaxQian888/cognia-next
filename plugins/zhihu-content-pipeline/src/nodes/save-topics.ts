@@ -61,7 +61,7 @@ export function makeSaveTopicsNode(dexie: PluginDexieAPI): PluginNodeDef {
     label: "Save Zhihu Topics",
     description:
       "Persist the ranking step's candidate topics into the pipeline's topics table for the 选题 review gate.",
-    iconName: "list-checks",
+    iconName: "ListChecks",
     keywords: ["zhihu", "topics", "candidates", "save"],
     retryable: false,
     paramsSchema: {

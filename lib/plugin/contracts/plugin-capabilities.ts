@@ -100,16 +100,20 @@ export const PLUGIN_CAPABILITY_CONTRACTS: readonly PluginCapabilityContract[] = 
   {
     id: "components",
     support: "supported",
-    manifestFields: ["a2uiComponents"],
+    manifestFields: ["a2uiComponents", "extensions"],
     runtimeBinding: "context.a2ui.registerComponent + Plugin A2UI bridge",
     hostBindings: ["lib/plugin/bridge/a2ui-bridge.ts", "lib/plugin/core/registry.ts"],
     typescriptSdk: [
       "packages/plugin-sdk/src/manifest/index.ts",
       "packages/plugin-sdk/src/context/index.ts",
+      "packages/plugin-sdk/src/define/define-extension.ts",
     ],
     pythonSdk: ["plugin-sdk/python/src/cognia/a2ui.py", "plugin-sdk/python/src/cognia/context.py"],
     docs: "docs/content/docs/en/subsystems/plugin-system/contracts-and-registries.mdx#capabilities",
-    requiredTests: ["stores/plugin-runtime/plugin-store.test.ts"],
+    requiredTests: [
+      "stores/plugin-runtime/plugin-store.test.ts",
+      "packages/plugin-sdk/src/define/define-extension.test.ts",
+    ],
   },
   {
     id: "modes",
@@ -1139,6 +1143,28 @@ export const PLUGIN_CAPABILITY_CONTRACTS: readonly PluginCapabilityContract[] = 
     ],
   },
   {
+    id: "integrations",
+    support: "supported",
+    manifestFields: ["integrations"],
+    runtimeBinding:
+      "Marketplace Integration definitions registered into the host event/action control plane",
+    hostBindings: [
+      "lib/plugin/bridge/integrations-bridge.ts",
+      "lib/plugin/api/integrations-api.ts",
+    ],
+    typescriptSdk: [
+      "packages/plugin-sdk/src/define/define-integration.ts",
+      "packages/plugin-sdk/src/api/integration.ts",
+    ],
+    pythonSdk: ["plugin-sdk/python/src/cognia/integrations.py"],
+    docs: "docs/content/docs/en/subsystems/plugin-system/contracts-and-registries.mdx#integrations",
+    requiredTests: [
+      "packages/plugin-sdk/src/define/define-integration.test.ts",
+      "lib/plugin/bridge/integrations-bridge.test.ts",
+      "lib/plugin/api/integrations-api.test.ts",
+    ],
+  },
+  {
     // Custom Visual-Workflow node executors (ADR-0017). Wired through the
     // workflow integration bridge into the editor catalog; no full SDK
     // package parity yet.
@@ -1331,9 +1357,8 @@ export const PLUGIN_CAPABILITY_CONTRACTS: readonly PluginCapabilityContract[] = 
     // the imperative `ctx.tray.register` shape (`PluginTrayItemInput`).
     id: "tray",
     support: "supported",
-    manifestFields: [],
-    runtimeBinding:
-      "ctx.tray.register (PluginTrayItemInput) + declarative quickActions surface 'tray'",
+    manifestFields: ["trayItems"],
+    runtimeBinding: "ctx.tray.register (PluginTrayItemInput) + declarative manifest.trayItems[]",
     hostBindings: ["lib/plugin/api/tray-api.ts", "lib/tray/registry.ts"],
     typescriptSdk: [
       "packages/plugin-sdk/src/define/define-tray-item.ts",

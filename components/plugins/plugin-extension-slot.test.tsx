@@ -172,25 +172,25 @@ describe("style containment", () => {
     expect(container.querySelector('[data-plugin-root="beta"]')).not.toBeNull()
   })
 
-  it("keeps the scope root out of layout so flex slots are unaffected", () => {
-    // A plain wrapper div would make a plugin's toolbar button a grandchild of
-    // the flex row instead of a child, silently breaking gap/alignment in the
-    // ~22 `row` slots.
+  it("uses a real query-container box for every plugin surface", () => {
+    // Container queries require a principal box; display: contents would make
+    // containerType ineffective and silently disable responsive plugin CSS.
     const Ext = () => <span>btn</span>
     mockRegistrations = [makeReg("acme", Ext)]
     const { container } = render(<PluginExtensionSlot point="chat.input.actions" />)
     const root = container.querySelector<HTMLElement>('[data-plugin-root="acme"]')
-    expect(root?.style.display).toBe("contents")
+    expect(root?.style.display).toBe("block")
+    expect(root?.style.containerType).toBe("inline-size")
   })
 
-  it("does not render a scope root when the extension crashed", () => {
+  it("keeps an empty scope root when a compact extension crashes", () => {
     const Boom = () => {
       throw new Error("boom")
     }
     const spy = jest.spyOn(console, "error").mockImplementation(() => {})
     mockRegistrations = [makeReg("acme", Boom)]
-    const { container } = render(<PluginExtensionSlot point="chat.input.above" />)
-    expect(container.querySelector('[data-plugin-root="acme"]')).toBeNull()
+    const { container } = render(<PluginExtensionSlot point="chat.input.actions" />)
+    expect(container.querySelector('[data-plugin-root="acme"]')).toBeEmptyDOMElement()
     spy.mockRestore()
   })
 })
@@ -257,9 +257,10 @@ describe("width hints", () => {
     return container.querySelector<HTMLElement>('[data-plugin-root="acme"]')!
   }
 
-  it("keeps display:contents when no hint is declared", () => {
+  it("keeps a bounded query-container box when no hint is declared", () => {
     const root = renderWithHints({})
-    expect(root.style.display).toBe("contents")
+    expect(root.style.display).toBe("block")
+    expect(root.style.containerType).toBe("inline-size")
     expect(root.style.minWidth).toBe("")
     expect(root.style.maxWidth).toBe("")
   })

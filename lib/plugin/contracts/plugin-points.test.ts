@@ -5,6 +5,7 @@ import {
   CANONICAL_EXTENSION_POINTS,
   CANONICAL_HOOK_POINTS,
   CANONICAL_RUNTIME_POINTS,
+  EXTENSION_POINT_FORM_FACTORS,
   PLUGIN_POINT_CONTRACTS,
   getExtensionPointAliases,
   getExtensionPointFormFactor,
@@ -15,6 +16,7 @@ import {
   validateHookPoint,
   type PluginPointFormFactor,
 } from "./plugin-points"
+import { EXTENSION_POINT_FORM_FACTORS as SDK_EXTENSION_POINT_FORM_FACTORS } from "@cognia/plugin-sdk/extensions"
 
 describe("plugin point contracts", () => {
   it("has unique canonical extension points", () => {
@@ -163,6 +165,21 @@ describe("plugin point contracts", () => {
     expect(resolveActivationPattern("onCommand:abc")).toBe("onCommand:*")
     expect(resolveActivationPattern("onTool:test")).toBe("onTool:*")
     expect(resolveActivationPattern("onLanguage:typescript")).toBe("onLanguage:*")
+  })
+
+  it("validates context-workbench onView resource kinds canonically", () => {
+    expect(
+      validateActivationEvent("onView:context-workbench:session", {
+        governanceMode: "block",
+      }).allowed
+    ).toBe(true)
+    const invalid = validateActivationEvent("onView:context-workbench:sesson", {
+      governanceMode: "block",
+    })
+    expect(invalid.allowed).toBe(false)
+    expect(invalid.diagnostics[0]).toEqual(
+      expect.objectContaining({ code: "plugin.point.unknown", severity: "error" })
+    )
   })
 
   it("warns for deprecated activation alias", () => {
@@ -491,6 +508,10 @@ describe("plugin point contracts", () => {
         const contract = PLUGIN_POINT_CONTRACTS.find((c) => c.id === point)
         expect(contract?.formFactor).toBe(getExtensionPointFormFactor(point))
       }
+    })
+
+    it("matches the standalone plugin SDK map key for key", () => {
+      expect(EXTENSION_POINT_FORM_FACTORS).toEqual(SDK_EXTENSION_POINT_FORM_FACTORS)
     })
 
     it("classifies the bar and rail slots as icon-sized", () => {

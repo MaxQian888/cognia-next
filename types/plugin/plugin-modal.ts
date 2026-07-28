@@ -100,6 +100,8 @@ export interface PluginModalMountDef {
   id: string
   /** Human label shown in plugin settings and the deep-link UI. */
   label: string
+  /** Plugin i18n key preferred over `label` when present for the active locale. */
+  labelKey?: string
   /** Relative path inside the plugin install root. */
   entry: string
   /**

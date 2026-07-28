@@ -35,6 +35,7 @@
     "badgeUpdates": "{count} updates",
     "hint": "Manage, install, configure, and govern plugins in the workspace.",
     "manageGovernance": "Manage governance",
+    "openIntegrations": "Open Integrations",
     "openWorkspace": "Open plugin workspace"
   },
   "title": "Plugins"

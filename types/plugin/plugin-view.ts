@@ -6,6 +6,7 @@
 // container panel renders the resolved views.
 
 import type React from "react"
+import type { PluginIconName } from "./plugin-icon"
 
 /** One node in a plugin tree view. Children are resolved lazily via the provider. */
 export interface PluginTreeNode {
@@ -14,7 +15,7 @@ export interface PluginTreeNode {
   /** Display label. */
   label: string
   /** Optional lucide icon name (PascalCase). */
-  icon?: string
+  icon?: PluginIconName
   /** Hint that this node has children (renders an expand chevron). */
   expandable?: boolean
   /** Initial collapsed state for an expandable node. Defaults to collapsed. */
@@ -54,6 +55,8 @@ export interface PluginViewDef {
   containerId: string
   /** Optional section title shown above the view. */
   title?: string
+  /** Plugin i18n key preferred over `title` when present for the active locale. */
+  titleKey?: string
   /** `tree` = data-driven tree; `react` = arbitrary panel component. */
   type: "tree" | "react"
   /** Relative module path (resolved against the plugin install root). */
@@ -72,6 +75,7 @@ export type ResolvedPluginView =
       viewId: string
       containerId: string
       title?: string
+      titleKey?: string
       when?: string
       provider: TreeDataProvider
     }
@@ -81,6 +85,7 @@ export type ResolvedPluginView =
       viewId: string
       containerId: string
       title?: string
+      titleKey?: string
       when?: string
       component: React.ComponentType<PluginViewProps>
     }

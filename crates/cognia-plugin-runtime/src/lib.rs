@@ -182,7 +182,7 @@ impl PluginRuntimeState {
     /// also report as `None` on stripped platforms).
     pub fn new(install_dir: PathBuf) -> Self {
         let plugin_state_dir = install_dir.join(".host-state");
-        Self {
+        let state = Self {
             plugins: Arc::new(RwLock::new(HashMap::new())),
             permissions: Arc::new(RwLock::new(HashMap::new())),
             network_allowlist: Arc::new(RwLock::new(HashMap::new())),
@@ -196,7 +196,19 @@ impl PluginRuntimeState {
             node_plugin_processes: Arc::new(Mutex::new(HashMap::new())),
             db_connections: Arc::new(RwLock::new(HashMap::new())),
             shell_allowlist: Arc::new(RwLock::new(HashMap::new())),
+        };
+        let recovery = marketplace::recover_update_transactions_for_state(&state);
+        if recovery.recovered_transactions > 0 || recovery.discarded_transactions > 0 {
+            log::info!(
+                "recovered {} and discarded {} interrupted plugin update transactions",
+                recovery.recovered_transactions,
+                recovery.discarded_transactions
+            );
         }
+        for failure in recovery.failures {
+            log::error!("{failure}");
+        }
+        state
     }
 
     /// Replace a plugin's declared shell-command allowlist (from its manifest

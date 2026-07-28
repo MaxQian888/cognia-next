@@ -80,9 +80,23 @@ export interface LspClientAdapter {
       uri: string,
       markers: ReturnType<typeof lspPublishDiagnosticsToBridgePayload>["markers"]
     ): void
-  }): Promise<void>
+    onServerRequest?(event: LspServerRequestEvent): void
+    onServerNotification?(event: LspServerNotificationEvent): void
+  }): Promise<{ capabilities?: unknown } | void>
   /** Stop a running server. Idempotent on a stopped/missing server. */
   stop(ownerId: LspServerOwner, serverId: string): Promise<void>
+}
+
+export interface LspServerRequestEvent {
+  requestId: string
+  method: string
+  payload: unknown
+  preconditions?: Record<string, { exists: boolean; version?: number; contentHash?: string }>
+}
+
+export interface LspServerNotificationEvent {
+  method: string
+  payload: unknown
 }
 
 /**

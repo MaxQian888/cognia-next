@@ -466,6 +466,35 @@ describe("dispatchSubagent — external backing (A2)", () => {
     expect(sink).toHaveBeenCalledWith({ type: "text-delta", delta: "hi" })
     expect(sink).toHaveBeenCalledTimes(1) // `done` produces no capture event
   })
+
+  it("routes external ACP permission requests through the managed headless tool gate", async () => {
+    externalCreatePreset.mockReturnValue({ id: "ext-6", metadata: { preset: "claude-code" } })
+    externalExecute.mockImplementation(async (_id: unknown, _prompt: unknown, opts: unknown) => {
+      const response = await (
+        opts as {
+          onPermissionRequest: (request: unknown) => Promise<unknown>
+        }
+      ).onPermissionRequest({
+        id: "permission-1",
+        toolInfo: { id: "bash", name: "Bash" },
+        rawInput: { command: "pwd" },
+        options: [
+          { optionId: "yes", name: "Allow", kind: "allow_once" },
+          { optionId: "no", name: "Deny", kind: "reject_once" },
+        ],
+      })
+      expect(response).toEqual({
+        requestId: "permission-1",
+        granted: true,
+        optionId: "yes",
+        scope: "once",
+      })
+      return { success: true, finalResponse: "ok" }
+    })
+    const gate = jest.fn(async () => ({ behavior: "allow" as const }))
+    await dispatchSubagent(externalDef, "go", { _canUseTool: gate })
+    expect(gate).toHaveBeenCalledWith("Bash", { command: "pwd" }, { signal: undefined })
+  })
 })
 
 describe("runTeam", () => {
