@@ -4,7 +4,6 @@
   "files": [
     "components/account/account-switcher.tsx",
     "components/chat/chat-header-preset-pill.tsx",
-    "components/chat/composer/camera-capture-button.tsx",
     "components/chat/welcome/welcome-a2ui-demo.tsx",
     "components/connectors/identity-merge-dialog.tsx",
     "components/inbox/history-load-earlier.tsx",
@@ -16,7 +15,6 @@
     "components/settings/developer/lsp-dev-toggle.tsx",
     "components/settings/provider/add-provider-popover.tsx",
     "components/settings/provider/add-provider-wizard.tsx",
-    "components/settings/provider/batch-test-progress.tsx",
     "components/settings/provider/custom-providers-list.tsx",
     "components/settings/provider/model-list-dialog.tsx",
     "components/settings/provider/model-manager.tsx",

@@ -1,7 +1,7 @@
 {
   "version": 1,
   "note": "Pre-existing clippy warnings per (cargo target, lint) pair, recorded when the gate landed. Counts may only go down: `pnpm rust:clippy` fails if any pair grows or a new pair appears. Regenerate with `pnpm rust:clippy -- --write-baseline` after fixing warnings.",
-  "total": 250,
+  "total": 248,
   "pairs": {
     "cognia_automation::clippy::collapsible_if": 2,
     "cognia_automation::clippy::derivable_impls": 4,
@@ -53,7 +53,7 @@
     "cognia_scheduling::clippy::derivable_impls": 2,
     "cognia_scheduling::clippy::duplicated_attributes": 2,
     "cognia_scheduling::clippy::manual_is_multiple_of": 2,
-    "cognia_scheduling::clippy::should_implement_trait": 4,
+    "cognia_scheduling::clippy::should_implement_trait": 2,
     "cognia_scheduling::clippy::trim_split_whitespace": 2,
     "cognia_scheduling::clippy::type_complexity": 1,
     "cognia_subscription::clippy::bool_assert_comparison": 1,
