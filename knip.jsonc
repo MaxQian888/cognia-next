@@ -4,6 +4,7 @@
     ".": {
       "entry": [
         "app/sw.ts",
+        "cli/src/cli/entry.ts",
         "components/{ai-elements,ui}/**/*.{ts,tsx}",
         "hooks/builtin/*.mjs",
         "lib/browser-stubs/*.{js,ts}",
@@ -39,7 +40,7 @@
         "xlsx",
       ],
       // Host toolchains installed outside pnpm and invoked by repository scripts.
-      "ignoreBinaries": ["chcp.com", "pwsh", "rustfmt", "uv"],
+      "ignoreBinaries": ["chcp.com", "pwsh", "rg", "rustfmt", "uv"],
       "ignoreIssues": {
         "**/*.generated.{js,ts,tsx}": [
           "files",
@@ -54,7 +55,21 @@
       },
     },
     "docs": {},
-    "crates/cognia-plugin-template-ts": {},
+    "crates/cognia-plugin-template-ts": {
+      // The template intentionally predeclares the host libraries available to
+      // third-party plugin authors; its starter module need not import all of
+      // them before generation.
+      "ignoreDependencies": [
+        "@types/json-schema",
+        "ai",
+        "class-variance-authority",
+        "clsx",
+        "cmdk",
+        "dexie",
+        "radix-ui",
+        "zod",
+      ],
+    },
     "crates/cognia-plugin-template-vscode-extension": {},
     "mobile": {
       "entry": ["scripts/*.{js,mjs,ts}"],
@@ -62,6 +77,15 @@
       "ignoreDependencies": ["^@capacitor(?:-|/)", "^@capgo/", "^capacitor-"],
     },
     "packages/*": {},
+    "packages/plugin-sdk": {
+      "entry": [
+        "scripts/import-code-128-contribution-schemas.mjs",
+        "tsup.author-types.config.ts",
+      ],
+    },
+    "packages/plugin-ui": {
+      "entry": ["tsup.author-types.config.ts"],
+    },
     "services/share-server/worker": {
       "ignoreDependencies": ["^cloudflare$"],
     },
@@ -77,6 +101,9 @@
     "sidecar/vscode-ext-host": {
       "entry": ["tests/fixtures/**/*.{js,mjs,ts}"],
       "ignoreDependencies": ["^vscode$", "vscode-languageclient"],
+    },
+    "sidecar/codeserver-agent-ext": {
+      "entry": ["build.mjs", "src/{extension,proxy-extension}.mjs"],
     },
     "sidecar/webclone": {},
   },
