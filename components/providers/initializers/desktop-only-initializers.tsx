@@ -83,6 +83,10 @@ const EditorLspRuntimeInitializer = dynamic(
   () => import("./editor-lsp-runtime-initializer").then((m) => m.EditorLspRuntimeInitializer),
   { ssr: false }
 )
+const ManagedIdeBrokerInitializer = dynamic(
+  () => import("./managed-ide-broker-initializer").then((m) => m.ManagedIdeBrokerInitializer),
+  { ssr: false }
+)
 const LocalCharacterPackInitializer = dynamic(
   () => import("./local-character-pack-initializer").then((m) => m.LocalCharacterPackInitializer),
   { ssr: false }
@@ -120,6 +124,10 @@ const CrashReportDialog = dynamic(
   () => import("@/components/desktop/crash-report-dialog").then((m) => m.CrashReportDialog),
   { ssr: false }
 )
+const SelectionToolbarInitializer = dynamic(
+  () => import("./selection-toolbar-initializer").then((m) => m.SelectionToolbarInitializer),
+  { ssr: false }
+)
 
 export function DesktopOnlyInitializers() {
   const isClient = useIsClient()
@@ -144,6 +152,7 @@ export function DesktopOnlyInitializers() {
       <ComputerUseKillSwitchInitializer />
       <TerminalBridgeInitializer />
       <EditorLspRuntimeInitializer />
+      <ManagedIdeBrokerInitializer />
       <LocalCharacterPackInitializer />
       <PetWindowInitializer />
       <FleetHistorySinkInitializer />
@@ -153,6 +162,7 @@ export function DesktopOnlyInitializers() {
       <CliBridgeEventsBridge />
       <ExitConfirmationDialog />
       <CrashReportDialog />
+      <SelectionToolbarInitializer />
     </>
   )
 }

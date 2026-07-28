@@ -213,9 +213,14 @@ describe("ExternalAgentManager", () => {
     expect(screen.getByText(/Lifecycle stage: execution/)).toBeInTheDocument()
     expect(screen.getByText(/Blocked stage: recovery/)).toBeInTheDocument()
     expect(screen.getByText(/Branch outcome: fallback/)).toBeInTheDocument()
+    // The reason CODE is a machine identifier; the panel resolves it through the
+    // shared diagnostic vocabulary instead of printing `extension_unsupported`
+    // at the user — this was the only place in the app that leaked a raw
+    // snake_case token into the UI.
     expect(
-      screen.getByText(/Canonical reason: extension_unsupported — Listing unsupported/)
+      screen.getByText(/Canonical reason: Not supported by this agent — Listing unsupported/)
     ).toBeInTheDocument()
+    expect(screen.queryByText(/extension_unsupported/)).not.toBeInTheDocument()
     expect(screen.getByText(/Auth methods: oauth/)).toBeInTheDocument()
     expect(screen.getByText(/Correlation — session sess-abc, turn turn-9/)).toBeInTheDocument()
     expect(

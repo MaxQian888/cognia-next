@@ -21,8 +21,28 @@ import {
   PluginExtensionSlot,
   usePluginSlotHasExtensions,
 } from "@/components/plugins/plugin-extension-slot"
+import { useState } from "react"
 import { Button } from "@/components/ui/button"
-import { GitBranchIcon, Shrink } from "lucide-react"
+import { Textarea } from "@/components/ui/textarea"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
+import { GitBranchIcon, Shrink, Undo2 } from "lucide-react"
 import { isExternalAgentSessionExtensionUnsupportedForMethod } from "@/lib/ai/agent/external/session-extension-errors"
 import { toast } from "sonner"
 import { useTranslations } from "next-intl"
@@ -33,6 +53,9 @@ interface Props {
 }
 
 export function ExternalAgentSessionPanel({ className }: Props) {
+  const [focusOpen, setFocusOpen] = useState(false)
+  const [focus, setFocus] = useState("")
+  const [providerUndoWarningOpen, setProviderUndoWarningOpen] = useState(false)
   const runtime = useAgentRuntimeStore((s) => s.runtime)
   const t = useTranslations("chat.header")
   const {
@@ -48,6 +71,13 @@ export function ExternalAgentSessionPanel({ className }: Props) {
     forkSession,
     compactSession,
     supportsCompaction,
+    supportsCompactionFocus,
+    isCompacting,
+    undoLastProviderChange,
+    providerUndoCapability,
+    providerUndoAcknowledged,
+    acknowledgeProviderUndoWarning,
+    isProviderUndoing,
   } = useExternalAgent()
 
   const hasPluginToolbar = usePluginSlotHasExtensions("agent.external-session.toolbar")
@@ -58,6 +88,8 @@ export function ExternalAgentSessionPanel({ className }: Props) {
   const hasPlan = planEntries.length > 0 || Boolean(planDocument)
   const hasConfigOptions = configOptions.length > 0
   const canFork = Boolean(activeSession)
+  const sessionBusy = isExecuting || isCompacting || isProviderUndoing
+  const supportsProviderUndo = providerUndoCapability?.status === "supported"
 
   // Render when there is native session data OR a plugin contributes a toolbar
   // control — otherwise the panel chrome would show empty.
@@ -79,12 +111,58 @@ export function ExternalAgentSessionPanel({ className }: Props) {
 
   const handleCompact = async () => {
     if (!activeSession) return
+    const toastId = toast.loading(t("compactProgress"))
     try {
       await compactSession(activeSession.id)
-      toast.success(t("compactStarted"))
+      toast.success(t("compactSuccess"), { id: toastId })
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : String(err))
+      toast.error(
+        t("compactFailure", { error: err instanceof Error ? err.message : String(err) }),
+        {
+          id: toastId,
+        }
+      )
     }
+  }
+
+  const handleFocusedCompact = async () => {
+    if (!activeSession || !focus.trim()) return
+    const toastId = toast.loading(t("compactProgress"))
+    try {
+      await compactSession(activeSession.id, { focus: focus.trim() })
+      setFocusOpen(false)
+      setFocus("")
+      toast.success(t("compactSuccess"), { id: toastId })
+    } catch (err) {
+      toast.error(
+        t("compactFailure", { error: err instanceof Error ? err.message : String(err) }),
+        {
+          id: toastId,
+        }
+      )
+    }
+  }
+
+  const executeProviderUndo = async () => {
+    if (!activeSession) return
+    const toastId = toast.loading(t("providerUndoProgress"))
+    try {
+      await undoLastProviderChange(activeSession.id)
+      toast.success(t("providerUndoSuccess"), { id: toastId })
+    } catch (err) {
+      toast.error(
+        t("providerUndoFailure", { error: err instanceof Error ? err.message : String(err) }),
+        { id: toastId }
+      )
+    }
+  }
+
+  const handleProviderUndo = () => {
+    if (providerUndoAcknowledged) {
+      void executeProviderUndo()
+      return
+    }
+    setProviderUndoWarningOpen(true)
   }
 
   return (
@@ -100,14 +178,14 @@ export function ExternalAgentSessionPanel({ className }: Props) {
                 const prompt = args ? `${command} ${args}` : command
                 void execute(prompt)
               }}
-              isExecuting={isExecuting}
+              isExecuting={sessionBusy}
             />
           )}
           {hasConfigOptions && (
             <ExternalAgentConfigOptions
               configOptions={configOptions}
               onSetConfigOption={setConfigOption}
-              disabled={isExecuting}
+              disabled={sessionBusy}
               compact
             />
           )}
@@ -117,7 +195,7 @@ export function ExternalAgentSessionPanel({ className }: Props) {
               size="sm"
               className="h-7 gap-1.5 text-xs"
               onClick={() => void handleFork()}
-              disabled={isExecuting}
+              disabled={sessionBusy}
               aria-label={t("forkAria")}
               title={t("forkTooltip")}
             >
@@ -131,13 +209,42 @@ export function ExternalAgentSessionPanel({ className }: Props) {
               size="sm"
               className="h-7 gap-1.5 text-xs"
               onClick={() => void handleCompact()}
-              disabled={isExecuting}
+              disabled={sessionBusy}
               aria-label={t("compactAria")}
               title={t("compactTooltip")}
               data-testid="session-compact-button"
             >
               <Shrink className="size-3.5" />
-              {t("compactAria")}
+              {isCompacting ? t("compactProgress") : t("compactAria")}
+            </Button>
+          )}
+          {Boolean(activeSession) && supportsCompaction && supportsCompactionFocus && (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-7 text-xs"
+              onClick={() => setFocusOpen(true)}
+              disabled={sessionBusy}
+              aria-label={t("compactFocusAria")}
+              title={t("compactFocusTooltip")}
+              data-testid="session-compact-focus-button"
+            >
+              {t("compactFocusAria")}
+            </Button>
+          )}
+          {Boolean(activeSession) && supportsProviderUndo && (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-7 gap-1.5 text-xs"
+              onClick={handleProviderUndo}
+              disabled={sessionBusy}
+              aria-label={t("providerUndoAria")}
+              title={t("providerUndoTooltip")}
+              data-testid="provider-undo-button"
+            >
+              <Undo2 className="size-3.5" />
+              {isProviderUndoing ? t("providerUndoProgress") : t("providerUndoAria")}
             </Button>
           )}
           {/* Plugin-contributed external-session controls. */}
@@ -161,6 +268,50 @@ export function ExternalAgentSessionPanel({ className }: Props) {
           compact
         />
       )}
+      <Dialog open={focusOpen} onOpenChange={setFocusOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{t("compactFocusTitle")}</DialogTitle>
+            <DialogDescription>{t("compactFocusDescription")}</DialogDescription>
+          </DialogHeader>
+          <Textarea
+            value={focus}
+            onChange={(event) => setFocus(event.target.value)}
+            placeholder={t("compactFocusPlaceholder")}
+            aria-label={t("compactFocusInputAria")}
+          />
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setFocusOpen(false)}>
+              {t("cancel")}
+            </Button>
+            <Button
+              onClick={() => void handleFocusedCompact()}
+              disabled={!focus.trim() || sessionBusy}
+            >
+              {t("compactAria")}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      <AlertDialog open={providerUndoWarningOpen} onOpenChange={setProviderUndoWarningOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t("providerUndoWarningTitle")}</AlertDialogTitle>
+            <AlertDialogDescription>{t("providerUndoWarningDescription")}</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>{t("cancel")}</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                acknowledgeProviderUndoWarning()
+                void executeProviderUndo()
+              }}
+            >
+              {t("providerUndoConfirm")}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }

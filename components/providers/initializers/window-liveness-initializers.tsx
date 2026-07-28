@@ -35,6 +35,13 @@ const WebviewHeartbeatInitializer = dynamic(
   () => import("./webview-heartbeat-initializer").then((m) => m.WebviewHeartbeatInitializer),
   { ssr: false }
 )
+const SelectionToolbarRestoreInitializer = dynamic(
+  () =>
+    import("./selection-toolbar-restore-initializer").then(
+      (m) => m.SelectionToolbarRestoreInitializer
+    ),
+  { ssr: false }
+)
 
 /**
  * Window-reveal + renderer-liveness initializers that MUST run *above* the
@@ -72,6 +79,7 @@ export function WindowLivenessInitializers() {
     <>
       <WindowShowInitializer />
       <WebviewHeartbeatInitializer />
+      <SelectionToolbarRestoreInitializer />
     </>
   )
 }

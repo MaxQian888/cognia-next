@@ -501,7 +501,8 @@ describe("plugin-contributed tool cards", () => {
     registerToolResultRenderer("p1", "boom_tool", Boom as never)
     const spy = jest.spyOn(console, "error").mockImplementation(() => {})
     render(<MCPToolCard part={part("tool-boom_tool", "x")} />)
-    expect(screen.getByTestId("plugin-part-error")).toHaveAttribute("data-plugin-id", "p1")
+    expect(screen.getByRole("alert")).toHaveAttribute("data-plugin-surface-error", "true")
+    expect(screen.getByText("p1 could not render")).toBeInTheDocument()
     spy.mockRestore()
   })
 

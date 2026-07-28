@@ -9,7 +9,7 @@ import {
 import { Reasoning, ReasoningContent, ReasoningTrigger } from "@/components/ai-elements/reasoning"
 import { Tool, ToolHeader, ToolContent, ToolInput } from "@/components/ai-elements/tool"
 import { ErrorTraceDetails } from "@/components/ai-elements/error-trace"
-import { ErrorParsedView } from "@/components/chat/error-parsed-view"
+import { ErrorParsedView } from "@/components/error/error-parsed-view"
 import { normalizeErrorText } from "@cognia/error-parsers"
 import { MarkdownRenderer } from "@/components/chat/markdown-renderer"
 import { StreamingTextPart } from "@/components/chat/streaming-text-part"
@@ -35,7 +35,7 @@ import {
   type MessageImageGalleryProps,
 } from "@/components/chat/renderers/message-image-gallery"
 import { MessageImageCollectionProvider } from "@/components/chat/renderers/message-image-collection"
-import { PluginPartErrorBoundary } from "@/components/chat/plugin-part-error-boundary"
+import { PluginSurface } from "@/components/plugins/plugin-surface"
 import { UnknownPartCard } from "@/components/chat/message-parts/unknown-part-card"
 import {
   HookNoticeRow,
@@ -1123,9 +1123,13 @@ function renderPart(
     const PluginRenderer = pluginEntry.component
     return (
       <React.Fragment key={key}>
-        <PluginPartErrorBoundary type={pluginEntry.type} pluginId={pluginEntry.pluginId}>
+        <PluginSurface
+          pluginId={pluginEntry.pluginId}
+          surfaceId={`message-renderer:${pluginEntry.type}`}
+          formFactor="block"
+        >
           <PluginRenderer part={part} messageId={messageId} isStreaming={isStreaming} />
-        </PluginPartErrorBoundary>
+        </PluginSurface>
         {/* UI companion to the `provider.message-renderer` runtime point: */}
         {/* plugins can mount per-part actions beneath any rendered part. */}
         <PluginExtensionSlot

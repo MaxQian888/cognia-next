@@ -48,6 +48,7 @@ import {
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
+import { diagnosticCodeForReason } from "@/lib/diagnostics/external-agent-reason"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import {
   Dialog,
@@ -112,7 +113,15 @@ const DEFAULT_RETRY_DELAY_MS = "1000"
 const DEFAULT_RETRY_MAX_DELAY_MS = "30000"
 
 /** Built-in protocol <SelectItem> values; anything else is plugin-contributed. */
-const BUILTIN_PROTOCOL_OPTIONS = ["acp", "opencode", "a2a", "http", "websocket", "custom"]
+const BUILTIN_PROTOCOL_OPTIONS = [
+  "acp",
+  "opencode",
+  "opencode-v2",
+  "a2a",
+  "http",
+  "websocket",
+  "custom",
+]
 
 const DEFAULT_ADD_AGENT_FORM_DATA: AddAgentFormData = {
   name: "",
@@ -335,7 +344,8 @@ function AddAgentDialog({ open, onOpenChange, onAdd }: AddAgentDialogProps) {
   const [isSubmitting, setIsSubmitting] = useState(false)
 
   const isOpenCode = formData.protocol === "opencode"
-  const isStdio = !isOpenCode && formData.transport === "stdio"
+  const isOpenCodeV2 = formData.protocol === "opencode-v2"
+  const isStdio = !isOpenCode && !isOpenCodeV2 && formData.transport === "stdio"
 
   const handlePresetChange = (presetId: string) => {
     setSelectedPreset(presetId as ExternalAgentPresetId | "")
@@ -347,7 +357,8 @@ function AddAgentDialog({ open, onOpenChange, onAdd }: AddAgentDialogProps) {
         const presetPort = preset.metadata?.port
         setFormData((current) => ({
           ...current,
-          name: preset.name,
+          name:
+            presetId === "opencode-v2-preview" ? tSettings("opencodeV2PresetName") : preset.name,
           protocol: preset.protocol,
           transport: preset.transport,
           command: preset.process?.command || "",
@@ -381,7 +392,10 @@ function AddAgentDialog({ open, onOpenChange, onAdd }: AddAgentDialogProps) {
       toast.error(tSettings("nameRequired"))
       return
     }
-    if (isOpenCode) {
+    if (isOpenCodeV2) {
+      // V2 preview discovers an already-running local service through the
+      // sidecar. It intentionally has no process or endpoint fields.
+    } else if (isOpenCode) {
       // Remote mode (no auto-spawn) needs an endpoint; auto-spawn defaults the
       // command to `opencode`, so nothing else is strictly required.
       if (!formData.autoSpawnServer && !formData.endpoint.trim()) {
@@ -449,7 +463,11 @@ function AddAgentDialog({ open, onOpenChange, onAdd }: AddAgentDialogProps) {
                     return (
                       <SelectItem key={presetId} value={presetId}>
                         <div className="flex items-center gap-2">
-                          <span>{preset.name}</span>
+                          <span>
+                            {presetId === "opencode-v2-preview"
+                              ? tSettings("opencodeV2PresetName")
+                              : preset.name}
+                          </span>
                           <span className="text-xs text-muted-foreground">
                             ({preset.tags.join(", ")})
                           </span>
@@ -482,7 +500,13 @@ function AddAgentDialog({ open, onOpenChange, onAdd }: AddAgentDialogProps) {
                     </a>
                   )}
                 </div>
-                {currentPreset.setupHint && <p>{currentPreset.setupHint}</p>}
+                {currentPreset.setupHint && (
+                  <p>
+                    {selectedPreset === "opencode-v2-preview"
+                      ? tSettings("opencodeV2PresetSetupHint")
+                      : currentPreset.setupHint}
+                  </p>
+                )}
                 {relatedOfficialSurfaces.length > 0 && (
                   <div className="space-y-1">
                     <p className="font-medium">{tManager("otherOfficialSurfaces")}</p>
@@ -542,7 +566,7 @@ function AddAgentDialog({ open, onOpenChange, onAdd }: AddAgentDialogProps) {
                       // (JSON-RPC + optional SSE) protocol — both need a network
                       // endpoint rather than a stdio command.
                       transport:
-                        value === "opencode"
+                        value === "opencode" || value === "opencode-v2"
                           ? "sse"
                           : value === "a2a"
                             ? "http"
@@ -564,6 +588,7 @@ function AddAgentDialog({ open, onOpenChange, onAdd }: AddAgentDialogProps) {
                     <SelectItem value="acp">ACP</SelectItem>
                     {/* i18n-exempt: protocol identifier (brand/technical) */}
                     <SelectItem value="opencode">OpenCode</SelectItem>
+                    <SelectItem value="opencode-v2">{tSettings("opencodeV2Protocol")}</SelectItem>
                     <SelectItem value="a2a">{tManager("a2aProtocol")}</SelectItem>
                     <SelectItem value="http" disabled>
                       {tManager("httpProtocolComingSoon")}
@@ -902,6 +927,23 @@ export function ExternalAgentManager({ className }: ExternalAgentManagerProps) {
   const tSettings = useTranslations("externalAgent.settings")
   const tManager = useTranslations("externalAgent.manager")
   const tDiag = useTranslations("externalAgent.manager.diagnostics")
+  const tDiagnostics = useTranslations("diagnostics")
+  /**
+   * Branch reason codes are machine identifiers (`ecosystem_prerequisite_missing`).
+   * This panel used to print them verbatim, which is the only place in the app
+   * that showed a user a raw snake_case token. Resolve them through the shared
+   * diagnostic vocabulary; fall back to the raw code so a reason code from a
+   * newer agent host degrades to today's behaviour rather than to blank.
+   */
+  const reasonLabel = useCallback(
+    (reasonCode: string): string => {
+      const code = diagnosticCodeForReason(reasonCode)
+      if (!code) return reasonCode
+      const key = `code.${code}.label`
+      return tDiagnostics.has(key) ? tDiagnostics(key) : reasonCode
+    },
+    [tDiagnostics]
+  )
   const tCommon = useTranslations("common")
   const refreshSessionsFailedMessage = tManager("refreshSessionsFailed")
   const [addDialogOpen, setAddDialogOpen] = useState(false)
@@ -1016,6 +1058,8 @@ export function ExternalAgentManager({ className }: ExternalAgentManagerProps) {
         if (Object.keys(metadata).length > 0) {
           config.metadata = metadata
         }
+      } else if (data.protocol === "opencode-v2") {
+        config.metadata = { preview: true, localServiceDiscovery: true }
       } else if (data.transport === "stdio") {
         config.process = {
           command: data.command,
@@ -1114,7 +1158,10 @@ export function ExternalAgentManager({ className }: ExternalAgentManagerProps) {
     activeAgentBlockedReason ||
     tDiag("noBlockingReason")
   const branchOutcome = activeAgentValidity?.branchOutcome || "external"
-  const recoveryHints = activeAgentValidity?.recoveryHints || []
+  // `recoveryHints` are i18n key ids (see `canonical-contract.ts`), not prose.
+  const recoveryHints = (activeAgentValidity?.recoveryHints || []).map((id) =>
+    tDiagnostics.has(`recoveryHint.${id}`) ? tDiagnostics(`recoveryHint.${id}`) : id
+  )
   const activeEcosystem =
     activeAgentValidity?.ecosystem ??
     (activeAgent ? getExternalAgentEcosystemReadiness(activeAgent.config) : undefined)
@@ -1584,10 +1631,10 @@ export function ExternalAgentManager({ className }: ExternalAgentManagerProps) {
               <p className="sm:col-span-2">
                 {canonicalReason
                   ? tDiag("canonicalReasonWithText", {
-                      code: canonicalReasonCode,
+                      code: reasonLabel(canonicalReasonCode),
                       reason: canonicalReason,
                     })
-                  : tDiag("canonicalReason", { code: canonicalReasonCode })}
+                  : tDiag("canonicalReason", { code: reasonLabel(canonicalReasonCode) })}
               </p>
               {(correlationSessionId || correlationTurnId) && (
                 <p className="sm:col-span-2">
@@ -1604,7 +1651,7 @@ export function ExternalAgentManager({ className }: ExternalAgentManagerProps) {
                       {tDiag("latestRun", { outcome: activeLastRunSnapshot.terminalOutcome })}
                     </span>
                     <Badge variant="outline" className="text-[10px]">
-                      {activeLastRunSnapshot.branchReasonCode}
+                      {reasonLabel(activeLastRunSnapshot.branchReasonCode)}
                     </Badge>
                     {lastRunHealthSummary && <TraceHealthBadge summary={lastRunHealthSummary} />}
                   </div>

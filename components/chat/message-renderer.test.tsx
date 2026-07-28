@@ -765,10 +765,9 @@ describe("plugin message-part renderer", () => {
     // Silence the boundary's console output.
     const errSpy = jest.spyOn(console, "error").mockImplementation(() => {})
     render(<MessageRenderer message={msg} />)
-    const errNode = document.querySelector("[data-testid='plugin-part-error']")
-    expect(errNode).toBeTruthy()
-    expect(errNode?.getAttribute("data-plugin-id")).toBe("bad-plugin")
-    expect(errNode?.getAttribute("data-part-type")).toBe("broken")
+    const errNode = screen.getByRole("alert")
+    expect(errNode).toHaveAttribute("data-plugin-surface-error", "true")
+    expect(screen.getByText("retry")).toBeInTheDocument()
     errSpy.mockRestore()
   })
 

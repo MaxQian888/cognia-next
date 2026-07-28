@@ -1,7 +1,7 @@
 import type { Meta, StoryObj } from "@storybook/nextjs-vite"
 import { fn } from "storybook/test"
 
-import { InlineError } from "./inline-error"
+import { InlineError } from "./diagnostic-card"
 
 const meta = {
   title: "Chat/InlineError",

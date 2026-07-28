@@ -17,6 +17,7 @@ export type ExternalAgentProtocol =
   | "acp" // Agent Client Protocol (Claude Code, etc.)
   | "codex-app-server" // OpenAI Codex native app-server JSON-RPC (thread/turn/item)
   | "opencode" // OpenCode SDK/server protocol
+  | "opencode-v2" // OpenCode V2 local-service preview protocol
   | "a2a" // Agent-to-Agent Protocol (Google)
   | "http" // HTTP/REST API
   | "websocket" // WebSocket
@@ -266,6 +267,11 @@ export interface ExternalAgentValiditySnapshot {
   canonicalReason?: string
   branchOutcome?: ExternalAgentBranchOutcome
   correlation?: ExternalAgentCorrelationMetadata
+  /**
+   * Remediation advice as i18n key ids, resolved by the renderer against
+   * `diagnostics.recoveryHint.*`. NOT display text — these cross into `lib/`,
+   * which must stay locale-free.
+   */
   recoveryHints?: string[]
   lastBranchReasonCode?: ExternalAgentBranchReasonCode
   lastBranchReason?: string

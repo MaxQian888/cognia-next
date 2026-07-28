@@ -21,6 +21,7 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/component
 import { getRecentErrorLogs, subscribeRecentErrorLogs } from "@cognia/logging/recent-errors"
 import { LEVEL_THEME } from "@cognia/logging/level-theme"
 import { cn } from "@/lib/utils"
+import { isCascadingIso } from "@/lib/diagnostics/cascade"
 import type { StructuredLogEntry } from "@/types/logging"
 
 export interface RecentErrorsCopy {
@@ -37,23 +38,21 @@ export interface RecentErrorsPanelProps {
   className?: string
 }
 
-const CASCADE_THRESHOLD = 3
-const CASCADE_WINDOW_MS = 5000
-
 function readEntries(limit: number, currentErrorId?: string): StructuredLogEntry[] {
   const all = getRecentErrorLogs(limit + (currentErrorId ? 1 : 0))
   const filtered = currentErrorId ? all.filter((entry) => entry.id !== currentErrorId) : all
   return filtered.slice(0, limit)
 }
 
-/** True when ≥3 of the entries landed within a 5s window. */
+/**
+ * True when ≥3 of the entries landed within a 5s window.
+ *
+ * The rule now lives in `lib/diagnostics/cascade.ts` so the diagnostic router
+ * suppresses a burst by the same definition this panel uses to label one.
+ * Re-exported because the panel's own tests (and callers) already import it here.
+ */
 export function isCascading(entries: StructuredLogEntry[]): boolean {
-  if (entries.length < CASCADE_THRESHOLD) return false
-  const times = entries
-    .map((entry) => Date.parse(entry.timestamp))
-    .filter((value) => !Number.isNaN(value))
-  if (times.length < CASCADE_THRESHOLD) return false
-  return Math.max(...times) - Math.min(...times) <= CASCADE_WINDOW_MS
+  return isCascadingIso(entries.map((entry) => entry.timestamp))
 }
 
 function formatTime(timestamp: string): string {

@@ -26,7 +26,7 @@ import {
   getToolResultRenderersRevision,
   subscribeToolResultRenderers,
 } from "@/lib/plugin/api/tool-result-renderers"
-import { PluginPartErrorBoundary } from "@/components/chat/plugin-part-error-boundary"
+import { PluginSurface } from "@/components/plugins/plugin-surface"
 import { McpContentBlocksCard } from "./mcp-renderers/mcp-content-blocks-card"
 import { WikiSearchCard } from "./mcp-renderers/wiki-search-card"
 import { WikiReadCard } from "./mcp-renderers/wiki-read-card"
@@ -189,13 +189,13 @@ export function MCPToolCard({ part, sessionId }: { part: ToolPart; sessionId?: s
     // explicitly permits. Supporting every component kind matters more than the
     // fallback, so a plugin that can't render a payload owns its empty state.
     return (
-      <PluginPartErrorBoundary
-        type={pluginEntry.toolName}
+      <PluginSurface
         pluginId={pluginEntry.pluginId}
-        kind="tool-result"
+        surfaceId={`tool-renderer:${pluginEntry.toolName}`}
+        formFactor="block"
       >
         <PluginCard part={part as ToolUIPart} sessionId={sessionId} />
-      </PluginPartErrorBoundary>
+      </PluginSurface>
     )
   }
 

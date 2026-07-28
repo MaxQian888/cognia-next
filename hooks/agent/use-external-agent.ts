@@ -49,6 +49,11 @@ import type {
   SessionCreateOptions,
   SessionListOptions,
 } from "@/lib/ai/agent/external/protocol-adapter"
+import type {
+  ExternalAgentCompactionCapability,
+  ExternalAgentCompactionOptions,
+  ExternalAgentProviderUndoCapability,
+} from "@/lib/ai/agent/external/session-capabilities"
 
 // ============================================================================
 // Validity projection
@@ -183,10 +188,28 @@ export interface UseExternalAgentActions {
   >
   /** Fork a session (ACP extension) */
   forkSession: (sessionId: string, options?: SessionCreateOptions) => Promise<ExternalAgentSession>
-  /** Trigger server-side context compaction (Codex app-server only) */
-  compactSession: (sessionId: string) => Promise<void>
-  /** Whether the active agent supports server-side context compaction */
+  /** Trigger provider-owned context compaction. */
+  compactSession: (sessionId: string, options?: ExternalAgentCompactionOptions) => Promise<void>
+  /** Whether the active agent supports provider-owned context compaction. */
   supportsCompaction: boolean
+  /** Whether an advertised compaction command accepts focus instructions. */
+  supportsCompactionFocus: boolean
+  /** Provider capability snapshot used by advanced UI affordances. */
+  compactionCapability: ExternalAgentCompactionCapability
+  /** Whether compaction is waiting for provider-confirmed completion. */
+  isCompacting: boolean
+  /** Execute the provider's advertised `/undo` command. */
+  undoLastProviderChange: (sessionId: string) => Promise<void>
+  /** Provider-native undo capability snapshot. */
+  providerUndoCapability: ExternalAgentProviderUndoCapability
+  /** Whether the per-agent provider-undo warning has been acknowledged. */
+  providerUndoAcknowledged: boolean
+  /** Persist the provider-undo warning acknowledgement for this agent. */
+  acknowledgeProviderUndoWarning: () => void
+  /** Restore the provider-undo warning for this agent. */
+  resetProviderUndoWarning: () => void
+  /** Whether provider undo is currently running. */
+  isProviderUndoing: boolean
   /** Resume a session (ACP extension) */
   resumeSession: (
     sessionId: string,
@@ -303,6 +326,7 @@ export function useExternalAgent(): UseExternalAgentReturn {
   const storeRemoveAgent = useExternalAgentStore((state) => state.removeAgent)
   const storeSetConnectionStatus = useExternalAgentStore((state) => state.setConnectionStatus)
   const storeSetAgentValidity = useExternalAgentStore((state) => state.setAgentValidity)
+  const storeUpdateAgent = useExternalAgentStore((state) => state.updateAgent)
   const storeGetAgentValidity = useExternalAgentStore((state) => state.getAgentValidity)
   const storeGetLastRunSnapshot = useExternalAgentStore((state) => state.getLastRunSnapshot)
   const storeGetBenchmarkCapabilities = useExternalAgentStore(
@@ -332,7 +356,23 @@ export function useExternalAgent(): UseExternalAgentReturn {
     ExternalAgentBenchmarkCapabilityEntry[]
   >([])
   const [supportsCompaction, setSupportsCompaction] = useState(false)
+  const [compactionCapability, setCompactionCapability] =
+    useState<ExternalAgentCompactionCapability>({
+      status: "unknown",
+      routes: [],
+    })
+  const [providerUndoCapability, setProviderUndoCapability] =
+    useState<ExternalAgentProviderUndoCapability>({ status: "unknown" })
+  const [isCompacting, setIsCompacting] = useState(false)
+  const [isProviderUndoing, setIsProviderUndoing] = useState(false)
   const activeAgentId = storeActiveAgentId
+  const supportsCompactionFocus = compactionCapability.routes.some(
+    (route) => route.kind === "command" && route.supportsFocus
+  )
+  const providerUndoAcknowledged = Boolean(
+    agents.find((agent) => agent.config.id === activeAgentId)?.config.metadata
+      ?.providerUndoWarningAcknowledged
+  )
 
   // Type for the external agent manager
   type ExternalAgentManagerType = Awaited<
@@ -346,6 +386,15 @@ export function useExternalAgent(): UseExternalAgentReturn {
   const executingSessionIdRef = useRef<string | null>(null)
   const activeAgentIdRef = useRef<string | null>(activeAgentId)
   const previousActiveAgentIdRef = useRef<string | null>(activeAgentId)
+  const compactionInProgressRef = useRef(false)
+  const providerUndoInProgressRef = useRef(false)
+  const executionInProgressRef = useRef(false)
+  const sessionMutationCountRef = useRef(0)
+  const providerUndoAcknowledgedRef = useRef(providerUndoAcknowledged)
+
+  useEffect(() => {
+    providerUndoAcknowledgedRef.current = providerUndoAcknowledged
+  }, [providerUndoAcknowledged])
 
   // Get the external agent manager
   const getManager = useCallback(async (): Promise<ExternalAgentManagerType> => {
@@ -957,7 +1006,14 @@ export function useExternalAgent(): UseExternalAgentReturn {
       if (!activeAgentId) {
         throw new Error("No active agent selected")
       }
+      if (compactionInProgressRef.current) {
+        throw new Error("Cannot create a session while context compaction is in progress")
+      }
+      if (providerUndoInProgressRef.current) {
+        throw new Error("Cannot create a session while provider undo is in progress")
+      }
 
+      sessionMutationCountRef.current += 1
       setIsLoading(true)
       setError(null)
 
@@ -972,6 +1028,7 @@ export function useExternalAgent(): UseExternalAgentReturn {
         setError(message)
         throw err
       } finally {
+        sessionMutationCountRef.current -= 1
         setIsLoading(false)
       }
     },
@@ -984,7 +1041,14 @@ export function useExternalAgent(): UseExternalAgentReturn {
       if (!activeAgentId) {
         return
       }
+      if (compactionInProgressRef.current) {
+        throw new Error("Cannot close a session while context compaction is in progress")
+      }
+      if (providerUndoInProgressRef.current) {
+        throw new Error("Cannot close a session while provider undo is in progress")
+      }
 
+      sessionMutationCountRef.current += 1
       setIsLoading(true)
       setError(null)
 
@@ -1001,6 +1065,7 @@ export function useExternalAgent(): UseExternalAgentReturn {
         setError(message)
         throw err
       } finally {
+        sessionMutationCountRef.current -= 1
         setIsLoading(false)
       }
     },
@@ -1070,6 +1135,13 @@ export function useExternalAgent(): UseExternalAgentReturn {
       if (!activeAgentId) {
         throw new Error("No active agent selected")
       }
+      if (compactionInProgressRef.current) {
+        throw new Error("Cannot fork a session while context compaction is in progress")
+      }
+      if (providerUndoInProgressRef.current) {
+        throw new Error("Cannot fork a session while provider undo is in progress")
+      }
+      sessionMutationCountRef.current += 1
       let manager: ExternalAgentManagerType | null = null
       try {
         manager = await getManager()
@@ -1084,28 +1156,44 @@ export function useExternalAgent(): UseExternalAgentReturn {
         }
         throw err
       } finally {
+        sessionMutationCountRef.current -= 1
         syncActiveAgentValidityFromRuntime(activeAgentId, manager)
       }
     },
     [getManager, activeAgentId, syncActiveAgentValidityFromRuntime]
   )
 
-  // Probe compaction support whenever the active agent or session changes —
-  // gates the session-panel "Compact context" button on the live adapter
-  // capability instead of a protocol-string check.
+  // Probe session-level provider capabilities whenever the active runtime
+  // changes. ACP itself has no compaction RPC, so adapters may report either a
+  // native route or an exact runtime-advertised slash command.
   useEffect(() => {
     let active = true
     void (async () => {
       if (!activeAgentId || !activeSession) {
-        if (active) setSupportsCompaction(false)
+        if (active) {
+          setSupportsCompaction(false)
+          setCompactionCapability({ status: "unknown", routes: [] })
+          setProviderUndoCapability({ status: "unknown" })
+        }
         return
       }
       try {
         const manager = await getManager()
-        const adapter = manager.getCodexAppServerAdapter(activeAgentId)
-        if (active) setSupportsCompaction(adapter?.supportsCompaction() ?? false)
+        const [compaction, providerUndo] = await Promise.all([
+          manager.getCompactionCapability(activeAgentId, activeSession.id),
+          manager.getProviderUndoCapability(activeAgentId, activeSession.id),
+        ])
+        if (active) {
+          setCompactionCapability(compaction)
+          setSupportsCompaction(compaction.status === "supported")
+          setProviderUndoCapability(providerUndo)
+        }
       } catch {
-        if (active) setSupportsCompaction(false)
+        if (active) {
+          setSupportsCompaction(false)
+          setCompactionCapability({ status: "unknown", routes: [] })
+          setProviderUndoCapability({ status: "unknown" })
+        }
       }
     })()
     return () => {
@@ -1113,28 +1201,95 @@ export function useExternalAgent(): UseExternalAgentReturn {
     }
   }, [activeAgentId, activeSession, getManager])
 
-  // Server-side context compaction — Codex app-server only (thread/compact/start).
-  // Exposed behind a capability probe so UI gates on the adapter, not protocol.
   const compactSession = useCallback(
-    async (sessionId: string): Promise<void> => {
+    async (sessionId: string, options?: ExternalAgentCompactionOptions): Promise<void> => {
       if (!activeAgentId) {
         throw new Error("No active agent selected")
       }
-      const manager = await getManager()
-      const adapter = manager.getCodexAppServerAdapter(activeAgentId)
-      if (!adapter?.supportsCompaction()) {
-        throw new Error("Agent does not support context compaction")
+      if (
+        executionInProgressRef.current ||
+        sessionMutationCountRef.current > 0 ||
+        compactionInProgressRef.current ||
+        providerUndoInProgressRef.current
+      ) {
+        throw new Error("Another session operation is already in progress")
       }
-      await adapter.compactSession(sessionId)
+      compactionInProgressRef.current = true
+      setIsCompacting(true)
+      setProgress(0)
+      try {
+        const manager = await getManager()
+        const capability = await manager.getCompactionCapability(activeAgentId, sessionId)
+        if (capability.status !== "supported") {
+          throw new Error("Agent does not support context compaction")
+        }
+        await manager.compactSession(activeAgentId, sessionId, options)
+        setProgress(100)
+      } finally {
+        compactionInProgressRef.current = false
+        setIsCompacting(false)
+      }
     },
     [getManager, activeAgentId]
   )
+
+  const undoLastProviderChange = useCallback(
+    async (sessionId: string): Promise<void> => {
+      if (!activeAgentId) throw new Error("No active agent selected")
+      if (
+        !providerUndoAcknowledgedRef.current ||
+        executionInProgressRef.current ||
+        sessionMutationCountRef.current > 0 ||
+        compactionInProgressRef.current ||
+        providerUndoInProgressRef.current
+      ) {
+        throw new Error(
+          providerUndoAcknowledgedRef.current
+            ? "Another session operation is already in progress"
+            : "Provider undo warning must be acknowledged"
+        )
+      }
+      providerUndoInProgressRef.current = true
+      setIsProviderUndoing(true)
+      try {
+        const manager = await getManager()
+        await manager.undoLastProviderChange(activeAgentId, sessionId)
+      } finally {
+        providerUndoInProgressRef.current = false
+        setIsProviderUndoing(false)
+      }
+    },
+    [activeAgentId, getManager]
+  )
+
+  const acknowledgeProviderUndoWarning = useCallback(() => {
+    if (!activeAgentId) return
+    providerUndoAcknowledgedRef.current = true
+    storeUpdateAgent(activeAgentId, {
+      metadata: { providerUndoWarningAcknowledged: true },
+    })
+  }, [activeAgentId, storeUpdateAgent])
+
+  const resetProviderUndoWarning = useCallback(() => {
+    if (!activeAgentId) return
+    providerUndoAcknowledgedRef.current = false
+    storeUpdateAgent(activeAgentId, {
+      metadata: { providerUndoWarningAcknowledged: false },
+    })
+  }, [activeAgentId, storeUpdateAgent])
 
   const resumeSession = useCallback(
     async (sessionId: string, options?: SessionCreateOptions): Promise<ExternalAgentSession> => {
       if (!activeAgentId) {
         throw new Error("No active agent selected")
       }
+      if (compactionInProgressRef.current) {
+        throw new Error("Cannot resume a session while context compaction is in progress")
+      }
+      if (providerUndoInProgressRef.current) {
+        throw new Error("Cannot resume a session while provider undo is in progress")
+      }
+      sessionMutationCountRef.current += 1
       let manager: ExternalAgentManagerType | null = null
       try {
         manager = await getManager()
@@ -1152,6 +1307,7 @@ export function useExternalAgent(): UseExternalAgentReturn {
         }
         throw err
       } finally {
+        sessionMutationCountRef.current -= 1
         syncActiveAgentValidityFromRuntime(activeAgentId, manager)
       }
     },
@@ -1167,7 +1323,15 @@ export function useExternalAgent(): UseExternalAgentReturn {
       if (!activeAgentId) {
         throw new Error("No active agent selected")
       }
+      if (
+        executionInProgressRef.current ||
+        compactionInProgressRef.current ||
+        providerUndoInProgressRef.current
+      ) {
+        throw new Error("Cannot send while a provider session operation is in progress")
+      }
 
+      executionInProgressRef.current = true
       setIsExecuting(true)
       setError(null)
       setProgress(0)
@@ -1242,6 +1406,7 @@ export function useExternalAgent(): UseExternalAgentReturn {
 
         throw err
       } finally {
+        executionInProgressRef.current = false
         setIsExecuting(false)
         setProgress(100)
         setPendingPermission(null)
@@ -1260,7 +1425,15 @@ export function useExternalAgent(): UseExternalAgentReturn {
       if (!activeAgentId) {
         throw new Error("No active agent selected")
       }
+      if (
+        executionInProgressRef.current ||
+        compactionInProgressRef.current ||
+        providerUndoInProgressRef.current
+      ) {
+        throw new Error("Cannot send while a provider session operation is in progress")
+      }
 
+      executionInProgressRef.current = true
       setIsExecuting(true)
       setError(null)
       setProgress(0)
@@ -1319,6 +1492,7 @@ export function useExternalAgent(): UseExternalAgentReturn {
         setError(message)
         throw err
       } finally {
+        executionInProgressRef.current = false
         setIsExecuting(false)
         setProgress(100)
         setPendingPermission(null)
@@ -1525,6 +1699,15 @@ export function useExternalAgent(): UseExternalAgentReturn {
     forkSession,
     compactSession,
     supportsCompaction,
+    supportsCompactionFocus,
+    compactionCapability,
+    isCompacting,
+    undoLastProviderChange,
+    providerUndoCapability,
+    providerUndoAcknowledged,
+    acknowledgeProviderUndoWarning,
+    resetProviderUndoWarning,
+    isProviderUndoing,
     resumeSession,
     execute,
     executeStreaming,

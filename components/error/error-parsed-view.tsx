@@ -5,18 +5,23 @@ import { useTranslations } from "next-intl"
 import {
   ChevronDown,
   ChevronRight,
-  FileCode,
-  WifiOff,
-  Clock,
-  KeyRound,
-  Gauge,
-  ServerCrash,
   CircleAlert,
+  Clock,
+  Database,
+  FileCode,
+  Gauge,
+  KeyRound,
+  Plug,
+  ServerCrash,
+  SettingsIcon,
+  WifiOff,
   type LucideIcon,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import type { ParsedError, ParsedNode } from "@cognia/error-parsers/types"
 import { normalizeErrorText, resolvePreset } from "@cognia/error-parsers"
+import { specForCode } from "@cognia/diagnostics"
+import type { DiagnosticIcon } from "@cognia/diagnostics"
 import { LEVEL_THEME } from "@cognia/logging/level-theme"
 import { ExternalLink } from "@/components/shared/external-link"
 import { JsonTree } from "@/components/shared/json-tree"
@@ -44,7 +49,7 @@ export function ErrorParsedView({
   toolType,
   fallback,
 }: ErrorParsedViewProps) {
-  const t = useTranslations("chat.message")
+  const t = useTranslations("diagnostics.detail")
   const [showParsed, setShowParsed] = useState(true)
 
   const text = rawText ?? normalizeErrorText(rawError, fallback)
@@ -117,52 +122,34 @@ function ParsedNodeView({ node }: { node: ParsedNode }) {
   }
 }
 
-// Stable category id → icon. A handful of grouped icons keeps the visual
-// vocabulary small while still distinguishing network / timeout / auth /
-// rate / server failures.
-const CATEGORY_ICON: Record<string, LucideIcon> = {
-  connectionRefused: WifiOff,
-  connectionReset: WifiOff,
-  dnsFailure: WifiOff,
-  networkUnreachable: WifiOff,
-  brokenPipe: WifiOff,
-  fetchFailed: WifiOff,
-  timeout: Clock,
-  sessionTimeout: Clock,
-  unauthorized: KeyRound,
-  forbidden: KeyRound,
-  rateLimited: Gauge,
-  quotaExceeded: Gauge,
-  modelOverloaded: Gauge,
-  serverError: ServerCrash,
-  serviceUnavailable: ServerCrash,
-  sidecarExited: ServerCrash,
-  dispatchFailed: ServerCrash,
+/**
+ * Icon token → lucide component.
+ *
+ * The per-category icon map and the destructive/warning split used to be
+ * duplicated inline here. Both now come from `DIAGNOSTIC_CODES`, so a new code
+ * gets its icon and tone from the same table that decides its actions — there
+ * is no second list to forget to update.
+ */
+const ICONS: Record<DiagnosticIcon, LucideIcon> = {
+  network: WifiOff,
+  clock: Clock,
+  key: KeyRound,
+  gauge: Gauge,
+  server: ServerCrash,
+  plug: Plug,
+  settings: SettingsIcon,
+  database: Database,
+  alert: CircleAlert,
 }
 
-// Hard / config failures read as destructive; transient / retryable ones as a
-// warning. Unlisted categories fall back to warning.
-const DESTRUCTIVE_CATEGORIES = new Set<string>([
-  "connectionRefused",
-  "dnsFailure",
-  "unauthorized",
-  "forbidden",
-  "serverError",
-  "serviceUnavailable",
-  "sidecarExited",
-  "providerMisconfigured",
-  "modelRequired",
-  "pluginToolMissing",
-  "dispatchFailed",
-])
-
 function CategoryNodeView({ node }: { node: ParsedNode }) {
-  const t = useTranslations("chat.message")
+  const t = useTranslations("diagnostics")
   const category = node.category ?? ""
-  const Icon = CATEGORY_ICON[category] ?? CircleAlert
-  const destructive = DESTRUCTIVE_CATEGORIES.has(category)
-  const label = t.has(`errorCategory.${category}`) ? t(`errorCategory.${category}`) : node.content
-  const hint = t.has(`errorCategoryHint.${category}`) ? t(`errorCategoryHint.${category}`) : ""
+  const spec = specForCode(category)
+  const Icon = ICONS[spec.icon]
+  const destructive = spec.severity === "fatal" || spec.severity === "error"
+  const label = t.has(`code.${category}.label`) ? t(`code.${category}.label`) : node.content
+  const hint = t.has(`code.${category}.hint`) ? t(`code.${category}.hint`) : ""
 
   return (
     <div className="space-y-1">
@@ -296,7 +283,7 @@ function ExitCodeNodeView({ node }: { node: ParsedNode }) {
 }
 
 function StatusCodeNodeView({ node }: { node: ParsedNode }) {
-  const t = useTranslations("chat.message")
+  const t = useTranslations("diagnostics")
   const status = node.status ?? 200
   const variant =
     status >= 200 && status < 300
@@ -308,9 +295,7 @@ function StatusCodeNodeView({ node }: { node: ParsedNode }) {
           : "bg-destructive/15 text-destructive"
 
   const hint =
-    node.category && t.has(`errorCategoryHint.${node.category}`)
-      ? t(`errorCategoryHint.${node.category}`)
-      : ""
+    node.category && t.has(`code.${node.category}.hint`) ? t(`code.${node.category}.hint`) : ""
 
   return (
     <div className="space-y-1">

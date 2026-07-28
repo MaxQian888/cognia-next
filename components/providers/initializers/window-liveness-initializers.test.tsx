@@ -16,11 +16,11 @@ jest.mock("@/lib/native/utils", () => ({
   isTauri: () => isTauriMock(),
 }))
 
-let mockPetRole: "main" | "web" | "overlay" | "popup" | "island" = "main"
+let mockPetRole: "main" | "web" | "overlay" | "popup" | "island" | "selection-toolbar" = "main"
 jest.mock("@/lib/pet/window-role", () => ({
   getPetWindowRole: () => mockPetRole,
   isSecondaryOverlayRole: (role: string) =>
-    role === "overlay" || role === "popup" || role === "island",
+    role === "overlay" || role === "popup" || role === "island" || role === "selection-toolbar",
 }))
 
 describe("WindowLivenessInitializers", () => {
@@ -44,11 +44,11 @@ describe("WindowLivenessInitializers", () => {
     await act(async () => {
       container = render(<WindowLivenessInitializers />).container
     })
-    // WindowShowInitializer + WebviewHeartbeatInitializer.
-    expect(container.querySelectorAll('[data-testid="liveness-child"]')).toHaveLength(2)
+    // WindowShowInitializer + WebviewHeartbeatInitializer + selection toolbar restore.
+    expect(container.querySelectorAll('[data-testid="liveness-child"]')).toHaveLength(3)
   })
 
-  it.each(["overlay", "popup", "island"] as const)(
+  it.each(["overlay", "popup", "island", "selection-toolbar"] as const)(
     "renders nothing in the %s overlay window even on Tauri",
     async (role) => {
       isTauriMock.mockReturnValue(true)

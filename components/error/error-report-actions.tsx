@@ -12,7 +12,9 @@
  *   configured via `NEXT_PUBLIC_ISSUE_REPORT_URL`. No repository is hard-coded.
  *
  * The report builder (`buildErrorReportMarkdown`) and the issue-URL builder
- * (`buildIssueUrl`) are pure and exported so they're independently testable.
+ * (`buildIssueUrl`) live in `lib/error/build-report.ts` so surfaces that aren't
+ * this page — an inline diagnostic card, a toast, a notification-center row —
+ * can offer the same two actions without importing a React component.
  */
 
 import { useCallback, useEffect, useRef, useState } from "react"
@@ -22,21 +24,19 @@ import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import { getRecentErrorLogs } from "@cognia/logging/recent-errors"
 import { getLocalRuntimeDiagnostics } from "@/lib/native/local-runtime"
-import type { LocalRuntimeDiagnostics } from "@/lib/native/local-runtime"
-import type { ErrorCategory } from "@/lib/error/classify-error"
-import type { StructuredLogEntry } from "@/types/logging"
+import {
+  buildErrorReportMarkdown,
+  buildIssueUrl,
+  type ErrorReportContext,
+} from "@/lib/error/build-report"
+
+export type { ErrorReportContext }
 
 export interface ErrorReportCopy {
   copyReport: string
   copyReportSuccess: string
   copyReportFailed: string
   reportIssue: string
-}
-
-export interface ErrorReportContext {
-  category: ErrorCategory
-  locale: string
-  pathname: string | null
 }
 
 export interface ErrorReportActionsProps {
@@ -54,77 +54,12 @@ export interface ErrorReportActionsProps {
   openUrl?: (url: string) => void
 }
 
-const MAX_ISSUE_BODY = 6000
-
 function defaultWriteClipboard(text: string): Promise<void> {
   return navigator.clipboard.writeText(text)
 }
 
 function defaultOpenUrl(url: string): void {
   window.open(url, "_blank", "noopener,noreferrer")
-}
-
-/** Build the human-readable Markdown report copied to the clipboard. */
-export function buildErrorReportMarkdown(params: {
-  error?: (Error & { digest?: string }) | null
-  context: ErrorReportContext
-  recent: StructuredLogEntry[]
-  diagnostics: LocalRuntimeDiagnostics | null
-  generatedAt: string
-}): string {
-  const { error, context, recent, diagnostics, generatedAt } = params
-  const lines: string[] = []
-
-  lines.push("## Cognia error report")
-  lines.push("")
-  lines.push(`- Generated: ${generatedAt}`)
-  lines.push(`- Category: ${context.category}`)
-  lines.push(`- Route: ${context.pathname ?? "—"}`)
-  lines.push(`- Locale: ${context.locale}`)
-  if (error?.digest) lines.push(`- Error ID: ${error.digest}`)
-  lines.push("")
-
-  lines.push("### Error")
-  if (error) {
-    lines.push("```")
-    lines.push(`${error.name}: ${error.message}`)
-    if (error.stack) lines.push(error.stack)
-    lines.push("```")
-  } else {
-    lines.push("_No error object was provided._")
-  }
-  lines.push("")
-
-  lines.push("### Diagnostics")
-  if (diagnostics) {
-    lines.push("```json")
-    lines.push(JSON.stringify(diagnostics, null, 2))
-    lines.push("```")
-  } else {
-    lines.push("_Diagnostics unavailable._")
-  }
-  lines.push("")
-
-  lines.push(`### Recent errors (${recent.length})`)
-  if (recent.length > 0) {
-    for (const entry of recent) {
-      lines.push(`- ${entry.timestamp} [${entry.level}] ${entry.module}: ${entry.message}`)
-    }
-  } else {
-    lines.push("_None recorded._")
-  }
-  lines.push("")
-
-  return lines.join("\n")
-}
-
-/** Build a pre-filled issue-tracker URL from the configured base. */
-export function buildIssueUrl(base: string, title: string, body: string): string {
-  const normalized = base.replace(/\/+$/, "")
-  const endpoint = /\/issues\/new$/.test(normalized) ? normalized : `${normalized}/issues/new`
-  const truncatedBody = body.length > MAX_ISSUE_BODY ? `${body.slice(0, MAX_ISSUE_BODY)}\n…` : body
-  const params = new URLSearchParams({ title, body: truncatedBody })
-  return `${endpoint}?${params.toString()}`
 }
 
 export function ErrorReportActions({

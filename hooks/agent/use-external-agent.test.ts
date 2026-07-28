@@ -67,7 +67,10 @@ jest.mock("@/lib/ai/agent/external/canonical-contract", () => ({
 }))
 
 interface StoreState {
-  agents: Record<string, { id: string; name: string; protocol: string }>
+  agents: Record<
+    string,
+    { id: string; name: string; protocol: string; metadata?: Record<string, unknown> }
+  >
   connectionStatus: Record<string, string>
   agentValidity: Record<string, unknown>
   lastRunSnapshots: Record<string, unknown>
@@ -111,6 +114,14 @@ const storeGetBenchmarkCapabilities = jest.fn(
 const storeSetActiveAgent = jest.fn((id: string | null) => {
   storeStateRef.current.activeAgentId = id
 })
+const storeUpdateAgent = jest.fn((id: string, updates: { metadata?: Record<string, unknown> }) => {
+  const agent = storeStateRef.current.agents[id]
+  if (!agent) return
+  storeStateRef.current.agents[id] = {
+    ...agent,
+    metadata: updates.metadata ? { ...agent.metadata, ...updates.metadata } : agent.metadata,
+  }
+})
 
 const stableGetAgent = (id: string) => storeStateRef.current.agents[id]
 const stableGetAllAgents = () => Object.values(storeStateRef.current.agents)
@@ -132,6 +143,7 @@ function getStoreState() {
     setLastRunSnapshot: storeSetLastRunSnapshot,
     getBenchmarkCapabilities: storeGetBenchmarkCapabilities,
     setActiveAgent: storeSetActiveAgent,
+    updateAgent: storeUpdateAgent,
     activeAgentId: storeStateRef.current.activeAgentId,
     defaultPermissionMode: storeStateRef.current.defaultPermissionMode,
   }
@@ -181,6 +193,10 @@ interface FakeManager {
   getConfigOptions: jest.Mock
   getAgentTools: jest.Mock
   checkAgentHealth: jest.Mock
+  getCompactionCapability: jest.Mock
+  compactSession: jest.Mock
+  getProviderUndoCapability: jest.Mock
+  undoLastProviderChange: jest.Mock
   addLifecycleListener: jest.Mock
   addEventListener: jest.Mock
 }
@@ -222,6 +238,10 @@ function makeManager(): FakeManager {
     getConfigOptions: jest.fn(() => ({ status: "ok", data: [] })),
     getAgentTools: jest.fn(() => ({})),
     checkAgentHealth: jest.fn(async () => true),
+    getCompactionCapability: jest.fn(async () => ({ status: "unsupported", routes: [] })),
+    compactSession: jest.fn(async () => undefined),
+    getProviderUndoCapability: jest.fn(async () => ({ status: "unsupported" })),
+    undoLastProviderChange: jest.fn(async () => undefined),
     addLifecycleListener: jest.fn(() => () => undefined),
     addEventListener: jest.fn(() => () => undefined),
   }
@@ -251,6 +271,7 @@ beforeEach(() => {
   storeGetLastRunSnapshot.mockClear()
   storeGetBenchmarkCapabilities.mockClear()
   storeSetActiveAgent.mockClear()
+  storeUpdateAgent.mockClear()
   normalizeMock.mockClear()
   isExecutableMock.mockReset().mockReturnValue(true)
   getBlockReasonMock.mockReset().mockReturnValue(null)
@@ -576,6 +597,154 @@ describe("useExternalAgent core actions", () => {
       await result.current.resumeSession("s1", { systemPrompt: "p" })
     })
     expect(fakeManager.resumeSession).toHaveBeenCalledWith("a1", "s1", { systemPrompt: "p" })
+  })
+
+  it("locks session mutations until provider-confirmed compaction completes", async () => {
+    seedAgent("a1")
+    fakeManager.getCompactionCapability.mockResolvedValue({
+      status: "supported",
+      routes: [{ kind: "native", supportsFocus: false }],
+    })
+    let finishCompaction!: () => void
+    fakeManager.compactSession.mockImplementation(
+      () =>
+        new Promise<void>((resolve) => {
+          finishCompaction = resolve
+        })
+    )
+    const { result } = renderHook(() => useExternalAgent())
+    await flush()
+
+    let compactPromise!: Promise<void>
+    act(() => {
+      compactPromise = result.current.compactSession("s1")
+    })
+    await expect(result.current.createSession()).rejects.toThrow(
+      "Cannot create a session while context compaction is in progress"
+    )
+    await expect(result.current.compactSession("s1")).rejects.toThrow(
+      "Another session operation is already in progress"
+    )
+    await flush()
+    expect(result.current.isCompacting).toBe(true)
+    expect(result.current.progress).toBe(0)
+    await expect(result.current.createSession()).rejects.toThrow(
+      "Cannot create a session while context compaction is in progress"
+    )
+    await expect(result.current.compactSession("s1")).rejects.toThrow(
+      "Another session operation is already in progress"
+    )
+
+    await act(async () => {
+      finishCompaction()
+      await compactPromise
+    })
+    expect(result.current.isCompacting).toBe(false)
+    expect(result.current.progress).toBe(100)
+  })
+
+  it("does not start compaction while sending or mutating a session", async () => {
+    seedAgent("a1")
+    let finishExecution!: () => void
+    fakeManager.execute.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finishExecution = () =>
+            resolve({
+              success: true,
+              sessionId: "sess-1",
+              finalResponse: "ok",
+            })
+        })
+    )
+    const { result } = renderHook(() => useExternalAgent())
+    await flush()
+
+    let executionPromise!: ReturnType<typeof result.current.execute>
+    act(() => {
+      executionPromise = result.current.execute("hello")
+    })
+    await expect(result.current.compactSession("s1")).rejects.toThrow(
+      "Another session operation is already in progress"
+    )
+    await act(async () => {
+      finishExecution()
+      await executionPromise
+    })
+
+    let finishCreate!: () => void
+    fakeManager.createSession.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finishCreate = () => resolve({ id: "sess-2" })
+        })
+    )
+    let createPromise!: ReturnType<typeof result.current.createSession>
+    act(() => {
+      createPromise = result.current.createSession()
+    })
+    await expect(result.current.compactSession("s1")).rejects.toThrow(
+      "Another session operation is already in progress"
+    )
+    await act(async () => {
+      finishCreate()
+      await createPromise
+    })
+  })
+
+  it("unlocks compaction after a provider failure", async () => {
+    seedAgent("a1")
+    fakeManager.getCompactionCapability.mockResolvedValue({
+      status: "supported",
+      routes: [{ kind: "native", supportsFocus: false }],
+    })
+    fakeManager.compactSession
+      .mockRejectedValueOnce(new Error("provider failed"))
+      .mockResolvedValueOnce(undefined)
+    const { result } = renderHook(() => useExternalAgent())
+    await flush()
+
+    let compactError: unknown
+    await act(async () => {
+      try {
+        await result.current.compactSession("s1")
+      } catch (error) {
+        compactError = error
+      }
+    })
+    expect(compactError).toEqual(new Error("provider failed"))
+    expect(result.current.isCompacting).toBe(false)
+
+    await act(async () => {
+      await result.current.compactSession("s1")
+    })
+    expect(fakeManager.compactSession).toHaveBeenCalledTimes(2)
+  })
+
+  it("persists and resets the per-agent provider undo acknowledgement", async () => {
+    seedAgent("a1")
+    const { result } = renderHook(() => useExternalAgent())
+    await flush()
+
+    await expect(result.current.undoLastProviderChange("s1")).rejects.toThrow(
+      "Provider undo warning must be acknowledged"
+    )
+    act(() => result.current.acknowledgeProviderUndoWarning())
+    expect(storeUpdateAgent).toHaveBeenLastCalledWith("a1", {
+      metadata: { providerUndoWarningAcknowledged: true },
+    })
+    await act(async () => {
+      await result.current.undoLastProviderChange("s1")
+    })
+    expect(fakeManager.undoLastProviderChange).toHaveBeenCalledWith("a1", "s1")
+
+    act(() => result.current.resetProviderUndoWarning())
+    expect(storeUpdateAgent).toHaveBeenLastCalledWith("a1", {
+      metadata: { providerUndoWarningAcknowledged: false },
+    })
+    await expect(result.current.undoLastProviderChange("s1")).rejects.toThrow(
+      "Provider undo warning must be acknowledged"
+    )
   })
 
   it("retains identified file plans emitted by the active session", async () => {
