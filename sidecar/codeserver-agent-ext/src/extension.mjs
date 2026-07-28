@@ -8,7 +8,20 @@
 // extension is inert in any other code-server.
 
 import * as net from "node:net"
+import { createHmac, randomUUID } from "node:crypto"
 import * as vscode from "vscode"
+import { ContentHandleClient } from "./content-handles.mjs"
+import { findOccupiedContributionIds } from "./contribution-ids.mjs"
+import {
+  ContentLengthDecoder,
+  brokerChallengeRequest,
+  brokerHelloRequest,
+  errorResponse,
+  eventNotification,
+  responseMessage,
+  serializeContentLength,
+  validateNegotiatedHello,
+} from "./jsonrpc.mjs"
 import {
   diagnosticSeverityName,
   editReflectionAction,
@@ -33,6 +46,8 @@ const RECONNECT_DELAY_MS = 1000
  * collapsing a burst into one trailing event loses nothing.
  */
 const EVENT_COALESCE_MS = 150
+const BROKER_REQUEST_TIMEOUT_MS = 30_000
+const IDE_CATALOG_HASH = "sha256:53cf23036ed2e14693f284778d7f2b0cd7cd5802ee63bb42c573063f40f86fb3"
 
 /**
  * Owns the single TCP connection back to the app and dispatches inbound request
@@ -40,14 +55,21 @@ const EVENT_COALESCE_MS = 150
  * app-side restart doesn't leave the bridge dead.
  */
 class AgentBridge {
-  constructor(port, token) {
+  constructor(port, token, protocolMode) {
     this.port = port
     this.token = token
+    this.protocolMode = protocolMode
     this.socket = null
     this.buffer = ""
+    this.decoder = new ContentLengthDecoder()
     this.disposed = false
     this.reconnectTimer = null
     this.coalesceTimers = new Map()
+    this.inflight = new Map()
+    this.pending = new Map()
+    this.notificationListeners = new Set()
+    this.nextRequestId = 1
+    this.negotiated = null
   }
 
   start() {
@@ -60,6 +82,8 @@ class AgentBridge {
     this.reconnectTimer = null
     for (const timer of this.coalesceTimers.values()) clearTimeout(timer)
     this.coalesceTimers.clear()
+    this.failPending("Managed IDE broker disposed")
+    this.notificationListeners.clear()
     this.socket?.destroy()
     this.socket = null
   }
@@ -80,7 +104,7 @@ class AgentBridge {
         this.coalesceTimers.delete(name)
         if (this.disposed || !this.socket) return
         try {
-          this.socket.write(eventFrame(name, payloadFn()))
+          this.writeEvent(name, payloadFn())
         } catch {
           // Socket died between the check and the write; the reconnect handles it.
         }
@@ -92,15 +116,28 @@ class AgentBridge {
     if (this.disposed) return
     const socket = net.createConnection({ host: "127.0.0.1", port: this.port }, () => {
       this.buffer = ""
-      socket.write(helloFrame(this.token))
+      this.decoder = new ContentLengthDecoder()
+      this.negotiated = null
+      if (this.protocolMode === "jsonrpc") {
+        const credential = splitBrokerCredential(this.token)
+        if (!credential) {
+          socket.destroy()
+          return
+        }
+        this.credential = credential
+        socket.write(serializeContentLength(brokerChallengeRequest(credential.tokenId)))
+      } else {
+        socket.write(helloFrame(this.token))
+      }
     })
-    socket.setEncoding("utf8")
+    if (this.protocolMode === "legacy") socket.setEncoding("utf8")
     socket.on("data", (chunk) => this.onData(chunk))
     // Errors surface as a `close`; swallow so an unhandled 'error' can't crash
     // the extension host.
     socket.on("error", () => {})
     socket.on("close", () => {
       if (this.socket === socket) this.socket = null
+      this.failPending("Managed IDE broker disconnected")
       this.scheduleReconnect()
     })
     this.socket = socket
@@ -115,6 +152,17 @@ class AgentBridge {
   }
 
   onData(chunk) {
+    if (this.protocolMode === "jsonrpc") {
+      let messages
+      try {
+        messages = this.decoder.push(chunk)
+      } catch {
+        this.socket?.destroy()
+        return
+      }
+      for (const message of messages) void this.handleJsonRpc(message)
+      return
+    }
     const { lines, rest } = splitFrames(this.buffer + chunk)
     this.buffer = rest
     for (const line of lines) void this.handleLine(line)
@@ -132,10 +180,179 @@ class AgentBridge {
       )
     }
   }
+
+  writeEvent(name, payload) {
+    if (!this.socket) return
+    if (this.protocolMode === "jsonrpc") {
+      this.socket.write(serializeContentLength(eventNotification(name, payload)))
+    } else {
+      this.socket.write(eventFrame(name, payload))
+    }
+  }
+
+  request(method, params, options = {}) {
+    if (this.protocolMode !== "jsonrpc") {
+      return Promise.reject(new Error("LEGACY_CAPABILITY_UNSUPPORTED: provider callbacks"))
+    }
+    if (!this.socket || !this.negotiated) {
+      return Promise.reject(new Error("Managed IDE broker is not ready"))
+    }
+    const id = `proxy:${this.nextRequestId++}`
+    const timeoutMs = options.timeoutMs ?? BROKER_REQUEST_TIMEOUT_MS
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.pending.delete(id)
+        this.notify("$/cancelRequest", { id })
+        reject(new Error(`Managed IDE broker request timed out: ${method}`))
+      }, timeoutMs)
+      this.pending.set(id, { resolve, reject, timer })
+      try {
+        this.socket.write(
+          serializeContentLength({
+            jsonrpc: "2.0",
+            id,
+            method,
+            params,
+          })
+        )
+      } catch (error) {
+        clearTimeout(timer)
+        this.pending.delete(id)
+        reject(error)
+      }
+    })
+  }
+
+  notify(method, params) {
+    if (this.protocolMode !== "jsonrpc" || !this.socket) return
+    this.socket.write(serializeContentLength({ jsonrpc: "2.0", method, params }))
+  }
+
+  onNotification(listener) {
+    this.notificationListeners.add(listener)
+    return {
+      dispose: () => this.notificationListeners.delete(listener),
+    }
+  }
+
+  failPending(message) {
+    for (const pending of this.pending.values()) {
+      clearTimeout(pending.timer)
+      pending.reject(new Error(message))
+    }
+    this.pending.clear()
+  }
+
+  async handleJsonRpc(message) {
+    if (!message || message.jsonrpc !== "2.0") return
+    if (message.id === "challenge" && ("result" in message || "error" in message)) {
+      if (message.error || typeof message.result?.challenge !== "string" || !this.credential) {
+        this.socket?.destroy()
+        return
+      }
+      const proof = createHmac("sha256", this.credential.secret)
+        .update(message.result.challenge)
+        .digest("hex")
+      this.socket?.write(
+        serializeContentLength(
+          brokerHelloRequest({
+            tokenId: this.credential.tokenId,
+            proof,
+            catalogHash: process.env.COGNIA_CS_CATALOG_HASH ?? IDE_CATALOG_HASH,
+            hostId: process.env.COGNIA_CS_HOST_ID ?? "local",
+            workspace: process.env.COGNIA_CS_WORKSPACE ?? "",
+          })
+        )
+      )
+      return
+    }
+    if (message.id === "hello" && ("result" in message || "error" in message)) {
+      if (message.error) {
+        this.socket?.destroy()
+      } else {
+        try {
+          this.negotiated = validateNegotiatedHello(
+            message.result,
+            process.env.COGNIA_CS_CATALOG_HASH ?? IDE_CATALOG_HASH
+          )
+        } catch {
+          this.socket?.destroy()
+        }
+      }
+      return
+    }
+    if (message.id !== undefined && ("result" in message || "error" in message)) {
+      const pending = this.pending.get(message.id)
+      if (!pending) return
+      clearTimeout(pending.timer)
+      this.pending.delete(message.id)
+      if (message.error) {
+        const error = new Error(message.error.message ?? "Managed IDE broker request failed")
+        error.code = message.error.code
+        error.data = message.error.data
+        pending.reject(error)
+      } else {
+        pending.resolve(message.result)
+      }
+      return
+    }
+    if (message.method === "$/cancelRequest") {
+      const id = message.params?.id
+      this.inflight.get(id)?.abort()
+      return
+    }
+    if (message.method === "cognia/provider/event" && message.id === undefined) {
+      for (const listener of this.notificationListeners) {
+        try {
+          listener(message.params ?? {})
+        } catch {
+          // One proxy's event handler cannot break delivery to other proxies.
+        }
+      }
+      return
+    }
+    if (typeof message.method !== "string" || message.id === undefined) return
+
+    const controller = new AbortController()
+    this.inflight.set(message.id, controller)
+    try {
+      const result = await dispatch(message.method, message.params ?? {}, controller.signal)
+      if (controller.signal.aborted) {
+        this.socket?.write(
+          serializeContentLength(errorResponse(message.id, -32800, "Request cancelled"))
+        )
+      } else {
+        this.socket?.write(serializeContentLength(responseMessage(message.id, result)))
+      }
+    } catch (error) {
+      const methodMissing = String(error?.message ?? error).startsWith("unknown method:")
+      this.socket?.write(
+        serializeContentLength(
+          errorResponse(
+            message.id,
+            methodMissing ? -32601 : -32603,
+            String(error?.message ?? error)
+          )
+        )
+      )
+    } finally {
+      this.inflight.delete(message.id)
+    }
+  }
+}
+
+function splitBrokerCredential(value) {
+  const separator = value.indexOf(".")
+  if (separator <= 0 || separator === value.length - 1) return null
+  return {
+    tokenId: value.slice(0, separator),
+    secret: value.slice(separator + 1),
+  }
 }
 
 /** Route a request method to its editor handler. */
-async function dispatch(method, params) {
+async function dispatch(method, params, signal) {
+  if (signal?.aborted) throw new Error("Request cancelled")
   switch (method) {
     case "openFile":
       return openFile(params)
@@ -153,8 +370,51 @@ async function dispatch(method, params) {
       return runInTerminal(params)
     case "notify":
       return notify(params)
+    case "managedProxyHandshake":
+      return managedProxyHandshake(params)
+    case "restartManagedExtensionHost":
+      await vscode.commands.executeCommand("workbench.action.restartExtensionHost")
+      return null
     default:
       throw new Error(`unknown method: ${method}`)
+  }
+}
+
+async function managedProxyHandshake(params) {
+  const pluginId = String(params?.pluginId ?? "")
+  const extensionName = `proxy-${pluginId
+    .toLowerCase()
+    .replace(/[^a-z0-9-]+/g, "-")
+    .replace(/^-|-$/g, "")}`
+  const extension = vscode.extensions.getExtension(`cognia-managed.${extensionName}`)
+  if (!extension) throw new Error(`IDE_PROXY_EXTENSION_NOT_DISCOVERED: ${pluginId}`)
+  if (!extension.isActive) await extension.activate()
+  const registration = proxyRegistrations.get(pluginId)
+  const descriptor = extension.packageJSON?.cogniaManaged
+  if (!registration || !descriptor) {
+    throw new Error(`IDE_PROXY_ACTIVATION_INCOMPLETE: ${pluginId}`)
+  }
+  for (const [field, expected] of [
+    ["pluginVersion", params.pluginVersion],
+    ["manifestHash", params.manifestHash],
+    ["catalogHash", params.catalogHash],
+    ["platformVersion", params.platformVersion],
+  ]) {
+    if (descriptor[field] !== expected) {
+      throw new Error(`IDE_PROXY_HANDSHAKE_MISMATCH: ${field}`)
+    }
+  }
+  return {
+    pluginId,
+    pluginVersion: descriptor.pluginVersion,
+    manifestHash: descriptor.manifestHash,
+    catalogHash: descriptor.catalogHash,
+    platformVersion: descriptor.platformVersion,
+    providerCount: descriptor.providers?.length ?? 0,
+    protocolCount: ["lsp", "dap", "mcp"].reduce(
+      (count, family) => count + (descriptor.protocols?.[family]?.length ?? 0),
+      0
+    ),
   }
 }
 
@@ -396,14 +656,208 @@ function proposedUri(fileUri) {
 }
 
 let bridge = null
+let contentHandles = null
+const proxyRegistrations = new Map()
+
+async function registerProxy(context, descriptor) {
+  if (!bridge) throw new Error("Managed IDE broker is not active")
+  if (descriptor.platformVersion !== "1.0.0") {
+    throw new Error("IDE_PLATFORM_VERSION_MISMATCH")
+  }
+  if (descriptor.catalogHash !== IDE_CATALOG_HASH) {
+    throw new Error("IDE_CATALOG_MISMATCH")
+  }
+  const runtimeDescriptor = {
+    ...descriptor,
+    contributions: context.extension.packageJSON?.contributes ?? {},
+  }
+  const collisions = findOccupiedContributionIds(vscode, runtimeDescriptor, context.extension.id)
+  if (collisions.length > 0) {
+    throw new Error(
+      `IDE_CONTRIBUTION_ID_OCCUPIED: ${collisions
+        .map((entry) => `${entry.kind}:${entry.id}@${entry.extensionId}`)
+        .join(", ")}`
+    )
+  }
+  const { createManagedStorageFacade } = await import("./managed-storage.mjs")
+  const managedStorage = await createManagedStorageFacade({
+    request: (method, params) => bridge.request(method, params),
+    descriptor: runtimeDescriptor,
+    hostId: process.env.COGNIA_CS_HOST_ID ?? "local",
+    workspaceRoot: process.env.COGNIA_CS_WORKSPACE ?? "",
+    getWorkspaceTrusted: () => vscode.workspace.isTrusted,
+  })
+  const { registerManagedProviders } = await import("./provider-adapters.mjs")
+  let providerRegistration
+  try {
+    providerRegistration = await registerManagedProviders(vscode, runtimeDescriptor, {
+      managedStorage,
+      onEvent: (listener) =>
+        bridge.onNotification((message) => {
+          if (message?.pluginId === runtimeDescriptor.pluginId) listener(message)
+        }),
+      createInvocationId: () => randomUUID(),
+      invoke: (provider, operation, args, token, suppliedInvocationId) => {
+        const invocationId = suppliedInvocationId ?? randomUUID()
+        const request = bridge.request("cognia/provider/invoke", {
+          invocationId,
+          pluginId: runtimeDescriptor.pluginId,
+          pluginVersion: runtimeDescriptor.pluginVersion,
+          manifestHash: runtimeDescriptor.manifestHash,
+          catalogHash: runtimeDescriptor.catalogHash,
+          hostId: process.env.COGNIA_CS_HOST_ID ?? "local",
+          workspaceRoot: process.env.COGNIA_CS_WORKSPACE ?? "",
+          workspaceTrusted: vscode.workspace.isTrusted,
+          providerId: provider.id,
+          providerKind: provider.kind,
+          handler: provider.handler,
+          permission: provider.permission ?? null,
+          operation,
+          arguments: args,
+        })
+        token?.onCancellationRequested(() => {
+          // The request owns its JSON-RPC cancellation id internally; cancellation
+          // is also carried as a provider operation so the host can stop work even
+          // when the callback arrived before the pending id was observable here.
+          bridge?.notify("cognia/provider/cancel", {
+            invocationId,
+            pluginId: runtimeDescriptor.pluginId,
+            providerId: provider.id,
+            operation,
+          })
+        })
+        return request
+      },
+      respondApproval: (provider, invocationId, requestId, decision, updatedInput, message) => {
+        bridge.notify("cognia/provider/approvalResponse", {
+          invocationId,
+          requestId,
+          pluginId: runtimeDescriptor.pluginId,
+          providerId: provider.id,
+          decision,
+          ...(updatedInput ? { updatedInput } : {}),
+          ...(message ? { message } : {}),
+        })
+      },
+      createContent: (provider, bytes) => {
+        if (!contentHandles) throw new Error("IDE_CONTENT_HANDLE_CHANNEL_UNAVAILABLE")
+        return contentHandles.upload({ ...provider, pluginId: runtimeDescriptor.pluginId }, bytes)
+      },
+      readContent: (provider, handle) => {
+        if (!contentHandles) throw new Error("IDE_CONTENT_HANDLE_CHANNEL_UNAVAILABLE")
+        return contentHandles.download(
+          { ...provider, pluginId: runtimeDescriptor.pluginId },
+          handle
+        )
+      },
+    })
+  } catch (error) {
+    managedStorage.dispose()
+    throw error
+  }
+  let protocolRegistration
+  try {
+    const { registerManagedProtocols } = await import("./protocol-adapters.mjs")
+    const protocolParams = (family, server, extra = {}) => ({
+      invocationId: randomUUID(),
+      pluginId: runtimeDescriptor.pluginId,
+      pluginVersion: runtimeDescriptor.pluginVersion,
+      manifestHash: runtimeDescriptor.manifestHash,
+      catalogHash: runtimeDescriptor.catalogHash,
+      hostId: process.env.COGNIA_CS_HOST_ID ?? "local",
+      workspaceRoot: process.env.COGNIA_CS_WORKSPACE ?? "",
+      workspaceTrusted: vscode.workspace.isTrusted,
+      family,
+      protocolId: server.id,
+      ...extra,
+    })
+    protocolRegistration = await registerManagedProtocols(vscode, runtimeDescriptor, {
+      onEvent: (listener) =>
+        bridge.onNotification((message) => {
+          if (message?.pluginId === runtimeDescriptor.pluginId) listener(message)
+        }),
+      startProtocol: (family, server, consumerId) =>
+        bridge.request(
+          "cognia/protocol/start",
+          protocolParams(family, server, consumerId ? { consumerId } : {})
+        ),
+      requestProtocol: (family, server, capabilityTicket, method, payload, token, consumerId) => {
+        const invocationId = randomUUID()
+        const request = bridge.request(
+          "cognia/protocol/request",
+          protocolParams(family, server, {
+            invocationId,
+            capabilityTicket,
+            method,
+            payload,
+            ...(consumerId ? { consumerId } : {}),
+          })
+        )
+        token?.onCancellationRequested(() => {
+          bridge?.notify("cognia/protocol/cancel", {
+            invocationId,
+            pluginId: runtimeDescriptor.pluginId,
+            protocolId: server.id,
+            ...(consumerId ? { consumerId } : {}),
+          })
+        })
+        return request
+      },
+      documentProtocol: (family, server, capabilityTicket, document, consumerId) =>
+        bridge.request(
+          "cognia/protocol/document",
+          protocolParams(family, server, {
+            capabilityTicket,
+            document,
+            ...(consumerId ? { consumerId } : {}),
+          })
+        ),
+      stopProtocol: (family, server, capabilityTicket, consumerId) =>
+        bridge.request(
+          "cognia/protocol/stop",
+          protocolParams(family, server, {
+            capabilityTicket,
+            ...(consumerId ? { consumerId } : {}),
+          })
+        ),
+    })
+  } catch (error) {
+    providerRegistration.dispose()
+    managedStorage.dispose()
+    throw error
+  }
+  const registration = vscode.Disposable.from(
+    managedStorage,
+    providerRegistration,
+    protocolRegistration
+  )
+  const previous = proxyRegistrations.get(runtimeDescriptor.pluginId)
+  previous?.dispose()
+  proxyRegistrations.set(runtimeDescriptor.pluginId, registration)
+  context.subscriptions.push(registration)
+  return {
+    generation: bridge.negotiated?.generation,
+    providerCount: runtimeDescriptor.providers?.length ?? 0,
+    managedContext: {
+      globalState: managedStorage.globalState,
+      workspaceState: managedStorage.workspaceState,
+      secrets: managedStorage.secrets,
+    },
+  }
+}
 
 export function activate(context) {
   const portRaw = process.env.COGNIA_CS_AGENT_PORT
   const token = process.env.COGNIA_CS_AGENT_TOKEN
   // Not launched by Cognia — stay completely dormant.
-  if (!portRaw || !token) return
+  if (!portRaw || !token) return undefined
   const port = Number(portRaw)
-  if (!Number.isInteger(port) || port <= 0) return
+  if (!Number.isInteger(port) || port <= 0) return undefined
+  const protocolMode = process.env.COGNIA_CS_BROKER_PROTOCOL === "1" ? "jsonrpc" : "legacy"
+  const contentPort = Number(process.env.COGNIA_CS_CONTENT_PORT)
+  if (protocolMode === "jsonrpc" && (!Number.isInteger(contentPort) || contentPort <= 0)) {
+    return undefined
+  }
 
   proposedEmitter = new vscode.EventEmitter()
   context.subscriptions.push(
@@ -414,7 +868,11 @@ export function activate(context) {
     })
   )
 
-  bridge = new AgentBridge(port, token)
+  bridge = new AgentBridge(port, token, protocolMode)
+  contentHandles =
+    protocolMode === "jsonrpc"
+      ? new ContentHandleClient({ port: contentPort, credential: token })
+      : null
   bridge.start()
 
   // Push editor state instead of making the app poll for it. Every handler reports
@@ -456,6 +914,9 @@ export function activate(context) {
       },
     }
   )
+  return {
+    registerProxy: (proxyContext, descriptor) => registerProxy(proxyContext, descriptor),
+  }
 }
 
 export function deactivate() {
@@ -463,4 +924,6 @@ export function deactivate() {
   bridge = null
   proposedContents.clear()
   proposedEmitter = null
+  for (const registration of proxyRegistrations.values()) registration.dispose()
+  proxyRegistrations.clear()
 }

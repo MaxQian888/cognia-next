@@ -45,6 +45,61 @@ async function defaultBuildEmbeddingModel(message) {
   return provider.embedding(message.model)
 }
 
+async function loadOpenCodeService() {
+  try {
+    return await import("@opencode-ai/client/service")
+  } catch (error) {
+    if (error?.code !== "ERR_PACKAGE_PATH_NOT_EXPORTED" && error?.code !== "ERR_MODULE_NOT_FOUND") {
+      throw error
+    }
+    const clientEntry = import.meta.resolve("@opencode-ai/client")
+    return import(new URL("./service.js", clientEntry))
+  }
+}
+
+export async function discoverOpenCodeV2Service({
+  loadService = loadOpenCodeService,
+  fetchImpl = fetch,
+} = {}) {
+  const { Service } = await loadService()
+  const discovered = await Service.discover()
+  if (!discovered) {
+    throw new Error(
+      "No compatible OpenCode V2 service was discovered. Start one with `opencode2 service start`."
+    )
+  }
+  const endpoint = new URL(discovered.url)
+  if (endpoint.protocol !== "http:" && endpoint.protocol !== "https:") {
+    throw new Error("OpenCode V2 discovery returned a non-HTTP endpoint")
+  }
+  const rawHeaders = Service.headers(discovered)
+  const headers = Object.fromEntries(
+    Object.entries(rawHeaders ?? {}).filter(
+      ([name, value]) => name.trim() && typeof value === "string"
+    )
+  )
+  const healthResponse = await fetchImpl(new URL("/api/health", endpoint), {
+    headers,
+    signal: AbortSignal.timeout(2_000),
+  })
+  const health = await healthResponse.json().catch(() => undefined)
+  if (!healthResponse.ok) {
+    throw new Error("OpenCode V2 discovery health probe failed")
+  }
+  if (
+    typeof health?.version !== "string" ||
+    !health.version.trim() ||
+    typeof health.pid !== "number"
+  ) {
+    throw new Error("OpenCode V2 discovery returned an incompatible health contract")
+  }
+  return {
+    endpoint: endpoint.toString().replace(/\/$/, ""),
+    version: health.version,
+    headers,
+  }
+}
+
 function scrubError(error, credentials = {}) {
   let message = error instanceof Error ? error.message : String(error)
   for (const key of ["apiKey", "accessKeyId", "secretAccessKey", "sessionToken"]) {
@@ -60,6 +115,7 @@ export function createFeatureCallHandler({
   emit,
   buildModel = defaultBuildModel,
   buildEmbeddingModel = defaultBuildEmbeddingModel,
+  discoverOpenCodeV2 = discoverOpenCodeV2Service,
 }) {
   const active = new Map()
 
@@ -79,6 +135,12 @@ export function createFeatureCallHandler({
       if (operation === "bedrock-discover") {
         const models = await discoverBedrockModels(bedrockSettings(message.credentials))
         emit({ type: "feature_call_result", requestId, result: { models } })
+        return
+      }
+
+      if (operation === "opencode-v2-discover") {
+        const result = await discoverOpenCodeV2()
+        emit({ type: "feature_call_result", requestId, result })
         return
       }
 

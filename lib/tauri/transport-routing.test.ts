@@ -61,6 +61,22 @@ describe("RoutingTransport", () => {
     expect(getActiveRemoteTransport()).toBe(remote.transport)
   })
 
+  it("keeps desktop webview and relay commands local while a remote host is active", async () => {
+    const local = fakeTransport("local")
+    const remote = fakeTransport("remote")
+    const routing = new RoutingTransport(local.transport)
+    setActiveRemoteTransport(remote.transport)
+
+    await routing.call("codeserver_embed_create", { url: "http://127.0.0.1:41000/" })
+    await routing.call("codeserver_remote_relay_ensure", { sessionId: "session-1" })
+
+    expect(local.calls.map((call) => call.name)).toEqual([
+      "codeserver_embed_create",
+      "codeserver_remote_relay_ensure",
+    ])
+    expect(remote.calls).toHaveLength(0)
+  })
+
   it("falls back to local after the remote is cleared", async () => {
     const local = fakeTransport("local")
     const remote = fakeTransport("remote")
@@ -168,7 +184,11 @@ describe("active-remote endpoint + isRemoteHostActive", () => {
 
   it("stores and clears the raw WebSocket endpoint descriptor", () => {
     expect(getActiveRemoteEndpoint()).toBeNull()
-    const endpoint = { baseUrl: "https://box.example:27890", deviceJwt: "device-jwt" }
+    const endpoint = {
+      baseUrl: "https://box.example:27890",
+      deviceJwt: "device-jwt",
+      serverFingerprint: "sha256:remote-spki",
+    }
     setActiveRemoteEndpoint(endpoint)
     expect(getActiveRemoteEndpoint()).toEqual(endpoint)
     setActiveRemoteEndpoint(null)

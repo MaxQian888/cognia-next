@@ -4018,6 +4018,82 @@ describe("agent self-invocation tools (Skill / SlashCommand)", () => {
   })
 })
 
+describe("plugin conversion skill tools", () => {
+  beforeEach(() => {
+    _resetImPromptMemosForTest()
+  })
+
+  it("surfaces inspect/apply when the prompt skill is active in a desktop workspace", async () => {
+    mListSkills.mockResolvedValueOnce([
+      {
+        id: "skill_builtin_plugin_conversion",
+        canonicalId: "builtin:plugin-conversion",
+        name: "Plugin conversion",
+        content: "Inspect before applying.",
+      } as unknown as Skill,
+    ])
+    const opts = await resolveSendOptions({
+      character: makeChar({ id: "c1", disablePluginTools: true }),
+      activeProject: makeProject([{ path: "/work/project", isPrimary: true }]),
+      ephemeralSkillIds: ["skill_builtin_plugin_conversion"],
+    })
+
+    expect(toolNames(opts)).toEqual(
+      expect.arrayContaining(["inspect_plugin_conversion", "apply_plugin_conversion"])
+    )
+  })
+
+  it("does not surface conversion tools when the skill is inactive", async () => {
+    const opts = await resolveSendOptions({
+      character: makeChar({ id: "c1" }),
+      activeProject: makeProject([{ path: "/work/project", isPrimary: true }]),
+    })
+
+    expect(toolNames(opts)).not.toContain("inspect_plugin_conversion")
+    expect(toolNames(opts)).not.toContain("apply_plugin_conversion")
+  })
+
+  it("preloads conversion tools when Skill self-invocation can load the prompt skill", async () => {
+    const opts = await resolveSendOptions({
+      character: makeChar({ id: "c1" }),
+      activeProject: makeProject([{ path: "/work/project", isPrimary: true }]),
+      appSettings: { selfInvokeTools: { skill: true } } as AppSettings,
+    })
+
+    expect(toolNames(opts)).toEqual(
+      expect.arrayContaining(["Skill", "inspect_plugin_conversion", "apply_plugin_conversion"])
+    )
+  })
+
+  it("never surfaces conversion tools in an IM-bound session", async () => {
+    mListSkills.mockResolvedValueOnce([
+      {
+        id: "skill_builtin_plugin_conversion",
+        canonicalId: "builtin:plugin-conversion",
+        name: "Plugin conversion",
+        content: "Inspect before applying.",
+      } as unknown as Skill,
+    ])
+    const opts = await resolveSendOptions({
+      character: makeChar({ id: "c1" }),
+      session: makeSession({
+        id: "s1",
+        platformBinding: {
+          adapterId: "adapter-1",
+          platform: "lark",
+          conversationKey: "lark:adapter-1:chat-1",
+          conversationRef: { platform: "lark", adapterId: "adapter-1", channelId: "chat-1" },
+        },
+      }),
+      activeProject: makeProject([{ path: "/work/project", isPrimary: true }]),
+      ephemeralSkillIds: ["skill_builtin_plugin_conversion"],
+    })
+
+    expect(toolNames(opts)).not.toContain("inspect_plugin_conversion")
+    expect(toolNames(opts)).not.toContain("apply_plugin_conversion")
+  })
+})
+
 describe("anthropic-managed (container) skills", () => {
   it("appends twin_knowledge_search when the dispatching teammate is twin-bound", async () => {
     // A twin-bound teammate is a sufficient signal — teamHasKnowledgeTwins

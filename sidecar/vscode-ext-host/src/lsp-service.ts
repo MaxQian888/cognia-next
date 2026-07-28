@@ -44,6 +44,14 @@ const diagnosticsBufferModule =
   require("./lsp-diagnostics-buffer") as typeof import("./lsp-diagnostics-buffer")
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const installerModule = require("./lsp-installer") as typeof import("./lsp-installer")
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const jsonrpc = require("vscode-jsonrpc") as typeof import("vscode-jsonrpc")
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const crypto = require("node:crypto") as typeof import("node:crypto")
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const fs = require("node:fs/promises") as typeof import("node:fs/promises")
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const url = require("node:url") as typeof import("node:url")
 
 import type { CogniaLspClient, ClientState } from "./lsp-client"
 import type { DiagnosticsBuffer } from "./lsp-diagnostics-buffer"
@@ -66,13 +74,15 @@ export interface LspStartParams {
   args?: string[]
   env?: Record<string, string>
   cwd?: string
-  transport?: "stdio"
+  transport?: "stdio" | "socket"
+  endpoint?: string
   workspaceFolders?: Array<{ uri: string; name: string }>
   initializationOptions?: unknown
   /** Per-server config for `workspace/configuration` + `didChangeConfiguration`. */
   settings?: Record<string, unknown>
   /** ms budget for the `initialize` handshake (default 10 000). */
   startupTimeout?: number
+  memoryLimitMb?: number
 }
 
 export interface LspDocumentParams {
@@ -84,6 +94,26 @@ export interface LspDocumentParams {
 }
 
 export interface LspRequestParams {
+  ownerId: string
+  serverId: string
+  method: string
+  payload: unknown
+  requestId?: string
+}
+
+export interface LspServerResponseParams {
+  ownerId: string
+  serverId: string
+  requestId: string
+  result?: unknown
+  error?: {
+    code: number
+    message: string
+    data?: unknown
+  }
+}
+
+export interface LspClientNotificationParams {
   ownerId: string
   serverId: string
   method: string
@@ -165,7 +195,19 @@ interface TrackedServer {
   startedAt?: number
   /** Set while an intentional stop is in flight — suppresses the supervisor. */
   stopping: boolean
+  cancellations: Map<string, InstanceType<typeof jsonrpc.CancellationTokenSource>>
+  serverRequests: Map<
+    string,
+    {
+      resolve: (value: unknown) => void
+      reject: (reason: unknown) => void
+      timeout: unknown
+    }
+  >
 }
+
+const SERVER_REQUEST_TIMEOUT_MS = 30_000
+const LSP_REQUEST_CANCELLED = -32800
 
 export class LspService {
   private servers = new Map<string, TrackedServer>()
@@ -234,6 +276,7 @@ export class LspService {
 
   /** Create a client for `params` and wire diagnostics/log/state plumbing. */
   private createWiredClient(k: string, params: LspStartParams): TrackedServer {
+    let tracked: TrackedServer
     const client = new this.clientCtor({
       serverId: params.serverId,
       command: params.command,
@@ -241,13 +284,25 @@ export class LspService {
       env: params.env,
       cwd: params.cwd,
       transport: params.transport ?? "stdio",
+      endpoint: params.endpoint,
       workspaceFolders: params.workspaceFolders,
       initializationOptions: params.initializationOptions,
       settings: params.settings,
       startupTimeout: params.startupTimeout,
+      memoryLimitMb: params.memoryLimitMb,
       logger: this.logger,
+      handleServerRequest: (method, payload) =>
+        this.forwardServerRequest(k, tracked, method, payload),
+      handleServerNotification: (method, payload) => {
+        this.notify("lsp:serverNotification", {
+          ownerId: params.ownerId,
+          serverId: params.serverId,
+          method,
+          payload,
+        })
+      },
     })
-    const tracked: TrackedServer = {
+    tracked = {
       client,
       params,
       restarts: 0,
@@ -255,6 +310,8 @@ export class LspService {
       disposers: [],
       docs: new Map(),
       stopping: false,
+      cancellations: new Map(),
+      serverRequests: new Map(),
     }
 
     tracked.disposers.push(
@@ -302,6 +359,91 @@ export class LspService {
     return tracked
   }
 
+  private async forwardServerRequest(
+    key: string,
+    tracked: TrackedServer,
+    method: string,
+    payload: unknown
+  ): Promise<unknown> {
+    const requestId = crypto.randomUUID()
+    const preconditions =
+      method === "workspace/applyEdit"
+        ? await this.workspaceEditPreconditions(tracked, payload)
+        : undefined
+    return new Promise((resolve, reject) => {
+      const timeout = this.timers.setTimeout(() => {
+        if (!tracked.serverRequests.delete(requestId)) return
+        reject(
+          new jsonrpc.ResponseError(LSP_REQUEST_CANCELLED, `LSP_CLIENT_REQUEST_TIMEOUT: ${method}`)
+        )
+      }, SERVER_REQUEST_TIMEOUT_MS)
+      tracked.serverRequests.set(requestId, { resolve, reject, timeout })
+      try {
+        this.notify("lsp:serverRequest", {
+          ownerId: tracked.params.ownerId,
+          serverId: tracked.params.serverId,
+          requestId,
+          method,
+          payload,
+          preconditions,
+        })
+      } catch (err) {
+        tracked.serverRequests.delete(requestId)
+        this.timers.clearTimeout(timeout)
+        reject(err)
+      }
+      this.pushLog(key, tracked.params.serverId, "info", `server request: ${method}`)
+    })
+  }
+
+  private async workspaceEditPreconditions(
+    tracked: TrackedServer,
+    payload: unknown
+  ): Promise<Record<string, { exists: boolean; version?: number; contentHash?: string }>> {
+    const uris = workspaceEditUris(payload)
+    const preconditions: Record<
+      string,
+      { exists: boolean; version?: number; contentHash?: string }
+    > = {}
+    for (const uri of uris) {
+      const doc = tracked.docs.get(uri)
+      const version = tracked.client.getDocumentVersion(uri)
+      if (doc) {
+        preconditions[uri] = {
+          exists: true,
+          ...(version == null ? {} : { version }),
+          contentHash: crypto.createHash("sha256").update(doc.text, "utf8").digest("hex"),
+        }
+        continue
+      }
+      let path: string
+      try {
+        path = url.fileURLToPath(uri)
+      } catch {
+        throw new jsonrpc.ResponseError(-32602, `LSP_WORKSPACE_EDIT_URI_INVALID: ${uri}`)
+      }
+      try {
+        const contents = await fs.readFile(path)
+        preconditions[uri] = {
+          exists: true,
+          contentHash: crypto.createHash("sha256").update(contents).digest("hex"),
+        }
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException)?.code !== "ENOENT") throw error
+        preconditions[uri] = { exists: false }
+      }
+    }
+    return preconditions
+  }
+
+  private rejectServerRequests(tracked: TrackedServer, message: string): void {
+    for (const pending of tracked.serverRequests.values()) {
+      this.timers.clearTimeout(pending.timeout)
+      pending.reject(new jsonrpc.ResponseError(LSP_REQUEST_CANCELLED, message))
+    }
+    tracked.serverRequests.clear()
+  }
+
   /** Backoff restart after an unexpected crash; `broken` after MAX_RESTARTS. */
   private scheduleRestart(k: string, tracked: TrackedServer): void {
     if (tracked.broken || tracked.restartTimer) return
@@ -332,6 +474,7 @@ export class LspService {
 
   private async restart(k: string, prev: TrackedServer): Promise<void> {
     if (this.servers.get(k) !== prev || prev.stopping) return
+    this.rejectServerRequests(prev, "LSP_CLIENT_DISCONNECTED")
     // Tear down the dead client's subscriptions; build a fresh one.
     for (const dispose of prev.disposers) {
       try {
@@ -372,11 +515,19 @@ export class LspService {
    * already running, returns its current state without restarting it. A
    * `broken` server is reset and given a fresh start (manual recovery).
    */
-  async start(params: LspStartParams): Promise<{ state: "running" | "starting"; key: string }> {
+  async start(params: LspStartParams): Promise<{
+    state: "running" | "starting"
+    key: string
+    capabilities: unknown
+  }> {
     const k = this.key(params.ownerId, params.serverId)
     const existing = this.servers.get(k)
     if (existing && !existing.broken) {
-      return { state: existing.client.getState() === "running" ? "running" : "starting", key: k }
+      return {
+        state: existing.client.getState() === "running" ? "running" : "starting",
+        key: k,
+        capabilities: existing.client.getServerCapabilities(),
+      }
     }
     if (existing) {
       // Manual recovery of a broken server: drop the old tracking entirely.
@@ -391,7 +542,11 @@ export class LspService {
       tracked.startedAt = Date.now()
       this.pushLog(k, params.serverId, "info", `started: ${params.command}`)
       this.emitState(k, tracked)
-      return { state: "running", key: k }
+      return {
+        state: "running",
+        key: k,
+        capabilities: tracked.client.getServerCapabilities(),
+      }
     } catch (err) {
       // Tear down the half-started entry so a retry can re-spawn.
       for (const dispose of tracked.disposers) {
@@ -421,6 +576,12 @@ export class LspService {
       tracked.restartTimer = undefined
     }
     this.diagnosticsBuffer.cancelKey(k)
+    for (const source of tracked.cancellations.values()) {
+      source.cancel()
+      source.dispose()
+    }
+    tracked.cancellations.clear()
+    this.rejectServerRequests(tracked, "LSP_CLIENT_STOPPED")
     try {
       await tracked.client.stop()
     } catch (err) {
@@ -454,7 +615,7 @@ export class LspService {
   /** `textDocument/didOpen`. */
   didOpen(params: LspDocumentParams): void {
     const tracked = this.requireServer(params.ownerId, params.serverId)
-    if (!params.text) throw new Error("lsp:didOpen requires `text`")
+    if (params.text == null) throw new Error("lsp:didOpen requires `text`")
     const languageId = params.languageId ?? "plaintext"
     tracked.docs.set(params.uri, { languageId, text: params.text })
     tracked.client.registerTextDocument(params.uri, languageId, params.text)
@@ -485,8 +646,23 @@ export class LspService {
    * matches the corresponding `CogniaLspClient` method signature.
    */
   async request(params: LspRequestParams): Promise<unknown> {
-    const client = this.requireServer(params.ownerId, params.serverId).client
+    const tracked = this.requireServer(params.ownerId, params.serverId)
+    const client = tracked.client
     const p = params.payload as Record<string, unknown>
+    if (params.method.includes("/")) {
+      if (!params.requestId) return client.requestRaw(params.method, params.payload)
+      if (tracked.cancellations.has(params.requestId)) {
+        throw new Error(`LSP_DUPLICATE_REQUEST_ID: ${params.requestId}`)
+      }
+      const source = new jsonrpc.CancellationTokenSource()
+      tracked.cancellations.set(params.requestId, source)
+      try {
+        return await client.requestRaw(params.method, params.payload, source.token)
+      } finally {
+        tracked.cancellations.delete(params.requestId)
+        source.dispose()
+      }
+    }
     switch (params.method) {
       case "completion":
         return client.completion(p.uri as string, p.position as { line: number; character: number })
@@ -529,6 +705,36 @@ export class LspService {
       default:
         throw new Error(`lsp:request — unknown method '${params.method}'`)
     }
+  }
+
+  cancel(ownerId: string, serverId: string, requestId: string): boolean {
+    const source = this.servers.get(this.key(ownerId, serverId))?.cancellations.get(requestId)
+    if (!source) return false
+    source.cancel()
+    return true
+  }
+
+  serverResponse(params: LspServerResponseParams): { accepted: boolean } {
+    const tracked = this.servers.get(this.key(params.ownerId, params.serverId))
+    const pending = tracked?.serverRequests.get(params.requestId)
+    if (!tracked || !pending) return { accepted: false }
+    tracked.serverRequests.delete(params.requestId)
+    this.timers.clearTimeout(pending.timeout)
+    if (params.error) {
+      pending.reject(
+        new jsonrpc.ResponseError(params.error.code, params.error.message, params.error.data)
+      )
+    } else {
+      pending.resolve(params.result ?? null)
+    }
+    return { accepted: true }
+  }
+
+  clientNotification(params: LspClientNotificationParams): { accepted: boolean } {
+    const tracked = this.servers.get(this.key(params.ownerId, params.serverId))
+    if (!tracked) return { accepted: false }
+    tracked.client.notifyRaw(params.method, params.payload)
+    return { accepted: true }
   }
 
   /** Snapshot of currently-tracked servers — useful for telemetry. */
@@ -620,4 +826,31 @@ export class LspService {
     }
     return tracked
   }
+}
+
+function workspaceEditUris(payload: unknown): Set<string> {
+  const uris = new Set<string>()
+  if (!payload || typeof payload !== "object") return uris
+  const edit = (payload as { edit?: unknown }).edit
+  if (!edit || typeof edit !== "object") return uris
+  const changes = (edit as { changes?: unknown }).changes
+  if (changes && typeof changes === "object" && !Array.isArray(changes)) {
+    for (const uri of Object.keys(changes)) uris.add(uri)
+  }
+  const documentChanges = (edit as { documentChanges?: unknown }).documentChanges
+  if (Array.isArray(documentChanges)) {
+    for (const change of documentChanges) {
+      if (!change || typeof change !== "object") continue
+      const value = change as {
+        textDocument?: { uri?: unknown }
+        uri?: unknown
+        oldUri?: unknown
+        newUri?: unknown
+      }
+      for (const uri of [value.textDocument?.uri, value.uri, value.oldUri, value.newUri]) {
+        if (typeof uri === "string") uris.add(uri)
+      }
+    }
+  }
+  return uris
 }

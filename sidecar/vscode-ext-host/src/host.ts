@@ -91,6 +91,18 @@ function ensureLspService(): import("./lsp-service").LspService {
   return lspService
 }
 
+let protocolService: import("./protocol-process-service").ProtocolProcessService | null = null
+function ensureProtocolService(): import("./protocol-process-service").ProtocolProcessService {
+  if (protocolService) return protocolService
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { ProtocolProcessService } =
+    require("./protocol-process-service") as typeof import("./protocol-process-service")
+  protocolService = new ProtocolProcessService((method, params) => {
+    connection.sendNotification(method, params)
+  })
+  return protocolService
+}
+
 // Map a require() call back to an extension by walking `parent.cogniaExtensionId`.
 setExtensionResolver((parent) => {
   let cur: NodeModule | null = parent
@@ -225,6 +237,23 @@ connection.onRequest("lsp:request", async (params) => {
   )
 })
 
+connection.onRequest("lsp:cancel", async (params) => {
+  const input = params as { ownerId: string; serverId: string; requestId: string }
+  return { cancelled: ensureLspService().cancel(input.ownerId, input.serverId, input.requestId) }
+})
+
+connection.onRequest("lsp:serverResponse", async (params) => {
+  return ensureLspService().serverResponse(
+    params as Parameters<import("./lsp-service").LspService["serverResponse"]>[0]
+  )
+})
+
+connection.onRequest("lsp:clientNotification", async (params) => {
+  return ensureLspService().clientNotification(
+    params as Parameters<import("./lsp-service").LspService["clientNotification"]>[0]
+  )
+})
+
 connection.onRequest("lsp:list", async () => {
   return ensureLspService().list()
 })
@@ -249,6 +278,34 @@ connection.onRequest("lsp:install", async (params) => {
   return ensureLspService().install(
     params as Parameters<import("./lsp-service").LspService["install"]>[0]
   )
+})
+
+connection.onRequest("protocol:start", async (params) => {
+  return ensureProtocolService().start(
+    params as Parameters<import("./protocol-process-service").ProtocolProcessService["start"]>[0]
+  )
+})
+
+connection.onRequest("protocol:request", async (params) => {
+  return ensureProtocolService().request(
+    params as Parameters<import("./protocol-process-service").ProtocolProcessService["request"]>[0]
+  )
+})
+
+connection.onRequest("protocol:cancel", async (params) => {
+  const input = params as { ownerId: string; serverId: string; requestId: string }
+  return {
+    cancelled: ensureProtocolService().cancel(input.ownerId, input.serverId, input.requestId),
+  }
+})
+
+connection.onRequest("protocol:stop", async (params) => {
+  const input = params as { ownerId: string; serverId: string }
+  return ensureProtocolService().stop(input.ownerId, input.serverId)
+})
+
+connection.onRequest("protocol:status", async () => {
+  return ensureProtocolService().status()
 })
 
 // ────────────────────────────────────────────────────────────────────────
@@ -404,6 +461,9 @@ process.on("SIGTERM", () => {
   // processes don't outlive the sidecar.
   if (lspService) {
     void lspService.stopAll()
+  }
+  if (protocolService) {
+    void protocolService.stopAll()
   }
   process.exit(0)
 })

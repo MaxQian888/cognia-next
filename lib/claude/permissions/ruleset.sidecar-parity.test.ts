@@ -10,8 +10,7 @@
  *
  * That drift is not academic: callers author a deny ruleset, test it against
  * the renderer matcher because that is the importable one, and ship believing
- * the sidecar enforces the same thing. `plugins/github-delivery` did exactly
- * that.
+ * the sidecar enforces the same thing.
  *
  * This test lives under `lib/` (not `/sidecar/`, which Jest ignores) and
  * imports BOTH; `permission-resolver.mjs` has zero imports so it transforms
@@ -25,7 +24,6 @@
  * one: anything an explicit rule denies is denied by both, through every
  * spelling the shell accepts.
  */
-import { ISSUE_LOOP_PERMISSION_RULESET } from "@/plugins/github-delivery/src/drivers/sidecar-driver"
 import { resolveBashPermission, type Ruleset } from "./ruleset"
 import { resolveForToolCall } from "../../../sidecar/dispatch/permission-resolver.mjs"
 
@@ -67,40 +65,5 @@ describe("renderer ↔ sidecar permission parity", () => {
       expect(rendererVerdict(DENY_RULESET, command)).not.toBe("deny")
       expect(sidecarVerdict(DENY_RULESET, command)).not.toBe("deny")
     }
-  })
-
-  // The reason this file exists. The Issue → PR driver hands its ruleset to the
-  // sidecar, so the sidecar matcher is the one enforcing it — the driver's own
-  // suite can only reach the renderer one.
-  describe("github-delivery issue-loop ruleset holds under the sidecar matcher", () => {
-    const ruleset = ISSUE_LOOP_PERMISSION_RULESET as unknown as Ruleset
-
-    it.each([
-      "git push",
-      "git push --force origin main",
-      "gh pr create --fill",
-      "git remote set-url origin https://x@github.com/a/b.git",
-      "git -C /tmp/checkout push",
-      "git -c user.name=x push origin main",
-      "git  push",
-      "env gh pr create --fill",
-      "npm test && git push origin main",
-      "echo $(git push)",
-      "echo `gh pr merge 1`",
-    ])("denies %s", (command) => {
-      expect(sidecarVerdict(ruleset, command)).toBe("deny")
-    })
-
-    it("still permits the commands the driver needs", () => {
-      for (const command of [
-        "npm test",
-        "git status",
-        "git add -A",
-        'git commit -m "fix the push flow"',
-        "git log --grep=push",
-      ]) {
-        expect(sidecarVerdict(ruleset, command)).not.toBe("deny")
-      }
-    })
   })
 })

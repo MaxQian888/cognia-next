@@ -1,6 +1,6 @@
 ---
 title: 导入转换
-description: cognia plugin import —— 把已有的 MCP 服务器、Agent Skill 或 CLI 二进制转换成插件工程；不执行任何东西，也不复制任何一个凭据。
+description: 转换 MCP 条目、Skill、CLI 骨架，或完整的 Claude Code、Codex、Gemini CLI 与 Cognia 插件包；不执行源代码，也不静默丢失行为。
 ---
 
 # 导入转换 —— `cognia plugin import`
@@ -75,6 +75,34 @@ cognia plugin import --from mcp --input ~/.cursor/mcp.json --pick playwright --i
 ```
 
 只有当输入含多个候选时才需要 `--pick`；skill 目录和 CLI 二进制各只有一个候选，可省略。
+
+## 完整插件包
+
+整插件转换使用 `lib/plugin/convert/ecosystem.ts`，与应用内 GitHub 预览及 Agent 转换技能共用同一个
+规范转换器：
+
+```bash
+# Claude Code、Codex 或 Gemini CLI 插件 → Cognia
+cognia plugin import --from plugin --input ./foreign-plugin --dir ./cognia-plugin
+
+# Cognia → 另一种受支持生态
+cognia plugin export --input ./cognia-plugin --to codex --dir ./codex-plugin
+```
+
+转换器会检测 `.claude-plugin/plugin.json`、`.codex-plugin/plugin.json`、`gemini-extension.json`
+或 Cognia `plugin.json`；转换结构化 Skill、Agent、MCP 定义和受支持元数据；逐字节保留二进制资源；
+并返回显式保真度报告。支持 Claude Code、Codex 或 Gemini CLI → Cognia，以及 Cognia → 这三种生态
+中的任意一种；外部生态 → 外部生态会被拒绝。
+
+转换采用关闭式失败。Hook、命令式运行时行为、权限或缺少安全目标契约的贡献类型会成为 blocking
+问题，而不会产出一个残缺插件。
+
+### Cognia 中由 Agent 驱动转换
+
+种子 `plugin-conversion` 提示技能会在桌面工作区聊天中向 Cognia Agent 暴露
+`inspect_plugin_conversion` 与 `apply_plugin_conversion`。检查阶段只读，并返回绑定源快照的
+限时计划；应用阶段会重新校验快照、拒绝非空或重叠输出目录、要求桌面审批，并且只写确定性转换产物。
+这些工具不会暴露给 IM、Web 或移动端会话。
 
 ## 不执行任何东西
 
@@ -250,8 +278,8 @@ Node 侧只往 stdout 打印**一个** JSON 对象，绝不打印任何散文，
 
 ## 边界
 
-- **TOML 后端的 agent 不在范围内。** Codex 把 MCP 服务器存在 TOML 里，其适配器消费的是已解码的
-  树；为了一个 agent 把 TOML 解析器拉进 bundle 不划算。错误信息会点明这个限制，而不是静默返回空。
+- **单条 MCP 导入与整插件转换的输入不同。** `--from mcp` 仍消费受支持的 Agent 配置格式；
+  Codex 插件 TOML 属于整插件路径（`--from plugin`）。
 - **`--list` 不写任何文件**，对任意文件运行都安全。
 - **非空目标目录会被拒绝。** `--into` 是触碰已有插件的那条显式且狭窄的路径。
 

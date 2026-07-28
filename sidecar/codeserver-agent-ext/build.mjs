@@ -38,12 +38,23 @@ await build({
   external: ["vscode"],
   legalComments: "none",
 })
+await build({
+  entryPoints: [join(root, "src/proxy-extension.mjs")],
+  outfile: join(dist, "proxy.js"),
+  bundle: true,
+  platform: "node",
+  target: "node18",
+  format: "cjs",
+  external: ["vscode"],
+  legalComments: "none",
+})
 
 // 2. Assemble the VSIX.
 rmSync(stage, { recursive: true, force: true })
 mkdirSync(join(stage, "extension", "dist"), { recursive: true })
 cpSync(join(root, "package.json"), join(stage, "extension", "package.json"))
 cpSync(join(dist, "extension.js"), join(stage, "extension", "dist", "extension.js"))
+cpSync(join(dist, "proxy.js"), join(stage, "extension", "dist", "proxy.js"))
 writeFileSync(join(stage, "extension.vsixmanifest"), vsixManifest(pkg))
 writeFileSync(join(stage, "[Content_Types].xml"), contentTypes())
 

@@ -12,9 +12,12 @@ description: 作为真实编辑器面板内嵌的 code-server —— 通往伴�
   code-server 自带 CLI 的 `--reuse-window <file>:<line>:<col>` 就够了。再往后就不行了：
   该 CLI **只能**打开与定位，因此「可撤销的编辑」或「读取*当前活动编辑器*」必须运行在
   VS Code 扩展宿主内部。这正是伴生扩展（`sidecar/codeserver-agent-ext/`）与回环控制通道
-  （`src-tauri/src/codeserver/agent_channel.rs`）存在的原因。该通道是跑在
-  **`127.0.0.1` TCP 套接字上的换行分隔 JSON，而不是 WebSocket**，
-  并且托管在 `codeserver` 模块而非可选开启的 companion API ——
+  （`src-tauri/src/codeserver/agent_channel.rs`）存在的原因。托管通道是跑在
+  **`127.0.0.1` TCP 套接字上的 JSON-RPC 2.0 `Content-Length` framing，而不是 WebSocket**；
+  旧 newline bridge 只保留一个发布周期用于兼容。profile 隔离、代理签名、capability
+  negotiation、content handle 与公共作者契约见
+  [托管 IDE 扩展平台](./managed-ide-extension-platform)。通道托管在
+  `codeserver` 模块而非可选开启的 companion API ——
   因此一项核心编辑器能力绝不依赖于「远程访问」是否被打开。
 </TLDR>
 
@@ -22,7 +25,7 @@ description: 作为真实编辑器面板内嵌的 code-server —— 通往伴�
   <Stat label="Rust 模块" value="6" hint="src-tauri/src/codeserver" />
   <Stat label="前端模块" value="6" hint="lib/codeserver，含 theme/" />
   <Stat label="React hooks" value="5" hint="hooks/codeserver" />
-  <Stat label="控制传输" value="TCP" hint="127.0.0.1 上的换行分隔 JSON" />
+  <Stat label="控制传输" value="JSON-RPC 2.0" hint="127.0.0.1 TCP 上的 Content-Length framing" />
   <Stat label="持久化" value="无" hint="磁盘 + settings.json —— 没有 Dexie 表" />
 </StatGrid>
 
@@ -31,8 +34,9 @@ description: 作为真实编辑器面板内嵌的 code-server —— 通往伴�
 ## 为什么要专用通道，又为什么用 TCP
 
 这条通道的两端都是我们自己的，且都不会穿过代理或浏览器。
-WebSocket 的握手、分帧与客户端掩码在此纯属仪式，
-所以通道就是回环 TCP 上的换行分隔 JSON。
+WebSocket 的握手、分帧与客户端掩码在此纯属仪式，因此协议 1.0 使用回环 TCP
+上的 JSON-RPC 2.0 与 LSP 风格 `Content-Length` framing。连接发布前会经过
+challenge/HMAC 认证；legacy newline parser 只开放原有编辑器控制方法。
 
 更有意思的决策是它的**托管位置**。它位于 `codeserver` 模块，而不是可选开启的
 `companion_api` 服务，因此它随其驱动的 code-server 进程一同启停。

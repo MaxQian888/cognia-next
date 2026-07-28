@@ -58,6 +58,7 @@ pub struct BrainConfig {
     pub bridge_url: String,
     pub data_dir: PathBuf,
     pub account_id: String,
+    pub host_id: String,
     pub tls_fingerprint: String,
     /// Path to the companion `tls.pem`, exported as `NODE_EXTRA_CA_CERTS`
     /// so Node trusts the self-signed loopback cert.
@@ -74,6 +75,7 @@ impl BrainConfig {
         port: u16,
         data_dir: PathBuf,
         account_id: String,
+        host_id: String,
         tls_fingerprint: String,
         node_extra_ca_certs: Option<PathBuf>,
     ) -> Self {
@@ -83,6 +85,7 @@ impl BrainConfig {
             bridge_url: format!("wss://127.0.0.1:{port}/ws/v1/bridge"),
             data_dir,
             account_id,
+            host_id,
             tls_fingerprint,
             node_extra_ca_certs,
             ready_timeout: Duration::from_secs(90),
@@ -112,6 +115,7 @@ pub fn build_brain_env(config: &BrainConfig, service_token: &str) -> Vec<(String
             "COGNIA_LOCAL_ACCOUNT_ID".to_string(),
             config.account_id.clone(),
         ),
+        ("COGNIA_HOST_ID".to_string(), config.host_id.clone()),
     ];
     if let Some(pem) = &config.node_extra_ca_certs {
         env.push(("NODE_EXTRA_CA_CERTS".to_string(), pem.display().to_string()));
@@ -398,6 +402,7 @@ mod tests {
             bridge_url: "wss://127.0.0.1:7890/ws/v1/bridge".into(),
             data_dir: PathBuf::from("/data"),
             account_id: "local_acct_a".into(),
+            host_id: "host-test".into(),
             tls_fingerprint: "ff00".into(),
             node_extra_ca_certs: Some(PathBuf::from("/data/cognia/companion/tls.pem")),
             ready_timeout,
@@ -421,6 +426,7 @@ mod tests {
         );
         assert_eq!(get("COGNIA_TLS_FINGERPRINT"), Some("ff00"));
         assert_eq!(get("COGNIA_LOCAL_ACCOUNT_ID"), Some("local_acct_a"));
+        assert_eq!(get("COGNIA_HOST_ID"), Some("host-test"));
         assert!(get("COGNIA_DATA_DIR").is_some());
         assert!(get("NODE_EXTRA_CA_CERTS").unwrap().ends_with("tls.pem"));
     }
@@ -432,6 +438,7 @@ mod tests {
             7777,
             PathBuf::from("/d"),
             "a".into(),
+            "host-a".into(),
             "fp".into(),
             None,
         );

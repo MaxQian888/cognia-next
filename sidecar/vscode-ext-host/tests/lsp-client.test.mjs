@@ -16,6 +16,7 @@
 
 import { test } from "node:test"
 import assert from "node:assert/strict"
+import { createServer } from "node:net"
 
 const { CogniaLspClient, selectConfigurationSection } = await import("../dist/lsp-client.js")
 
@@ -128,6 +129,142 @@ test("start() resolves with server capabilities and transitions to running", asy
 
   await client.stop()
   assert.equal(client.getState(), "stopped")
+})
+
+test("stable server requests and notifications are projected to the IDE consumer", async () => {
+  const mock = makeMockConnection()
+  mock.replyTo("initialize", () => ({ capabilities: ECHO_CAPS }))
+  mock.replyTo("shutdown", () => null)
+  const requests = []
+  const notifications = []
+  const client = makeClient(mock, {
+    handleServerRequest: async (method, params) => {
+      requests.push({ method, params })
+      return { applied: true }
+    },
+    handleServerNotification: (method, params) => {
+      notifications.push({ method, params })
+    },
+  })
+
+  await client.start()
+  const result = await mock.simulateRequest("workspace/applyEdit", {
+    label: "fix",
+    edit: { changes: {} },
+  })
+  mock.simulateNotification("$/progress", { token: "index", value: { kind: "begin" } })
+
+  assert.deepEqual(result, { applied: true })
+  assert.deepEqual(requests, [
+    {
+      method: "workspace/applyEdit",
+      params: { label: "fix", edit: { changes: {} } },
+    },
+  ])
+  assert.deepEqual(notifications, [
+    { method: "$/progress", params: { token: "index", value: { kind: "begin" } } },
+  ])
+  await client.stop()
+})
+
+test("server requests fail explicitly when no IDE consumer is installed", async () => {
+  const mock = makeMockConnection()
+  mock.replyTo("initialize", () => ({ capabilities: ECHO_CAPS }))
+  mock.replyTo("shutdown", () => null)
+  const client = makeClient(mock)
+  await client.start()
+
+  await assert.rejects(
+    () => mock.simulateRequest("window/showDocument", { uri: "file:///tmp/a.ts" }),
+    /LSP_CLIENT_METHOD_UNAVAILABLE/
+  )
+  await client.stop()
+})
+
+test("invalid language-server memory limits fail before transport creation", async () => {
+  const mock = makeMockConnection()
+  let constructed = false
+  const client = new CogniaLspClient(
+    {
+      serverId: "invalid-limit",
+      command: "(mock)",
+      memoryLimitMb: 1,
+    },
+    async () => {
+      constructed = true
+      return { connection: mock.connection, dispose() {} }
+    }
+  )
+  await assert.rejects(() => client.start(), /IDE_PROTOCOL_MEMORY_LIMIT_INVALID/)
+  assert.equal(constructed, false)
+})
+
+test("socket transport connects only to the declared loopback endpoint", async () => {
+  const sockets = new Set()
+  const server = createServer((socket) => {
+    sockets.add(socket)
+    socket.once("close", () => sockets.delete(socket))
+    let buffer = Buffer.alloc(0)
+    socket.on("data", (chunk) => {
+      buffer = Buffer.concat([buffer, chunk])
+      while (true) {
+        const headerEnd = buffer.indexOf("\r\n\r\n")
+        if (headerEnd < 0) return
+        const header = buffer.subarray(0, headerEnd).toString("ascii")
+        const length = Number(/Content-Length:\s*(\d+)/i.exec(header)?.[1])
+        const frameEnd = headerEnd + 4 + length
+        if (!Number.isSafeInteger(length) || buffer.length < frameEnd) return
+        const message = JSON.parse(buffer.subarray(headerEnd + 4, frameEnd).toString("utf8"))
+        buffer = buffer.subarray(frameEnd)
+        if (message.method === "initialize" || message.method === "shutdown") {
+          const result = message.method === "initialize" ? { capabilities: ECHO_CAPS } : null
+          const body = Buffer.from(JSON.stringify({ jsonrpc: "2.0", id: message.id, result }))
+          socket.write(`Content-Length: ${body.length}\r\n\r\n`)
+          socket.write(body)
+        }
+      }
+    })
+  })
+  await new Promise((resolve, reject) => {
+    server.once("error", reject)
+    server.listen(0, "127.0.0.1", resolve)
+  })
+  const address = server.address()
+  assert.ok(address && typeof address !== "string")
+  const client = new CogniaLspClient({
+    serverId: "socket",
+    command: process.execPath,
+    args: ["-e", "setInterval(() => {}, 1000)"],
+    transport: "socket",
+    endpoint: `tcp://127.0.0.1:${address.port}`,
+  })
+  try {
+    await client.start()
+    assert.equal(client.getState(), "running")
+    await client.stop()
+  } finally {
+    for (const socket of sockets) socket.destroy()
+    await new Promise((resolve) => server.close(resolve))
+  }
+})
+
+test("socket transport rejects remote and credential-bearing endpoints", async () => {
+  for (const endpoint of [
+    "tcp://example.com:5007",
+    "tcp://user:secret@127.0.0.1:5007",
+    "http://127.0.0.1:5007",
+  ]) {
+    const client = new CogniaLspClient({
+      serverId: "unsafe-socket",
+      command: process.execPath,
+      args: ["-e", "setInterval(() => {}, 1000)"],
+      transport: "socket",
+      endpoint,
+      startupTimeout: 100,
+    })
+    await assert.rejects(() => client.start(), /LSP_SOCKET_ENDPOINT_INVALID/)
+    await client.stop()
+  }
 })
 
 test("start() is idempotent — concurrent calls share the same promise", async () => {

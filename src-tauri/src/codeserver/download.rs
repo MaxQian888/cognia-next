@@ -110,14 +110,18 @@ pub fn resolve_platform() -> Result<(&'static str, &'static str)> {
         "macos" => "macos",
         other => {
             return Err(anyhow!(
-                "code-server has no standalone binary for {other}; the Pro IDE mode is desktop macOS/Linux only"
+                "unsupported_platform: code-server has no standalone binary for {other}; the Pro IDE mode is desktop macOS/Linux only"
             ))
         }
     };
     let arch = match std::env::consts::ARCH {
         "x86_64" => "amd64",
         "aarch64" => "arm64",
-        other => return Err(anyhow!("unsupported arch for code-server: {other}")),
+        other => {
+            return Err(anyhow!(
+                "unsupported_platform: unsupported arch for code-server: {other}"
+            ))
+        }
     };
     Ok((os, arch))
 }
@@ -505,10 +509,9 @@ mod tests {
         token.cancel();
 
         let waiter = token.clone();
-        let result = tokio::time::timeout(
-            std::time::Duration::from_millis(50),
-            async move { waiter.notify.notified().await },
-        )
+        let result = tokio::time::timeout(std::time::Duration::from_millis(50), async move {
+            waiter.notify.notified().await
+        })
         .await;
 
         assert!(result.is_err(), "a stale cancel armed the next download");

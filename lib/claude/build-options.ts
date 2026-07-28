@@ -1947,6 +1947,13 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
           BUILTIN_SKILLS_MANIFEST_CACHE_CAP
         )
       }
+      // plugin.conversion is activated by its prompt skill (or the Skill
+      // self-loader) and is appended through its own desktop/workspace gate
+      // below. A character's broad enableBuiltInSkills switch must not expose
+      // filesystem write tools that the user did not select.
+      builtInSkillsManifest = builtInSkillsManifest.filter(
+        (entry) => !entry.skillId.startsWith("plugin.conversion.")
+      )
       for (const entry of builtInSkillsManifest) {
         allowed.add(entry.name)
       }
@@ -2365,6 +2372,40 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
     }
   } catch (err) {
     loggers.app.warn("failed to append editor built-in tool", { error: String(err) })
+  }
+
+  // Plugin conversion is a prompt-skill-backed capability, not a global
+  // plugin-tool toggle. Preload its two typed tools when the skill is active,
+  // or when the opt-in Skill self-loader may activate it during the turn.
+  // The tools are desktop-only, require a confined workspace cwd/backend, and
+  // remain available even when third-party plugin tools are disabled.
+  const pluginConversionRequested =
+    skills.some((skill) => skill.canonicalId === "builtin:plugin-conversion") ||
+    appSettings?.selfInvokeTools?.skill === true
+  if (pluginConversionRequested && !imSession && opts.cwd) {
+    try {
+      const { hasWorkspaceFsBackend } = await import("@/lib/files/workspace-backend")
+      if (hasWorkspaceFsBackend()) {
+        // Side-effect import registers the family before the manifest walk.
+        await import("@/lib/skills/built-in")
+        const { buildBuiltInSkillManifest } = await import("@/lib/skills/built-in/manifest")
+        const conversionEntries = buildBuiltInSkillManifest({})
+          .filter((entry) => entry.skillId.startsWith("plugin.conversion."))
+          .map((entry) => ({
+            name: entry.name,
+            description: entry.description,
+            jsonSchema: entry.jsonSchema,
+            pluginId: entry.pluginId,
+          }))
+        const existing = new Set((opts.pluginTools ?? []).map((entry) => entry.name))
+        opts.pluginTools = [
+          ...(opts.pluginTools ?? []),
+          ...conversionEntries.filter((entry) => !existing.has(entry.name)),
+        ]
+      }
+    } catch (err) {
+      loggers.app.warn("failed to append plugin conversion tools", { error: String(err) })
+    }
   }
 
   // Agent self-invocation tools (Skill / SlashCommand). Opt-in (default off).

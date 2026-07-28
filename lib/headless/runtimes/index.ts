@@ -57,6 +57,8 @@ import "./initializers"
 import "./connector-runtime"
 import "./backup-scheduler"
 import "./plugin-runtime"
+import "./managed-ide-broker"
 import "./memory-job-worker"
+import "./integration-runtime"
 
 export {}

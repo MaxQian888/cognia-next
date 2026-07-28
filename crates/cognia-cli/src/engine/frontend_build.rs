@@ -126,6 +126,7 @@ const ESBUILD_EXTERNALS: &[&str] = &[
     "react-dom",
     "@cognia/plugin-sdk",
     "@cognia/plugin-ui",
+    "lucide-react",
 ];
 
 /// Build the esbuild argument vector. Split out from `run_esbuild` so the
@@ -267,6 +268,7 @@ mod tests {
             "react/jsx-dev-runtime",
             "@cognia/plugin-sdk",
             "@cognia/plugin-ui",
+            "lucide-react",
         ] {
             assert!(
                 args.iter().any(|a| a == &format!("--external:{shared}")),

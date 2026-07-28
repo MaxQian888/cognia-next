@@ -171,8 +171,7 @@ tauri-plugin-notification = "2"
 tauri-plugin-clipboard-manager = "2"
 tauri-plugin-opener = "2"
 tauri-plugin-os = "2"
-# `tauri-plugin-shell` powers cloudflared tunnel spawn for the
-# GitHub Delivery one-click webhook receiver (`lib/github/cloudflared-tauri.ts`).
+# `tauri-plugin-shell` powers the host-managed cloudflared companion tunnel.
 # Scope-locked to the `cloudflared` binary in `tauri.conf.json`.
 tauri-plugin-shell = "2"
 tauri-plugin-store = "2"

@@ -1,6 +1,6 @@
 ---
 title: Importing
-description: cognia plugin import — convert an existing MCP server, agent skill, or CLI binary into a plugin project, without executing anything and without copying a single credential.
+description: Convert MCP entries, skills, CLI skeletons, or complete Claude Code, Codex, Gemini CLI, and Cognia plugin bundles without executing source code or silently dropping behavior.
 ---
 
 # Importing — `cognia plugin import`
@@ -80,6 +80,35 @@ cognia plugin import --from mcp --input ~/.cursor/mcp.json --pick playwright --i
 
 `--pick` is required only when the input holds more than one candidate; a skill folder and
 a CLI binary each hold exactly one, so it can be omitted there.
+
+## Complete plugin bundles
+
+Whole-plugin conversion uses `lib/plugin/convert/ecosystem.ts`, the same canonical converter used by the
+in-app GitHub preview and the Agent conversion skill:
+
+```bash
+# Claude Code, Codex, or Gemini CLI plugin → Cognia
+cognia plugin import --from plugin --input ./foreign-plugin --dir ./cognia-plugin
+
+# Cognia → another supported ecosystem
+cognia plugin export --input ./cognia-plugin --to codex --dir ./codex-plugin
+```
+
+The converter detects `.claude-plugin/plugin.json`, `.codex-plugin/plugin.json`, `gemini-extension.json`, or
+Cognia `plugin.json`; translates structured skills, agents, MCP definitions, and supported metadata; preserves
+binary resources byte-for-byte; and returns an explicit fidelity report. Claude Code, Codex, or Gemini CLI →
+Cognia and Cognia → any of those three are supported. Foreign → foreign conversion is rejected.
+
+Conversion is fail-closed. Hooks, imperative runtime behavior, permissions, or contribution kinds without a
+safe target contract produce blocking issues instead of a partial plugin.
+
+### Agent-driven conversion in Cognia
+
+The seeded `plugin-conversion` prompt skill exposes `inspect_plugin_conversion` and
+`apply_plugin_conversion` to a Cognia Agent in desktop workspace chat. Inspection is read-only and returns an
+expiring plan bound to the source snapshot. Apply rechecks the snapshot, refuses non-empty or overlapping
+output directories, requires desktop approval, and writes only deterministic converter output. The tools are
+not exposed to IM, web, or mobile sessions.
 
 ## Nothing is executed
 
@@ -280,9 +309,8 @@ colour setting cannot corrupt the protocol. Failures use the same shape plus a n
 
 ## Limits
 
-- **TOML-backed agents are out of scope.** Codex stores MCP servers in TOML, and its adapter
-  consumes an already-decoded tree; pulling a TOML parser into the bundle buys one agent. The
-  error names the limitation rather than silently returning nothing.
+- **Single-entry MCP import and whole-plugin conversion have different inputs.** `--from mcp` still consumes
+  the supported agent config formats; Codex plugin TOML belongs to the whole-plugin path (`--from plugin`).
 - **`--list` never writes anything**, so it is safe to run against any file.
 - **A non-empty target directory is refused.** `--into` is the explicit, narrow way to touch
   an existing plugin.

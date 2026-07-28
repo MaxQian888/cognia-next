@@ -8,6 +8,15 @@ description: "Ownership, layout and theming rules for the embedded code-server e
 **Status:** Accepted
 **Date:** 2026-07-21
 
+> **2026-07-28 amendment:** the original companion channel described below was
+> replaced by the [Managed IDE Extension Platform](../subsystems/managed-ide-extension-platform).
+> The current design uses isolated managed/native profiles, JSON-RPC 2.0 with
+> challenge authentication and capability negotiation, signed generated proxy
+> VSIX packages, and a separate scoped binary content channel. The `0.2.x`
+> newline bridge is compatibility-only for one release. Decisions about native
+> webview ownership, pane handoff, theming, and process visibility remain in
+> force.
+
 ## Context
 
 "Pro IDE" is an optional embedded [code-server](https://github.com/coder/code-server)
@@ -158,12 +167,10 @@ recorded as debt rather than done half-way.
 native-overlay constraint in decision 4, but abandons the premise that the editor
 sits beside the agent in one workspace.
 
-**A companion extension over a loopback WebSocket** for millisecond
-open/reveal. Designed in `src-tauri/src/codeserver/PHASE2_AGENT_DRIVE.md` and
-still the right shape if this is ever needed. Deferred: the process-storm risk it
-was mainly meant to solve is already handled by the coalescing queue
-(`lib/codeserver/open-file-queue.ts`), and the remaining benefit is per-jump
-latency.
+**A companion extension over a loopback WebSocket.** Superseded by the managed
+broker. The implemented transport is plain loopback TCP with JSON-RPC
+`Content-Length` framing; it avoids a WebSocket handshake because both endpoints
+are native processes on the same host.
 
 ## Consequences
 
@@ -181,16 +188,14 @@ latency.
 
 ## Known debt
 
-- **Two disjoint VS Code extension ecosystems.** The app's Open VSX marketplace
-  (`lib/plugin/vscode-shim/`) installs `.vsix` into the plugin runtime, which
-  shares nothing with code-server's `--extensions-dir`. The two hosts have
-  unequal capabilities, so bridging them naively produces "installed but does
-  not work".
-- **No update channel.** `CODE_SERVER_VERSION` is pinned with hand-maintained
-  SHA-256 digests (code-server publishes no checksum file) and
-  `--disable-update-check`. Bumping it requires refreshing that table from
-  `gh api repos/coder/code-server/releases/tags/v<ver> --jq '.assets[].digest'`.
-  Settings → Pro IDE only reclaims *old* version directories.
+- **The native ecosystem is intentionally separate.** Open VSX extensions run
+  only in Native Extensions IDE. Managed proxies are generated from Cognia
+  plugins and never accept third-party entrypoints. Sharing extension state or
+  credentials across those trust domains remains explicitly unsupported.
+- **Pinned Code upgrades remain a release operation.** The managed platform
+  now has signed, transactional plugin/proxy updates, but changing
+  code-server/Code itself still requires archive digest refresh, catalog/schema
+  diffing, regenerated fixtures, and the full E2E matrix.
 - **Multi-user machine exposure**, per decision 6.
 - **`components/ui/progress.tsx` never forwards `value` to the Radix root**, so
   every `<Progress>` in the app reports itself as indeterminate to assistive

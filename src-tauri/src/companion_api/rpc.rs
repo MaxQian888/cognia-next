@@ -249,6 +249,14 @@ const KNOWN_COMMANDS: &[&str] = &[
     "connectors_register",
     "connectors_unregister",
     "connectors_list_adapters",
+    // Marketplace Integration ingress uses the same host-owned workflow
+    // router and encrypted spool on desktop and headless deployments.
+    "integration_ingress_register",
+    "integration_ingress_unregister",
+    "integration_ingress_get_url",
+    "integration_ingress_poll",
+    "integration_ingress_ack",
+    "integration_ingress_nack",
     // ADR-0090 Phase 1 — Provider Profile Store admin plane (service scope;
     // redacted docs only, secrets never transit these arms).
     "provider_profiles_list",
@@ -473,6 +481,10 @@ const KNOWN_COMMANDS: &[&str] = &[
     "plugin_install",
     "plugin_install_from_github",
     "plugin_uninstall",
+    "plugin_stage_version",
+    "plugin_commit_staged_update",
+    "plugin_discard_staged_update",
+    "plugin_finalize_staged_update",
     "plugin_backup_create",
     "plugin_backup_restore",
     "plugin_backup_delete",
@@ -514,6 +526,19 @@ const KNOWN_COMMANDS: &[&str] = &[
     "plugin_python_install_deps",
     "plugin_python_unload",
     "plugin_python_list",
+    // Managed Pro IDE lifecycle. The remote companion owns the pinned binary,
+    // profiles, broker, and relay; the desktop receives only an opaque path.
+    "codeserver_supported",
+    "codeserver_ensure",
+    "codeserver_status",
+    "codeserver_stop",
+    "codeserver_stop_all",
+    "codeserver_build_proxy",
+    "codeserver_activate_proxy",
+    "codeserver_list_proxies",
+    "codeserver_broker_validate_paths",
+    "codeserver_broker_respond",
+    "codeserver_broker_notify",
     "lsp_host_ensure",
     "lsp_host_request",
     "ensure_system_lsp_host",
@@ -692,6 +717,11 @@ const READ_ONLY_COMMANDS: &[&str] = &[
     "get_external_agent_status",
     // ADR-0059 R12 — read-only projection of the webhook ingress registry.
     "connectors_list_adapters",
+    // Integration reads must never be served from the idempotency cache:
+    // the public URL appears after listener startup and the spool changes
+    // whenever a webhook is accepted or acknowledged.
+    "integration_ingress_get_url",
+    "integration_ingress_poll",
     // Read-only remote-control capability probe (drives the mobile
     // computer-use consent sheet). Pure read of the process-global allow list.
     "companion_can_control",
@@ -751,6 +781,9 @@ const READ_ONLY_COMMANDS: &[&str] = &[
     // candidates). Like `read_text_file` it is simultaneously read-only
     // (idempotency axis) and control-gated (capability axis) — see below.
     "terminal_complete_paths",
+    "codeserver_supported",
+    "codeserver_status",
+    "codeserver_list_proxies",
     // Ensuring the system host is structurally idempotent. Individual LSP
     // requests are not: didOpen/didChange/start/install mutate sidecar state.
     "lsp_host_ensure",
@@ -916,10 +949,17 @@ const CONTROL_COMMANDS: &[&str] = &[
     // that need it (remote terminal autocomplete) already hold the
     // remote-control capability required to open the PTY itself.
     "terminal_complete_paths",
+    "codeserver_ensure",
+    "codeserver_stop",
+    "codeserver_stop_all",
     // Plugin install/uninstall/backup-restore — modify the on-disk plugin set.
     "plugin_install",
     "plugin_install_from_github",
     "plugin_uninstall",
+    "plugin_stage_version",
+    "plugin_commit_staged_update",
+    "plugin_discard_staged_update",
+    "plugin_finalize_staged_update",
     "plugin_backup_create",
     "plugin_backup_restore",
     "plugin_backup_delete",
@@ -1016,6 +1056,13 @@ fn is_control_authorized(name: &str, device_id: &str, scope: Option<&str>) -> bo
         || super::control_allow_list::global().is_allowed(device_id)
 }
 
+/// Revalidate the paired-device control grant on non-RPC streams such as the
+/// managed IDE relay. Revocation therefore closes authority immediately rather
+/// than only when a new code-server session is requested.
+pub(crate) fn device_can_control(device_id: &str) -> bool {
+    super::control_allow_list::global().is_allowed(device_id)
+}
+
 /// Commands whose TS dispatch arm needs the authenticated caller's device id
 /// (ADR-0060). The bridge arm injects `callerDeviceId` into the payload for
 /// exactly these names — see [`inject_caller_device_id`].
@@ -1057,6 +1104,12 @@ const SERVICE_ONLY_COMMANDS: &[&str] = &[
     "connectors_register",
     "connectors_unregister",
     "connectors_list_adapters",
+    "integration_ingress_register",
+    "integration_ingress_unregister",
+    "integration_ingress_get_url",
+    "integration_ingress_poll",
+    "integration_ingress_ack",
+    "integration_ingress_nack",
     // ADR-0059 T-A5 — the connector command plane carries credentials and
     // arbitrary outbound HTTP; only the brain's service token may touch it.
     "connectors_health",
@@ -1115,6 +1168,12 @@ const SERVICE_ONLY_COMMANDS: &[&str] = &[
     "plugin_python_install_deps",
     "plugin_python_unload",
     "plugin_python_list",
+    "codeserver_build_proxy",
+    "codeserver_activate_proxy",
+    "codeserver_list_proxies",
+    "codeserver_broker_validate_paths",
+    "codeserver_broker_respond",
+    "codeserver_broker_notify",
     "ensure_system_lsp_host",
     "plugin_load_vscode",
     "plugin_activate_vscode",
@@ -1685,11 +1744,17 @@ fn remote_lsp_method_allowed(method: &str) -> bool {
             | "lsp:didChange"
             | "lsp:didClose"
             | "lsp:request"
+            | "lsp:cancel"
             | "lsp:list"
             | "lsp:status"
             | "lsp:logs"
             | "lsp:detect"
             | "lsp:install"
+            | "protocol:start"
+            | "protocol:stop"
+            | "protocol:request"
+            | "protocol:cancel"
+            | "protocol:status"
     )
 }
 
@@ -2588,6 +2653,135 @@ pub(super) async fn dispatch(
                 })
                 .collect();
             Ok(serde_json::json!({ "adapters": adapters }))
+        }
+
+        // ── Marketplace Integration ingress + encrypted spool ───────────────
+        // Both hosts execute the same scheduling-crate command bodies. The
+        // service-token gate above keeps webhook material and route secrets
+        // inaccessible to paired-device JWTs.
+        "integration_ingress_register" => {
+            let input: crate::workflow::triggers::webhook_router::IntegrationIngressEntry =
+                required(&args, "input")?;
+            let result = match host {
+                super::dispatch_host::DispatchHost::Tauri(app) => {
+                    let workflow = app.state::<crate::workflow::WorkflowState>();
+                    crate::workflow::commands::integration_ingress_register_for_state(
+                        workflow.inner(),
+                        input,
+                    )
+                }
+                super::dispatch_host::DispatchHost::Headless(services) => {
+                    crate::workflow::commands::integration_ingress_register_for_state(
+                        services.workflow.as_ref(),
+                        input,
+                    )
+                }
+            }
+            .map_err(RpcError::internal)?;
+            to_json(result)
+        }
+
+        "integration_ingress_unregister" => {
+            let route_id: String = required_aliased(&args, "route_id", "routeId")?;
+            match host {
+                super::dispatch_host::DispatchHost::Tauri(app) => {
+                    let workflow = app.state::<crate::workflow::WorkflowState>();
+                    crate::workflow::commands::integration_ingress_unregister_for_state(
+                        workflow.inner(),
+                        route_id,
+                    )
+                }
+                super::dispatch_host::DispatchHost::Headless(services) => {
+                    crate::workflow::commands::integration_ingress_unregister_for_state(
+                        services.workflow.as_ref(),
+                        route_id,
+                    )
+                }
+            }
+            .map(|_| Value::Null)
+            .map_err(RpcError::internal)
+        }
+
+        "integration_ingress_get_url" => {
+            let route_id: String = required_aliased(&args, "route_id", "routeId")?;
+            let result = match host {
+                super::dispatch_host::DispatchHost::Tauri(app) => {
+                    let workflow = app.state::<crate::workflow::WorkflowState>();
+                    crate::workflow::commands::integration_ingress_get_url_for_state(
+                        workflow.inner(),
+                        route_id,
+                    )
+                }
+                super::dispatch_host::DispatchHost::Headless(services) => {
+                    crate::workflow::commands::integration_ingress_get_url_for_state(
+                        services.workflow.as_ref(),
+                        route_id,
+                    )
+                }
+            }
+            .map_err(RpcError::internal)?;
+            to_json(result)
+        }
+
+        "integration_ingress_poll" => {
+            let limit: Option<usize> = optional(&args, "limit")?;
+            let result = match host {
+                super::dispatch_host::DispatchHost::Tauri(app) => {
+                    let workflow = app.state::<crate::workflow::WorkflowState>();
+                    crate::workflow::commands::integration_ingress_poll_for_state(
+                        workflow.inner(),
+                        limit,
+                    )
+                }
+                super::dispatch_host::DispatchHost::Headless(services) => {
+                    crate::workflow::commands::integration_ingress_poll_for_state(
+                        services.workflow.as_ref(),
+                        limit,
+                    )
+                }
+            }
+            .map_err(RpcError::internal)?;
+            to_json(result)
+        }
+
+        "integration_ingress_ack" | "integration_ingress_nack" => {
+            let route_id: String = required_aliased(&args, "route_id", "routeId")?;
+            let delivery_id: String =
+                required_aliased(&args, "delivery_id", "deliveryId")?;
+            let result = match host {
+                super::dispatch_host::DispatchHost::Tauri(app) => {
+                    let workflow = app.state::<crate::workflow::WorkflowState>();
+                    if name == "integration_ingress_ack" {
+                        crate::workflow::commands::integration_ingress_ack_for_state(
+                            workflow.inner(),
+                            route_id,
+                            delivery_id,
+                        )
+                    } else {
+                        crate::workflow::commands::integration_ingress_nack_for_state(
+                            workflow.inner(),
+                            route_id,
+                            delivery_id,
+                        )
+                    }
+                }
+                super::dispatch_host::DispatchHost::Headless(services) => {
+                    if name == "integration_ingress_ack" {
+                        crate::workflow::commands::integration_ingress_ack_for_state(
+                            services.workflow.as_ref(),
+                            route_id,
+                            delivery_id,
+                        )
+                    } else {
+                        crate::workflow::commands::integration_ingress_nack_for_state(
+                            services.workflow.as_ref(),
+                            route_id,
+                            delivery_id,
+                        )
+                    }
+                }
+            };
+            result.map(|_| Value::Null).map_err(RpcError::internal)
         }
 
         // ── Provider Profile Store admin plane (ADR-0090 Phase 1) ───────────
@@ -4214,6 +4408,120 @@ pub(super) async fn dispatch(
                 .map(|_| Value::Null)
                 .map_err(|e| RpcError::internal(e.to_string()))
         }
+        "plugin_stage_version" => {
+            let plugin_id: String = required(&args, "pluginId")?;
+            let version: String = required(&args, "version")?;
+            let download_url: String = required(&args, "downloadUrl")?;
+            let checksum: Option<String> = optional(&args, "checksum")?;
+            let signature_hex: Option<String> = optional(&args, "signatureHex")?;
+            let public_key_hex: Option<String> = optional(&args, "publicKeyHex")?;
+            let require_signature: Option<bool> = optional(&args, "requireSignature")?;
+            if let Some(services) = host.headless() {
+                return crate::plugin_api::marketplace::plugin_stage_version_for_state(
+                    services.plugin_runtime.as_ref(),
+                    plugin_id,
+                    version,
+                    download_url,
+                    checksum,
+                    signature_hex,
+                    public_key_hex,
+                    require_signature,
+                )
+                .await
+                .map_err(|error| RpcError::internal(error.to_string()))
+                .and_then(to_json);
+            }
+            let app = host.tauri_app(name)?;
+            let state: tauri::State<'_, crate::plugin_api::PluginRuntimeState> = app.state();
+            crate::plugin_api::marketplace::plugin_stage_version_for_state(
+                state.inner(),
+                plugin_id,
+                version,
+                download_url,
+                checksum,
+                signature_hex,
+                public_key_hex,
+                require_signature,
+            )
+            .await
+            .map_err(|error| RpcError::internal(error.to_string()))
+            .and_then(to_json)
+        }
+        "plugin_commit_staged_update" => {
+            let plugin_id: String = required(&args, "pluginId")?;
+            let transaction_id: String = required(&args, "transactionId")?;
+            if let Some(services) = host.headless() {
+                let committed =
+                    crate::plugin_api::marketplace::commit_staged_update_for_state(
+                        services.plugin_runtime.as_ref(),
+                        &plugin_id,
+                        &transaction_id,
+                    )
+                    .map_err(|error| RpcError::internal(error.to_string()))?;
+                services.event_bus.publish(
+                    "plugin://runtime-changed".to_string(),
+                    serde_json::json!({
+                        "action": "updated",
+                        "pluginId": plugin_id,
+                        "accountId": account_id,
+                    }),
+                );
+                return to_json(committed);
+            }
+            let app = host.tauri_app(name)?;
+            let state: tauri::State<'_, crate::plugin_api::PluginRuntimeState> = app.state();
+            crate::plugin_api::marketplace::commit_staged_update_for_state(
+                state.inner(),
+                &plugin_id,
+                &transaction_id,
+            )
+            .map_err(|error| RpcError::internal(error.to_string()))
+            .and_then(to_json)
+        }
+        "plugin_discard_staged_update" => {
+            let plugin_id: String = required(&args, "pluginId")?;
+            let transaction_id: String = required(&args, "transactionId")?;
+            if let Some(services) = host.headless() {
+                return crate::plugin_api::marketplace::discard_staged_update_for_state(
+                    services.plugin_runtime.as_ref(),
+                    &plugin_id,
+                    &transaction_id,
+                )
+                .map(|_| Value::Null)
+                .map_err(|error| RpcError::internal(error.to_string()));
+            }
+            let app = host.tauri_app(name)?;
+            let state: tauri::State<'_, crate::plugin_api::PluginRuntimeState> = app.state();
+            crate::plugin_api::marketplace::discard_staged_update_for_state(
+                state.inner(),
+                &plugin_id,
+                &transaction_id,
+            )
+            .map(|_| Value::Null)
+            .map_err(|error| RpcError::internal(error.to_string()))
+        }
+        "plugin_finalize_staged_update" => {
+            let plugin_id: String = required(&args, "pluginId")?;
+            let transaction_id: String = required(&args, "transactionId")?;
+            if let Some(services) = host.headless() {
+                return crate::plugin_api::marketplace::finalize_staged_update_for_state(
+                    services.plugin_runtime.as_ref(),
+                    &plugin_id,
+                    &transaction_id,
+                )
+                .map(|_| Value::Null)
+                .map_err(|error| RpcError::internal(error.to_string()));
+            }
+            let app = host.tauri_app(name)?;
+            let state: tauri::State<'_, crate::plugin_api::PluginRuntimeState> = app.state();
+            crate::plugin_api::marketplace::finalize_staged_update_for_state(
+                state.inner(),
+                &plugin_id,
+                &transaction_id,
+            )
+            .map(|_| Value::Null)
+            .map_err(|error| RpcError::internal(error.to_string()))
+        }
         "plugin_backup_create" => {
             let plugin_id: String = required(&args, "pluginId")?;
             let label: Option<String> = optional(&args, "label")?;
@@ -4665,6 +4973,143 @@ pub(super) async fn dispatch(
             to_json(crate::plugin_api::api_bridge::plugin_get_capabilities_for_host(false))
         }
 
+        "codeserver_supported" => to_json(crate::codeserver::download::resolve_platform().is_ok()),
+        "codeserver_ensure" => {
+            let services = host
+                .headless()
+                .ok_or_else(|| RpcError::headless_unsupported(name))?;
+            let root: String = required(&args, "root")?;
+            let profile =
+                optional::<crate::codeserver::profile::IdeProfile>(&args, "profile")?
+                    .unwrap_or_default();
+            services
+                .code_server
+                .ensure(&root, profile, device_id)
+                .await
+                .and_then(|status| {
+                    serde_json::to_value(status)
+                        .map_err(|error| format!("serialize code-server status: {error}"))
+                })
+                .map_err(RpcError::service_unavailable)
+        }
+        "codeserver_status" => {
+            let services = host
+                .headless()
+                .ok_or_else(|| RpcError::headless_unsupported(name))?;
+            let root: String = required(&args, "root")?;
+            services
+                .code_server
+                .status(&root, device_id)
+                .await
+                .and_then(|status| {
+                    serde_json::to_value(status)
+                        .map_err(|error| format!("serialize code-server status: {error}"))
+                })
+                .map_err(RpcError::service_unavailable)
+        }
+        "codeserver_stop" => {
+            let services = host
+                .headless()
+                .ok_or_else(|| RpcError::headless_unsupported(name))?;
+            let root: String = required(&args, "root")?;
+            to_json(services.code_server.stop(&root).await)
+        }
+        "codeserver_stop_all" => {
+            let services = host
+                .headless()
+                .ok_or_else(|| RpcError::headless_unsupported(name))?;
+            services.code_server.stop_all().await;
+            Ok(Value::Null)
+        }
+        "codeserver_build_proxy" => {
+            let services = host
+                .headless()
+                .ok_or_else(|| RpcError::headless_unsupported(name))?;
+            let request: crate::codeserver::proxy::ProxyBuildRequest =
+                required(&args, "request")?;
+            let code_server = std::sync::Arc::clone(&services.code_server);
+            let artifact = tokio::task::spawn_blocking(move || code_server.build_proxy(request))
+                .await
+                .map_err(|error| {
+                    RpcError::internal(format!("build managed proxy task failed: {error}"))
+                })?
+                .map_err(RpcError::service_unavailable)?;
+            serde_json::to_value(artifact)
+                .map_err(|error| RpcError::internal(format!("serialize proxy artifact: {error}")))
+        }
+        "codeserver_activate_proxy" => {
+            let services = host
+                .headless()
+                .ok_or_else(|| RpcError::headless_unsupported(name))?;
+            let artifact: crate::codeserver::proxy::ProxyArtifact =
+                required(&args, "artifact")?;
+            to_json(
+                services
+                    .code_server
+                    .install_proxy_artifact(&artifact)
+                    .await,
+            )
+        }
+        "codeserver_list_proxies" => {
+            let services = host
+                .headless()
+                .ok_or_else(|| RpcError::headless_unsupported(name))?;
+            let code_server = std::sync::Arc::clone(&services.code_server);
+            tokio::task::spawn_blocking(move || code_server.list_proxies())
+                .await
+                .map_err(|error| {
+                    RpcError::internal(format!("list managed proxies task failed: {error}"))
+                })?
+                .and_then(|artifacts| {
+                    serde_json::to_value(artifacts)
+                        .map_err(|error| format!("serialize proxy artifacts: {error}"))
+                })
+                .map_err(RpcError::service_unavailable)
+        }
+        "codeserver_broker_validate_paths" => {
+            let root: String = required(&args, "root")?;
+            let paths: Vec<String> = required(&args, "paths")?;
+            tokio::task::spawn_blocking(move || {
+                paths
+                    .iter()
+                    .map(|path| {
+                        crate::files::validate_confined_path(path, std::slice::from_ref(&root))
+                            .map(|value| value.to_string_lossy().into_owned())
+                    })
+                    .collect::<Result<Vec<_>, _>>()
+            })
+            .await
+            .map_err(|error| {
+                RpcError::internal(format!("validate managed IDE paths task failed: {error}"))
+            })?
+            .and_then(|paths| {
+                serde_json::to_value(paths)
+                    .map_err(|error| format!("serialize validated IDE paths: {error}"))
+            })
+            .map_err(RpcError::service_unavailable)
+        }
+        "codeserver_broker_respond" => {
+            let root: String = required(&args, "root")?;
+            let generation: u64 = required(&args, "generation")?;
+            let id: Value = required(&args, "id")?;
+            let result: Option<Value> = optional(&args, "result")?;
+            let error: Option<Value> = optional(&args, "error")?;
+            crate::codeserver::agent_channel::global()
+                .respond(&root, generation, id, result, error)
+                .await
+                .map(|()| Value::Null)
+                .map_err(RpcError::service_unavailable)
+        }
+        "codeserver_broker_notify" => {
+            let root: String = required(&args, "root")?;
+            let generation: u64 = required(&args, "generation")?;
+            let params: Value = required(&args, "params")?;
+            crate::codeserver::agent_channel::global()
+                .notify_provider(&root, generation, params)
+                .await
+                .map(|()| Value::Null)
+                .map_err(RpcError::service_unavailable)
+        }
         "lsp_host_ensure" => {
             let services = host
                 .headless()
@@ -5804,6 +6249,18 @@ mod tests {
         }
         assert!(SERVICE_ONLY_COMMANDS.contains(&"ensure_system_lsp_host"));
         assert!(SERVICE_ONLY_COMMANDS.contains(&"plugin_invoke_vscode_rpc"));
+        for method in [
+            "lsp:start",
+            "lsp:request",
+            "lsp:cancel",
+            "protocol:start",
+            "protocol:request",
+            "protocol:cancel",
+            "protocol:stop",
+        ] {
+            assert!(remote_lsp_method_allowed(method), "{method}");
+        }
+        assert!(!remote_lsp_method_allowed("extension:activate"));
     }
 
     #[test]
@@ -6809,6 +7266,67 @@ rl.on("line", (line) => {
         );
     }
 
+    #[tokio::test]
+    async fn integration_ingress_uses_the_headless_workflow_state() {
+        let state = test_state();
+        let services = crate::headless::HeadlessServices::stub_for_tests();
+        let host = super::super::dispatch_host::DispatchHost::Headless(Arc::clone(&services));
+        let route_id = format!("route-{}", uuid::Uuid::new_v4());
+        let input = json!({
+            "routeId": route_id,
+            "pluginId": "fixture-delivery",
+            "integrationId": "fixture",
+            "accountId": "account-1",
+            "subscriptionId": "subscription-1",
+            "path": route_id,
+            "verification": {
+                "type": "static-token",
+                "tokenHeader": "x-fixture-token",
+                "secretHandle": "secret-1",
+            },
+            "deliveryIdHeader": "x-delivery-id",
+            "eventTypeHeader": "x-event-type",
+            "enabled": true,
+        });
+
+        let denied = dispatch(
+            "integration_ingress_register",
+            json!({ "input": input.clone() }),
+            &state,
+            &host,
+            "device-1",
+            Some(ACCOUNT_ID),
+            Some("device"),
+        )
+        .await
+        .expect_err("paired devices cannot manage Integration ingress");
+        assert_eq!(denied.0, StatusCode::FORBIDDEN);
+
+        dispatch(
+            "integration_ingress_register",
+            json!({ "input": input }),
+            &state,
+            &host,
+            "brain-local",
+            Some(ACCOUNT_ID),
+            Some("service"),
+        )
+        .await
+        .expect("register integration route");
+
+        dispatch(
+            "integration_ingress_unregister",
+            json!({ "routeId": route_id }),
+            &state,
+            &host,
+            "brain-local",
+            Some(ACCOUNT_ID),
+            Some("service"),
+        )
+        .await
+        .expect("unregister integration route");
+    }
+
     /// Malformed args map to 400 malformed_request, not a panic or 500.
     #[tokio::test]
     async fn connectors_http_request_rejects_malformed_args() {
@@ -7537,6 +8055,40 @@ rl.on("line", (line) => {
         assert_eq!(CONTROL_COMMANDS_SET.len(), CONTROL_COMMANDS.len());
         for c in KNOWN_COMMANDS {
             assert!(KNOWN_COMMANDS_SET.contains(c));
+        }
+    }
+
+    #[test]
+    fn managed_ide_remote_commands_preserve_trust_boundaries() {
+        for read in [
+            "codeserver_supported",
+            "codeserver_status",
+            "codeserver_list_proxies",
+        ] {
+            assert!(KNOWN_COMMANDS.contains(&read));
+            assert!(READ_ONLY_COMMANDS.contains(&read));
+            assert!(!CONTROL_COMMANDS.contains(&read));
+        }
+        for control in [
+            "codeserver_ensure",
+            "codeserver_stop",
+            "codeserver_stop_all",
+        ] {
+            assert!(KNOWN_COMMANDS.contains(&control));
+            assert!(CONTROL_COMMANDS.contains(&control));
+            assert!(!READ_ONLY_COMMANDS.contains(&control));
+            assert!(!SERVICE_ONLY_COMMANDS.contains(&control));
+        }
+        for internal in [
+            "codeserver_build_proxy",
+            "codeserver_activate_proxy",
+            "codeserver_list_proxies",
+            "codeserver_broker_validate_paths",
+            "codeserver_broker_respond",
+            "codeserver_broker_notify",
+        ] {
+            assert!(KNOWN_COMMANDS.contains(&internal));
+            assert!(SERVICE_ONLY_COMMANDS.contains(&internal));
         }
     }
 

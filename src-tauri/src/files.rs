@@ -1042,6 +1042,45 @@ fn reject_symlinked_final(final_path: &Path) -> Result<(), String> {
 /// inside one of `allowed_roots`, and reject a symlinked final component.
 /// Returns the absolute path to write to. Empty `allowed_roots` => `Err` (no
 /// implicit any-path).
+pub(crate) fn validate_confined_path(
+    path: &str,
+    allowed_roots: &[String],
+) -> Result<PathBuf, String> {
+    let roots = canonicalize_roots(allowed_roots);
+    if roots.is_empty() {
+        return Err("no allowed roots configured".into());
+    }
+    let target = PathBuf::from(path);
+    if !target.is_absolute() {
+        return Err(format!("path must be absolute: {}", target.display()));
+    }
+    let canonical = if target.exists() {
+        target
+            .canonicalize()
+            .map_err(|error| format!("canonicalize {}: {error}", target.display()))?
+    } else {
+        let ancestor = canonicalize_deepest_existing_ancestor(&target)?;
+        let relative = target
+            .strip_prefix(
+                target
+                    .ancestors()
+                    .find(|candidate| candidate.exists())
+                    .ok_or_else(|| {
+                        format!("path has no existing ancestor: {}", target.display())
+                    })?,
+            )
+            .map_err(|error| format!("resolve {}: {error}", target.display()))?;
+        ancestor.join(relative)
+    };
+    if !starts_with_any_canonical_root(&canonical, &roots) {
+        return Err(format!(
+            "path escapes the allowed roots: {}",
+            canonical.display()
+        ));
+    }
+    Ok(canonical)
+}
+
 fn resolve_confined_target(path: &str, allowed_roots: &[String]) -> Result<PathBuf, String> {
     let roots = canonicalize_roots(allowed_roots);
     if roots.is_empty() {
@@ -1379,6 +1418,46 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         dir
+    }
+
+    #[test]
+    fn confined_path_accepts_existing_and_missing_descendants() {
+        let root = make_sandbox("confined-path");
+        let existing = root.join("existing.txt");
+        std::fs::write(&existing, "ok").unwrap();
+        let roots = vec![root.to_string_lossy().into_owned()];
+
+        assert_eq!(
+            validate_confined_path(existing.to_str().unwrap(), &roots).unwrap(),
+            existing.canonicalize().unwrap()
+        );
+        assert_eq!(
+            validate_confined_path(root.join("new/deep.txt").to_str().unwrap(), &roots).unwrap(),
+            root.canonicalize().unwrap().join("new/deep.txt")
+        );
+        assert!(
+            validate_confined_path(root.join("../outside.txt").to_str().unwrap(), &roots).is_err()
+        );
+        assert!(validate_confined_path("relative.txt", &roots).is_err());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn confined_path_rejects_symlink_escape() {
+        use std::os::unix::fs::symlink;
+
+        let root = make_sandbox("confined-symlink-root");
+        let outside = make_sandbox("confined-symlink-outside");
+        symlink(&outside, root.join("escape")).unwrap();
+        let roots = vec![root.to_string_lossy().into_owned()];
+
+        assert!(
+            validate_confined_path(root.join("escape/secret.txt").to_str().unwrap(), &roots)
+                .is_err()
+        );
+        let _ = std::fs::remove_dir_all(&root);
+        let _ = std::fs::remove_dir_all(&outside);
     }
 
     #[test]

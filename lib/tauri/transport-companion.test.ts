@@ -350,6 +350,9 @@ describe("call() — idempotency key", () => {
       "skills_scan_native",
       "mcp_server_status",
       "lsp_host_ensure",
+      "codeserver_supported",
+      "codeserver_status",
+      "codeserver_list_proxies",
       "read_agent_config",
       "session_list",
       "companion_can_control",
@@ -471,6 +474,75 @@ describe("call() — idempotency key", () => {
       (fetchSpy.mock.calls[1] as [string, RequestInit])[1].headers as Record<string, string>
     )["Idempotency-Key"]
     expect(key1).not.toEqual(key2)
+  })
+})
+
+describe("managed IDE raw content transport", () => {
+  beforeEach(() => setConfig({ ...MOCK_CONFIG, serverFingerprint: "ab".repeat(32) }))
+
+  it("uploads bytes as a raw body with service context in a header", async () => {
+    fetchSpy.mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ $type: "ContentHandle", id: "handle-1" }),
+    })
+    transport = new CompanionTransport()
+
+    await transport.uploadManagedIdeContent(
+      {
+        root: "/workspace",
+        generation: 4,
+        pluginId: "demo",
+        providerId: "cognia.demo.fs",
+        permission: "filesystem:read",
+      },
+      Uint8Array.from([0, 1, 255])
+    )
+
+    const [url, init] = fetchSpy.mock.calls[0] as [string, RequestInit]
+    expect(url).toBe("https://192.168.1.42:7890/api/v1/ide/content")
+    expect(init.body).toBeInstanceOf(ArrayBuffer)
+    expect(Array.from(new Uint8Array(init.body as ArrayBuffer))).toEqual([0, 1, 255])
+    const headers = init.headers as Record<string, string>
+    expect(headers.Authorization).toBe("Bearer test.jwt.token")
+    const context = JSON.parse(
+      atob(
+        headers["X-Cognia-Content-Context"]
+          .replace(/-/g, "+")
+          .replace(/_/g, "/")
+          .padEnd(Math.ceil(headers["X-Cognia-Content-Context"].length / 4) * 4, "=")
+      )
+    )
+    expect(context).toMatchObject({
+      root: "/workspace",
+      generation: 4,
+      pluginId: "demo",
+    })
+  })
+
+  it("redeems a one-shot handle as raw response bytes", async () => {
+    fetchSpy.mockResolvedValue({
+      ok: true,
+      status: 200,
+      arrayBuffer: async () => Uint8Array.from([7, 8, 9]).buffer,
+    })
+    transport = new CompanionTransport()
+
+    await expect(
+      transport.redeemManagedIdeContent(
+        {
+          root: "/workspace",
+          generation: 4,
+          pluginId: "demo",
+          providerId: "cognia.demo.fs",
+          permission: null,
+        },
+        "handle/opaque"
+      )
+    ).resolves.toEqual(Uint8Array.from([7, 8, 9]))
+    expect(fetchSpy.mock.calls[0][0]).toBe(
+      "https://192.168.1.42:7890/api/v1/ide/content/handle%2Fopaque"
+    )
   })
 })
 

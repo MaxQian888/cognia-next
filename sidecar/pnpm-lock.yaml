@@ -47,6 +47,9 @@ importers:
       '@modelcontextprotocol/sdk':
         specifier: ^1.29.0
         version: 1.29.0(zod@4.4.3)
+      '@opencode-ai/client':
+        specifier: https://raw.githubusercontent.com/anomalyco/opencode/95636bd3caa7935eba3ae91ec92a81560c8520e1/packages/app/vendor/opencode-ai-client-1.17.13-v2.tgz
+        version: https://raw.githubusercontent.com/anomalyco/opencode/95636bd3caa7935eba3ae91ec92a81560c8520e1/packages/app/vendor/opencode-ai-client-1.17.13-v2.tgz
       '@opentelemetry/api':
         specifier: ^1.9.1
         version: 1.9.1
@@ -92,6 +95,9 @@ importers:
         version: 0.25.10
 
 packages:
+
+  '@opencode-ai/client@https://raw.githubusercontent.com/anomalyco/opencode/95636bd3caa7935eba3ae91ec92a81560c8520e1/packages/app/vendor/opencode-ai-client-1.17.13-v2.tgz':
+    resolution: {integrity: sha512-332kgNifvpQOF9e3UA+pIa5xPrMhLaQkUiNiO+meS0Ba9HjSE6hfsWnEojMkD0DPSLqPP6rCF1dDoF7U0Y0OCQ==, tarball: https://raw.githubusercontent.com/anomalyco/opencode/95636bd3caa7935eba3ae91ec92a81560c8520e1/packages/app/vendor/opencode-ai-client-1.17.13-v2.tgz}
 
   '@ai-sdk/amazon-bedrock@4.0.123':
     resolution: {integrity: sha512-lEvz/jOJksH+KYIciVbX0iV7/80I+sG1Er7pullu4fh1fEpbhQC+o2wNwp2H+UzglJehE0uo93erd2RgQtEX6g==}
@@ -1324,6 +1330,8 @@ packages:
     resolution: {integrity: sha512-ytENFjIJFl2UwYglde2jchW2Hwm4GJFLDiSXWdTrJQBIN9Fcyp7n4DhxJEiWNAJMV1/BqWfW/kkg71UDcHJyTQ==}
 
 snapshots:
+
+  '@opencode-ai/client@https://raw.githubusercontent.com/anomalyco/opencode/95636bd3caa7935eba3ae91ec92a81560c8520e1/packages/app/vendor/opencode-ai-client-1.17.13-v2.tgz': {}
 
   '@ai-sdk/amazon-bedrock@4.0.123(zod@4.4.3)':
     dependencies:

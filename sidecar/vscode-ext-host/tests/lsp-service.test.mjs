@@ -23,6 +23,7 @@ function makeFakeClientCtor() {
       this.didChangeCalls = []
       this.didCloseCalls = []
       this.requestCalls = []
+      this.notificationCalls = []
       this.stopped = false
       created.push(this)
     }
@@ -31,6 +32,9 @@ function makeFakeClientCtor() {
     }
     getServerCapabilities() {
       return null
+    }
+    getDocumentVersion(uri) {
+      return this.didOpenCalls.some((call) => call.uri === uri) ? 1 : null
     }
     async start() {
       this.state = "running"
@@ -101,6 +105,13 @@ function makeFakeClientCtor() {
     async semanticTokens(uri) {
       this.requestCalls.push({ method: "semanticTokens", uri })
       return { data: [] }
+    }
+    async requestRaw(method, params) {
+      this.requestCalls.push({ method, params })
+      return { method, params }
+    }
+    notifyRaw(method, params) {
+      this.notificationCalls.push({ method, params })
     }
   }
   return { ctor: FakeLspClient, created }
@@ -174,6 +185,106 @@ test("publishDiagnostics from the client → connection.sendNotification('lsp:pu
   assert.equal(published[0].params.diagnostics.length, 1, "duplicates are dropped")
 })
 
+test("server requests are correlated, carry workspace-edit preconditions, and accept responses", async () => {
+  const { service, created, notifications } = makeService()
+  await service.start({ ownerId: "managed-pro:acme", serverId: "ts", command: "/x" })
+  service.didOpen({
+    ownerId: "managed-pro:acme",
+    serverId: "ts",
+    uri: "file:///workspace/a.ts",
+    languageId: "typescript",
+    text: "const value = 1\n",
+  })
+
+  const pending = created[0].opts.handleServerRequest("workspace/applyEdit", {
+    edit: {
+      changes: {
+        "file:///workspace/a.ts": [
+          {
+            range: {
+              start: { line: 0, character: 14 },
+              end: { line: 0, character: 15 },
+            },
+            newText: "2",
+          },
+        ],
+      },
+    },
+  })
+  await new Promise((resolve) => setImmediate(resolve))
+  const forwarded = notifications.find((item) => item.method === "lsp:serverRequest")
+  assert.ok(forwarded)
+  assert.equal(forwarded.params.method, "workspace/applyEdit")
+  assert.equal(forwarded.params.preconditions["file:///workspace/a.ts"].version, 1)
+  assert.match(
+    forwarded.params.preconditions["file:///workspace/a.ts"].contentHash,
+    /^[a-f0-9]{64}$/
+  )
+
+  assert.deepEqual(
+    service.serverResponse({
+      ownerId: "managed-pro:acme",
+      serverId: "ts",
+      requestId: forwarded.params.requestId,
+      result: { applied: true },
+    }),
+    { accepted: true }
+  )
+  assert.deepEqual(await pending, { applied: true })
+  assert.deepEqual(
+    service.serverResponse({
+      ownerId: "managed-pro:acme",
+      serverId: "ts",
+      requestId: forwarded.params.requestId,
+      result: null,
+    }),
+    { accepted: false }
+  )
+})
+
+test("server notifications are projected and pending requests fail on stop", async () => {
+  const { service, created, notifications } = makeService()
+  await service.start({ ownerId: "managed-pro:acme", serverId: "ts", command: "/x" })
+  created[0].opts.handleServerNotification("$/progress", {
+    token: "index",
+    value: { kind: "report", message: "50%" },
+  })
+  assert.deepEqual(notifications.at(-1), {
+    method: "lsp:serverNotification",
+    params: {
+      ownerId: "managed-pro:acme",
+      serverId: "ts",
+      method: "$/progress",
+      payload: { token: "index", value: { kind: "report", message: "50%" } },
+    },
+  })
+
+  const pending = created[0].opts.handleServerRequest("window/showMessageRequest", {
+    type: 3,
+    message: "Continue?",
+    actions: [{ title: "Yes" }],
+  })
+  await service.stop("managed-pro:acme", "ts")
+  await assert.rejects(() => pending, /LSP_CLIENT_STOPPED/)
+})
+
+test("client notifications are routed to the exact language-server session", async () => {
+  const { service, created } = makeService()
+  await service.start({ ownerId: "managed-pro:acme", serverId: "ts", command: "/x" })
+  assert.deepEqual(
+    service.clientNotification({
+      ownerId: "managed-pro:acme",
+      serverId: "ts",
+      method: "window/workDoneProgress/cancel",
+      payload: { token: "index" },
+    }),
+    { accepted: true }
+  )
+  assert.deepEqual(created[0].notificationCalls, [
+    { method: "window/workDoneProgress/cancel", params: { token: "index" } },
+  ])
+})
+
 test("stop() tears the client down and unsubscribes diagnostics", async () => {
   const { service, created } = makeService()
   await service.start({ ownerId: "user", serverId: "eslint", command: "/x" })
@@ -219,6 +330,23 @@ test("didOpen / didChange / didClose route to the underlying client", async () =
   assert.equal(c.didCloseCalls.length, 1)
 })
 
+test("didOpen accepts an empty document", async () => {
+  const { service, created } = makeService()
+  await service.start({ ownerId: "user", serverId: "eslint", command: "/x" })
+  service.didOpen({
+    ownerId: "user",
+    serverId: "eslint",
+    uri: "file:///empty.ts",
+    languageId: "typescript",
+    text: "",
+  })
+  assert.deepEqual(created[0].didOpenCalls.at(-1), {
+    uri: "file:///empty.ts",
+    languageId: "typescript",
+    text: "",
+  })
+})
+
 test("request() dispatches every supported LSP method to the matching client call", async () => {
   const { service, created } = makeService()
   await service.start({ ownerId: "user", serverId: "eslint", command: "/x" })
@@ -253,6 +381,50 @@ test("request() dispatches every supported LSP method to the matching client cal
   for (const m of expected) {
     assert.ok(seen.includes(m), `expected ${m} in ${seen.join(",")}`)
   }
+})
+
+test("request() forwards stable protocol method names through requestRaw", async () => {
+  const { service, created } = makeService()
+  await service.start({ ownerId: "managed-pro:acme", serverId: "ts", command: "/x" })
+  const payload = {
+    textDocument: { uri: "file:///foo.ts" },
+    position: { line: 1, character: 2 },
+  }
+  const result = await service.request({
+    ownerId: "managed-pro:acme",
+    serverId: "ts",
+    method: "textDocument/declaration",
+    payload,
+  })
+  assert.deepEqual(result, { method: "textDocument/declaration", params: payload })
+  assert.deepEqual(created[0].requestCalls.at(-1), {
+    method: "textDocument/declaration",
+    params: payload,
+  })
+})
+
+test("cancel() propagates through the JSON-RPC cancellation token", async () => {
+  const { service, created } = makeService()
+  await service.start({ ownerId: "managed-pro:acme", serverId: "ts", command: "/x" })
+  let resolveRequest
+  let cancellationToken
+  created[0].requestRaw = (_method, _params, token) => {
+    cancellationToken = token
+    return new Promise((resolve) => {
+      resolveRequest = resolve
+    })
+  }
+  const pending = service.request({
+    ownerId: "managed-pro:acme",
+    serverId: "ts",
+    requestId: "broker-request-1",
+    method: "textDocument/hover",
+    payload: {},
+  })
+  assert.equal(service.cancel("managed-pro:acme", "ts", "broker-request-1"), true)
+  assert.equal(cancellationToken.isCancellationRequested, true)
+  resolveRequest(null)
+  await pending
 })
 
 test("request() throws on an unknown method", async () => {

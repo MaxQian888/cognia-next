@@ -24,6 +24,26 @@ use parking_lot::RwLock;
 use crate::claude::SidecarState;
 use crate::companion_api::event_bus::EventBus;
 
+struct HeadlessWorkflowEmitter(Arc<EventBus>);
+
+impl crate::workflow::TriggerEmitter for HeadlessWorkflowEmitter {
+    fn emit(&self, event: crate::workflow::types::TriggerEvent) {
+        if let Ok(payload) = serde_json::to_value(event) {
+            self.0.publish("workflow:trigger".to_string(), payload);
+        }
+    }
+
+    fn emit_integration_delivery_available(&self, route_id: &str, delivery_id: &str) {
+        self.0.publish(
+            "integration:delivery-available".to_string(),
+            serde_json::json!({
+                "routeId": route_id,
+                "deliveryId": delivery_id,
+            }),
+        );
+    }
+}
+
 pub const VSCODE_EXT_HOST_SCRIPT_ENV: &str = "COGNIA_VSCODE_EXT_HOST_SCRIPT";
 pub const VSCODE_EXT_HOST_NODE_ENV: &str = "COGNIA_VSCODE_EXT_HOST_NODE";
 pub const MCP_SIDECAR_PATH_ENV: &str = "COGNIA_MCP_SIDECAR_PATH";
@@ -120,6 +140,9 @@ pub struct HeadlessServices {
     /// Existing VS Code extension sidecar registry, configured with a
     /// server-owned host script and bridged onto the companion event bus.
     pub vscode_plugins: Arc<crate::plugin_api::vscode::VscodeExtensionState>,
+    /// Pinned code-server lifecycle and device-bound relay owned entirely by
+    /// this remote host. The paired desktop cannot install or upgrade it.
+    pub code_server: Arc<crate::codeserver::remote::RemoteCodeServerState>,
     /// The companion event bus — every host-emitted event rides
     /// `/ws/v1/events` from here.
     pub event_bus: Arc<EventBus>,
@@ -133,6 +156,9 @@ pub struct HeadlessServices {
     /// ingress on the front door (ADR-0059 F4/R12). Adapters are registered
     /// by the brain via the service-scope `connectors_register` arm.
     pub connectors: ConnectorsState,
+    /// Host-neutral workflow timing, webhook ingress, and encrypted
+    /// Integration spool. Desktop owns the same state through Tauri.
+    pub workflow: Arc<crate::workflow::WorkflowState>,
     /// ADR-0090 Phase 1 — the headless Provider Profile Store (same-port
     /// SQLite mirror of the renderer's Dexie v121 tables). Feeds the Phase 2
     /// Gateway snapshot projection; secret-free by construction.
@@ -173,6 +199,38 @@ impl HeadlessServices {
         exec: Arc<dyn crate::external_agent::exec_backend::ExecBackend>,
         plugin_install_dir: std::path::PathBuf,
     ) -> Arc<Self> {
+        let data_dir = plugin_install_dir
+            .parent()
+            .unwrap_or(plugin_install_dir.as_path())
+            .to_path_buf();
+        let workflow_dir = data_dir.join("cognia");
+        std::fs::create_dir_all(&workflow_dir).unwrap_or_else(|error| {
+            panic!(
+                "create headless workflow directory {}: {error}",
+                workflow_dir.display()
+            )
+        });
+        let workflow_emitter = Arc::new(HeadlessWorkflowEmitter(Arc::clone(&event_bus)));
+        let workflow_state_emitter: Arc<dyn crate::workflow::TriggerEmitter> =
+            workflow_emitter.clone();
+        let workflow = Arc::new(
+            crate::workflow::WorkflowState::open(
+                crate::workflow::default_mirror_path(&data_dir),
+                workflow_state_emitter,
+            )
+            .unwrap_or_else(|error| panic!("open headless workflow state: {error}")),
+        );
+        if !cfg!(test) {
+            let runtime = tokio::runtime::Handle::try_current()
+                .expect("headless workflow runtime requires an active Tokio runtime");
+            runtime.spawn(workflow.cron.clone().run_loop());
+            let webhook = workflow.webhook.clone();
+            runtime.spawn(async move {
+                if let Err(error) = webhook.start(workflow_emitter, 0).await {
+                    log::warn!("headless workflow webhook router start failed: {error}");
+                }
+            });
+        }
         let python_dir = plugin_install_dir
             .parent()
             .unwrap_or(plugin_install_dir.as_path())
@@ -198,6 +256,8 @@ impl HeadlessServices {
         let vscode_plugins = Arc::new(crate::plugin_api::vscode::VscodeExtensionState::new(
             vscode_dir,
         ));
+        let code_server = crate::codeserver::remote::RemoteCodeServerState::new(data_dir.clone());
+        crate::codeserver::agent_channel::global().attach_event_bus(Arc::clone(&event_bus));
         let vscode_event_bus = Arc::clone(&event_bus);
         vscode_plugins.configure_host(
             resolve_vscode_ext_host_script(),
@@ -239,10 +299,12 @@ impl HeadlessServices {
             wasm_plugins: Arc::new(crate::plugin_api::wasm::WasmPluginState::default()),
             python_plugins,
             vscode_plugins,
+            code_server,
             event_bus,
             exec,
             spawn_policy,
             connectors: ConnectorsState::new(),
+            workflow,
             profiles,
         })
     }

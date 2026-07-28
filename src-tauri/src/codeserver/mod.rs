@@ -12,9 +12,45 @@
 //! `codeserver_supported`.
 
 pub mod agent_channel;
+mod broker_protocol;
 pub mod commands;
+pub mod content_bridge;
 pub mod download;
 pub mod process;
+pub mod profile;
+pub mod proxy;
+pub mod relay;
+pub mod remote;
 pub mod webview;
 
 pub use process::CodeServerState;
+
+pub const MANAGED_IDE_KILL_SWITCH_ENV: &str = "COGNIA_MANAGED_IDE_KILL_SWITCH";
+
+pub fn managed_platform_enabled() -> bool {
+    managed_platform_enabled_from(std::env::var(MANAGED_IDE_KILL_SWITCH_ENV).ok().as_deref())
+}
+
+fn managed_platform_enabled_from(value: Option<&str>) -> bool {
+    !value.is_some_and(|value| {
+        matches!(
+            value.trim().to_ascii_lowercase().as_str(),
+            "1" | "true" | "yes" | "on"
+        )
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn managed_platform_kill_switch_accepts_explicit_truthy_values_only() {
+        assert!(!managed_platform_enabled_from(Some("1")));
+        assert!(!managed_platform_enabled_from(Some(" TRUE ")));
+        assert!(!managed_platform_enabled_from(Some("yes")));
+        assert!(managed_platform_enabled_from(None));
+        assert!(managed_platform_enabled_from(Some("0")));
+        assert!(managed_platform_enabled_from(Some("false")));
+    }
+}

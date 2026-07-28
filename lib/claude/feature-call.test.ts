@@ -1,4 +1,4 @@
-import { createSidecarFeatureCallClient } from "./feature-call"
+import { createSidecarFeatureCallClient, validateOpenCodeV2Discovery } from "./feature-call"
 import type { ClaudeEvent } from "@cognia/agent-config-types"
 
 describe("sidecar feature-call LanguageModelV3 proxy", () => {
@@ -123,5 +123,37 @@ describe("sidecar feature-call LanguageModelV3 proxy", () => {
       embeddings: [{ values: [0.2, 0.8] }],
       warnings: [],
     })
+  })
+})
+
+describe("OpenCode V2 discovery validation", () => {
+  it("keeps ephemeral string headers and normalizes the endpoint", () => {
+    expect(
+      validateOpenCodeV2Discovery({
+        endpoint: "http://127.0.0.1:4096/",
+        version: "2.0.0-beta.1",
+        headers: {
+          authorization: "Bearer ephemeral",
+          "x-number": 1,
+          "": "ignored",
+        },
+      })
+    ).toEqual({
+      endpoint: "http://127.0.0.1:4096",
+      version: "2.0.0-beta.1",
+      headers: { authorization: "Bearer ephemeral" },
+    })
+  })
+
+  it("rejects missing versions and non-HTTP endpoints", () => {
+    expect(() =>
+      validateOpenCodeV2Discovery({ endpoint: "http://127.0.0.1:4096", headers: {} })
+    ).toThrow("invalid service descriptor")
+    expect(() =>
+      validateOpenCodeV2Discovery({
+        endpoint: "file:///tmp/service.sock",
+        version: "2.0.0-beta.1",
+      })
+    ).toThrow("invalid endpoint")
   })
 })

@@ -1,13 +1,13 @@
 {
-  "name": "cognia-agent-bridge",
-  "displayName": "Cognia Agent Bridge",
-  "description": "Bridges the Cognia agent to the live code-server editor (open/reveal, apply-edit, read-active, save, diff preview, reveal-in-explorer, terminal, notifications) and pushes editor-state changes back. Side-loaded by Cognia; dormant outside it.",
-  "version": "0.2.0",
+  "name": "cognia-managed-broker",
+  "displayName": "Cognia Managed IDE Broker",
+  "description": "Capability-negotiated JSON-RPC broker for Cognia's managed Pro IDE profile, with one-release legacy bridge compatibility.",
+  "version": "1.0.0",
   "publisher": "cognia",
   "private": true,
   "license": "SEE LICENSE IN ../../LICENSE",
   "engines": {
-    "vscode": "^1.80.0"
+    "vscode": "^1.128.0"
   },
   "categories": [
     "Other"

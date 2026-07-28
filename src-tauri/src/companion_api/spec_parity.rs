@@ -74,6 +74,12 @@ mod tests {
             "plugin_deactivate_js",
             "plugin_stop_js",
             "plugin_js_status",
+            "integration_ingress_register",
+            "integration_ingress_unregister",
+            "integration_ingress_get_url",
+            "integration_ingress_poll",
+            "integration_ingress_ack",
+            "integration_ingress_nack",
         ]);
 
         let mut missing: Vec<&str> = Vec::new();

@@ -50,7 +50,29 @@ export interface RemoteHostEndpoint {
   baseUrl: string
   /** Signed device JWT — the companion auth middleware reads `?token=`. */
   deviceJwt: string
+  /**
+   * SHA-256 fingerprint of the remote companion certificate's SPKI.
+   * Required by the Pro IDE relay before it sends the device JWT upstream.
+   */
+  serverFingerprint?: string
 }
+
+/**
+ * Commands which necessarily execute in the desktop shell even while the
+ * project/runtime transport is pointed at a paired host. A remote companion
+ * owns code-server, but it cannot create or position this desktop's child
+ * webview, nor can it bind the desktop-side certificate-pinned relay.
+ */
+const LOCAL_ONLY_COMMANDS = new Set([
+  "codeserver_embed_create",
+  "codeserver_embed_set_background",
+  "codeserver_embed_set_bounds",
+  "codeserver_embed_set_visible",
+  "codeserver_embed_navigate",
+  "codeserver_embed_destroy",
+  "codeserver_remote_relay_ensure",
+  "codeserver_remote_relay_stop",
+])
 
 /**
  * Install (or clear, with `null`) the active remote transport. Idempotent: a
@@ -122,6 +144,7 @@ export class RoutingTransport implements Transport {
   }
 
   call<T = unknown>(name: string, args?: Record<string, unknown>): Promise<T> {
+    if (LOCAL_ONLY_COMMANDS.has(name)) return this.local.call<T>(name, args)
     return this.target().call<T>(name, args)
   }
 

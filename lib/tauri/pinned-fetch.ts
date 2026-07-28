@@ -58,7 +58,7 @@ function pickTrustMode(
 }
 
 export interface PinnedFetchInit extends Omit<RequestInit, "body"> {
-  body?: string
+  body?: BodyInit | null
   /** Pinned SHA-256 SPKI fingerprint (lower-case hex) from the pair payload. */
   serverFingerprint?: string
 }
@@ -107,6 +107,12 @@ function buildResponseLike(
   data: unknown
 ): Response {
   const text = typeof data === "string" ? data : JSON.stringify(data)
+  const bytes =
+    data instanceof ArrayBuffer
+      ? data
+      : ArrayBuffer.isView(data)
+        ? data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength)
+        : new TextEncoder().encode(text).buffer
   const lowerHeaders: Record<string, string> = {}
   for (const [k, v] of Object.entries(headers)) {
     lowerHeaders[k.toLowerCase()] = v
@@ -122,6 +128,7 @@ function buildResponseLike(
     },
     text: async () => text,
     json: async () => JSON.parse(text),
+    arrayBuffer: async () => bytes,
   }
   return responseLike as unknown as Response
 }

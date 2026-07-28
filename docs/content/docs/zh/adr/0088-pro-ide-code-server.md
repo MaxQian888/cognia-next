@@ -8,6 +8,13 @@ description: "内嵌 code-server 编辑器的所有权、布局与主题规则�
 **状态：** 已接受
 **日期：** 2026-07-21
 
+> **2026-07-28 修订：** 下文最初描述的 companion channel 已由
+> [托管 IDE 扩展平台](../subsystems/managed-ide-extension-platform)替代。
+> 当前实现采用 managed/native 隔离 profile、带 challenge 认证与 capability
+> negotiation 的 JSON-RPC 2.0、签名生成代理 VSIX，以及独立的 scoped binary
+> content channel。`0.2.x` newline bridge 只保留一个发布周期用于兼容。原 ADR
+> 关于原生 webview 所有权、pane handoff、主题与进程可见性的决定继续有效。
+
 ## 背景
 
 "Pro IDE" 是可选的内嵌 [code-server](https://github.com/coder/code-server)
@@ -149,13 +156,12 @@ VS Code 重度依赖的 WebSocket 升级。工作量真实、失效模式微妙�
 
 ## 已知债务
 
-- **两套互不相通的 VS Code 扩展生态。** App 的 Open VSX 市场
-  （`lib/plugin/vscode-shim/`）把 `.vsix` 装进插件运行时，与 code-server 的
-  `--extensions-dir` 毫无共享。两个宿主能力不对等，粗暴打通会产出"装了但不工作"。
-- **没有更新通道。** `CODE_SERVER_VERSION` 被钉死，配手工维护的 SHA-256 摘要
-  （code-server 不发布校验和文件），并带 `--disable-update-check`。升级需要用
-  `gh api repos/coder/code-server/releases/tags/v<ver> --jq '.assets[].digest'`
-  刷新那张表。设置 → Pro IDE 只回收**旧**版本目录。
+- **Native 生态有意隔离。** Open VSX 扩展只在 Native Extensions IDE 运行；
+  managed proxy 只由 Cognia 插件生成，且不接受第三方 entrypoint。跨越两个信任域
+  共享扩展 state 或凭据仍明确不支持。
+- **固定 Code 升级仍是 release operation。** Managed platform 已支持签名、
+  事务化 plugin/proxy 更新，但升级 code-server/Code 本身仍需刷新 archive digest、
+  对比 catalog/schema、重生成 fixture 并执行完整 E2E matrix。
 - **多用户机器的暴露面**，见决策 6。
 - **`components/ui/progress.tsx` 从未把 `value` 转发给 Radix root**，因此 App 里
   每一个 `<Progress>` 对辅助技术都自称"不确定进度"。这是既有的、全仓范围的问题；

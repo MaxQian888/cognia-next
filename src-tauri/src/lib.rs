@@ -92,6 +92,7 @@ pub use cognia_scheduling::scheduler;
 // unchanged. `keyring_secrets`/`proxy_config` stay as app-side facades because
 // they keep their `#[tauri::command]` shells.
 pub use cognia_secrets::secret_store;
+mod selection_toolbar;
 mod session_import;
 mod session_import_watch;
 mod settings;
@@ -354,10 +355,9 @@ pub fn run() {
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_os::init())
-        // Shell plugin powers the one-click cloudflared tunnel button in
-        // Settings → GitHub Delivery → Repos. Scope is locked to the
-        // `cloudflared` binary in `tauri.conf.json`; we don't expose a
-        // generic shell to the renderer.
+        // Shell plugin powers the host-managed cloudflared companion tunnel.
+        // Scope is locked to the `cloudflared` binary in `tauri.conf.json`;
+        // we don't expose a generic shell to the renderer.
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_store::Builder::new().build())
         // ADR-pluginset expansion — see `docs/content/docs/en/adr/` once an ADR
@@ -369,6 +369,7 @@ pub fn run() {
         .plugin(tauri_plugin_positioner::init())
         .manage(claude::SidecarState::new())
         .manage(codeserver::CodeServerState::new())
+        .manage(codeserver::relay::DesktopRelayState::new())
         .manage(ApiKeyState::new())
         // ADR-0025 — unified subscription module. In-process cache of the
         // active account + resolved env per provider. Populated lazily by
@@ -376,6 +377,7 @@ pub fn run() {
         // env-builder) consume it via `subscription_get_active`.
         .manage(subscription::ActiveAccountState::new())
         .manage(WindowBehavior::new())
+        .manage(selection_toolbar::SelectionToolbarState::default())
         // Runtime white-screen watchdog state (ADR window-recovery). Written by
         // the renderer heartbeat command, read by the polling loop spawned in
         // setup() once the main window exists.
@@ -652,6 +654,15 @@ pub fn run() {
             pet_window::is_pet_window_open,
             capture::get_foreground_app,
             pet_window::show_main_window,
+            selection_toolbar::selection_toolbar_start,
+            selection_toolbar::selection_toolbar_stop,
+            selection_toolbar::selection_toolbar_status,
+            selection_toolbar::selection_toolbar_current_candidate,
+            selection_toolbar::selection_toolbar_capture_clipboard,
+            selection_toolbar::selection_toolbar_execute,
+            selection_toolbar::selection_toolbar_take_pending_stage,
+            selection_toolbar::selection_toolbar_reveal,
+            selection_toolbar::selection_toolbar_set_interactive,
             pet_window::open_pet_popup,
             pet_window::close_pet_popup,
             pet_window::pet_popup_resize,
@@ -1042,6 +1053,12 @@ pub fn run() {
             workflow::commands::workflow_ack_completed,
             workflow::commands::workflow_get_webhook_url,
             workflow::commands::workflow_webhook_respond,
+            workflow::commands::integration_ingress_register,
+            workflow::commands::integration_ingress_unregister,
+            workflow::commands::integration_ingress_get_url,
+            workflow::commands::integration_ingress_poll,
+            workflow::commands::integration_ingress_ack,
+            workflow::commands::integration_ingress_nack,
             plugin_api::scan::plugin_scan_directory,
             plugin_api::cli_exec::plugin_cli_exec,
             plugin_api::python::commands::plugin_python_initialize,
@@ -1130,6 +1147,10 @@ pub fn run() {
             plugin_api::marketplace::plugin_get_directory,
             plugin_api::marketplace::plugin_read_verification,
             plugin_api::marketplace::plugin_download_version,
+            plugin_api::marketplace::plugin_stage_version,
+            plugin_api::marketplace::plugin_commit_staged_update,
+            plugin_api::marketplace::plugin_discard_staged_update,
+            plugin_api::marketplace::plugin_finalize_staged_update,
             plugin_api::marketplace::plugin_invalidate_cache,
             plugin_api::devtools::plugin_dev_server_start,
             plugin_api::devtools::plugin_dev_server_stop,
@@ -1202,7 +1223,17 @@ pub fn run() {
             browser::cookie_import::browser_cookie_import,
             // Optional desktop "Pro IDE" mode — on-demand embedded code-server.
             codeserver::commands::codeserver_supported,
+            codeserver::commands::codeserver_remote_relay_ensure,
+            codeserver::commands::codeserver_remote_relay_stop,
+            codeserver::commands::codeserver_build_proxy,
+            codeserver::commands::codeserver_activate_proxy,
+            codeserver::commands::codeserver_list_proxies,
             codeserver::commands::codeserver_ensure,
+            codeserver::commands::codeserver_broker_respond,
+            codeserver::commands::codeserver_broker_notify,
+            codeserver::commands::codeserver_broker_validate_paths,
+            codeserver::commands::codeserver_broker_content_create,
+            codeserver::commands::codeserver_broker_content_redeem,
             codeserver::commands::codeserver_status,
             codeserver::commands::codeserver_stop,
             codeserver::commands::codeserver_stop_all,

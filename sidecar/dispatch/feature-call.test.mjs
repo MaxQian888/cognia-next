@@ -1,7 +1,10 @@
 import test from "node:test"
 import assert from "node:assert/strict"
+import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 
-import { createFeatureCallHandler } from "./feature-call.mjs"
+import { createFeatureCallHandler, discoverOpenCodeV2Service } from "./feature-call.mjs"
 
 function deferred() {
   let resolve
@@ -192,4 +195,147 @@ test("executes Bedrock embeddings through the correlated feature channel", async
       result: { embeddings: [{ values: [0.1, 0.2] }], warnings: [] },
     },
   ])
+})
+
+test("discovers OpenCode V2 without persisting or logging authentication headers", async () => {
+  const events = []
+  const handler = createFeatureCallHandler({
+    emit: (event) => events.push(event),
+    discoverOpenCodeV2: async () => ({
+      endpoint: "http://127.0.0.1:4096",
+      version: "2.0.0-beta.1",
+      headers: { authorization: "Bearer ephemeral" },
+    }),
+  })
+
+  await handler.call({
+    type: "feature_call",
+    requestId: "opencode-v2",
+    operation: "opencode-v2-discover",
+    credentials: {},
+  })
+
+  assert.deepEqual(events, [
+    {
+      type: "feature_call_result",
+      requestId: "opencode-v2",
+      result: {
+        endpoint: "http://127.0.0.1:4096",
+        version: "2.0.0-beta.1",
+        headers: { authorization: "Bearer ephemeral" },
+      },
+    },
+  ])
+})
+
+test("validates the discovered OpenCode V2 endpoint and derives its version from health", async () => {
+  const endpoint = {
+    url: "http://127.0.0.1:4096",
+    auth: { type: "basic", username: "opencode", password: "ephemeral" },
+  }
+  const result = await discoverOpenCodeV2Service({
+    loadService: async () => ({
+      Service: {
+        discover: async () => endpoint,
+        headers: (value) => {
+          assert.equal(value, endpoint)
+          return { authorization: "Basic ephemeral" }
+        },
+      },
+    }),
+    fetchImpl: async (url, options) => {
+      assert.equal(url.toString(), "http://127.0.0.1:4096/api/health")
+      assert.deepEqual(options.headers, { authorization: "Basic ephemeral" })
+      return {
+        ok: true,
+        json: async () => ({ version: "2.0.0-beta.1", pid: 42 }),
+      }
+    },
+  })
+
+  assert.deepEqual(result, {
+    endpoint: "http://127.0.0.1:4096",
+    version: "2.0.0-beta.1",
+    headers: { authorization: "Basic ephemeral" },
+  })
+})
+
+test("uses the exact pinned OpenCode V2 Service contract in isolated state", async (t) => {
+  const stateRoot = await mkdtemp(join(tmpdir(), "cognia-opencode-v2-"))
+  const previousStateHome = process.env.XDG_STATE_HOME
+  const previousFetch = globalThis.fetch
+  t.after(async () => {
+    globalThis.fetch = previousFetch
+    if (previousStateHome === undefined) delete process.env.XDG_STATE_HOME
+    else process.env.XDG_STATE_HOME = previousStateHome
+    await rm(stateRoot, { recursive: true, force: true })
+  })
+
+  const serviceDirectory = join(stateRoot, "opencode")
+  await mkdir(serviceDirectory, { recursive: true })
+  await writeFile(
+    join(serviceDirectory, "service.json"),
+    JSON.stringify({
+      id: "isolated-test",
+      url: "http://127.0.0.1:4096",
+      pid: 4242,
+      version: "2.0.0-beta.1",
+      password: "ephemeral",
+    })
+  )
+  process.env.XDG_STATE_HOME = stateRoot
+  globalThis.fetch = async () => ({
+    ok: true,
+    status: 200,
+    json: async () => ({ version: "2.0.0-beta.1", pid: 4242 }),
+  })
+
+  const result = await discoverOpenCodeV2Service()
+
+  assert.equal(result.endpoint, "http://127.0.0.1:4096")
+  assert.equal(result.version, "2.0.0-beta.1")
+  assert.equal(
+    result.headers.authorization,
+    `Basic ${Buffer.from("opencode:ephemeral").toString("base64")}`
+  )
+})
+
+test("reports actionable OpenCode V2 discovery and health failures", async () => {
+  await assert.rejects(
+    discoverOpenCodeV2Service({
+      loadService: async () => ({
+        Service: { discover: async () => undefined, headers: () => undefined },
+      }),
+    }),
+    /opencode2 service start/
+  )
+
+  await assert.rejects(
+    discoverOpenCodeV2Service({
+      loadService: async () => ({
+        Service: {
+          discover: async () => ({ url: "http://127.0.0.1:4096" }),
+          headers: () => undefined,
+        },
+      }),
+      fetchImpl: async () => ({ ok: false, json: async () => ({ healthy: false }) }),
+    }),
+    /health probe failed/
+  )
+
+  await assert.rejects(
+    discoverOpenCodeV2Service({
+      loadService: async () => ({
+        Service: {
+          discover: async () => ({ url: "http://127.0.0.1:4096" }),
+          headers: () => undefined,
+        },
+      }),
+      fetchImpl: async () => ({
+        ok: true,
+        json: async () => ({ healthy: true, version: "2.0.0-beta.1" }),
+      }),
+    }),
+    /incompatible health contract/
+  )
 })

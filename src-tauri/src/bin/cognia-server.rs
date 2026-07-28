@@ -616,6 +616,9 @@ async fn run_serve(
                 handle.bound_port,
                 data_dir.clone(),
                 HEADLESS_LOCAL_ACCOUNT_ID.to_string(),
+                headless_services()
+                    .map(|services| services.code_server.host_id().to_string())
+                    .unwrap_or_else(|| "headless".to_string()),
                 tls_material.fingerprint_sha256.clone(),
                 Some(tls_material.cert_pem_path.clone()),
             );
@@ -644,6 +647,7 @@ async fn run_serve(
         supervisor.shutdown();
     }
     if let Some(services) = headless_services() {
+        services.code_server.stop_all().await;
         let _ = services.gateway.stop();
         kill_sidecar(services.sidecar.clone()).await;
     }

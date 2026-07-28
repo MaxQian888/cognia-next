@@ -139,7 +139,31 @@ RUN pnpm --dir sidecar install --ignore-workspace --frozen-lockfile
 COPY . .
 RUN npm --prefix sidecar/vscode-ext-host ci --no-audit --no-fund \
     && npm --prefix sidecar/vscode-ext-host run build
+RUN pnpm sidecar:codeserver-agent:build
 RUN NODE_OPTIONS=--max-old-space-size=8192 node scripts/build/build-cli-binary.mjs --layout-only
+
+# Pinned managed Pro IDE binary. The release digest is selected per BuildKit
+# TARGETARCH and verified before extraction; runtime hosts never download or
+# self-upgrade this artifact.
+FROM node:26-bookworm-slim AS codeserver-preload
+ARG TARGETARCH
+ARG CODE_SERVER_VERSION=4.128.0
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates curl \
+    && case "$TARGETARCH" in \
+         amd64) digest=79ba26bf186e5268a22b7c17b30a5f288a16c37791f0b86c27859e8fef103188 ;; \
+         arm64) digest=f8f02c2a81d1a433a4d132716a6f0405f690f6d70dd955942e95e87356db8a10 ;; \
+         *) echo "unsupported code-server architecture: $TARGETARCH" >&2; exit 1 ;; \
+       esac \
+    && asset="code-server-${CODE_SERVER_VERSION}-linux-${TARGETARCH}.tar.gz" \
+    && curl --fail --location --proto '=https' --tlsv1.2 \
+         "https://github.com/coder/code-server/releases/download/v${CODE_SERVER_VERSION}/${asset}" \
+         --output "/tmp/${asset}" \
+    && echo "${digest}  /tmp/${asset}" | sha256sum --check --strict \
+    && mkdir -p "/opt/cognia/code-server/${CODE_SERVER_VERSION}" \
+    && tar -xzf "/tmp/${asset}" --strip-components=1 \
+         -C "/opt/cognia/code-server/${CODE_SERVER_VERSION}" \
+    && rm -f "/tmp/${asset}"
 
 # The plugin permission model is pinned independently from the brain's Node
 # runtime. cognia-plugin-runtime verifies this exact major/minimum patch before
@@ -153,13 +177,15 @@ FROM node:26-bookworm-slim AS runtime-slim
 # note) — ship the runtime .so set alongside the headless essentials.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
-       ca-certificates libssl3 curl \
+       ca-certificates libssl3 curl git \
        libgtk-3-0 libwebkit2gtk-4.1-0 libjavascriptcoregtk-4.1-0 \
        libsoup-3.0-0 libayatana-appindicator3-1 librsvg2-2 \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /work/target/release/cognia-server /usr/local/bin/cognia-server
 COPY --from=brain-builder /work/cli/dist/bin/cognia-agent-layout /app/brain
+COPY --from=brain-builder /work/sidecar/codeserver-agent-ext/cognia-agent-bridge.vsix /opt/cognia/codeserver-agent-ext/cognia-agent-bridge.vsix
+COPY --from=codeserver-preload /opt/cognia/code-server /opt/cognia/code-server
 COPY --from=plugin-node-runtime /usr/local/bin/node /opt/cognia/plugin-node/bin/node
 # Smoke stub agent (ADR-0059 D6): admitted by SpawnPolicy ONLY when
 # COGNIA_SMOKE_AGENT=1 is set on the server — inert otherwise.
@@ -171,6 +197,8 @@ ENV COGNIA_DATA_DIR=/data \
     COGNIA_SIDECAR_SCRIPT=/app/brain/sidecar/agent-host.mjs \
     COGNIA_VSCODE_EXT_HOST_SCRIPT=/app/brain/sidecar/vscode-ext-host/dist/host.js \
     COGNIA_MCP_SIDECAR_PATH=/app/brain/sidecar/cognia-mcp.mjs
+ENV COGNIA_CODE_SERVER_BIN=/opt/cognia/code-server/4.128.0/bin/code-server \
+    COGNIA_CODE_SERVER_AGENT_VSIX=/opt/cognia/codeserver-agent-ext/cognia-agent-bridge.vsix
 VOLUME /data
 # 27890 tracks companion_api::server::DEFAULT_PORT — 7890/7891 are the Clash
 # mixed/SOCKS defaults and collide with a proxy on most dev hosts.
@@ -182,8 +210,6 @@ CMD ["serve", "--port", "27890"]
 # ── Runtime: full (external agent CLIs preinstalled + git) ──────────────────
 FROM runtime-slim AS runtime-full
 COPY deploy/runner/install-agents.sh /tmp/install-agents.sh
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends git \
-    && bash /tmp/install-agents.sh \
+RUN bash /tmp/install-agents.sh \
     && rm -f /tmp/install-agents.sh \
     && rm -rf /var/lib/apt/lists/*

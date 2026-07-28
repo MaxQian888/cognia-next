@@ -267,6 +267,20 @@ pub fn build_router(state: SharedState) -> Router {
         // rejects non-service scopes before the upgrade.
         .route("/ws/v1/bridge", any(ws_bridge::ws_bridge_handler))
         .route("/ws/v1/terminal", any(ws_terminal::ws_terminal_handler))
+        // Remote Pro IDE relay. The companion owns code-server and revalidates
+        // the paired device on every HTTP request and WebSocket upgrade.
+        .route(
+            "/ide/v1/relay/{relay_id}",
+            any(crate::codeserver::remote::relay_root_handler),
+        )
+        .route(
+            "/ide/v1/relay/{relay_id}/",
+            any(crate::codeserver::remote::relay_root_handler),
+        )
+        .route(
+            "/ide/v1/relay/{relay_id}/{*tail}",
+            any(crate::codeserver::remote::relay_handler),
+        )
         // ACP server (Agent Client Protocol) — external editors drive cognia
         // Claude sessions over JSON-RPC. Baseline-chat surface only (the
         // handler reaches `claude_*` arms through `rpc::dispatch`, whose
@@ -305,7 +319,7 @@ pub fn build_router(state: SharedState) -> Router {
             any(super::browser_gateway::browser_ws_handler),
         )
         .merge(protected_routes)
-        .with_state(state);
+        .with_state(state.clone());
 
     // Fleet ingress (`/api/v1/fleet/*`) — its own auth tier: loopback-source
     // + shared fleet token (see `fleet::routes`). Neither device-JWT (hook
@@ -345,7 +359,29 @@ pub fn build_router(state: SharedState) -> Router {
     // Body-size limit applied to all routes (incl. the ingress — Lark/Slack
     // webhook bodies fit comfortably under 64 KiB). JWT payloads are tiny;
     // the generous limit leaves room for future multipart (M4.6 push-token).
-    router.layer(RequestBodyLimitLayer::new(BODY_LIMIT_BYTES))
+    let router = router.layer(RequestBodyLimitLayer::new(BODY_LIMIT_BYTES));
+    if crate::headless::headless_services().is_none() {
+        return router;
+    }
+    // Raw broker content deliberately sits outside the default JSON/webhook
+    // body limit. It has its own 64 MiB cap and the same device-JWT middleware;
+    // the handler additionally requires a loopback-only service-scope token.
+    let content_router = Router::new()
+        .route(
+            "/api/v1/ide/content",
+            post(crate::codeserver::content_bridge::upload_content),
+        )
+        .route(
+            "/api/v1/ide/content/{handle_id}",
+            get(crate::codeserver::content_bridge::redeem_content),
+        )
+        .layer(RequestBodyLimitLayer::new(64 * 1024 * 1024))
+        .layer(from_fn_with_state(
+            state.clone(),
+            middleware::require_device_jwt,
+        ))
+        .with_state(state);
+    router.merge(content_router)
 }
 
 // ---------------------------------------------------------------------------

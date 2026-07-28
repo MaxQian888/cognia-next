@@ -8,6 +8,22 @@ import { TransportRtc, type TransportRtcOptions } from "./transport-rtc"
 
 export type { CompanionConfig } from "./companion-storage"
 
+export interface ManagedIdeContentContext {
+  root: string
+  generation: number
+  pluginId: string
+  providerId: string
+  permission: string | null
+  mediaType?: string
+}
+
+function encodeContentContext(context: ManagedIdeContentContext): string {
+  const bytes = new TextEncoder().encode(JSON.stringify(context))
+  let binary = ""
+  for (const byte of bytes) binary += String.fromCharCode(byte)
+  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "")
+}
+
 // ---------------------------------------------------------------------------
 // Read-only command set — mirrors READ_ONLY_COMMANDS in rpc.rs exactly.
 // These skip the Idempotency-Key header (they are structurally idempotent).
@@ -21,6 +37,9 @@ const READ_ONLY_COMMANDS: ReadonlySet<string> = new Set([
   "skills_scan_native",
   "mcp_server_status",
   "lsp_host_ensure",
+  "codeserver_supported",
+  "codeserver_status",
+  "codeserver_list_proxies",
   "read_agent_config",
   "session_list",
   "companion_can_control",
@@ -398,6 +417,63 @@ export class CompanionTransport implements Transport {
     }
 
     return this.fetchWithRetry<T>(url, headers, JSON.stringify(args ?? {}))
+  }
+
+  /**
+   * One-shot raw content upload for the headless managed IDE broker. This is
+   * intentionally not implemented through `call`: binary values must not be
+   * expanded into JSON arrays/base64, and actions are never auto-retried.
+   */
+  async uploadManagedIdeContent<T>(
+    context: ManagedIdeContentContext,
+    bytes: Uint8Array
+  ): Promise<T> {
+    const config = this.config()
+    if (!config) throw new Error("companion not paired")
+    const body = new ArrayBuffer(bytes.byteLength)
+    new Uint8Array(body).set(bytes)
+    const response = await pinnedFetch(`${config.baseUrl.replace(/\/+$/, "")}/api/v1/ide/content`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${config.deviceJwt}`,
+        "Content-Type": context.mediaType ?? "application/octet-stream",
+        "X-Cognia-Content-Context": encodeContentContext(context),
+      },
+      body,
+      serverFingerprint: config.serverFingerprint,
+    })
+    if (!response.ok) {
+      throw new Error(
+        `managed IDE content upload failed (${response.status}): ${await response.text()}`
+      )
+    }
+    return (await response.json()) as T
+  }
+
+  /** Redeem a one-shot generation-bound content handle as raw bytes. */
+  async redeemManagedIdeContent(
+    context: ManagedIdeContentContext,
+    handleId: string
+  ): Promise<Uint8Array> {
+    const config = this.config()
+    if (!config) throw new Error("companion not paired")
+    const response = await pinnedFetch(
+      `${config.baseUrl.replace(/\/+$/, "")}/api/v1/ide/content/${encodeURIComponent(handleId)}`,
+      {
+        method: "GET",
+        headers: {
+          Authorization: `Bearer ${config.deviceJwt}`,
+          "X-Cognia-Content-Context": encodeContentContext(context),
+        },
+        serverFingerprint: config.serverFingerprint,
+      }
+    )
+    if (!response.ok) {
+      throw new Error(
+        `managed IDE content redemption failed (${response.status}): ${await response.text()}`
+      )
+    }
+    return new Uint8Array(await response.arrayBuffer())
   }
 
   // ── Transport.subscribe ────────────────────────────────────────────────────

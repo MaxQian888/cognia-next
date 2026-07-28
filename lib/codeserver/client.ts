@@ -11,12 +11,24 @@
 import type { ElementRect } from "@/lib/browser/protocol"
 import type { ActiveEditorContext, ActiveEditorDiagnostic } from "@/lib/files/project-editor-bridge"
 import { transport } from "@/lib/tauri"
+import { getActiveRemoteEndpoint } from "@/lib/tauri/transport-routing"
 
 /** Mirror of `codeserver::process::CodeServerStatus`. */
+export type CodeServerProfile = "managed" | "native"
+
 export interface CodeServerStatus {
   running: boolean
   port: number | null
   version: string
+  /** Absent only when talking to a pre-platform host during rolling upgrade. */
+  profile?: CodeServerProfile | null
+  /** Remote companion path. Never contains a credential or the host loopback port. */
+  relayPath?: string | null
+}
+
+interface DesktopRelayStatus {
+  port: number
+  url: string
 }
 
 /** Mirror of `codeserver::download::CodeServerDiskUsage`. */
@@ -35,6 +47,47 @@ export interface CodeServerInstallInfo {
   version: string
   installDir: string
   binaryPath: string
+}
+
+export interface CodeServerProxyAsset {
+  sourcePath: string
+  packagePath: string
+  sha256?: string
+}
+
+export interface CodeServerProxyBuildRequest {
+  pluginId: string
+  pluginVersion: string
+  pluginRoot: string
+  manifestHash: string
+  catalogHash: string
+  contributions: unknown
+  providers: unknown[]
+  executables: unknown[]
+  protocols: unknown
+  assets: CodeServerProxyAsset[]
+}
+
+export interface CodeServerProxyArtifact {
+  pluginId: string
+  pluginVersion: string
+  manifestHash: string
+  catalogHash: string
+  platformVersion: string
+  sha256: string
+  signature: string
+  publicKey: string
+  vsixPath: string
+  executables: Array<{ id: string; sha256: string; path: string }>
+}
+
+export interface CodeServerContentHandle {
+  $type: "ContentHandle"
+  id: string
+  size: number
+  sha256: string
+  mediaType: string
+  expiresAtMs: number
 }
 
 /**
@@ -98,25 +151,82 @@ export interface CodeServerEditorEvent {
   payload: { path?: string | null; empty?: boolean; count?: number } | null
 }
 
+export interface CodeServerBrokerRequest {
+  root: string
+  generation: number
+  id: string | number
+  method: string
+  params: unknown
+}
+
+export interface CodeServerBrokerNotification {
+  root: string
+  generation: number
+  method: string
+  params: unknown
+}
+
 export const CODESERVER_EVENTS = {
   downloadProgress: "codeserver://download-progress",
   instanceExited: "codeserver://instance-exited",
   editorEvent: "codeserver://editor-event",
+  brokerRequest: "codeserver://broker-request",
+  brokerNotification: "codeserver://broker-notification",
 } as const
 
 export const codeServerClient = {
   /** Whether this host has a prebuilt code-server binary (macOS/Linux). */
   supported: () => transport.call<boolean>("codeserver_supported", {}),
   /** Ensure a healthy code-server serves `root`; returns its loopback port. */
-  ensure: (root: string) => transport.call<CodeServerStatus>("codeserver_ensure", { root }),
+  ensure: async (root: string, profile: CodeServerProfile = "managed") => {
+    const status = await transport.call<CodeServerStatus>("codeserver_ensure", { root, profile })
+    const endpoint = getActiveRemoteEndpoint()
+    if (!endpoint) return status
+    if (!status.relayPath) {
+      throw new Error("remote host did not provide a managed IDE relay path")
+    }
+    if (!endpoint.serverFingerprint) {
+      throw new Error("remote host is missing its paired certificate fingerprint")
+    }
+    const relay = await transport.call<DesktopRelayStatus>("codeserver_remote_relay_ensure", {
+      baseUrl: endpoint.baseUrl,
+      deviceJwt: endpoint.deviceJwt,
+      serverFingerprint: endpoint.serverFingerprint,
+      relayPath: status.relayPath,
+    })
+    return { ...status, port: relay.port }
+  },
   /** Current status for `root` without spawning. */
   status: (root: string) => transport.call<CodeServerStatus>("codeserver_status", { root }),
   /** Stop the code-server serving `root`. Returns whether one was running. */
-  stop: (root: string) => transport.call<boolean>("codeserver_stop", { root }),
+  stop: async (root: string) => {
+    const stopped = await transport.call<boolean>("codeserver_stop", { root })
+    if (getActiveRemoteEndpoint()) {
+      await transport.call<boolean>("codeserver_remote_relay_stop", {})
+    }
+    return stopped
+  },
   /** Stop every running code-server (global shutdown / kill switch). */
-  stopAll: () => transport.call<void>("codeserver_stop_all", {}),
+  stopAll: async () => {
+    await transport.call<void>("codeserver_stop_all", {})
+    if (getActiveRemoteEndpoint()) {
+      await transport.call<boolean>("codeserver_remote_relay_stop", {})
+    }
+  },
   /** Download + install code-server without spawning (pre-fetch). */
   download: () => transport.call<CodeServerInstallInfo>("codeserver_download", {}),
+  /** Generate and locally sign a managed proxy from normalized manifest IR. */
+  buildProxy: (request: CodeServerProxyBuildRequest) =>
+    transport.call<CodeServerProxyArtifact>("codeserver_build_proxy", { request }),
+  /**
+   * Promote a previously built and verified proxy into every live managed
+   * profile. The host owns the activation handshake and restores the prior
+   * proxy if live activation cannot complete.
+   */
+  activateProxy: (artifact: CodeServerProxyArtifact) =>
+    transport.call<boolean>("codeserver_activate_proxy", { artifact }),
+  /** List hash/signature-verified managed proxy artifacts. */
+  listProxies: () => transport.call<CodeServerProxyArtifact[]>("codeserver_list_proxies", {}),
   /**
    * Abort an in-flight first-run download (~100-200MB). Safe to call when none
    * is running; the in-flight `ensure`/`download` call rejects and the partial
@@ -190,27 +300,93 @@ export const codeServerClient = {
   /** Surface an app-side message inside the editor. */
   notify: (root: string, message: string, kind?: "info" | "warning" | "error") =>
     transport.call<void>("codeserver_agent_notify", { root, message, kind }),
+  respondToBroker: (
+    request: Pick<CodeServerBrokerRequest, "root" | "generation" | "id">,
+    outcome: { result?: unknown; error?: { code: number; message: string; data?: unknown } }
+  ) =>
+    transport.call<void>("codeserver_broker_respond", {
+      ...request,
+      result: outcome.result,
+      error: outcome.error,
+    }),
+  notifyBroker: (
+    root: string,
+    generation: number,
+    params: {
+      pluginId: string
+      providerId: string
+      invocationId?: string
+      event: string
+      payload?: unknown
+    }
+  ) =>
+    transport.call<void>("codeserver_broker_notify", {
+      root,
+      generation,
+      params,
+    }),
+  validateBrokerPaths: (root: string, paths: string[]) =>
+    transport.call<string[]>("codeserver_broker_validate_paths", {
+      root,
+      paths,
+    }),
+  createBrokerContent: (
+    root: string,
+    generation: number,
+    pluginId: string,
+    providerId: string,
+    permission: string | null,
+    mediaType: string,
+    bytes: number[]
+  ) =>
+    transport.call<CodeServerContentHandle>("codeserver_broker_content_create", {
+      root,
+      generation,
+      pluginId,
+      providerId,
+      permission,
+      mediaType,
+      bytes,
+    }),
+  redeemBrokerContent: (
+    root: string,
+    generation: number,
+    pluginId: string,
+    providerId: string,
+    permission: string | null,
+    handleId: string
+  ) =>
+    transport.call<number[]>("codeserver_broker_content_redeem", {
+      root,
+      generation,
+      pluginId,
+      providerId,
+      permission,
+      handleId,
+    }),
 
   /** Raw `settings.json` for the embedded editor; `""` when it doesn't exist. */
-  readUserSettings: () => transport.call<string>("codeserver_read_user_settings", {}),
+  readUserSettings: (profile: CodeServerProfile = "managed") =>
+    transport.call<string>("codeserver_read_user_settings", { profile }),
   /**
    * Replace `settings.json`. VS Code hot-watches it, so this repaints a running
    * workbench without a reload.
    */
-  writeUserSettings: (contents: string) =>
-    transport.call<void>("codeserver_write_user_settings", { contents }),
+  writeUserSettings: (contents: string, profile: CodeServerProfile = "managed") =>
+    transport.call<void>("codeserver_write_user_settings", { contents, profile }),
 
   /**
    * Raw `argv.json` for the embedded editor — VS Code's *runtime* arguments,
    * where the display language lives. `""` when it doesn't exist.
    */
-  readRuntimeArgs: () => transport.call<string>("codeserver_read_runtime_args", {}),
+  readRuntimeArgs: (profile: CodeServerProfile = "managed") =>
+    transport.call<string>("codeserver_read_runtime_args", { profile }),
   /**
    * Replace `argv.json`. Unlike `settings.json` this is read only at workbench
    * startup, so a locale change needs the instance restarted to take effect.
    */
-  writeRuntimeArgs: (contents: string) =>
-    transport.call<void>("codeserver_write_runtime_args", { contents }),
+  writeRuntimeArgs: (contents: string, profile: CodeServerProfile = "managed") =>
+    transport.call<void>("codeserver_write_runtime_args", { contents, profile }),
   /**
    * Whether a VS Code display-language pack is published for `locale`. Lets the
    * UI say the editor has no translation instead of silently staying English.

@@ -21,6 +21,7 @@ use tokio::process::{Child, Command};
 use tokio::sync::Mutex;
 
 use super::download;
+use super::profile::{IdeProfile, ProfilePaths};
 
 /// Emitted when a healthy instance stops answering `/healthz`, so the pane can
 /// leave `ready` instead of sitting on a dead page.
@@ -44,6 +45,7 @@ pub struct CodeServerExited {
 /// A live code-server instance for one project root.
 struct RunningInstance {
     port: u16,
+    profile: IdeProfile,
     child: Child,
     binary_path: String,
     user_data_dir: PathBuf,
@@ -112,57 +114,102 @@ impl CodeServerState {
         Self::default()
     }
 
-    /// Status for a project root: `(running, port)`.
-    pub async fn status(&self, root: &str) -> (bool, Option<u16>) {
+    /// Status for a project root: `(running, port, profile)`.
+    pub async fn status(&self, root: &str) -> (bool, Option<u16>, Option<IdeProfile>) {
         let canonical = canonicalize_root(root).unwrap_or_else(|_| root.to_string());
         let mut map = self.instances.lock().await;
         if let Some(inst) = map.get_mut(&canonical) {
             if inst.is_reusable() {
-                return (true, Some(inst.port));
+                return (true, Some(inst.port), Some(inst.profile));
             }
             inst.retire();
             map.remove(&canonical);
+            super::agent_channel::global().deregister(&canonical);
         }
-        (false, None)
+        (false, None, None)
     }
 
     /// Ensure a healthy code-server is serving `root`, returning its loopback
     /// port. Downloads + installs code-server on first use.
     pub async fn ensure(&self, app: &tauri::AppHandle, root: &str) -> Result<u16, String> {
+        self.ensure_profile(app, root, IdeProfile::Managed).await
+    }
+
+    /// Ensure a healthy code-server is serving `root` in exactly one trust
+    /// domain. Switching profile retires the existing process before starting
+    /// the other one, so two extension hosts never touch one workspace at once.
+    pub async fn ensure_profile(
+        &self,
+        app: &tauri::AppHandle,
+        root: &str,
+        profile: IdeProfile,
+    ) -> Result<u16, String> {
         let canonical = canonicalize_root(root)?;
 
         // Fast path: an already-healthy instance for this root.
-        if let Some(port) = self.live_port(&canonical).await {
+        if let Some(port) = self.live_port(&canonical, profile).await {
             return Ok(port);
         }
 
         // Serialize install + spawn across all roots.
         let _guard = self.operation_lock.lock().await;
         // Re-check under the lock — another caller may have just spawned it.
-        if let Some(port) = self.live_port(&canonical).await {
+        if let Some(port) = self.live_port(&canonical, profile).await {
             return Ok(port);
         }
 
         let info = download::ensure_code_server(app, Some(self.download_cancel.clone()))
             .await
             .map_err(|e| format!("install code-server: {e:#}"))?;
+        let migration_root = download::code_server_root(app)
+            .map_err(|error| format!("resolve code-server root: {error:#}"))?;
+        tokio::task::spawn_blocking(move || {
+            super::profile::migrate_legacy_profile_state(&migration_root)?;
+            if profile == IdeProfile::Managed {
+                let native = super::profile::ProfilePaths::new(&migration_root, IdeProfile::Native);
+                let managed =
+                    super::profile::ProfilePaths::new(&migration_root, IdeProfile::Managed);
+                super::profile::synchronize_portable_preferences(
+                    &native.user_data_dir,
+                    &managed.user_data_dir,
+                )?;
+            }
+            Ok::<(), String>(())
+        })
+        .await
+        .map_err(|error| format!("migrate code-server profiles task: {error}"))??;
 
-        let user_data_dir = state_subdir(app, "user-data")?;
-        let extensions_dir = state_subdir(app, "extensions")?;
+        let paths = profile_paths(app, profile)?;
+        let user_data_dir = paths.user_data_dir;
+        let extensions_dir = paths.extensions_dir;
+        std::fs::create_dir_all(&user_data_dir)
+            .map_err(|e| format!("create {}: {e}", user_data_dir.display()))?;
+        std::fs::create_dir_all(&extensions_dir)
+            .map_err(|e| format!("create {}: {e}", extensions_dir.display()))?;
         let port = pick_free_loopback_port()?;
         let args = code_server_args(&canonical, port, &user_data_dir, &extensions_dir);
 
         // Side-load the agent-bridge extension (best-effort, once per version) BEFORE
         // the child starts so it activates on this launch. A missing/failed install
         // only degrades the Pro IDE agent-drive features, never the spawn itself.
-        install_agent_extension(app, &info.binary_path, &extensions_dir, &user_data_dir).await;
+        let broker_enabled = profile.allows_broker() && super::managed_platform_enabled();
+        if broker_enabled {
+            install_agent_extension(app, &info.binary_path, &extensions_dir, &user_data_dir).await;
+            install_managed_proxy_extensions(
+                app,
+                &info.binary_path,
+                &extensions_dir,
+                &user_data_dir,
+            )
+            .await;
+        }
 
         // Same deal for the display-language pack: VS Code ships English only, so a
         // non-English `locale` in argv.json needs the matching MS-CEINTL pack present
         // at startup. Read from disk rather than taken as an argument because the
         // locale is written by the renderer's sync and must survive an app restart
         // that never touches it again. Best-effort; failure just leaves the UI English.
-        let locale = tokio::fs::read_to_string(runtime_args_path(app)?)
+        let locale = tokio::fs::read_to_string(runtime_args_path_for_profile(app, profile)?)
             .await
             .ok()
             .and_then(|raw| locale_from_runtime_args(&raw));
@@ -175,20 +222,34 @@ impl CodeServerState {
         // env — the companion extension reads them on activate to dial back. Any
         // failure after this must deregister so a leaked token can't address a dead
         // editor.
-        let channel = super::agent_channel::global();
-        // Hand over the app handle before the extension can connect, so the very
-        // first pushed editor event has somewhere to go.
-        channel.attach_app(app);
-        let (agent_port, agent_token) = channel.register_instance(&canonical).await?;
-        let agent_envs = [
-            ("COGNIA_CS_AGENT_PORT", agent_port.to_string()),
-            ("COGNIA_CS_AGENT_TOKEN", agent_token),
-        ];
+        let mut agent_envs = Vec::new();
+        if broker_enabled {
+            let channel = super::agent_channel::global();
+            // Hand over the app handle before the extension can connect, so the very
+            // first pushed editor event has somewhere to go.
+            channel.attach_app(app);
+            let (agent_port, agent_token) = channel.register_instance(&canonical).await?;
+            let content_port = channel.content_port().await?;
+            agent_envs.extend([
+                ("COGNIA_CS_AGENT_PORT", agent_port.to_string()),
+                ("COGNIA_CS_AGENT_TOKEN", agent_token),
+                ("COGNIA_CS_CONTENT_PORT", content_port.to_string()),
+                ("COGNIA_CS_BROKER_PROTOCOL", "1".to_string()),
+                (
+                    "COGNIA_CS_CATALOG_HASH",
+                    super::broker_protocol::DEFAULT_CATALOG_HASH.to_string(),
+                ),
+                ("COGNIA_CS_HOST_ID", "local".to_string()),
+                ("COGNIA_CS_WORKSPACE", canonical.clone()),
+            ]);
+        }
 
         let child = match spawn_child(&info.binary_path, &args, &agent_envs) {
             Ok(child) => child,
             Err(e) => {
-                super::agent_channel::global().deregister(&canonical);
+                if broker_enabled {
+                    super::agent_channel::global().deregister(&canonical);
+                }
                 return Err(e);
             }
         };
@@ -200,6 +261,7 @@ impl CodeServerState {
                 canonical.clone(),
                 RunningInstance {
                     port,
+                    profile,
                     child,
                     binary_path: info.binary_path,
                     user_data_dir,
@@ -265,6 +327,101 @@ impl CodeServerState {
     /// the UI can fire it without first asking whether it is worth firing.
     pub fn cancel_download(&self) {
         self.download_cancel.cancel();
+    }
+
+    /// Install a freshly generated proxy into a live managed profile. With no
+    /// live managed instance the verified artifact remains staged and the next
+    /// launch installs it before code-server starts.
+    pub async fn install_proxy_artifact(
+        &self,
+        app: &tauri::AppHandle,
+        artifact: &super::proxy::ProxyArtifact,
+    ) -> Result<bool, String> {
+        super::proxy::verify_artifact(app, artifact)?;
+        let _guard = self.operation_lock.lock().await;
+        let targets = {
+            let mut map = self.instances.lock().await;
+            map.iter_mut()
+                .filter_map(|(root, instance)| {
+                    (instance.profile == IdeProfile::Managed && instance.is_reusable()).then(|| {
+                        (
+                            root.clone(),
+                            instance.binary_path.clone(),
+                            instance.extensions_dir.clone(),
+                            instance.user_data_dir.clone(),
+                        )
+                    })
+                })
+                .collect::<Vec<_>>()
+        };
+        let Some((_, binary, extensions_dir, user_data_dir)) = targets.first() else {
+            return Ok(false);
+        };
+        let roots = targets
+            .iter()
+            .map(|(root, _, _, _)| root.clone())
+            .collect::<Vec<_>>();
+        let marker = managed_proxy_marker(&extensions_dir, &artifact.plugin_id);
+        let previous_sha = tokio::fs::read_to_string(&marker).await.ok();
+        let previous = if let Some(previous_sha) = previous_sha.as_deref() {
+            let app = app.clone();
+            tokio::task::spawn_blocking(move || super::proxy::list_artifacts(&app))
+                .await
+                .map_err(|error| format!("list rollback proxies task: {error}"))??
+                .into_iter()
+                .find(|candidate| candidate.sha256 == previous_sha)
+        } else {
+            None
+        };
+        install_one_managed_proxy(binary, extensions_dir, user_data_dir, artifact).await?;
+        let channel = super::agent_channel::global();
+        if let Err(error) = activate_managed_proxy(&channel, &roots, artifact).await {
+            if let Some(previous) = previous {
+                install_one_managed_proxy(binary, extensions_dir, user_data_dir, &previous)
+                    .await
+                    .map_err(|rollback| {
+                        format!(
+                            "proxy {} handshake failed ({error}); rollback failed: {rollback}",
+                            artifact.plugin_id
+                        )
+                    })?;
+                restart_and_verify_proxies(&channel, &roots, &previous)
+                    .await
+                    .map_err(|rollback| {
+                        format!(
+                            "proxy {} handshake failed ({error}); old proxy reinstall succeeded but verification failed: {rollback}",
+                            artifact.plugin_id
+                        )
+                    })?;
+            } else {
+                uninstall_managed_proxy(
+                    binary,
+                    extensions_dir,
+                    user_data_dir,
+                    &artifact.plugin_id,
+                )
+                .await
+                .map_err(|rollback| {
+                    format!(
+                        "proxy {} handshake failed ({error}); uninstall rollback failed: {rollback}",
+                        artifact.plugin_id
+                    )
+                })?;
+                restart_managed_extension_hosts(&channel, &roots)
+                    .await
+                    .map_err(|rollback| {
+                        format!(
+                            "proxy {} handshake failed ({error}); uninstall succeeded but extension-host cleanup failed: {rollback}",
+                            artifact.plugin_id
+                        )
+                    })?;
+            }
+            return Err(format!(
+                "proxy {} activation handshake failed and was rolled back: {error}",
+                artifact.plugin_id
+            ));
+        }
+        Ok(true)
     }
 
     /// Stop all children and reclaim code-server files as one serialized
@@ -469,11 +626,11 @@ impl CodeServerState {
         ))
     }
 
-    async fn live_port(&self, canonical: &str) -> Option<u16> {
+    async fn live_port(&self, canonical: &str, profile: IdeProfile) -> Option<u16> {
         let mut map = self.instances.lock().await;
         match map.get_mut(canonical) {
             Some(inst) => {
-                if inst.is_reusable() {
+                if inst.profile == profile && inst.is_reusable() {
                     return Some(inst.port);
                 }
                 // Dead — or alive but past its health check, in which case the
@@ -485,8 +642,78 @@ impl CodeServerState {
         }
         // Drop it so the next ensure spawns a fresh instance.
         map.remove(canonical);
+        super::agent_channel::global().deregister(canonical);
         None
     }
+}
+
+fn proxy_handshake(artifact: &super::proxy::ProxyArtifact) -> Value {
+    json!({
+        "pluginId": artifact.plugin_id,
+        "pluginVersion": artifact.plugin_version,
+        "manifestHash": artifact.manifest_hash,
+        "catalogHash": artifact.catalog_hash,
+        "platformVersion": artifact.platform_version,
+    })
+}
+
+async fn activate_managed_proxy(
+    channel: &super::agent_channel::AgentChannel,
+    roots: &[String],
+    artifact: &super::proxy::ProxyArtifact,
+) -> Result<(), String> {
+    for root in roots {
+        let generation = channel.connection_generation(root);
+        let mut handshake = channel
+            .send(root, "managedProxyHandshake", proxy_handshake(artifact))
+            .await;
+        if handshake.is_err() {
+            if let Some(generation) = generation {
+                let _ = channel
+                    .send(root, "restartManagedExtensionHost", json!({}))
+                    .await;
+                if channel
+                    .wait_for_new_generation(root, generation, Duration::from_secs(30))
+                    .await
+                    .is_ok()
+                {
+                    handshake = channel
+                        .send(root, "managedProxyHandshake", proxy_handshake(artifact))
+                        .await;
+                }
+            }
+        }
+        handshake.map_err(|error| format!("{root}: {error}"))?;
+    }
+    Ok(())
+}
+
+async fn restart_managed_extension_hosts(
+    channel: &super::agent_channel::AgentChannel,
+    roots: &[String],
+) -> Result<(), String> {
+    for root in roots {
+        let generation = channel
+            .connection_generation(root)
+            .ok_or_else(|| format!("{root}: managed extension host is disconnected"))?;
+        let _ = channel
+            .send(root, "restartManagedExtensionHost", json!({}))
+            .await;
+        channel
+            .wait_for_new_generation(root, generation, Duration::from_secs(30))
+            .await
+            .map_err(|error| format!("{root}: {error}"))?;
+    }
+    Ok(())
+}
+
+async fn restart_and_verify_proxies(
+    channel: &super::agent_channel::AgentChannel,
+    roots: &[String],
+    artifact: &super::proxy::ProxyArtifact,
+) -> Result<(), String> {
+    restart_managed_extension_hosts(channel, roots).await?;
+    activate_managed_proxy(channel, roots, artifact).await
 }
 
 /// One live code-server instance as seen by the managed-process registry. The
@@ -505,6 +732,7 @@ pub struct CodeServerStatus {
     pub running: bool,
     pub port: Option<u16>,
     pub version: String,
+    pub profile: Option<IdeProfile>,
 }
 
 /// Canonicalize a project root so the same folder maps to one instance
@@ -519,19 +747,24 @@ fn canonicalize_root(root: &str) -> Result<String, String> {
 
 /// `<app_data>/cognia/code-server/<name>` — isolated code-server state dirs so
 /// user-data / extensions don't leak into `~/.local/share/code-server`.
-fn state_subdir(app: &tauri::AppHandle, name: &str) -> Result<PathBuf, String> {
-    let dir = download::code_server_root(app)
-        .map_err(|e| format!("resolve code-server root: {e:#}"))?
-        .join(name);
-    std::fs::create_dir_all(&dir).map_err(|e| format!("create {}: {e}", dir.display()))?;
-    Ok(dir)
+fn profile_paths(app: &tauri::AppHandle, profile: IdeProfile) -> Result<ProfilePaths, String> {
+    let root =
+        download::code_server_root(app).map_err(|e| format!("resolve code-server root: {e:#}"))?;
+    Ok(ProfilePaths::new(&root, profile))
 }
 
 /// `<user-data>/User/settings.json` — the file VS Code hot-watches, and so the
 /// only channel that can repaint a *running* workbench. Creating the directory
 /// here is safe: it is the same one `--user-data-dir` points code-server at.
 pub fn user_settings_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
-    let dir = state_subdir(app, "user-data")?.join("User");
+    user_settings_path_for_profile(app, IdeProfile::Managed)
+}
+
+pub fn user_settings_path_for_profile(
+    app: &tauri::AppHandle,
+    profile: IdeProfile,
+) -> Result<PathBuf, String> {
+    let dir = profile_paths(app, profile)?.user_data_dir.join("User");
     std::fs::create_dir_all(&dir).map_err(|e| format!("create {}: {e}", dir.display()))?;
     Ok(dir.join("settings.json"))
 }
@@ -544,7 +777,14 @@ pub fn user_settings_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
 /// Same directory as {@link user_settings_path}, which is the one
 /// `--user-data-dir` points code-server at.
 pub fn runtime_args_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
-    let dir = state_subdir(app, "user-data")?.join("User");
+    runtime_args_path_for_profile(app, IdeProfile::Managed)
+}
+
+pub fn runtime_args_path_for_profile(
+    app: &tauri::AppHandle,
+    profile: IdeProfile,
+) -> Result<PathBuf, String> {
+    let dir = profile_paths(app, profile)?.user_data_dir.join("User");
     std::fs::create_dir_all(&dir).map_err(|e| format!("create {}: {e}", dir.display()))?;
     Ok(dir.join("argv.json"))
 }
@@ -654,7 +894,8 @@ pub async fn install_language_pack(
 
 /// Build the code-server argv. Pure so the flag set is unit-tested. Loopback
 /// bind + `--auth none` keep it reachable only from this machine; workspace
-/// trust and telemetry are disabled so the agent isn't blocked by prompts.
+/// telemetry is disabled. Workspace Trust intentionally remains enabled and is
+/// enforced conjunctively with Cognia permissions.
 fn code_server_args(
     root: &str,
     port: u16,
@@ -668,7 +909,6 @@ fn code_server_args(
         "none".to_string(),
         "--disable-telemetry".to_string(),
         "--disable-update-check".to_string(),
-        "--disable-workspace-trust".to_string(),
         "--user-data-dir".to_string(),
         user_data_dir.to_string_lossy().into_owned(),
         "--extensions-dir".to_string(),
@@ -739,7 +979,7 @@ fn pick_free_loopback_port() -> Result<u16, String> {
 /// Version of the bundled agent-bridge extension. Bump in lockstep with
 /// `sidecar/codeserver-agent-ext/package.json` `version` so an upgrade triggers a
 /// reinstall (the marker below stores the installed version).
-const AGENT_EXT_VERSION: &str = "0.2.0";
+const AGENT_EXT_VERSION: &str = "1.0.0";
 /// Stable filename of the bundled `.vsix` (see the extension's `build.mjs`).
 const AGENT_EXT_VSIX: &str = "cognia-agent-bridge.vsix";
 
@@ -807,6 +1047,141 @@ async fn install_agent_extension(
         ),
         Ok(Err(e)) => log::warn!("code-server agent ext install: {e}"),
         Err(_) => log::warn!("code-server agent ext install timed out"),
+    }
+}
+
+/// Install every locally generated proxy that still passes signature and
+/// content-hash verification. A broken proxy is isolated: it is logged and
+/// skipped while base code-server remains available.
+async fn install_managed_proxy_extensions(
+    app: &tauri::AppHandle,
+    binary: &str,
+    extensions_dir: &Path,
+    user_data_dir: &Path,
+) {
+    let app = app.clone();
+    let artifacts =
+        match tokio::task::spawn_blocking(move || super::proxy::list_artifacts(&app)).await {
+            Ok(Ok(artifacts)) => artifacts,
+            Ok(Err(error)) => {
+                log::warn!("code-server managed proxies: {error}");
+                return;
+            }
+            Err(error) => {
+                log::warn!("code-server managed proxies task: {error}");
+                return;
+            }
+        };
+    for artifact in artifacts {
+        // The artifact cache is a staging area, not the activation ledger.
+        // Transactional updates deliberately build the next proxy before the
+        // package commit; only the hash recorded by a successful activation
+        // handshake may be installed on process start.
+        let marker = managed_proxy_marker(extensions_dir, &artifact.plugin_id);
+        let marker_contents = tokio::fs::read_to_string(&marker).await.ok();
+        if !super::proxy::activation_marker_selects(marker_contents.as_deref(), &artifact) {
+            continue;
+        }
+        if let Err(error) =
+            install_one_managed_proxy(binary, extensions_dir, user_data_dir, &artifact).await
+        {
+            log::warn!(
+                "code-server proxy {} unavailable: {error}",
+                artifact.plugin_id
+            );
+        }
+    }
+}
+
+async fn install_one_managed_proxy(
+    binary: &str,
+    extensions_dir: &Path,
+    user_data_dir: &Path,
+    artifact: &super::proxy::ProxyArtifact,
+) -> Result<(), String> {
+    let marker = managed_proxy_marker(extensions_dir, &artifact.plugin_id);
+    if tokio::fs::read_to_string(&marker).await.ok().as_deref() == Some(artifact.sha256.as_str()) {
+        return Ok(());
+    }
+    let mut command = Command::new(binary);
+    command
+        .arg("--install-extension")
+        .arg(&artifact.vsix_path)
+        .arg("--force")
+        .arg("--extensions-dir")
+        .arg(extensions_dir)
+        .arg("--user-data-dir")
+        .arg(user_data_dir)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .kill_on_drop(true);
+    let output = tokio::time::timeout(Duration::from_secs(60), command.output())
+        .await
+        .map_err(|_| format!("proxy {} install timed out", artifact.plugin_id))?
+        .map_err(|error| format!("proxy {} install failed: {error}", artifact.plugin_id))?;
+    if !output.status.success() {
+        return Err(format!(
+            "proxy {} install failed: {}",
+            artifact.plugin_id,
+            String::from_utf8_lossy(&output.stderr).trim()
+        ));
+    }
+    tokio::fs::write(&marker, &artifact.sha256)
+        .await
+        .map_err(|error| format!("proxy {} marker write failed: {error}", artifact.plugin_id))
+}
+
+fn managed_proxy_marker(extensions_dir: &Path, plugin_id: &str) -> PathBuf {
+    extensions_dir.join(format!(
+        ".cognia-proxy-{}",
+        plugin_id
+            .chars()
+            .map(|character| if character.is_ascii_alphanumeric() {
+                character
+            } else {
+                '-'
+            })
+            .collect::<String>()
+    ))
+}
+
+async fn uninstall_managed_proxy(
+    binary: &str,
+    extensions_dir: &Path,
+    user_data_dir: &Path,
+    plugin_id: &str,
+) -> Result<(), String> {
+    let extension_id = format!("cognia-managed.{}", super::proxy::proxy_name(plugin_id));
+    let output = tokio::time::timeout(
+        Duration::from_secs(60),
+        Command::new(binary)
+            .arg("--uninstall-extension")
+            .arg(&extension_id)
+            .arg("--extensions-dir")
+            .arg(extensions_dir)
+            .arg("--user-data-dir")
+            .arg(user_data_dir)
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .kill_on_drop(true)
+            .output(),
+    )
+    .await
+    .map_err(|_| format!("proxy {plugin_id} uninstall timed out"))?
+    .map_err(|error| format!("proxy {plugin_id} uninstall failed: {error}"))?;
+    if !output.status.success() {
+        return Err(format!(
+            "proxy {plugin_id} uninstall failed: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        ));
+    }
+    let marker = managed_proxy_marker(extensions_dir, plugin_id);
+    match tokio::fs::remove_file(marker).await {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(format!("proxy {plugin_id} marker cleanup failed: {error}")),
     }
 }
 
@@ -1010,7 +1385,7 @@ mod tests {
     }
 
     #[test]
-    fn args_bind_loopback_and_disable_prompts() {
+    fn args_bind_loopback_and_preserve_workspace_trust() {
         let args = code_server_args(
             "/work/proj",
             43117,
@@ -1023,8 +1398,8 @@ mod tests {
         // Auth disabled (loopback-only).
         let auth_idx = args.iter().position(|a| a == "--auth").unwrap();
         assert_eq!(args[auth_idx + 1], "none");
-        // Prompt-free for the agent.
-        assert!(args.iter().any(|a| a == "--disable-workspace-trust"));
+        // Workspace Trust remains a mandatory, independent security decision.
+        assert!(!args.iter().any(|a| a == "--disable-workspace-trust"));
         assert!(args.iter().any(|a| a == "--disable-telemetry"));
         // Isolated state dirs.
         assert!(args.iter().any(|a| a == "/data/ud"));
@@ -1092,6 +1467,19 @@ mod tests {
     }
 
     #[test]
+    fn managed_proxy_markers_are_stable_and_confined_to_the_extension_directory() {
+        let root = Path::new("/managed/extensions");
+        assert_eq!(
+            managed_proxy_marker(root, "acme.tools"),
+            root.join(".cognia-proxy-acme-tools")
+        );
+        assert_eq!(
+            managed_proxy_marker(root, "../../escape"),
+            root.join(".cognia-proxy-------escape")
+        );
+    }
+
+    #[test]
     fn pick_free_loopback_port_is_nonzero() {
         let p = pick_free_loopback_port().unwrap();
         assert!(p > 0);
@@ -1113,9 +1501,10 @@ mod tests {
     #[tokio::test]
     async fn status_is_false_for_unknown_root() {
         let state = CodeServerState::new();
-        let (running, port) = state.status("/tmp").await;
+        let (running, port, profile) = state.status("/tmp").await;
         assert!(!running);
         assert!(port.is_none());
+        assert!(profile.is_none());
     }
 
     #[tokio::test]
@@ -1145,6 +1534,7 @@ mod tests {
             root.to_string(),
             RunningInstance {
                 port,
+                profile: IdeProfile::Managed,
                 child,
                 binary_path: "/bin/code-server".to_string(),
                 user_data_dir: PathBuf::from("/tmp/ud"),
@@ -1166,13 +1556,19 @@ mod tests {
         let unhealthy = insert_fake_instance(&state, "/work/proj", 43117).await;
 
         // Alive and healthy → reused.
-        assert_eq!(state.live_port("/work/proj").await, Some(43117));
+        assert_eq!(
+            state.live_port("/work/proj", IdeProfile::Managed).await,
+            Some(43117)
+        );
 
         unhealthy.store(true, Ordering::Relaxed);
 
         // Still alive, but no longer serving: refused, killed and forgotten so
         // the next `ensure` spawns a fresh one.
-        assert_eq!(state.live_port("/work/proj").await, None);
+        assert_eq!(
+            state.live_port("/work/proj", IdeProfile::Managed).await,
+            None
+        );
         assert!(state.instances.lock().await.is_empty());
     }
 
@@ -1181,11 +1577,14 @@ mod tests {
     async fn status_stops_reporting_an_instance_that_failed_its_health_check() {
         let state = CodeServerState::new();
         let unhealthy = insert_fake_instance(&state, "/work/proj", 43118).await;
-        assert_eq!(state.status("/work/proj").await, (true, Some(43118)));
+        assert_eq!(
+            state.status("/work/proj").await,
+            (true, Some(43118), Some(IdeProfile::Managed))
+        );
 
         unhealthy.store(true, Ordering::Relaxed);
 
-        assert_eq!(state.status("/work/proj").await, (false, None));
+        assert_eq!(state.status("/work/proj").await, (false, None, None));
         assert!(state.instances.lock().await.is_empty());
     }
 

@@ -12,6 +12,9 @@ use tauri::State;
 
 use super::download::{self, CodeServerDiskUsage, InstallInfo};
 use super::process::{self, CodeServerState, CodeServerStatus};
+use super::profile::IdeProfile;
+use super::proxy::{ProxyArtifact, ProxyBuildRequest};
+use super::relay::{DesktopRelayState, DesktopRelayStatus};
 use crate::cli_bridge::detect;
 
 /// The VS Code launcher on PATH. Probed through the shared binary detector so
@@ -52,6 +55,67 @@ pub fn codeserver_supported() -> bool {
     download::resolve_platform().is_ok()
 }
 
+/// Bind/reuse the desktop's ephemeral loopback relay for a remote-owned IDE.
+/// Certificate pinning completes before the existing device JWT is sent.
+#[tauri::command]
+pub async fn codeserver_remote_relay_ensure(
+    state: State<'_, DesktopRelayState>,
+    base_url: String,
+    device_jwt: String,
+    server_fingerprint: String,
+    relay_path: String,
+) -> Result<DesktopRelayStatus, String> {
+    state
+        .ensure(base_url, device_jwt, server_fingerprint, relay_path)
+        .await
+}
+
+#[tauri::command]
+pub async fn codeserver_remote_relay_stop(
+    state: State<'_, DesktopRelayState>,
+) -> Result<bool, String> {
+    Ok(state.stop().await)
+}
+
+/// Build and sign a deterministic managed proxy VSIX from normalized IDE IR.
+#[tauri::command]
+pub async fn codeserver_build_proxy(
+    app: tauri::AppHandle,
+    request: ProxyBuildRequest,
+) -> Result<ProxyArtifact, String> {
+    if !super::managed_platform_enabled() {
+        return Err("IDE_PLATFORM_DISABLED".to_string());
+    }
+    let build_app = app.clone();
+    let artifact =
+        tokio::task::spawn_blocking(move || super::proxy::build_proxy(&build_app, request))
+            .await
+            .map_err(|error| format!("build managed proxy task: {error}"))??;
+    Ok(artifact)
+}
+
+/// Promote a staged proxy into live managed profiles. The process layer owns
+/// handshake verification and restores the prior extension on failure.
+#[tauri::command]
+pub async fn codeserver_activate_proxy(
+    app: tauri::AppHandle,
+    state: State<'_, CodeServerState>,
+    artifact: ProxyArtifact,
+) -> Result<bool, String> {
+    if !super::managed_platform_enabled() {
+        return Err("IDE_PLATFORM_DISABLED".to_string());
+    }
+    state.install_proxy_artifact(&app, &artifact).await
+}
+
+/// List locally signed proxy artifacts that pass hash/signature verification.
+#[tauri::command]
+pub async fn codeserver_list_proxies(app: tauri::AppHandle) -> Result<Vec<ProxyArtifact>, String> {
+    tokio::task::spawn_blocking(move || super::proxy::list_artifacts(&app))
+        .await
+        .map_err(|error| format!("list managed proxies task: {error}"))?
+}
+
 /// Ensure a healthy code-server is serving `root`; returns its loopback port.
 /// Downloads + installs code-server on first use (progress on
 /// `codeserver://download-progress`).
@@ -60,12 +124,15 @@ pub async fn codeserver_ensure(
     app: tauri::AppHandle,
     state: State<'_, CodeServerState>,
     root: String,
+    profile: Option<IdeProfile>,
 ) -> Result<CodeServerStatus, String> {
-    let port = state.ensure(&app, &root).await?;
+    let profile = profile.unwrap_or_default();
+    let port = state.ensure_profile(&app, &root, profile).await?;
     Ok(CodeServerStatus {
         running: true,
         port: Some(port),
         version: download::CODE_SERVER_VERSION.to_string(),
+        profile: Some(profile),
     })
 }
 
@@ -75,12 +142,115 @@ pub async fn codeserver_status(
     state: State<'_, CodeServerState>,
     root: String,
 ) -> Result<CodeServerStatus, String> {
-    let (running, port) = state.status(&root).await;
+    let (running, port, profile) = state.status(&root).await;
     Ok(CodeServerStatus {
         running,
         port,
         version: download::CODE_SERVER_VERSION.to_string(),
+        profile,
     })
+}
+
+/// Answer a provider callback from the current managed broker generation.
+#[tauri::command]
+pub async fn codeserver_broker_respond(
+    root: String,
+    generation: u64,
+    id: serde_json::Value,
+    result: Option<serde_json::Value>,
+    error: Option<serde_json::Value>,
+) -> Result<(), String> {
+    if !super::managed_platform_enabled() {
+        return Err("IDE_PLATFORM_DISABLED".to_string());
+    }
+    super::agent_channel::global()
+        .respond(&root, generation, id, result, error)
+        .await
+}
+
+/// Deliver a validated provider state-change notification to the current
+/// managed extension-host generation. Notifications are never queued or replayed.
+#[tauri::command]
+pub async fn codeserver_broker_notify(
+    root: String,
+    generation: u64,
+    params: serde_json::Value,
+) -> Result<(), String> {
+    if !super::managed_platform_enabled() {
+        return Err("IDE_PLATFORM_DISABLED".to_string());
+    }
+    super::agent_channel::global()
+        .notify_provider(&root, generation, params)
+        .await
+}
+
+/// Canonicalize every file path on the IDE host and reject symlink/traversal
+/// escapes before provider arguments enter a plugin runtime.
+#[tauri::command]
+pub async fn codeserver_broker_validate_paths(
+    root: String,
+    paths: Vec<String>,
+) -> Result<Vec<String>, String> {
+    if !super::managed_platform_enabled() {
+        return Err("IDE_PLATFORM_DISABLED".to_string());
+    }
+    tokio::task::spawn_blocking(move || {
+        paths
+            .iter()
+            .map(|path| {
+                crate::files::validate_confined_path(path, std::slice::from_ref(&root))
+                    .map(|value| value.to_string_lossy().into_owned())
+            })
+            .collect()
+    })
+    .await
+    .map_err(|error| format!("validate managed IDE paths task: {error}"))?
+}
+
+#[tauri::command]
+pub async fn codeserver_broker_content_create(
+    root: String,
+    generation: u64,
+    plugin_id: String,
+    provider_id: String,
+    permission: Option<String>,
+    media_type: String,
+    bytes: Vec<u8>,
+) -> Result<super::agent_channel::ContentHandle, String> {
+    if !super::managed_platform_enabled() {
+        return Err("IDE_PLATFORM_DISABLED".to_string());
+    }
+    super::agent_channel::global().create_content_handle(
+        &root,
+        generation,
+        &plugin_id,
+        &provider_id,
+        permission,
+        media_type,
+        bytes,
+    )
+}
+
+#[tauri::command]
+pub async fn codeserver_broker_content_redeem(
+    root: String,
+    generation: u64,
+    plugin_id: String,
+    provider_id: String,
+    permission: Option<String>,
+    handle_id: String,
+) -> Result<Vec<u8>, String> {
+    if !super::managed_platform_enabled() {
+        return Err("IDE_PLATFORM_DISABLED".to_string());
+    }
+    super::agent_channel::global().redeem_content_handle(
+        &root,
+        generation,
+        &plugin_id,
+        &provider_id,
+        permission.as_deref(),
+        &handle_id,
+    )
 }
 
 /// Stop the code-server serving `root`. Returns whether one was running.
@@ -195,9 +365,12 @@ pub async fn codeserver_agent_read_active(
 /// it does not exist yet. The renderer owns the merge (it has the JSONC parser
 /// the VS Code theme importer already ships).
 #[tauri::command]
-pub async fn codeserver_read_user_settings(app: tauri::AppHandle) -> Result<String, String> {
+pub async fn codeserver_read_user_settings(
+    app: tauri::AppHandle,
+    profile: Option<IdeProfile>,
+) -> Result<String, String> {
     tokio::task::spawn_blocking(move || {
-        let path = process::user_settings_path(&app)?;
+        let path = process::user_settings_path_for_profile(&app, profile.unwrap_or_default())?;
         read_text_or_empty(&path)
     })
     .await
@@ -210,9 +383,10 @@ pub async fn codeserver_read_user_settings(app: tauri::AppHandle) -> Result<Stri
 pub async fn codeserver_write_user_settings(
     app: tauri::AppHandle,
     contents: String,
+    profile: Option<IdeProfile>,
 ) -> Result<(), String> {
     tokio::task::spawn_blocking(move || {
-        let path = process::user_settings_path(&app)?;
+        let path = process::user_settings_path_for_profile(&app, profile.unwrap_or_default())?;
         atomic_write_text(&path, &contents)
     })
     .await
@@ -284,9 +458,12 @@ pub async fn codeserver_agent_notify(
 /// Current contents of code-server's `argv.json` (runtime arguments — where the
 /// display language lives), or an empty string when it does not exist yet.
 #[tauri::command]
-pub async fn codeserver_read_runtime_args(app: tauri::AppHandle) -> Result<String, String> {
+pub async fn codeserver_read_runtime_args(
+    app: tauri::AppHandle,
+    profile: Option<IdeProfile>,
+) -> Result<String, String> {
     tokio::task::spawn_blocking(move || {
-        let path = process::runtime_args_path(&app)?;
+        let path = process::runtime_args_path_for_profile(&app, profile.unwrap_or_default())?;
         read_text_or_empty(&path)
     })
     .await
@@ -302,9 +479,10 @@ pub async fn codeserver_read_runtime_args(app: tauri::AppHandle) -> Result<Strin
 pub async fn codeserver_write_runtime_args(
     app: tauri::AppHandle,
     contents: String,
+    profile: Option<IdeProfile>,
 ) -> Result<(), String> {
     tokio::task::spawn_blocking(move || {
-        let path = process::runtime_args_path(&app)?;
+        let path = process::runtime_args_path_for_profile(&app, profile.unwrap_or_default())?;
         atomic_write_text(&path, &contents)
     })
     .await

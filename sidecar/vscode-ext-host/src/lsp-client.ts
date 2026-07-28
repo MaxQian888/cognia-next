@@ -39,8 +39,12 @@
 const childProcess = require("node:child_process") as typeof import("node:child_process")
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const jsonrpc = require("vscode-jsonrpc/node") as typeof import("vscode-jsonrpc/node")
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const net = require("node:net") as typeof import("node:net")
 
 import type { ChildProcessWithoutNullStreams } from "node:child_process"
+import type { Socket } from "node:net"
+import { monitorProcessResources } from "./process-resource-monitor"
 
 /** Subset of LSP `ClientCapabilities` cognia advertises. */
 const DEFAULT_CLIENT_CAPABILITIES = {
@@ -113,8 +117,10 @@ export interface LspClientOptions {
   env?: Record<string, string>
   /** Working directory for the child process. */
   cwd?: string
-  /** Stdio transport — TCP not yet implemented (placeholder for future). */
-  transport?: "stdio"
+  /** Process stdio or a loopback TCP endpoint owned by the spawned server. */
+  transport?: "stdio" | "socket"
+  /** Required for `socket`; credentials are forbidden in the URL. */
+  endpoint?: string
   /** Workspace folder URIs to advertise via `initialize`. */
   workspaceFolders?: Array<{ uri: string; name: string }>
   /** Initialization options forwarded verbatim. */
@@ -132,12 +138,21 @@ export interface LspClientOptions {
    * against hung binaries blocking callers forever. Default 10 000.
    */
   startupTimeout?: number
+  /** Maximum aggregate RSS for the detached language-server process tree. */
+  memoryLimitMb?: number
   /** Optional logger for protocol-level events. */
   logger?: {
     info?: (msg: string, ctx?: unknown) => void
     warn?: (msg: string, ctx?: unknown) => void
     error?: (msg: string, ctx?: unknown) => void
   }
+  /**
+   * Project a stable LSP server→client request into the active IDE
+   * consumer. The promise result is returned to the language server.
+   */
+  handleServerRequest?: (method: string, params: unknown) => Promise<unknown>
+  /** Project stable server→client notifications such as `$/progress`. */
+  handleServerNotification?: (method: string, params: unknown) => void
 }
 
 export interface PublishDiagnosticsParams {
@@ -166,7 +181,7 @@ export interface LspRange {
 
 /** Minimal Connection shape we depend on — sourced from vscode-jsonrpc. */
 interface LspConnection {
-  sendRequest<T>(method: string, params: unknown): Promise<T>
+  sendRequest<T>(method: string, params: unknown, token?: unknown): Promise<T>
   sendNotification(method: string, params: unknown): void
   onNotification(method: string, cb: (params: unknown) => void): void
   /** Server→client request handler (e.g. `workspace/configuration`). */
@@ -176,6 +191,88 @@ interface LspConnection {
   listen(): void
   dispose(): void
 }
+
+const STABLE_SERVER_REQUESTS = new Set([
+  "textDocument/completion",
+  "completionItem/resolve",
+  "textDocument/hover",
+  "textDocument/signatureHelp",
+  "textDocument/declaration",
+  "textDocument/definition",
+  "textDocument/typeDefinition",
+  "textDocument/implementation",
+  "textDocument/references",
+  "textDocument/documentHighlight",
+  "textDocument/documentSymbol",
+  "textDocument/codeAction",
+  "codeAction/resolve",
+  "textDocument/codeLens",
+  "codeLens/resolve",
+  "textDocument/documentLink",
+  "documentLink/resolve",
+  "textDocument/documentColor",
+  "textDocument/colorPresentation",
+  "textDocument/formatting",
+  "textDocument/rangeFormatting",
+  "textDocument/onTypeFormatting",
+  "textDocument/rename",
+  "textDocument/prepareRename",
+  "textDocument/foldingRange",
+  "textDocument/selectionRange",
+  "textDocument/prepareCallHierarchy",
+  "callHierarchy/incomingCalls",
+  "callHierarchy/outgoingCalls",
+  "textDocument/prepareTypeHierarchy",
+  "typeHierarchy/supertypes",
+  "typeHierarchy/subtypes",
+  "textDocument/semanticTokens/full",
+  "textDocument/semanticTokens/full/delta",
+  "textDocument/semanticTokens/range",
+  "textDocument/linkedEditingRange",
+  "textDocument/moniker",
+  "textDocument/inlayHint",
+  "inlayHint/resolve",
+  "textDocument/inlineValue",
+  "textDocument/diagnostic",
+  "workspace/symbol",
+  "workspaceSymbol/resolve",
+  "workspace/diagnostic",
+  "workspace/executeCommand",
+  "workspace/willCreateFiles",
+  "workspace/willRenameFiles",
+  "workspace/willDeleteFiles",
+])
+
+const STABLE_CLIENT_REQUESTS = [
+  "workspace/applyEdit",
+  "workspace/workspaceFolders",
+  "workspace/semanticTokens/refresh",
+  "workspace/codeLens/refresh",
+  "workspace/inlayHint/refresh",
+  "workspace/inlineValue/refresh",
+  "workspace/diagnostic/refresh",
+  "workspace/foldingRange/refresh",
+  "window/showMessageRequest",
+  "window/showDocument",
+  "window/workDoneProgress/create",
+  "client/registerCapability",
+  "client/unregisterCapability",
+] as const
+
+const STABLE_CLIENT_NOTIFICATIONS = [
+  "$/progress",
+  "$/logTrace",
+  "telemetry/event",
+  "window/logMessage",
+  "window/showMessage",
+] as const
+
+const STABLE_SERVER_NOTIFICATIONS = new Set([
+  "window/workDoneProgress/cancel",
+  "workspace/didChangeWorkspaceFolders",
+  "workspace/didChangeWatchedFiles",
+  "workspace/didChangeConfiguration",
+])
 
 /**
  * Resolve a dotted `workspace/configuration` section (e.g.
@@ -218,6 +315,7 @@ const DEFAULT_STARTUP_TIMEOUT_MS = 10_000
 
 export class CogniaLspClient {
   private process: ChildProcessWithoutNullStreams | null = null
+  private socket: Socket | null = null
   private connection: LspConnection | null = null
   private state: ClientState = "stopped"
   private serverCapabilities: unknown = null
@@ -229,6 +327,7 @@ export class CogniaLspClient {
   private currentSettings: Record<string, unknown> | undefined
   private stateListeners = new Set<(state: ClientState) => void>()
   private logListeners = new Set<(entry: LspClientLogEntry) => void>()
+  private disposeResourceMonitor: (() => void) | null = null
 
   constructor(
     private readonly opts: LspClientOptions,
@@ -311,6 +410,7 @@ export class CogniaLspClient {
     if (this.state === "running") return Promise.resolve()
     this.setState("starting")
     this.startPromise = this.doStart().catch((err) => {
+      this.cleanup()
       this.setState("crashed")
       this.startPromise = null
       this.emitLog("error", `start failed: ${err instanceof Error ? err.message : String(err)}`)
@@ -322,6 +422,14 @@ export class CogniaLspClient {
   private testDispose: (() => void) | null = null
 
   private async doStart(): Promise<void> {
+    if (
+      this.opts.memoryLimitMb !== undefined &&
+      (!Number.isInteger(this.opts.memoryLimitMb) ||
+        this.opts.memoryLimitMb < 16 ||
+        this.opts.memoryLimitMb > 32_768)
+    ) {
+      throw new Error("IDE_PROTOCOL_MEMORY_LIMIT_INVALID")
+    }
     if (this.connectionFactory) {
       // Test seam — bypass child_process entirely.
       const made = await this.connectionFactory(this.opts)
@@ -331,9 +439,22 @@ export class CogniaLspClient {
       const proc = childProcess.spawn(this.opts.command, this.opts.args ?? [], {
         cwd: this.opts.cwd,
         env: { ...process.env, ...(this.opts.env ?? {}) },
+        detached: process.platform !== "win32",
         stdio: ["pipe", "pipe", "pipe"],
       })
       this.process = proc
+      if (proc.pid) {
+        this.disposeResourceMonitor = monitorProcessResources({
+          pid: proc.pid,
+          memoryLimitMb: this.opts.memoryLimitMb,
+          onLimitExceeded: (error) => {
+            this.emitLog("error", error.message)
+            this.cleanup()
+            this.setState("crashed")
+            this.startPromise = null
+          },
+        })
+      }
 
       proc.stderr.on("data", (buf: Buffer) => {
         const chunk = buf.toString("utf-8").slice(0, 4096)
@@ -350,8 +471,16 @@ export class CogniaLspClient {
         this.startPromise = null
       })
 
-      const reader = new jsonrpc.StreamMessageReader(proc.stdout)
-      const writer = new jsonrpc.StreamMessageWriter(proc.stdin)
+      const stream =
+        this.opts.transport === "socket"
+          ? await connectLoopbackSocket(
+              this.opts.endpoint,
+              this.opts.startupTimeout ?? DEFAULT_STARTUP_TIMEOUT_MS
+            )
+          : null
+      this.socket = stream
+      const reader = new jsonrpc.StreamMessageReader(stream ?? proc.stdout)
+      const writer = new jsonrpc.StreamMessageWriter(stream ?? proc.stdin)
       this.connection = jsonrpc.createMessageConnection(reader, writer) as unknown as LspConnection
     }
 
@@ -376,6 +505,29 @@ export class CogniaLspClient {
           : []
       return items.map((item) => selectConfigurationSection(this.currentSettings, item?.section))
     })
+    for (const method of STABLE_CLIENT_REQUESTS) {
+      this.connection.onRequest(method, async (params: unknown) => {
+        if (!this.opts.handleServerRequest) {
+          throw new jsonrpc.ResponseError(
+            jsonrpc.ErrorCodes.MethodNotFound,
+            `LSP_CLIENT_METHOD_UNAVAILABLE: ${method}`
+          )
+        }
+        return this.opts.handleServerRequest(method, params)
+      })
+    }
+    for (const method of STABLE_CLIENT_NOTIFICATIONS) {
+      this.connection.onNotification(method, (params: unknown) => {
+        try {
+          this.opts.handleServerNotification?.(method, params)
+        } catch (err) {
+          this.opts.logger?.warn?.(`[lsp:${this.opts.serverId}] client notification failed`, {
+            method,
+            err,
+          })
+        }
+      })
+    }
     this.connection.onError((err) => {
       this.opts.logger?.error?.(`[lsp:${this.opts.serverId}] connection error`, { err })
     })
@@ -603,6 +755,27 @@ export class CogniaLspClient {
   }
 
   /**
+   * Send an arbitrary stable LSP 3.17 server request. Keeping the allowlist
+   * here prevents the managed IDE bridge from becoming an escape hatch to
+   * proposed or server-to-client methods.
+   */
+  async requestRaw(method: string, params: unknown, cancellationToken?: unknown): Promise<unknown> {
+    if (!STABLE_SERVER_REQUESTS.has(method)) {
+      throw new Error(`LSP_METHOD_UNSUPPORTED: ${method}`)
+    }
+    this.assertRunning()
+    return this.connection!.sendRequest(method, params, cancellationToken)
+  }
+
+  notifyRaw(method: string, params: unknown): void {
+    if (!STABLE_SERVER_NOTIFICATIONS.has(method)) {
+      throw new Error(`LSP_NOTIFICATION_UNSUPPORTED: ${method}`)
+    }
+    this.assertRunning()
+    this.connection!.sendNotification(method, params)
+  }
+
+  /**
    * Tear down the connection. Sends `shutdown` + `exit` per spec; if
    * the server fails to acknowledge within 5s we SIGKILL the child.
    */
@@ -620,6 +793,11 @@ export class CogniaLspClient {
           ),
         ])
         this.connection.sendNotification("exit", null)
+        if (this.socket) {
+          // StreamMessageWriter schedules socket writes. Give the final `exit`
+          // notification one event-loop turn before disposing the transport.
+          await new Promise<void>((resolve) => setImmediate(resolve))
+        }
       }
     } catch (err) {
       this.opts.logger?.warn?.(`[lsp:${this.opts.serverId}] shutdown failed`, { err })
@@ -629,12 +807,18 @@ export class CogniaLspClient {
   }
 
   private cleanup(): void {
+    this.disposeResourceMonitor?.()
+    this.disposeResourceMonitor = null
     try {
       this.connection?.dispose()
     } catch {
       /* swallow */
     }
     this.connection = null
+    if (this.socket) {
+      this.socket.destroy()
+      this.socket = null
+    }
     if (this.testDispose) {
       try {
         this.testDispose()
@@ -645,9 +829,17 @@ export class CogniaLspClient {
     }
     if (this.process && !this.process.killed) {
       try {
-        this.process.kill("SIGKILL")
+        if (process.platform !== "win32" && this.process.pid) {
+          process.kill(-this.process.pid, "SIGKILL")
+        } else {
+          this.process.kill("SIGKILL")
+        }
       } catch {
-        /* swallow */
+        try {
+          this.process.kill("SIGKILL")
+        } catch {
+          /* swallow */
+        }
       }
     }
     this.process = null
@@ -667,4 +859,42 @@ export class CogniaLspClient {
       )
     }
   }
+}
+
+async function connectLoopbackSocket(
+  endpoint: string | undefined,
+  timeoutMs: number
+): Promise<Socket> {
+  let url: URL
+  try {
+    url = new URL(endpoint ?? "")
+  } catch {
+    throw new Error("LSP_SOCKET_ENDPOINT_INVALID")
+  }
+  if (
+    url.protocol !== "tcp:" ||
+    !["127.0.0.1", "localhost", "::1"].includes(url.hostname) ||
+    !url.port ||
+    url.username ||
+    url.password
+  ) {
+    throw new Error("LSP_SOCKET_ENDPOINT_INVALID")
+  }
+  const deadline = Date.now() + timeoutMs
+  while (Date.now() < deadline) {
+    const socket = await new Promise<Socket | null>((resolve) => {
+      const candidate = net.createConnection({
+        host: url.hostname,
+        port: Number(url.port),
+      })
+      candidate.once("connect", () => resolve(candidate))
+      candidate.once("error", () => {
+        candidate.destroy()
+        resolve(null)
+      })
+    })
+    if (socket) return socket
+    await new Promise((resolve) => setTimeout(resolve, 50))
+  }
+  throw new Error(`LSP_SOCKET_ENDPOINT_TIMEOUT: ${url.origin}`)
 }

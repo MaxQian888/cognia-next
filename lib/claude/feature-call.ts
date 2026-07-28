@@ -246,3 +246,42 @@ export async function discoverBedrockModelsViaSidecar(
   )) as { models?: BedrockDiscoveredModel[] }
   return result.models ?? []
 }
+
+export interface OpenCodeV2Discovery {
+  endpoint: string
+  version: string
+  headers: Record<string, string>
+}
+
+export function validateOpenCodeV2Discovery(result: unknown): OpenCodeV2Discovery {
+  const descriptor =
+    result && typeof result === "object" ? (result as Partial<OpenCodeV2Discovery>) : {}
+  const endpoint = typeof descriptor.endpoint === "string" ? descriptor.endpoint : ""
+  const version = typeof descriptor.version === "string" ? descriptor.version : ""
+  if (!endpoint || !version) {
+    throw new Error("OpenCode V2 discovery returned an invalid service descriptor")
+  }
+  const url = new URL(endpoint)
+  if (url.protocol !== "http:" && url.protocol !== "https:") {
+    throw new Error("OpenCode V2 discovery returned an invalid endpoint")
+  }
+  const headers = Object.fromEntries(
+    Object.entries(descriptor.headers ?? {}).filter(
+      ([name, value]) => name.trim() && typeof value === "string"
+    )
+  )
+  return { endpoint: url.toString().replace(/\/$/, ""), version, headers }
+}
+
+export async function discoverOpenCodeV2ViaSidecar(
+  abortSignal?: AbortSignal
+): Promise<OpenCodeV2Discovery> {
+  const result = await defaultClient.requestResult(
+    {
+      operation: "opencode-v2-discover",
+      credentials: {},
+    },
+    abortSignal
+  )
+  return validateOpenCodeV2Discovery(result)
+}
