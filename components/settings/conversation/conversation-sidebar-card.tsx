@@ -5,10 +5,21 @@ import { PanelLeftIcon } from "lucide-react"
 
 import { useSettingsStore } from "@/stores/settings"
 import { useUIStore, SIDEBAR_WIDTH_DEFAULT } from "@/stores/ui"
-import type { ConversationSidebarSettings } from "@cognia/agent-config-types"
+import type { ConversationGroupBy, ConversationSidebarSettings } from "@cognia/agent-config-types"
 import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import { Switch } from "@/components/ui/switch"
+import {
+  CONVERSATION_GROUP_BY_OPTIONS,
+  resolveConversationGroupBy,
+} from "@/lib/chat/conversation-grouping"
 import { SettingsCard } from "../common/settings-section"
 
 /**
@@ -28,7 +39,7 @@ export function ConversationSidebarCard() {
 
   const compact = settings?.density === "compact"
   const showPreview = settings?.showPreview ?? false
-  const groupByDate = settings?.groupByDate !== false
+  const groupBy = resolveConversationGroupBy(settings)
   const showUnreadBadges = settings?.showUnreadBadges !== false
   const contentSearch = settings?.searchScope === "titleAndContent"
 
@@ -57,14 +68,6 @@ export function ConversationSidebarCard() {
       onCheckedChange: (v) => saveSidebar({ showPreview: v }),
     },
     {
-      id: "sidebar-group-by-date",
-      heading: t("groupByDate.heading"),
-      description: t("groupByDate.description"),
-      label: t("groupByDate.label"),
-      checked: groupByDate,
-      onCheckedChange: (v) => saveSidebar({ groupByDate: v }),
-    },
-    {
       id: "sidebar-unread",
       heading: t("unread.heading"),
       description: t("unread.description"),
@@ -89,6 +92,28 @@ export function ConversationSidebarCard() {
       description={t("description")}
     >
       <div className="space-y-6">
+        <div className="flex items-center justify-between gap-4">
+          <div className="space-y-0.5">
+            <Label htmlFor="sidebar-group-by">{t("groupBy.heading")}</Label>
+            <p className="text-sm text-muted-foreground">{t("groupBy.description")}</p>
+          </div>
+          <Select
+            value={groupBy}
+            onValueChange={(value) => saveSidebar({ groupBy: value as ConversationGroupBy })}
+          >
+            <SelectTrigger id="sidebar-group-by" className="w-44" aria-label={t("groupBy.label")}>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {CONVERSATION_GROUP_BY_OPTIONS.map((option) => (
+                <SelectItem key={option} value={option}>
+                  {t(`groupBy.options.${option}`)}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+
         {rows.map((row) => (
           <div key={row.id} className="flex items-center justify-between gap-4">
             <div className="space-y-0.5">

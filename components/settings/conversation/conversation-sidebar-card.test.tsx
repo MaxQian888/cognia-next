@@ -31,22 +31,39 @@ beforeEach(() => {
   setSidebarWidth.mockReset()
 })
 
-test("groups the sidebar behavior toggles under one card", () => {
+test("groups the sidebar behavior controls under one card", () => {
   render(<ConversationSidebarCard />)
   expect(screen.getByLabelText("density.label")).toBeInTheDocument()
   expect(screen.getByLabelText("preview.label")).toBeInTheDocument()
-  expect(screen.getByLabelText("groupByDate.label")).toBeInTheDocument()
+  expect(screen.getByLabelText("groupBy.label")).toBeInTheDocument()
   expect(screen.getByLabelText("unread.label")).toBeInTheDocument()
   expect(screen.getByLabelText("contentSearch.label")).toBeInTheDocument()
 })
 
-test("defaults: date grouping + unread on, preview + compact + content-search off", () => {
+test("defaults: workspace grouping + unread on, preview + compact + content-search off", () => {
   render(<ConversationSidebarCard />)
-  expect(screen.getByLabelText("groupByDate.label")).toBeChecked()
+  expect(screen.getByLabelText("groupBy.label")).toHaveTextContent("groupBy.options.workspace")
   expect(screen.getByLabelText("unread.label")).toBeChecked()
   expect(screen.getByLabelText("preview.label")).not.toBeChecked()
   expect(screen.getByLabelText("density.label")).not.toBeChecked()
   expect(screen.getByLabelText("contentSearch.label")).not.toBeChecked()
+})
+
+test("folds the retired groupByDate=false into the no-grouping option", () => {
+  settingsValue = { groupByDate: false }
+  render(<ConversationSidebarCard />)
+  expect(screen.getByLabelText("groupBy.label")).toHaveTextContent("groupBy.options.none")
+})
+
+test("picking a grouping axis saves it without dropping siblings", async () => {
+  settingsValue = { showPreview: true }
+  const user = userEvent.setup()
+  render(<ConversationSidebarCard />)
+  await user.click(screen.getByLabelText("groupBy.label"))
+  await user.click(screen.getByRole("option", { name: "groupBy.options.date" }))
+  expect(save).toHaveBeenCalledWith({
+    conversationSidebar: { showPreview: true, groupBy: "date" },
+  })
 })
 
 test("enabling content search saves searchScope=titleAndContent", async () => {
@@ -78,8 +95,6 @@ test("each behavior toggle saves its matching field", async () => {
   await user.click(screen.getByLabelText("preview.label"))
   expect(save).toHaveBeenCalledWith({ conversationSidebar: { showPreview: true } })
   // Defaults are on → clicking turns them off.
-  await user.click(screen.getByLabelText("groupByDate.label"))
-  expect(save).toHaveBeenCalledWith({ conversationSidebar: { groupByDate: false } })
   await user.click(screen.getByLabelText("unread.label"))
   expect(save).toHaveBeenCalledWith({ conversationSidebar: { showUnreadBadges: false } })
 })
