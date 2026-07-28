@@ -111,7 +111,7 @@ Install from repo root only — single `pnpm-lock.yaml`.
 - `components/ai-elements/` — vendored (**no tests**)
 - `hooks/`, `lib/utils.ts` (`cn()` = clsx + tailwind-merge)
 - `i18n/` next-intl wiring (`request.ts`, `config.ts`, `messages/{en,zh-CN}.json`) — `i18n.request.ts` is plugged in via `withNextIntl(...)` in `next.config.ts`
-- `plugins/` in-tree first-party plugins (`computer-use`, `github-delivery`, `clipboard-history`, `screenshot`, `web-tools`, …) — loaded by the plugin manager, not as npm packages
+- `plugins/` in-tree first-party plugins (`computer-use`, `clipboard-history`, `screenshot`, `web-tools`, …) — loaded by the plugin manager, not as npm packages
 - `sidecar/` Node sidecar bundled by Tauri (`claude-host.mjs`, `dispatch/`, `builtin-tools/`, `fetch-interceptor.mjs`); reads `CLAUDE_CODE_OAUTH_TOKEN` from keyring
 
 ### Docs (`docs/`)
@@ -160,7 +160,8 @@ One line per subsystem — the **full detail lives in the ADR** under `docs/cont
 | Scheduled task scheduler   | `lib/scheduler/` (independent `SchedulerDatabase`, not `lib/db/schema.ts`), `types/scheduler/`, `components/scheduler/`, `app/scheduler/`, `crates/cognia-scheduling/`                             | SchedulerDB v2                             | 0002, 0079             |
 | Plugin Dexie Tables        | `lib/plugin/dexie/`, `lib/plugin/api/dexie-api.ts`                                                                                                                                                 | v27                                        | dexie-tables.mdx       |
 | Marketplace Integrations   | `lib/integrations/`, `lib/db/integrations.ts`, `types/plugin/plugin-integration.ts`, `lib/plugin/api/integrations-api.ts`                                                                          | Dexie v127                                 | 0026                   |
-| GitHub Delivery            | `lib/github/`, `plugins/github-delivery/`                                                                                                                                                          | —                                          | 0018                   |
+| Agent Team PR feedback     | `lib/github/pr-observe/`, `lib/github/octokit-factory.ts`, `lib/github/auth-app.ts`, `lib/ai/agent/team/pr-feedback/`                                                                              | —                                          | 0022                   |
+| Plugin workspace backends  | `lib/github/workspace.ts`, `lib/github/workspace-backend-registry.ts`, `lib/plugin/api/workspace-api.ts`, `plugins/e2b-sandbox/`                                                                   | —                                          | 0026                   |
 | Capacitor mobile           | `mobile/`, `lib/capacitor/`, `components/mobile/`                                                                                                                                                  | —                                          | 0014, 0015             |
 | /goal Command              | `lib/goal/`, `components/goal/`, `lib/slash-commands/actions/goal.ts`                                                                                                                              | v30                                        | 0019                   |
 | Computer Use               | `crates/cognia-automation/`, `lib/automation/`, `components/automation/`, `plugins/computer-use/`                                                                                                  | v32                                        | 0020                   |
@@ -191,7 +192,7 @@ One line per subsystem — the **full detail lives in the ADR** under `docs/cont
 ### Cross-cutting hooks (reuse, don't reinvent)
 
 - **PII redaction**: `packages/redact/src/index.ts:hasNoLeakingPii` is the gate before any LLM/embed call (encrypted master key in `lib/twin/ingest/redaction-key.ts`). Shared by Twin, Goal, Connector auto-mode (`lib/connectors/ai-loop/safe-send-prompt.ts`), and Agent Team shared-memory.
-- **Quiet hours**: `lib/connectors/outbound-runner.isInQuietHours` / `msUntilQuietEnd` exported; reused by the GitHub Delivery policy gate.
+- **Quiet hours**: `lib/connectors/outbound-runner.isInQuietHours` / `msUntilQuietEnd` exported; reused by `lib/connectors/sla.ts`, `lib/connectors/derive-job-badge.ts`, `components/inbox/quiet-hours-chip.tsx`, and `hooks/pet/use-pet-proactive.ts`.
 - **Build-options pipeline**: `lib/claude/build-options.ts:resolveSendOptions` is where A2UI, brief mode, active goal, computer-use tools, twin runtime, and the per-channel A2UI capability prompt converge (incl. the IM computer-use blacklist).
 - **A2UI ⇄ IM bridge**: `lib/connectors/a2ui-bridge/*` projects assistant surfaces into platform-native rich content and routes inbound callbacks via `ConnectorBus.dispatchConnectorCallback`. Shared toolkit: `lib/connectors/adapters/_shared/a2ui-mapper.ts`.
 - **Static-export caveat**: `app/api/` does not exist in production — anything needing an HTTP server (MCP HTTP, webhook receiver, cron daemon, headless V2 API) lives in Tauri Rust (axum), not Next.js routes.
