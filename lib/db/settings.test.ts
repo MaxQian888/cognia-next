@@ -288,3 +288,68 @@ describe("removeAlwaysAllow", () => {
     await expect(removeAlwaysAllow("missing")).resolves.toBeUndefined()
   })
 })
+
+describe("connection closed mid-operation (plugin schema bump)", () => {
+  /**
+   * What Dexie rejects with when `close()` lands on an in-flight request —
+   * the exact pair the boot-time report carried ("settings.load failed
+   * DatabaseClosedError: TransactionInactiveError").
+   */
+  function closedError(): Error {
+    const err = new Error(
+      "Failed to execute 'get' on 'IDBObjectStore': The transaction is inactive or finished."
+    )
+    err.name = "DatabaseClosedError"
+    return err
+  }
+
+  it("re-reads instead of stranding the caller on defaults", async () => {
+    await saveSettings({ theme: "dark" })
+    const table = getDb().settings
+    const get = jest.spyOn(table, "get").mockImplementationOnce(() => {
+      // `SettingsHydrator` and `PluginRuntimeInitializer` mount as siblings, so
+      // this read is regularly in flight when the plugin table bridge does
+      // close() → version(n).stores(patch) → open() on the shared connection.
+      return Promise.reject(closedError()) as ReturnType<typeof table.get>
+    })
+    try {
+      const s = await getSettings()
+      // The persisted row, NOT DEFAULTS — the whole point of the retry.
+      expect(s.theme).toBe("dark")
+      expect(get).toHaveBeenCalledTimes(2)
+    } finally {
+      get.mockRestore()
+    }
+  })
+
+  it("does not drop a settings write that raced the same close", async () => {
+    const table = getDb().settings
+    const put = jest.spyOn(table, "put").mockImplementationOnce(() => {
+      return Promise.reject(closedError()) as ReturnType<typeof table.put>
+    })
+    try {
+      const out = await saveSettings({ theme: "light", fontScale: "lg" })
+      expect(out.theme).toBe("light")
+      expect(out.fontScale).toBe("lg")
+      expect((await getSettings()).theme).toBe("light")
+      expect(put).toHaveBeenCalledTimes(2)
+    } finally {
+      put.mockRestore()
+    }
+  })
+
+  it("still surfaces a genuine failure rather than retrying forever", async () => {
+    const table = getDb().settings
+    const boom = new Error("disk is on fire")
+    boom.name = "UnknownError"
+    const get = jest.spyOn(table, "get").mockImplementation(() => {
+      return Promise.reject(boom) as ReturnType<typeof table.get>
+    })
+    try {
+      await expect(getSettings()).rejects.toThrow("disk is on fire")
+      expect(get).toHaveBeenCalledTimes(1)
+    } finally {
+      get.mockRestore()
+    }
+  })
+})

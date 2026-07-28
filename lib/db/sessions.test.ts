@@ -27,12 +27,23 @@ import { createPreset, setDefaultPreset } from "./prompt-presets"
 import { getDb, whenSeeded, __resetDbForTesting } from "./schema"
 import { createLoop, getLoop, listLoopsBySession } from "./loops"
 import { createGoal, listGoalsBySession } from "./goals"
+import { loggers } from "@cognia/logging"
 
 // The /loop cascade tears down backing scheduler tasks via a dynamic
 // import — mock the scheduler singleton so no real timing engine spins up.
 const schedulerMock = { deleteTask: jest.fn().mockResolvedValue(true) }
 jest.mock("@/lib/scheduler/task-scheduler", () => ({
   getTaskScheduler: () => schedulerMock,
+}))
+
+// `purgeSessionStoreBuckets` reaches the artifact store through a dynamic
+// import too. Mocked so the purge is observable without standing up the real
+// persisted store — the store's own behaviour is covered by
+// `stores/artifact/artifact-store.test.ts`; what matters here is that the
+// cascade calls it at all, which is what was missing.
+const clearSessionDataMock = jest.fn()
+jest.mock("@/stores/artifact/artifact-store", () => ({
+  useArtifactStore: { getState: () => ({ clearSessionData: clearSessionDataMock }) },
 }))
 
 beforeEach(async () => {
@@ -61,6 +72,21 @@ describe("createSession — without default preset", () => {
     expect(session.title).toBe("Test")
     expect(session.model).toBe("claude-y")
     expect(session.systemPrompt).toBeUndefined()
+  })
+
+  it("persists an Integration Inbox binding independently from platformBinding", async () => {
+    const integrationBinding = {
+      pluginId: "github-delivery",
+      integrationId: "github",
+      accountId: "acct-1",
+      projectionId: "pull-request",
+      threadKey: "owner/repo#42",
+    }
+    const session = await createSession({ title: "PR #42", integrationBinding })
+
+    expect(session.integrationBinding).toEqual(integrationBinding)
+    expect(session.platformBinding).toBeUndefined()
+    await expect(getSession(session.id)).resolves.toMatchObject({ integrationBinding })
   })
 })
 
@@ -366,6 +392,42 @@ describe("deleteSession — /loop + goal cascade (v79)", () => {
     await bulkDeleteSessions([a.id, b.id])
     expect(await listLoopsBySession(a.id)).toHaveLength(0)
     expect(schedulerMock.deleteTask).toHaveBeenCalledWith("task_a")
+  })
+})
+
+describe("deleteSession — artifact store purge", () => {
+  beforeEach(() => {
+    clearSessionDataMock.mockReset()
+  })
+
+  it("drops the deleted session's artifacts from the persisted store", async () => {
+    const s = await createSession({ title: "with artifacts" })
+    await deleteSession(s.id)
+    expect(clearSessionDataMock).toHaveBeenCalledWith(s.id)
+  })
+
+  it("purges every id on bulkDeleteSessions", async () => {
+    const a = await createSession({ title: "a" })
+    const b = await createSession({ title: "b" })
+    await bulkDeleteSessions([a.id, b.id])
+    expect(clearSessionDataMock.mock.calls.map(([id]) => id).sort()).toEqual([a.id, b.id].sort())
+  })
+
+  // Artifacts are convenience state, not the record of truth: a store that is
+  // absent (SSR), stale, or throwing must never strand the session row itself.
+  it("still deletes the session when the store throws", async () => {
+    const warn = jest.spyOn(loggers.store, "warn").mockImplementation(() => {})
+    clearSessionDataMock.mockImplementationOnce(() => {
+      throw new Error("store unavailable")
+    })
+    const s = await createSession({ title: "doomed" })
+    await expect(deleteSession(s.id)).resolves.toBeUndefined()
+    expect(await getSession(s.id)).toBeUndefined()
+    expect(warn).toHaveBeenCalledWith("session artifact cleanup failed", {
+      sessionId: s.id,
+      error: "Error: store unavailable",
+    })
+    warn.mockRestore()
   })
 })
 

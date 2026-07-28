@@ -43,6 +43,9 @@ import type {
 } from "./canvas-types"
 import type { A2UIAppRow, A2UISurfaceRow, A2UITemplateRow, A2UIEventHistoryRow } from "./a2ui-types"
 import { buildA2UIBridgeMcpRow, A2UI_BRIDGE_SERVER_NAME } from "@/lib/a2ui/mcp-tool-schemas"
+import { dispatchDbUpgradeBlocked } from "./upgrade-blocked-signal"
+import { createDiagnostic } from "@cognia/diagnostics"
+import { dispatchDiagnostic } from "@/lib/diagnostics/bus"
 import type { Twin, TwinSource, TwinChunk, TwinProfile, TwinDraft, TwinJob } from "@/types/twin"
 import type { MobileOutboundJobRow } from "./mobile-outbound-types"
 import type {
@@ -113,6 +116,13 @@ import type { TerminalHistoryRow } from "./terminal-history"
 import type { ProviderCostDailyRow } from "./provider-cost-daily"
 import type { UnattendedExecAuditRow } from "./terminal-audit"
 import type { BehaviorEventRow } from "./behavior-event-types"
+import type {
+  IntegrationAccountRow,
+  IntegrationActionJobRow,
+  IntegrationAuditRow,
+  IntegrationEventRow,
+  IntegrationSubscriptionRow,
+} from "./integration-types"
 import type {
   ExecutionRun,
   ExecutionRunBinding,
@@ -358,6 +368,12 @@ export class CogniaDB extends Dexie {
     import("./agent-canonical-sessions").AgentCanonicalSessionRow,
     string
   >
+  // v127 — Marketplace Integration control plane.
+  integrationAccounts!: Table<IntegrationAccountRow, string>
+  integrationSubscriptions!: Table<IntegrationSubscriptionRow, string>
+  integrationEvents!: Table<IntegrationEventRow, string>
+  integrationActionJobs!: Table<IntegrationActionJobRow, string>
+  integrationAudit!: Table<IntegrationAuditRow, string>
   // v121 — Provider Profile Store (ADR-0090 Phase 1). See `lib/db/provider-profiles.ts`.
   providerProfiles!: Table<ProviderProfile, string>
   deploymentProfiles!: Table<DeploymentProfile, string>
@@ -2773,6 +2789,21 @@ export class CogniaDB extends Dexie {
       larkWebSessions: "&id, adapterId, principalId, expiresAt",
     })
 
+    // v127 — Host-owned Marketplace Integration control plane. External
+    // service resources/actions stay separate from IM Connector state.
+    this.version(127).stores({
+      integrationAccounts:
+        "&id, pluginId, &[pluginId+integrationId+remoteAccountId], [pluginId+integrationId], providerId, enabled, health, updatedAt",
+      integrationSubscriptions:
+        "&id, pluginId, [pluginId+integrationId], accountId, [accountId+enabled], ingressRouteId, updatedAt",
+      integrationEvents:
+        "&id, &[accountId+deliveryId], [pluginId+integrationId], accountId, subscriptionId, eventType, occurredAt, receivedAt",
+      integrationActionJobs:
+        "&id, &[accountId+idempotencyKey], [pluginId+integrationId], accountId, status, nextAttemptAt, updatedAt",
+      integrationAudit:
+        "&id, [pluginId+integrationId], accountId, kind, createdAt, [accountId+createdAt]",
+    })
+
     // First full-chain construction under Jest: cache the merged spec so every
     // later construction in this worker takes the collapsed fast path above.
     if (isSchemaCollapseEnabled() && !collapsedSchemaCacheSlot().__cogniaCollapsedSchema) {
@@ -3072,6 +3103,60 @@ export function startBlockedYieldRetry(
   return () => clearInterval(timer)
 }
 
+/**
+ * Dexie's "the connection went away under you" rejection. Spelled both ways
+ * across Dexie versions, so both are matched.
+ */
+function isDatabaseClosedError(err: unknown): boolean {
+  const name = err instanceof Error ? err.name : ""
+  return name === "DatabaseClosedError" || name === "DatabaseClosed"
+}
+
+/**
+ * Backoff before re-issuing an operation a schema mutation killed. The first
+ * retry lands inside a typical close→upgrade→open round-trip; the tail covers a
+ * bump that has to create stores.
+ */
+const DB_REOPEN_RETRY_DELAYS_MS = [50, 150, 400, 1000] as const
+
+/**
+ * Re-run a Dexie operation that a schema mutation killed mid-flight.
+ *
+ * This database gets closed out from under in-flight reads by design, from two
+ * directions: the yield handshake above (another window needs to upgrade past
+ * our version) and — far more often — the plugin table bridge, which registers
+ * plugin stores with `close() → version(n).stores(patch) → open()` on the
+ * *shared* cached instance (`lib/plugin/dexie/bridge.ts`). Both reject whatever
+ * was in flight with `DatabaseClosedError` (inner `TransactionInactiveError`:
+ * the IDB transaction is torn down under the pending request).
+ *
+ * At boot those two collide with the settings read every window makes:
+ * `SettingsHydrator` and `PluginRuntimeInitializer` mount as siblings, so
+ * `settings.get()` is regularly in flight when the plugin bump closes the
+ * connection. The read never ran against a live connection — it isn't a failed
+ * read, it's a cancelled one — but the caller saw a rejection and fell back to
+ * DEFAULTS for the rest of the session ("settings.load failed
+ * DatabaseClosedError"), silently discarding the user's persisted settings.
+ *
+ * So: re-issue it. `op` MUST re-derive its table handles from `getDb()` on
+ * every call — after a yield the cached instance is gone entirely, and after a
+ * plugin bump the surviving one is mid-reopen. Only this error class is
+ * retried; everything else propagates untouched.
+ */
+export async function withDbReopenRetry<T>(
+  op: () => Promise<T>,
+  delaysMs: readonly number[] = DB_REOPEN_RETRY_DELAYS_MS
+): Promise<T> {
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      return await op()
+    } catch (err) {
+      if (attempt >= delaysMs.length || !isDatabaseClosedError(err)) throw err
+      await new Promise((resolve) => setTimeout(resolve, delaysMs[attempt]))
+    }
+  }
+}
+
 export function activateAccountDatabase(accountId: string): void {
   const nextName = accountDatabaseName(accountId)
   if (_activeDatabaseName === nextName && _db?.name === nextName) return
@@ -3132,6 +3217,14 @@ export function getDb(): CogniaDB {
             console.error(
               "[db] schema upgrade still blocked after retries — another window (desktop pet / fleet island / a second tab) is holding an older database version open. Close the extra window or restart the app."
             )
+            // The console line only ever reached developers. From the user's
+            // side the app is simply frozen on the loading spinner with an idle
+            // CPU, and nothing on screen says which window to close. Raise it so
+            // `DbUpgradeBlockedDialog` can.
+            dispatchDbUpgradeBlocked({
+              databaseName: opened.name,
+              attempts: BLOCKED_RENUDGE_MAX_ATTEMPTS,
+            })
           },
         }
       )
@@ -3153,9 +3246,17 @@ export function getDb(): CogniaDB {
       .catch((err) => {
         // DatabaseClosedError fires when the db is deleted out from under us
         // (common during tests and hard resets). Not actionable; suppress.
-        const name = err instanceof Error ? err.name : ""
-        if (name === "DatabaseClosedError" || name === "DatabaseClosed") return
+        if (isDatabaseClosedError(err)) return
         console.error("seedBuiltIns failed", err)
+        // The user-visible consequence is missing built-in skills, characters
+        // and teams — which reads as "those features don't exist here" rather
+        // than as a failure. Say so instead of only logging it.
+        dispatchDiagnostic(
+          createDiagnostic("seedFailed", {
+            source: "storage",
+            message: err instanceof Error ? err.message : String(err),
+          })
+        )
       })
   }
   return _db

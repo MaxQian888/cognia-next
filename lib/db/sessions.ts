@@ -1,5 +1,6 @@
 import Dexie from "dexie"
 import type { ChatSession } from "@cognia/agent-config-types"
+import { loggers } from "@cognia/logging"
 import { getDb } from "./schema"
 import { getDefaultPreset, recordPresetUsage } from "./prompt-presets"
 import { buildAutoApplySessionPatch } from "@/lib/presets/apply-to-session"
@@ -126,6 +127,7 @@ export async function createSession(
     briefMode: partial?.briefMode,
     forkedFromSdkSessionId: partial?.forkedFromSdkSessionId,
     scratchpad: partial?.scratchpad,
+    integrationBinding: partial?.integrationBinding,
     createdAt: now,
     updatedAt: now,
   }
@@ -354,6 +356,46 @@ export async function deleteSession(id: string): Promise<void> {
   invalidatePersistSnapshot(id)
   await cleanupSessionScopedLoops(id)
   await deleteGoalsForSession(id).catch(() => {})
+  await purgeSessionStoreBuckets(id)
+}
+
+/**
+ * Best-effort purge of localStorage-backed per-session store state.
+ *
+ * The cascade above drops the session's Dexie rows, but artifacts live in a
+ * persisted Zustand store rather than in Dexie — so deleting a conversation
+ * left its artifacts, versions and open tabs resident until the 200-artifact
+ * LRU cap happened to evict them. `clearSessionData` was written and tested for
+ * exactly this and had no caller on any path.
+ *
+ * Mirrors `purgeStoreBuckets` in `lib/db/project-scope.ts`, which wires the
+ * sibling `purgeProject` the same way: a dynamic import so `lib/db` keeps no
+ * static dependency on the store layer, an optional call, and never throws — a
+ * store that is absent (SSR / tests) must not block session deletion.
+ *
+ * Placed here rather than at the call sites because deletion arrives by three
+ * routes — the chat UI (`hooks/chat/use-sessions.ts`), the plugin API
+ * (`lib/plugin/api/session-api.ts` via `stores/chat/session-store.ts`), and
+ * direct callers — and all three converge on this module.
+ */
+async function purgeSessionStoreBuckets(sessionId: string): Promise<void> {
+  let useArtifactStore:
+    typeof import("@/stores/artifact/artifact-store").useArtifactStore | undefined
+  try {
+    const artifactStoreModule = await import("@/stores/artifact/artifact-store")
+    useArtifactStore = artifactStoreModule.useArtifactStore
+  } catch {
+    // Store module absent in SSR/minimal test runtimes — non-fatal.
+    return
+  }
+  try {
+    useArtifactStore.getState().clearSessionData?.(sessionId)
+  } catch (error) {
+    loggers.store.warn("session artifact cleanup failed", {
+      sessionId,
+      error: String(error),
+    })
+  }
 }
 
 /**
@@ -411,6 +453,7 @@ export async function bulkDeleteSessions(ids: readonly string[]): Promise<void> 
     invalidatePersistSnapshot(id)
     await cleanupSessionScopedLoops(id)
     await deleteGoalsForSession(id).catch(() => {})
+    await purgeSessionStoreBuckets(id)
   }
 }
 

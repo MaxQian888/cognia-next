@@ -23,6 +23,7 @@ import {
   getDb,
   startBlockedYieldRetry,
   whenSeeded,
+  withDbReopenRetry,
 } from "./schema"
 import type { OutboundJobRow } from "./connector-types"
 import { emit, listen } from "@tauri-apps/api/event"
@@ -248,6 +249,23 @@ describe("getDb", () => {
     expect(db.larkChatSurfaces.schema.primKey.name).toBe("[adapterId+chatId+surfaceType]")
     expect(db.larkMessageImports.schema.indexes.map((index) => index.name)).toContain("sourceHash")
     expect(db.larkWebSessions.schema.primKey.name).toBe("id")
+  })
+
+  it("v127 opens the Marketplace Integration control-plane tables", async () => {
+    const db = getDb()
+    await db.open()
+    expect(db.verno).toBeGreaterThanOrEqual(127)
+    expect(db.integrationAccounts.schema.indexes.map((index) => index.name)).toContain(
+      "[pluginId+integrationId+remoteAccountId]"
+    )
+    expect(db.integrationSubscriptions.schema.indexes.map((index) => index.name)).toContain(
+      "accountId"
+    )
+    expect(db.integrationEvents.schema.indexes.map((index) => index.name)).toContain(
+      "[accountId+deliveryId]"
+    )
+    expect(db.integrationActionJobs.schema.indexes.map((index) => index.name)).toContain("status")
+    expect(db.integrationAudit.schema.indexes.map((index) => index.name)).toContain("createdAt")
   })
 
   it("v125 opens the Feishu unified identity registry tables", async () => {
@@ -3451,6 +3469,68 @@ describe("schema seed error handling isolation", () => {
 // connection is holding open. Exercised in isolation from a real IndexedDB
 // block: fake timers drive the interval; the getDb glue that starts/stops it is
 // thin.
+describe("withDbReopenRetry", () => {
+  /** Dexie's rejection when the connection goes away under an in-flight op. */
+  function closedError(name = "DatabaseClosedError"): Error {
+    const err = new Error(
+      "Failed to execute 'get' on 'IDBObjectStore': The transaction is inactive or finished."
+    )
+    err.name = name
+    return err
+  }
+
+  it("passes the value through when nothing closed the connection", async () => {
+    const op = jest.fn(() => Promise.resolve("row"))
+    await expect(withDbReopenRetry(op, [0])).resolves.toBe("row")
+    expect(op).toHaveBeenCalledTimes(1)
+  })
+
+  it("re-issues the operation after the connection is closed under it", async () => {
+    const op = jest
+      .fn<Promise<string>, []>()
+      .mockRejectedValueOnce(closedError())
+      .mockResolvedValueOnce("row")
+    await expect(withDbReopenRetry(op, [0])).resolves.toBe("row")
+    expect(op).toHaveBeenCalledTimes(2)
+  })
+
+  it("also matches Dexie's shorter spelling of the same error", async () => {
+    const op = jest
+      .fn<Promise<string>, []>()
+      .mockRejectedValueOnce(closedError("DatabaseClosed"))
+      .mockResolvedValueOnce("row")
+    await expect(withDbReopenRetry(op, [0])).resolves.toBe("row")
+    expect(op).toHaveBeenCalledTimes(2)
+  })
+
+  it("never retries an error that isn't a closed connection", async () => {
+    const boom = new Error("constraint violated")
+    boom.name = "ConstraintError"
+    const op = jest.fn<Promise<string>, []>().mockRejectedValue(boom)
+    await expect(withDbReopenRetry(op, [0, 0])).rejects.toThrow("constraint violated")
+    expect(op).toHaveBeenCalledTimes(1)
+  })
+
+  it("gives up once the backoff is exhausted, surfacing the last rejection", async () => {
+    const op = jest.fn<Promise<string>, []>().mockRejectedValue(closedError())
+    await expect(withDbReopenRetry(op, [0, 0])).rejects.toThrow(/transaction is inactive/)
+    // One attempt per delay, plus the initial one.
+    expect(op).toHaveBeenCalledTimes(3)
+  })
+
+  it("backs off on its own schedule when the caller supplies none", async () => {
+    const op = jest
+      .fn<Promise<string>, []>()
+      .mockRejectedValueOnce(closedError())
+      .mockResolvedValueOnce("row")
+    const started = Date.now()
+    await expect(withDbReopenRetry(op)).resolves.toBe("row")
+    // Default first backoff is 50ms — the retry must not be a hot loop, or it
+    // burns every attempt inside the close→open window it is waiting out.
+    expect(Date.now() - started).toBeGreaterThanOrEqual(40)
+  })
+})
+
 describe("startBlockedYieldRetry", () => {
   beforeEach(() => {
     jest.useFakeTimers()

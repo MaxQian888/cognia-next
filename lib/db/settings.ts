@@ -17,7 +17,7 @@ import { DEFAULT_OCR_SETTINGS, type UserOcrSettings } from "@/types/ocr"
 import { DEFAULT_GIT_SETTINGS } from "@/types/git"
 import { DEFAULT_SIDEBAR_LAYOUT } from "@/types/shell/sidebar"
 import { DEFAULT_EVAL_SETTINGS } from "@/types/eval/settings"
-import { getDb } from "./schema"
+import { getDb, withDbReopenRetry } from "./schema"
 
 const SINGLETON_ID = "singleton" as const
 
@@ -198,11 +198,12 @@ export const DEFAULTS: AppSettings = {
   // summaries off (they cost one model call per turn).
   conversationTimeline: { enabled: true, expanded: false, labelSummary: { enabled: false } },
   // Conversation sidebar (ChannelList) — comfortable density, no preview line,
-  // date grouping + unread badges on, title-only search (content search is opt-in).
+  // workspace grouping (the axis conversations are already stamped with) +
+  // unread badges on, title-only search (content search is opt-in).
   conversationSidebar: {
     density: "comfortable",
     showPreview: false,
-    groupByDate: true,
+    groupBy: "workspace",
     showUnreadBadges: true,
     searchScope: "title",
   },
@@ -211,7 +212,11 @@ export const DEFAULTS: AppSettings = {
 }
 
 export async function getSettings(): Promise<AppSettings> {
-  const row = await getDb().settings.get(SINGLETON_ID)
+  // Retried across a connection close: this read is what every window makes at
+  // boot, right when the plugin table bridge closes and reopens the shared
+  // connection to register plugin stores. Losing it used to strand the whole
+  // window on DEFAULTS for the rest of the session (see `withDbReopenRetry`).
+  const row = await withDbReopenRetry(() => getDb().settings.get(SINGLETON_ID))
   // Forward-compat: merge defaults under the persisted row so older installs
   // pick up new fields (e.g., searchProviders) without a schema migration.
   if (!row) return DEFAULTS
@@ -281,6 +286,13 @@ export async function getSettings(): Promise<AppSettings> {
     // features + "More". Arrays replace wholesale (an explicit empty `pinned`
     // is a deliberate user choice, not a missing field).
     sidebarLayout: { ...DEFAULT_SIDEBAR_LAYOUT, ...(row.sidebarLayout ?? {}) },
+    // `titleBarLayout` / `statusBarLayout` are deliberately NOT seeded here.
+    // "Absent" is load-bearing for them: `components/shell/use-bar-layout.ts`
+    // reads it as "this install has never customized the bar" and folds the
+    // legacy `barItems` visibility map (persisted by the UI store before the
+    // bars became orderable) into the first resolved layout. Defaulting them
+    // here would make every existing install look already-customized and throw
+    // that choice away.
     profile: { ...DEFAULT_USER_PROFILE, ...(row.profile ?? {}) },
     conversationTitle: { ...DEFAULTS.conversationTitle, ...(row.conversationTitle ?? {}) },
     conversationTimeline: {
@@ -330,29 +342,35 @@ function mergeBuiltinTools(stored: BuiltinToolsConfig | undefined): BuiltinTools
 let saveQueue: Promise<unknown> = Promise.resolve()
 
 export async function saveSettings(patch: Partial<Omit<AppSettings, "id">>): Promise<AppSettings> {
-  const next = saveQueue.then(async () => {
-    const current = await getSettings()
-    // Bump `updatedAt` on every write so the companion sync source can tell
-    // when the singleton changed and re-emit it to paired phones (see
-    // `lib/sync/desktop-sync-source.ts:readSettingsDelta`).
-    const merged: AppSettings = { ...current, ...patch, id: SINGLETON_ID, updatedAt: Date.now() }
-    await getDb().settings.put(merged)
-    // ADR-0090 Phase 1: keep the derived Provider Profile Store fresh.
-    // Runs inside the serialized queue so derivations observe writes in
-    // order; awaited so a caller that immediately reads profiles sees the
-    // updated set, but failures never poison the settings save itself.
-    if ("providerSettings" in patch || "customProviders" in patch) {
-      try {
-        const { syncProviderProfilesFromSettings } =
-          await import("@/lib/settings/provider-profile-sync")
-        await syncProviderProfilesFromSettings(merged)
-      } catch {
-        // The profile store is a re-derivable projection; a failed sync is
-        // recovered by the next provider-touching save.
+  // Same connection-close exposure as the read, with a worse failure: a patch
+  // dropped mid-boot is a setting the user watched themselves change and then
+  // lose. The whole read-modify-write retries as a unit — re-reading `current`
+  // is what keeps the merge correct on the second pass.
+  const next = saveQueue.then(() =>
+    withDbReopenRetry(async () => {
+      const current = await getSettings()
+      // Bump `updatedAt` on every write so the companion sync source can tell
+      // when the singleton changed and re-emit it to paired phones (see
+      // `lib/sync/desktop-sync-source.ts:readSettingsDelta`).
+      const merged: AppSettings = { ...current, ...patch, id: SINGLETON_ID, updatedAt: Date.now() }
+      await getDb().settings.put(merged)
+      // ADR-0090 Phase 1: keep the derived Provider Profile Store fresh.
+      // Runs inside the serialized queue so derivations observe writes in
+      // order; awaited so a caller that immediately reads profiles sees the
+      // updated set, but failures never poison the settings save itself.
+      if ("providerSettings" in patch || "customProviders" in patch) {
+        try {
+          const { syncProviderProfilesFromSettings } =
+            await import("@/lib/settings/provider-profile-sync")
+          await syncProviderProfilesFromSettings(merged)
+        } catch {
+          // The profile store is a re-derivable projection; a failed sync is
+          // recovered by the next provider-touching save.
+        }
       }
-    }
-    return merged
-  })
+      return merged
+    })
+  )
   // Swallow rejection on the queue tail so a single failure doesn't poison
   // every subsequent caller — each awaiter still gets their own rejected
   // Promise via the `next` reference returned below.
