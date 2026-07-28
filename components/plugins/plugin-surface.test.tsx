@@ -140,7 +140,7 @@ describe("PluginSurface", () => {
     errorSpy.mockRestore()
   })
 
-  it("preserves host layout without width hints and clamps declared hints", () => {
+  it("stays a query container without width hints and clamps declared hints", () => {
     const { container, rerender } = render(
       <PluginSurface pluginId="acme.reference" surfaceId="slot" formFactor="row">
         <span>content</span>
@@ -148,8 +148,12 @@ describe("PluginSurface", () => {
     )
     const root = () => container.querySelector<HTMLElement>('[data-plugin-root="acme.reference"]')!
 
-    expect(root().style.display).toBe("contents")
-    expect(root().style.containerType).toBe("")
+    // A hint-less slot still needs a principal box: `container-type` is inert on
+    // `display: contents`, so a plugin's `@container` rules would never match.
+    expect(root().style.display).toBe("block")
+    expect(root().style.containerType).toBe("inline-size")
+    expect(root().style.minWidth).toBe("")
+    expect(root().style.maxWidth).toBe("")
     rerender(
       <PluginSurface
         pluginId="acme.reference"
@@ -222,7 +226,31 @@ describe("PluginSurface", () => {
   })
 
   it("can opt out of layout containment for context panels", () => {
-    const { container } = render(
+    // Width hints are what make this assertion load-bearing: without them the
+    // hint-less branch is taken and `containerType` is empty for every host, so
+    // the opt-out would pass whether or not `container` was honored.
+    const { container, rerender } = render(
+      <PluginSurface
+        pluginId="acme.reference"
+        surfaceId="context-panel"
+        formFactor="panel"
+        container={false}
+        minWidth={320}
+        maxWidth={640}
+      >
+        <span>panel</span>
+      </PluginSurface>
+    )
+
+    const root = () => container.querySelector<HTMLElement>("[data-plugin-surface]")
+    expect(root()?.style.containerType).toBe("")
+    expect(root()?.style.minWidth).toBe("min(320px, 100%)")
+    expect(root()?.style.maxWidth).toBe("min(640px, 100%)")
+
+    // With no hints the opt-out gets the host layout back untouched, which is
+    // the reason context panels ask for it — containment re-anchors absolutely
+    // positioned descendants.
+    rerender(
       <PluginSurface
         pluginId="acme.reference"
         surfaceId="context-panel"
@@ -232,8 +260,7 @@ describe("PluginSurface", () => {
         <span>panel</span>
       </PluginSurface>
     )
-
-    const root = container.querySelector<HTMLElement>("[data-plugin-surface]")
-    expect(root?.style.containerType).toBe("")
+    expect(root()?.style.display).toBe("contents")
+    expect(root()?.style.containerType).toBe("")
   })
 })

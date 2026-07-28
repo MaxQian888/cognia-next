@@ -19,14 +19,19 @@ describe("PluginCustomViewHost", () => {
     expect(screen.getByText("hello p/v")).toBeInTheDocument()
   })
 
-  it("isolates a throwing view behind the error boundary", () => {
-    const Boom = () => {
-      throw new Error("kaboom")
-    }
-    const errSpy = jest.spyOn(console, "error").mockImplementation(() => {})
-    const { container } = render(<PluginCustomViewHost component={Boom} pluginId="p" viewId="v" />)
-    // Boundary renders null on error — host survives.
-    expect(container.textContent).toBe("")
-    errSpy.mockRestore()
+  it("adds no wrapper element of its own", () => {
+    // This host owns nothing but prop forwarding. Crash isolation and the
+    // `@scope` anchor moved up to `PluginSurface` when the surface contracts
+    // were unified, so `PluginViewHost` — not this component — is what stands
+    // between a throwing plugin view and the app. Isolation is proven there:
+    // "silently removes a crashed %s surface while reporting it" and "renders
+    // an inline diagnostic for a crashed %s surface and retries successfully"
+    // in `plugin-surface.test.tsx`, plus the per-kind wrapper assertions in
+    // `plugin-view-host.test.tsx`.
+    const View = () => <span>body</span>
+    const { container } = render(<PluginCustomViewHost component={View} pluginId="p" viewId="v" />)
+
+    expect(container.firstElementChild?.tagName).toBe("SPAN")
+    expect(container.querySelector("[data-plugin-root]")).toBeNull()
   })
 })

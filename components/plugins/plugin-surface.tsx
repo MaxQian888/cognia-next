@@ -8,6 +8,17 @@ import { usePluginStore } from "@/stores/plugin-runtime"
 import type { PluginSurfaceFormFactor } from "@/types/plugin/plugin-surface"
 
 const DISPLAY_CONTENTS: CSSProperties = { display: "contents" }
+/**
+ * No width hint declared, but the surface is still a query container.
+ *
+ * `display: contents` generates no principal box, and `container-type` is inert
+ * without one — so returning DISPLAY_CONTENTS here would silently stop every
+ * `@container` rule a plugin ships from ever matching, which is the opposite of
+ * what `plugin-dev/surfaces.mdx` promises ("Slot wrappers are query
+ * containers"). Hosts that genuinely need the host layout preserved say so with
+ * `container={false}`.
+ */
+const QUERY_CONTAINER_ONLY: CSSProperties = { display: "block", containerType: "inline-size" }
 const widthHintStyles = new Map<string, CSSProperties>()
 
 function surfaceStyle(
@@ -16,7 +27,7 @@ function surfaceStyle(
   container: boolean
 ): CSSProperties {
   if (minWidth === undefined && maxWidth === undefined) {
-    return DISPLAY_CONTENTS
+    return container ? QUERY_CONTAINER_ONLY : DISPLAY_CONTENTS
   }
   const key = `${minWidth ?? ""}|${maxWidth ?? ""}|${container}`
   const cached = widthHintStyles.get(key)
