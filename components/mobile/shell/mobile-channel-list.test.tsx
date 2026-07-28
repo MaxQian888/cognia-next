@@ -7,6 +7,8 @@ import userEvent from "@testing-library/user-event"
 import type { ChatSession } from "@cognia/agent-config-types"
 
 import { MobileChannelList } from "./mobile-channel-list"
+import { useProjectStore } from "@/stores/project/project-store"
+import type { Project } from "@/types"
 
 const updateSessionMock: jest.Mock<Promise<void>, [string, Record<string, unknown>]> = jest.fn()
 jest.mock("@/lib/db/sessions", () => ({
@@ -82,6 +84,7 @@ jest.mock("@/lib/capacitor/haptics", () => ({
 // component, so no-op setters are enough (spies let us assert persistence).
 const setChannelListView = jest.fn()
 const setCollapsedFolders = jest.fn()
+const setGroupCollapsed = jest.fn()
 jest.mock("@/stores/ui", () => ({
   useUIStore: <T,>(selector: (s: Record<string, unknown>) => T): T =>
     selector({
@@ -89,6 +92,8 @@ jest.mock("@/stores/ui", () => ({
       setChannelListView,
       collapsedFolderIds: [],
       setCollapsedFolders,
+      groupCollapseOverrides: {},
+      setGroupCollapsed,
     }),
 }))
 
@@ -127,12 +132,16 @@ describe("<MobileChannelList />", () => {
     sessionStatesRef.value = []
     setChannelListView.mockReset()
     setCollapsedFolders.mockReset()
+    setGroupCollapsed.mockReset()
+    useProjectStore.setState({ projects: [], activeProjectId: null, loaded: false })
     conversationSidebar = null
     searchSessionsByContent.mockReset()
     searchSessionsByContent.mockResolvedValue({ ids: new Set<string>(), truncated: false })
   })
 
   it("groups pinned sessions and buckets the rest by date", () => {
+    // Date buckets are one option now; the default axis is the workspace.
+    conversationSidebar = { groupBy: "date" }
     render(
       <MobileChannelList
         sessions={sessions}
@@ -153,6 +162,58 @@ describe("<MobileChannelList />", () => {
     expect(within(older).getByText("Side note")).toBeInTheDocument()
     // The pinned session is not duplicated into the date bucket.
     expect(within(older).queryByText("Daily standup")).toBeNull()
+  })
+
+  it("groups by workspace by default, folding every workspace but the active one", async () => {
+    // Only `id`/`name` are read by the grouping path.
+    useProjectStore.setState({
+      projects: [
+        { id: "w1", name: "Alpha" },
+        { id: "w2", name: "Beta" },
+      ] as unknown as Project[],
+      activeProjectId: "w1",
+      loaded: true,
+    })
+    render(
+      <MobileChannelList
+        sessions={[
+          baseSession("here", { title: "Here", projectId: "w1" }),
+          baseSession("there", { title: "There", projectId: "w2" }),
+        ]}
+        activeSessionId={null}
+        onSelect={jest.fn()}
+        onNewDirect={jest.fn()}
+        onDelete={jest.fn()}
+        onRename={jest.fn()}
+        onArchive={jest.fn()}
+        onUnarchive={jest.fn()}
+      />
+    )
+    const alpha = screen.getByTestId("mobile-channel-group-workspace:w1")
+    const beta = screen.getByTestId("mobile-channel-group-workspace:w2")
+    expect(within(alpha).getByText("Here")).toBeInTheDocument()
+    expect(within(beta).queryByText("There")).toBeNull()
+
+    await userEvent.click(screen.getByRole("button", { name: "Beta" }))
+    expect(setGroupCollapsed).toHaveBeenCalledWith("workspace:w2", false)
+  })
+
+  it("labels the leftovers generically when grouping by agent", () => {
+    conversationSidebar = { groupBy: "agent" }
+    render(
+      <MobileChannelList
+        sessions={[baseSession("loose", { title: "Loose" })]}
+        activeSessionId={null}
+        onSelect={jest.fn()}
+        onNewDirect={jest.fn()}
+        onDelete={jest.fn()}
+        onRename={jest.fn()}
+        onArchive={jest.fn()}
+        onUnarchive={jest.fn()}
+      />
+    )
+    expect(screen.getByRole("button", { name: "ungroupedAgent" })).toBeInTheDocument()
+    expect(screen.getByText("Loose")).toBeInTheDocument()
   })
 
   it("does not expose embedded resource sessions in the mobile conversation list", () => {

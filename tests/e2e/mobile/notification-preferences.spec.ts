@@ -7,7 +7,7 @@
  * queued command without coupling to the runner's transient delivery status.
  */
 
-import { expect, test } from "@playwright/test"
+import { expect, test } from "@/tests/e2e/fixtures/test"
 
 import {
   bootstrapCogniaMobile,

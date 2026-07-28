@@ -8,7 +8,7 @@
  * - Drain the queue → banner hides.
  */
 
-import { expect, test } from "@playwright/test"
+import { expect, test } from "@/tests/e2e/fixtures/test"
 import { injectCapacitor } from "../helpers/inject-capacitor"
 import { resetCogniaDb, waitForTestGlobals } from "../helpers/db-reset"
 
@@ -52,7 +52,7 @@ test.describe("mobile — offline banner + outbound queue", () => {
     await expect(page.getByTestId("offline-banner")).toHaveCount(0, { timeout: 20_000 })
   })
 
-  test("pending outbound row drives the banner into queued mode even when online", async ({
+  test("@critical pending outbound work drives the queued state while online", async ({
     page,
   }) => {
     await page.goto("/")

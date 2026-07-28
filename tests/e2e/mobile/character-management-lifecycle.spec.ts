@@ -6,7 +6,7 @@
  * local Dexie CRUD, durable outbound queue, and live Companion dispatcher.
  */
 
-import { expect, test, type Page } from "@playwright/test"
+import { expect, test, type Page } from "@/tests/e2e/fixtures/test"
 
 import { bootstrapCogniaMobile, readDexieRow, readDexieRows } from "../helpers/db-reset"
 import { injectCapacitor } from "../helpers/inject-capacitor"

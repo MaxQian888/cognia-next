@@ -10,7 +10,7 @@
  * assertion — the drag could be completely dead and the test stayed green.
  */
 
-import { expect, test } from "@playwright/test"
+import { expect, test } from "@/tests/e2e/fixtures/test"
 import { resetCogniaDb, setCogniaSettings } from "../../helpers/db-reset"
 import { injectCapacitor } from "../../helpers/inject-capacitor"
 

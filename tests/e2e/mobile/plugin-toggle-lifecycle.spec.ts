@@ -7,7 +7,7 @@
  * network transition to wake the runner.
  */
 
-import { expect, test, type Page } from "@playwright/test"
+import { expect, test, type Page } from "@/tests/e2e/fixtures/test"
 
 import { bootstrapCogniaMobile, readDexieRow, readDexieRows } from "../helpers/db-reset"
 import { injectCapacitor } from "../helpers/inject-capacitor"
@@ -87,7 +87,7 @@ async function installPluginDesktop(page: Page): Promise<{ calls: CapturedRpc[] 
 }
 
 test.describe("mobile — plugin toggle lifecycle", () => {
-  test("syncs a plugin and dispatches an online toggle through the durable queue", async ({
+  test("@critical syncs and dispatches a plugin toggle through the durable queue", async ({
     page,
   }) => {
     const desktop = await installPluginDesktop(page)

@@ -1,7 +1,13 @@
 import test from "node:test"
 import { strict as assert } from "node:assert"
+import { dirname, isAbsolute, resolve } from "node:path"
+import { fileURLToPath } from "node:url"
 
-import { patchPlist, USAGE_DESCRIPTIONS } from "./patch-ios-info-plist.mjs"
+import {
+  patchPlist,
+  resolveRepoRoot,
+  USAGE_DESCRIPTIONS,
+} from "./patch-ios-info-plist.mjs"
 
 const EMPTY_PLIST = `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -12,6 +18,14 @@ const EMPTY_PLIST = `<?xml version="1.0" encoding="UTF-8"?>
 </dict>
 </plist>
 `
+
+test("resolves the repository root as an absolute macOS path", () => {
+  const root = resolveRepoRoot(new URL("./patch-ios-info-plist.mjs", import.meta.url).href)
+  const expected = resolve(dirname(fileURLToPath(import.meta.url)), "../..")
+
+  assert.equal(isAbsolute(root), true)
+  assert.equal(root, expected)
+})
 
 test("adds NSBonjourServices and every usage-description key to a fresh plist", () => {
   const { out, changed } = patchPlist(EMPTY_PLIST)
@@ -66,19 +80,43 @@ test("adds UIBackgroundModes remote-notification to a fresh plist (iOS push)", (
   assert.equal(changed, true)
   assert.match(out, /UIBackgroundModes/)
   assert.match(out, /<string>remote-notification<\/string>/)
+  assert.match(out, /<string>fetch<\/string>/)
 })
 
-test("injects remote-notification into an existing UIBackgroundModes array", () => {
+test("injects required modes into an existing UIBackgroundModes array", () => {
   const withModes = EMPTY_PLIST.replace(
     "</dict>\n</plist>",
-    "\t<key>UIBackgroundModes</key>\n\t<array>\n\t\t<string>fetch</string>\n\t</array>\n</dict>\n</plist>"
+    "\t<key>UIBackgroundModes</key>\n\t<array>\n\t\t<string>audio</string>\n\t</array>\n</dict>\n</plist>"
   )
   const { out, changed } = patchPlist(withModes)
   assert.equal(changed, true)
   assert.match(out, /<string>remote-notification<\/string>/)
   assert.match(out, /<string>fetch<\/string>/)
+  assert.match(out, /<string>audio<\/string>/)
   // The existing single array is reused, not duplicated.
   assert.equal(out.match(/UIBackgroundModes/g).length, 1)
+})
+
+test("adds a local-network-only App Transport Security exception", () => {
+  const { out, changed } = patchPlist(EMPTY_PLIST)
+
+  assert.equal(changed, true)
+  assert.match(out, /NSAppTransportSecurity/)
+  assert.match(out, /NSAllowsLocalNetworking/)
+  assert.doesNotMatch(out, /NSAllowsArbitraryLoads/)
+})
+
+test("preserves existing App Transport Security settings", () => {
+  const withAts = EMPTY_PLIST.replace(
+    "</dict>\n</plist>",
+    "\t<key>NSAppTransportSecurity</key>\n\t<dict>\n\t\t<key>NSAllowsArbitraryLoadsInWebContent</key>\n\t\t<false/>\n\t</dict>\n</dict>\n</plist>"
+  )
+  const { out, changed } = patchPlist(withAts)
+
+  assert.equal(changed, true)
+  assert.match(out, /NSAllowsLocalNetworking/)
+  assert.match(out, /NSAllowsArbitraryLoadsInWebContent/)
+  assert.equal(out.match(/NSAppTransportSecurity/g).length, 1)
 })
 
 test("escapes XML-sensitive characters in usage strings", () => {

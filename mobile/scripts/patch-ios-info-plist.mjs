@@ -14,6 +14,10 @@
  *                                     hand-edit per IOS_BOOTSTRAP.md; a
  *                                     regenerated iOS project that missed
  *                                     it silently dropped every deep link.
+ *   - NSAppTransportSecurity        — permits local-network development
+ *                                     without weakening arbitrary web loads.
+ *   - UIBackgroundModes            — remote notification delivery and
+ *                                     background fetch for queue recovery.
  *   - NS*UsageDescription strings   — camera (QR pair / chat attach),
  *                                     photo library (attach / save),
  *                                     microphone (voice messages),
@@ -36,8 +40,13 @@
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { dirname, resolve } from "node:path"
+import { fileURLToPath } from "node:url"
 
-const REPO_ROOT = resolve(new URL("../..", import.meta.url).pathname.replace(/^\//, ""))
+export function resolveRepoRoot(moduleUrl = import.meta.url) {
+  return resolve(fileURLToPath(new URL("../..", moduleUrl)))
+}
+
+const REPO_ROOT = resolveRepoRoot()
 const PLIST_PATH = resolve(REPO_ROOT, "mobile/ios/App/App/Info.plist")
 
 const SERVICE_TYPE = "_cognia._tcp"
@@ -134,22 +143,43 @@ export function patchPlist(xml) {
     changed = true
   }
 
+  if (!/NSAppTransportSecurity/.test(out)) {
+    const insert =
+      `\t<key>NSAppTransportSecurity</key>\n\t<dict>\n` +
+      `\t\t<key>NSAllowsLocalNetworking</key>\n\t\t<true/>\n\t</dict>\n`
+    out = insertBeforeClosingDict(out, insert)
+    changed = true
+  } else if (!/NSAllowsLocalNetworking/.test(out)) {
+    out = out.replace(
+      /(<key>NSAppTransportSecurity<\/key>\s*<dict>)/u,
+      "$1\n\t\t<key>NSAllowsLocalNetworking</key>\n\t\t<true/>"
+    )
+    changed = true
+  }
+
   // Push notifications need the `remote-notification` background mode so
-  // silent / content-available APNs payloads can wake the app to sync. The
+  // silent / content-available APNs payloads can wake the app to sync.
+  // `fetch` gives the outbound queue a bounded recovery opportunity. The
   // `aps-environment` entitlement + Push Notifications capability still have to
   // be added via an App.entitlements file in Xcode (see IOS_BOOTSTRAP.md) —
   // only the Info.plist half is automatable here, and without it
   // `PushNotifications.register()` background delivery never fires.
   if (!/UIBackgroundModes/.test(out)) {
-    const insert = `\t<key>UIBackgroundModes</key>\n\t<array>\n\t\t<string>remote-notification</string>\n\t</array>\n`
+    const insert =
+      `\t<key>UIBackgroundModes</key>\n\t<array>\n` +
+      `\t\t<string>remote-notification</string>\n` +
+      `\t\t<string>fetch</string>\n\t</array>\n`
     out = insertBeforeClosingDict(out, insert)
     changed = true
-  } else if (!/remote-notification/.test(out)) {
-    out = out.replace(
-      /(<key>UIBackgroundModes<\/key>\s*<array>)([\s\S]*?)(<\/array>)/,
-      (_match, head, body, tail) => `${head}\n\t\t<string>remote-notification</string>${body}${tail}`
-    )
-    changed = true
+  } else {
+    for (const mode of ["remote-notification", "fetch"]) {
+      if (out.includes(`<string>${mode}</string>`)) continue
+      out = out.replace(
+        /(<key>UIBackgroundModes<\/key>\s*<array>)([\s\S]*?)(<\/array>)/u,
+        (_match, head, body, tail) => `${head}\n\t\t<string>${mode}</string>${body}${tail}`
+      )
+      changed = true
+    }
   }
 
   return { out, changed }

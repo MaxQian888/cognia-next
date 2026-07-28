@@ -6,7 +6,7 @@
  * code ever rendered — rescued by an `.or(getByText(/pairing/))` fallback.
  */
 
-import { expect, test } from "@playwright/test"
+import { expect, test } from "@/tests/e2e/fixtures/test"
 import { resetCogniaDb, setCogniaSettings } from "../helpers/db-reset"
 import { injectCapacitor } from "../helpers/inject-capacitor"
 

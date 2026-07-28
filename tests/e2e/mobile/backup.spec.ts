@@ -16,7 +16,7 @@
  * components/mobile/backup/mobile-backup-section.tsx.
  */
 
-import { expect, test } from "@playwright/test"
+import { expect, test } from "@/tests/e2e/fixtures/test"
 import { readDexieRow, resetCogniaDb, setCogniaSettings } from "../helpers/db-reset"
 import { injectCapacitor } from "../helpers/inject-capacitor"
 
@@ -43,7 +43,7 @@ test.describe("mobile — backup round-trip", () => {
     await setCogniaSettings(page, { mobileRuntimeMode: "standalone" })
   })
 
-  test("export → wipe → import restores the seeded data", async ({ page }) => {
+  test("@critical export → wipe → import restores the seeded data", async ({ page }) => {
     // 1. Seed a distinctive row the round-trip must preserve.
     const charId = await page.evaluate(async (name) => {
       const w = window as Window & {

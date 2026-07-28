@@ -7,7 +7,7 @@
  * the failure path (biometric rejects → config preserved).
  */
 
-import { expect, test } from "@playwright/test"
+import { expect, test } from "@/tests/e2e/fixtures/test"
 import { createMockV2Server, type MockV2Server } from "./mock-v2-server"
 import { injectCapacitor } from "../helpers/inject-capacitor"
 import { resetCogniaDb } from "../helpers/db-reset"

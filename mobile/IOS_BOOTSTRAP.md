@@ -1,101 +1,47 @@
-# iOS Platform Bootstrap (Wave 1.3)
+# iOS Platform Bootstrap
 
 ## Status
 
-**Pending HITL on macOS.** Capacitor's `cap add ios` requires Xcode 15+,
-CocoaPods, and the iOS toolchain — all macOS-only. The Windows host that
-generated the rest of Wave 1 cannot run this command.
+The Capacitor 8 iOS project is committed under `mobile/ios/`. It targets iOS
+16.0 and uses CocoaPods. A full native build still requires macOS with Xcode
+26+ and Apple signing credentials.
 
-## Steps (run on macOS)
+## Daily workflow
 
 ```bash
-# From repo root, after pulling main
+# From the repository root
 pnpm install
-
-# Add iOS platform — generates mobile/ios/App/...
-pnpm --filter mobile exec cap add ios
-
-# Pull plugin native code into the iOS Xcode project
-pnpm --filter mobile exec cap sync ios
-
-# Open in Xcode for signing + first build
-pnpm --filter mobile exec cap open ios
+pnpm mobile:sync:ios
+pnpm mobile:open:ios
 ```
 
-## Required Info.plist additions
+`mobile:sync:ios` runs the deterministic native configurator before Capacitor
+sync. The configurator maintains:
 
-**Automated:** `node scripts/patch-ios-info-plist.mjs` (chained by
-`pnpm -F mobile add:ios`, rerunnable via `pnpm -F mobile patch:ios`) injects
-`NSBonjourServices` (`_cognia._tcp`) plus every `NS*UsageDescription` key the
-shipped plugins need — camera, photo library (read + add), microphone,
-Face ID, location-when-in-use, local network — with bilingual strings in
-`en.lproj` / `zh-Hans.lproj` `InfoPlist.strings`. iOS kills the app at
-permission-request time when one of these keys is missing, so run the
-patcher after every `cap add ios`.
+- iOS 16.0 deployment targets in the Podfile and Xcode project
+- camera, photo library, microphone, Face ID, location, and local-network
+  usage descriptions, including `en` and `zh-Hans` localization
+- `_cognia._tcp` Bonjour discovery
+- the `cognia://` URL scheme
+- local-network-only App Transport Security access
+- `remote-notification` and `fetch` background modes
+- the Cognia app icon and deep-navy launch screen assets
 
-**Manual (paste into the top-level `<dict>`):** the remaining keys below are
-not yet automated:
+Run `pnpm -F mobile patch:ios` to reapply only those native settings without
+building or syncing the web application.
 
-```xml
-<!-- Cleartext loopback for LAN dev (release uses TLS — Wave 1.4) -->
-<key>NSAppTransportSecurity</key>
-<dict>
-  <key>NSAllowsLocalNetworking</key>
-  <true/>
-</dict>
+## Regenerating the project
 
-<!-- URL scheme for OAuth deeplink, pair payload, open-session -->
-<key>CFBundleURLTypes</key>
-<array>
-  <dict>
-    <key>CFBundleURLName</key>
-    <string>com.cognia.mobile</string>
-    <key>CFBundleURLSchemes</key>
-    <array>
-      <string>cognia</string>
-    </array>
-  </dict>
-</array>
-
-<!-- Background modes — push notifications + outbound queue flush on resume -->
-<key>UIBackgroundModes</key>
-<array>
-  <string>remote-notification</string>
-  <string>fetch</string>
-</array>
-```
-
-## Required LaunchScreen dark variant
-
-The Android side ships a fixed deep-navy splash via the Android 12+
-SplashScreen API: `AppTheme.NoActionBarLaunch` sets
-`windowSplashScreenBackground` (`@color/splash_background`, identical in
-light + night) and `windowSplashScreenAnimatedIcon` (`@drawable/splash_icon`).
-iOS requires a sibling change inside the storyboard so the launch surface
-honors `userInterfaceStyle = .dark` instead of flashing white.
-
-After `cap add ios` generates `mobile/ios/App/App/Base.lproj/LaunchScreen.storyboard`:
-
-1. Open the storyboard in Xcode → select the root view.
-2. In the **Attributes inspector** → **Background** field, click the
-   color swatch → **Other…** → switch to the **+** menu → **Add Color**
-   to add a **Trait Variation**:
-   - **Any** → `#FFFFFF` (current behavior)
-   - **Dark** → `#0A0A0A` (matches cognia's `--background` dark token)
-3. Repeat for any subviews that have an explicit background color.
-4. In `Info.plist`, ensure `UIUserInterfaceStyle` is **not** set to
-   `Light` or `Dark` — leave it absent so iOS picks the system value.
-5. If launch images are configured in `Assets.xcassets/Splash.imageset/`,
-   add a separate `Dark` slot (Inspector → Appearances → **Any, Dark**)
-   pointing at a darkmode-tinted PNG.
-
-Verification (Simulator):
+Only regenerate when `mobile/ios/` is missing:
 
 ```bash
-pnpm --filter mobile exec cap run ios
-# In the Simulator: Settings → Developer → Dark Appearance → ON
-# Then re-launch cognia — splash should appear with the dark background.
+pnpm -F mobile add:ios
 ```
+
+The command deliberately selects CocoaPods instead of Swift Package Manager:
+`@capacitor-mlkit/barcode-scanning`, `capacitor-voice-recorder`, and
+`capacitor-zeroconf` currently need CocoaPods integration. It then applies the
+native configuration and synchronizes all Capacitor plugins.
 
 ## Apple Developer (one-time)
 
@@ -111,12 +57,14 @@ Required to ship to TestFlight / App Store:
 4. Provisioning Profile: Development + Distribution
 5. Code-signing: configure in Xcode under "Signing & Capabilities"
 
-## Verification (after macOS bootstrap)
+## Native verification
 
 ```bash
-pnpm build                       # Fresh static export at out/
-pnpm --filter mobile exec cap sync ios
-pnpm --filter mobile exec cap run ios   # iOS Simulator boot
+sudo xcode-select --switch /Applications/Xcode.app/Contents/Developer
+pnpm mobile:sync:ios
+pnpm mobile:open:ios
+# In Xcode, select an iOS Simulator and run the App scheme.
+
 # Manual:
 #   - QR scan pair flow exits cleanly when camera permission denied
 #   - cognia://oauth/claude?code=x is captured by appUrlOpen listener
@@ -128,5 +76,7 @@ pnpm --filter mobile exec cap run ios   # iOS Simulator boot
 
 - The **Android** equivalent of these manifest changes already lives in
   `mobile/android/app/src/main/AndroidManifest.xml` (Wave 1.3 commit).
-- Once iOS is generated, future `cap sync` runs are non-destructive — the
-  Info.plist additions stay in place across plugin upgrades.
+- `mobile/ios/App/Pods`, the copied `public/` bundle, build products, and local
+  Xcode state are generated and intentionally gitignored.
+- The Push Notifications capability and `aps-environment` entitlement must
+  still be enabled in Xcode with the selected Apple Developer team.

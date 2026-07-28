@@ -6,7 +6,7 @@
  * and verifies the runtime-mode settings singleton survives the cleanup.
  */
 
-import { expect, test } from "@playwright/test"
+import { expect, test } from "@/tests/e2e/fixtures/test"
 
 import {
   bootstrapCogniaMobile,

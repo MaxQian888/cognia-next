@@ -7,7 +7,7 @@
  * real — no product route or store is seeded directly.
  */
 
-import { expect, test, type Page } from "@playwright/test"
+import { expect, test, type Page } from "@/tests/e2e/fixtures/test"
 
 import { bootstrapCogniaMobile, readDexieRows } from "../helpers/db-reset"
 import { injectCapacitor } from "../helpers/inject-capacitor"

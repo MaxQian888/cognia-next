@@ -6,7 +6,7 @@
  * newer snapshot. The product store, sorting, rows, and actions remain real.
  */
 
-import { expect, test, type Page, type WebSocketRoute } from "@playwright/test"
+import { expect, test, type Page, type WebSocketRoute } from "@/tests/e2e/fixtures/test"
 
 import { bootstrapCogniaMobile } from "../helpers/db-reset"
 import { injectCapacitor } from "../helpers/inject-capacitor"

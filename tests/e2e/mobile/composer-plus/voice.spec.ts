@@ -2,7 +2,7 @@
  * E2E: composer plus menu — record voice via VoiceRecorder plugin.
  */
 
-import { expect, test } from "@playwright/test"
+import { expect, test } from "@/tests/e2e/fixtures/test"
 import { resetCogniaDb } from "../../helpers/db-reset"
 import { injectCapacitor } from "../../helpers/inject-capacitor"
 

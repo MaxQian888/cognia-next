@@ -5,6 +5,7 @@ import { useFormatter, useNow, useTranslations } from "next-intl"
 import {
   ArchiveIcon,
   ArchiveRestoreIcon,
+  BotIcon,
   ChevronDownIcon,
   ChevronRightIcon,
   FolderIcon,
@@ -33,6 +34,9 @@ import { cn } from "@/lib/utils"
 import { filterExposedSessions } from "@/lib/chat/session-exposure"
 import { useUIStore, type ChannelListView } from "@/stores/ui"
 import { useSettingsStore } from "@/stores/settings"
+import { useProjectStore } from "@/stores/project/project-store"
+import { resolveConversationGroupBy } from "@/lib/chat/conversation-grouping"
+import { conversationSectionKey, UNGROUPED_ID } from "@/lib/chat/conversation-list-model"
 import type { DateBucket } from "@/lib/chat/conversation-list-model"
 import type {
   Character,
@@ -145,7 +149,7 @@ export function MobileChannelList({
   const sidebarSettings = useSettingsStore((s) => s.settings?.conversationSidebar)
   const density: ConversationSidebarDensity = sidebarSettings?.density ?? "comfortable"
   const showPreview = sidebarSettings?.showPreview ?? false
-  const groupByDate = sidebarSettings?.groupByDate !== false
+  const groupBy = resolveConversationGroupBy(sidebarSettings)
   const showUnreadBadges = sidebarSettings?.showUnreadBadges !== false
   const contentScope = sidebarSettings?.searchScope === "titleAndContent"
 
@@ -199,15 +203,33 @@ export function MobileChannelList({
     return map
   }, [sessionStates, showUnreadBadges])
 
-  // Shared grouping model: pinned → date buckets, or a flat result list while
-  // searching (mirrors the desktop sidebar via the same headless hook).
+  // Group axes the pure model can't resolve on its own.
+  const projects = useProjectStore((s) => s.projects)
+  const activeProjectId = useProjectStore((s) => s.activeProjectId)
+  const workspaceGroups = useMemo(
+    () => projects.map((p) => ({ id: p.id, name: p.name })),
+    [projects]
+  )
+  const agentGroups = useMemo(
+    () => (characters ?? []).map((c) => ({ id: c.id, name: c.name })),
+    [characters]
+  )
+  const groupCollapseOverrides = useUIStore((s) => s.groupCollapseOverrides)
+  const setGroupCollapsed = useUIStore((s) => s.setGroupCollapsed)
+
+  // Shared grouping model: pinned → folders → the chosen axis, or a flat result
+  // list while searching (mirrors the desktop sidebar via the same headless hook).
   const { sections, filteredCount } = useConversationListModel({
     sessions: exposedSessions,
     folders: view === "archived" ? undefined : folders,
     query,
     view,
     collapsedFolderIds,
-    groupByDate,
+    groupBy,
+    workspaces: workspaceGroups,
+    agents: agentGroups,
+    activeWorkspaceId: activeProjectId,
+    groupCollapseOverrides,
     contentMatchIds: contentScope ? contentMatchIds : undefined,
   })
   const archived = view === "archived"
@@ -386,6 +408,41 @@ export function MobileChannelList({
                   {renderRows(section.sessions)}
                 </Section>
               )
+            case "group": {
+              const key = conversationSectionKey(section)
+              const name =
+                section.group.id === UNGROUPED_ID
+                  ? t(section.axis === "workspace" ? "ungroupedWorkspace" : "ungroupedAgent")
+                  : section.group.name
+              return (
+                <section key={key} data-testid={`mobile-channel-group-${key}`}>
+                  <button
+                    type="button"
+                    onClick={() => setGroupCollapsed(key, !section.collapsed)}
+                    aria-expanded={!section.collapsed}
+                    aria-label={name}
+                    className="flex w-full items-center gap-1.5 px-3 pb-1 pt-3 text-left"
+                  >
+                    {section.collapsed ? (
+                      <ChevronRightIcon className="size-3 text-muted-foreground" />
+                    ) : (
+                      <ChevronDownIcon className="size-3 text-muted-foreground" />
+                    )}
+                    {section.axis === "workspace" ? (
+                      <FolderIcon className="size-3 text-muted-foreground" aria-hidden="true" />
+                    ) : (
+                      <BotIcon className="size-3 text-muted-foreground" aria-hidden="true" />
+                    )}
+                    <span className="truncate text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                      {name}
+                    </span>
+                  </button>
+                  {section.collapsed ? null : (
+                    <ul className="flex flex-col">{renderRows(section.sessions)}</ul>
+                  )}
+                </section>
+              )
+            }
             case "search":
               return (
                 <Section key="search" testId="mobile-channel-results">

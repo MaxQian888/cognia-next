@@ -24,7 +24,7 @@
  * kind fails assertion 1.
  */
 
-import { expect, test } from "@playwright/test"
+import { expect, test } from "@/tests/e2e/fixtures/test"
 import { readDexieRow, resetCogniaDb, setCogniaSettings } from "../helpers/db-reset"
 import { injectCapacitor } from "../helpers/inject-capacitor"
 

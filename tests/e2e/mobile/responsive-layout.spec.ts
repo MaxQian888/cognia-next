@@ -10,7 +10,7 @@
  * project routing (`testDir: ./tests/e2e/mobile`).
  */
 
-import { expect, test } from "@playwright/test"
+import { expect, test } from "@/tests/e2e/fixtures/test"
 import { injectCapacitor } from "../helpers/inject-capacitor"
 import { resetCogniaDb } from "../helpers/db-reset"
 
