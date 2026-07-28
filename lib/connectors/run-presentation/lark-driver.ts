@@ -6,6 +6,13 @@ import type {
   RunProjectionSnapshot,
 } from "@/types/execution/run"
 import type { ConversationDeliveryTarget } from "@/types/connectors/event"
+import {
+  formatRunActivityTimeline,
+  runTitleForPresentation,
+} from "@/lib/connectors/activity/activity-to-a2ui"
+import { resolveActivityI18n } from "@/lib/connectors/activity/i18n"
+import { safeStableActivityId } from "@/lib/execution/run-activity"
+import { hasNoLeakingPiiDeep } from "@cognia/redact"
 
 type LarkMethod = "POST" | "PUT" | "PATCH"
 export type LarkRunRequest = (method: LarkMethod, path: string, body: unknown) => Promise<unknown>
@@ -15,8 +22,10 @@ const CARD_CREATED_AT_KEY = "cardCreatedAt"
 const SUMMARY_ELEMENT_ID = "run_summary"
 const ACTIONS_ELEMENT_ID = "run_actions"
 const MAX_MUTATION_ATTEMPTS = 3
+const MUTATION_SAFETY_VERSION = 1
 
 interface PendingCardMutation {
+  safetyVersion: typeof MUTATION_SAFETY_VERSION
   sequence: number
   uuid: string
   operation: "stream_summary" | "update_actions" | "replace_card"
@@ -41,6 +50,34 @@ interface LarkCardState {
   hasActions: boolean
 }
 
+function isSafePendingMutation(
+  value: unknown,
+  cardId: string,
+  elementIds: LarkCardState["elementIds"]
+): value is PendingCardMutation {
+  if (!value || typeof value !== "object") return false
+  const mutation = value as Partial<PendingCardMutation>
+  const expectedPath =
+    mutation.operation === "stream_summary"
+      ? `/cardkit/v1/cards/${cardId}/elements/${elementIds.summary}/content`
+      : mutation.operation === "update_actions"
+        ? `/cardkit/v1/cards/${cardId}/elements/${elementIds.actions}`
+        : mutation.operation === "replace_card"
+          ? `/cardkit/v1/cards/${cardId}`
+          : undefined
+  return (
+    mutation.safetyVersion === MUTATION_SAFETY_VERSION &&
+    Number.isSafeInteger(mutation.sequence) &&
+    typeof mutation.uuid === "string" &&
+    /^[0-9a-f]{8}-[0-9a-f]{4}-5[0-9a-f]{3}-a[0-9a-f]{3}-[0-9a-f]{12}$/i.test(mutation.uuid) &&
+    mutation.method === "PUT" &&
+    mutation.path === expectedPath &&
+    !!mutation.body &&
+    typeof mutation.body === "object" &&
+    hasNoLeakingPiiDeep(mutation.body)
+  )
+}
+
 interface FollowUpControlItem {
   action: RunControlAction | "status"
   content: string
@@ -60,28 +97,6 @@ interface FollowUpControlState {
 export interface LarkRunPresentationDriverOptions {
   sleep?: (ms: number) => Promise<void>
   now?: () => number
-}
-
-const STATUS_LABEL_EN: Record<RunProjectionSnapshot["status"], string> = {
-  queued: "Queued",
-  running: "Running",
-  waiting: "Waiting",
-  paused: "Paused",
-  recovery_required: "Recovery required",
-  completed: "Completed",
-  failed: "Failed",
-  cancelled: "Cancelled",
-}
-
-const STATUS_LABEL_ZH: Record<RunProjectionSnapshot["status"], string> = {
-  queued: "排队中",
-  running: "运行中",
-  waiting: "等待确认",
-  paused: "已暂停",
-  recovery_required: "需要恢复",
-  completed: "已完成",
-  failed: "失败",
-  cancelled: "已取消",
 }
 
 const ACTION_LABEL_EN: Record<RunControlAction, string> = {
@@ -125,38 +140,13 @@ function deterministicUuid(input: string): string {
 }
 
 function cardJson(snapshot: RunProjectionSnapshot, streaming: boolean): Record<string, unknown> {
+  const safeRunId = safeStableActivityId(snapshot.runId)
   const zh = snapshot.locale?.toLowerCase().startsWith("zh") === true
-  const statusLabel = zh ? STATUS_LABEL_ZH : STATUS_LABEL_EN
+  const i18n = resolveActivityI18n(snapshot.locale)
+  const statusLabel = i18n.runStatus(snapshot.status)
+  const title = runTitleForPresentation(snapshot, i18n)
   const actionLabel = zh ? ACTION_LABEL_ZH : ACTION_LABEL_EN
-  const stepLines = [...snapshot.activeSteps, ...snapshot.recentSteps]
-    .slice(0, 8)
-    .map(
-      (step) =>
-        `- ${step.status === "completed" ? "✅" : step.status === "failed" ? "❌" : "⏳"} ${clamp(step.title, 240)}`
-    )
-  const progress = snapshot.progress.trustworthy
-    ? `${snapshot.progress.completed}/${snapshot.progress.total}${
-        snapshot.progress.ratio === undefined
-          ? ""
-          : ` · ${Math.round(snapshot.progress.ratio * 100)}%`
-      }`
-    : `${snapshot.progress.completed} steps completed`
-  const details = [
-    `**${statusLabel[snapshot.status]}** · ${progress} · ${Math.floor(snapshot.elapsedMs / 1_000)}s`,
-    clamp(snapshot.waitingReason ?? snapshot.error ?? snapshot.summary, 4_000),
-    ...stepLines,
-    snapshot.pendingStepCount > 0 ? `_${snapshot.pendingStepCount} more pending_` : undefined,
-    snapshot.connectorQueueDepth !== undefined
-      ? zh
-        ? `队列深度：${snapshot.connectorQueueDepth}`
-        : `Queue depth: ${snapshot.connectorQueueDepth}`
-      : undefined,
-    ...snapshot.artifacts
-      .slice(0, 4)
-      .map((artifact) =>
-        artifact.url ? `[${artifact.title}](${artifact.url})` : `📎 ${artifact.title}`
-      ),
-  ].filter(Boolean)
+  const details = formatRunActivityTimeline(snapshot, i18n)
   const actions = snapshot.allowedActions.slice(0, 5).map((action) => ({
     tag: "button",
     text: { tag: "plain_text", content: actionLabel[action] },
@@ -171,20 +161,22 @@ function cardJson(snapshot: RunProjectionSnapshot, streaming: boolean): Record<s
         ? [
             {
               type: "open_url",
-              default_url: snapshot.detailsUrl ?? `cognia://execution-runs/${snapshot.runId}`,
+              default_url: `/agent-runs?run=${encodeURIComponent(safeRunId)}`,
             },
           ]
         : [
             {
               type: "callback",
               value: {
-                actionId: `run:${snapshot.runId}:${action}:${snapshot.revision}`,
-                surfaceId: `execution-run:${snapshot.runId}`,
+                actionId: `run:${safeRunId}:${action}:${snapshot.revision}`,
+                surfaceId: `execution-run:${safeRunId}`,
                 componentId: `run-action-${action}`,
                 action,
-                runId: snapshot.runId,
+                runId: safeRunId,
                 revision: snapshot.revision,
-                ...(snapshot.pendingInterrupt ? { interruptId: snapshot.pendingInterrupt.id } : {}),
+                ...(snapshot.pendingInterrupt
+                  ? { interruptId: safeStableActivityId(snapshot.pendingInterrupt.id) }
+                  : {}),
               },
             },
           ],
@@ -194,7 +186,7 @@ function cardJson(snapshot: RunProjectionSnapshot, streaming: boolean): Record<s
     config: {
       update_multi: true,
       streaming_mode: streaming,
-      summary: { content: `${snapshot.title}: ${statusLabel[snapshot.status]}` },
+      summary: { content: `${title}: ${statusLabel}` },
       streaming_config: {
         print_frequency_ms: { default: 70, android: 70, ios: 70, pc: 70 },
         print_step: { default: 1, android: 1, ios: 1, pc: 1 },
@@ -202,13 +194,13 @@ function cardJson(snapshot: RunProjectionSnapshot, streaming: boolean): Record<s
       },
     },
     header: {
-      title: { tag: "plain_text", content: clamp(snapshot.title, 240) },
+      title: { tag: "plain_text", content: clamp(title, 240) },
       template:
         snapshot.status === "failed" ? "red" : snapshot.status === "completed" ? "green" : "blue",
     },
     body: {
       elements: [
-        { tag: "markdown", content: details.join("\n\n"), element_id: SUMMARY_ELEMENT_ID },
+        { tag: "markdown", content: details, element_id: SUMMARY_ELEMENT_ID },
         ...(actions.length > 0
           ? [{ tag: "action", layout: "bisected", actions, element_id: ACTIONS_ELEMENT_ID }]
           : []),
@@ -267,7 +259,9 @@ function followUpItems(snapshot: RunProjectionSnapshot): FollowUpControlItem[] {
       action,
       content: ACTION_LABEL_EN[action],
       localizedContent: ACTION_LABEL_ZH[action],
-      ...(snapshot.pendingInterrupt ? { interruptId: snapshot.pendingInterrupt.id } : {}),
+      ...(snapshot.pendingInterrupt
+        ? { interruptId: safeStableActivityId(snapshot.pendingInterrupt.id) }
+        : {}),
     }))
   return [
     ...actionable,
@@ -292,16 +286,17 @@ function state(ref: RunPresentationRef): LarkCardState {
   ) {
     throw new Error("Invalid Lark CardKit presentation reference")
   }
+  const resolvedElementIds =
+    elementIds && typeof elementIds === "object"
+      ? (elementIds as LarkCardState["elementIds"])
+      : { summary: SUMMARY_ELEMENT_ID, actions: ACTIONS_ELEMENT_ID }
   return {
     cardId,
     lastAcknowledgedSequence,
     cardCreatedAt,
     target: target as RunPresentationTarget,
-    elementIds:
-      elementIds && typeof elementIds === "object"
-        ? (elementIds as LarkCardState["elementIds"])
-        : { summary: SUMMARY_ELEMENT_ID, actions: ACTIONS_ELEMENT_ID },
-    ...(pendingMutation && typeof pendingMutation === "object"
+    elementIds: resolvedElementIds,
+    ...(isSafePendingMutation(pendingMutation, cardId, resolvedElementIds)
       ? { pendingMutation: pendingMutation as PendingCardMutation }
       : {}),
     hasActions:
@@ -525,6 +520,7 @@ export function createLarkRunPresentationDriver(
     const desired: PendingCardMutation =
       operation === "stream_summary"
         ? {
+            safetyVersion: MUTATION_SAFETY_VERSION,
             sequence,
             uuid: mutationUuid("summary"),
             operation,
@@ -538,18 +534,20 @@ export function createLarkRunPresentationDriver(
           }
         : operation === "update_actions"
           ? {
+              safetyVersion: MUTATION_SAFETY_VERSION,
               sequence,
               uuid: mutationUuid("actions"),
               operation,
               method: "PUT",
               path: `/cardkit/v1/cards/${current.cardId}/elements/${current.elementIds.actions}`,
               body: {
-                element: actionsElement(snapshot),
+                element: JSON.stringify(actionsElement(snapshot)),
                 sequence,
                 uuid: mutationUuid("actions"),
               },
             }
           : {
+              safetyVersion: MUTATION_SAFETY_VERSION,
               sequence,
               uuid: mutationUuid("replace"),
               operation,

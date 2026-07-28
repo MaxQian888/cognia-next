@@ -78,7 +78,9 @@ import { recordHeartbeatNow } from "@/lib/connectors/health/heartbeat"
 import {
   listRunningAdapters,
   registerRunningAdapter,
+  resumeSuspendedAdaptersByOwner,
   subscribeCredentialsRotatedToLifecycle,
+  suspendRunningAdaptersByOwner,
   unregisterRunningAdapter,
 } from "@/lib/connectors/lifecycle"
 import { getAdapterInstance } from "@/lib/db/adapter-instances"
@@ -494,6 +496,13 @@ export function installConnectorRuntime(opts: InstallConnectorRuntimeOptions = {
     // A2UI surface and drive a fresh AI-loop turn through the digest runner.
     bus.callbackHandler = defaultConnectorCallbackHandler
 
+    // A remote host handoff suspends plugin-owned transports without
+    // discarding their restart closures. Resume them only after the local
+    // runtime and callback routes are installed, so no early inbound event is
+    // dropped during the hand-back.
+    await resumeSuspendedAdaptersByOwner("plugin")
+    if (cancelled) return
+
     // Instantiate and register each enabled adapter.
     const { getDb } = await import("@/lib/db/schema")
     // Whether any enabled adapter receives inbound events over the Rust axum
@@ -697,6 +706,7 @@ export function installConnectorRuntime(opts: InstallConnectorRuntimeOptions = {
         // Hot-remove: a running adapter no longer in the enabled set
         // (disabled or deleted). Mirrors the teardown's per-adapter reap.
         for (const entry of running) {
+          if (entry.owner === "plugin") continue
           const id = entry.adapter.id
           if (enabledIds.has(id)) continue
           unregisterRunningAdapter(id) // aborts signal + stops transport
@@ -811,7 +821,14 @@ export function installConnectorRuntime(opts: InstallConnectorRuntimeOptions = {
     stopExecutionRunPresentationRunner = null
     disposeExecutionRunControlHandlers?.()
     disposeExecutionRunControlHandlers = null
-    // Tear down every running adapter through the lifecycle registry so
+    // A window that never acquired the singleton runtime owns none of the
+    // shared adapter transports below.
+    if (!ownsRuntime) return
+    // Plugin adapters are contribution-owned, but must stop while a remote
+    // brain owns connector routing to avoid double-dial. Suspend them first so
+    // their restart closures survive the local runtime teardown.
+    suspendRunningAdaptersByOwner("plugin")
+    // Tear down every remaining running adapter through the lifecycle registry so
     // the per-adapter abort signals get cleaned up too. Swallow
     // per-adapter errors so a bad stop() can't crash the teardown; the
     // registry's `unregisterRunningAdapter` already catches the stop()
@@ -840,11 +857,6 @@ export function installConnectorRuntime(opts: InstallConnectorRuntimeOptions = {
         )
       })
     }
-    // Shared Rust-side resources are owner-only: a non-owner window that
-    // opened and closed must not stop the owner's inbound axum server or
-    // unregister its webhook / reverse-WS routes (the owner never restarts
-    // them, so webhook adapters would silently starve).
-    if (!ownsRuntime) return
     // Reap this install's webhook / reverse-WS registrations so the Rust
     // registered-adapter map doesn't retain stale entries across a remount.
     // Mirrors the per-adapter registration in `bootAdapter`.

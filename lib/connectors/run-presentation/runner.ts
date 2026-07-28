@@ -1,7 +1,11 @@
 import { liveQuery, type Subscription } from "dexie"
 import { getDb } from "@/lib/db/schema"
 import { enqueueOutbound, waitForOutboundTerminal } from "@/lib/db/outbound-jobs"
-import { sweepExecutionRunEventRetention, updateExecutionRunBinding } from "@/lib/db/execution-runs"
+import {
+  listExecutionRunBindings,
+  sweepExecutionRunEventRetention,
+  updateExecutionRunBinding,
+} from "@/lib/db/execution-runs"
 import { getRunningAdapter } from "@/lib/connectors/lifecycle"
 import type {
   ExecutionRunBinding,
@@ -14,9 +18,19 @@ import { hasNoLeakingPiiDeep } from "@cognia/redact"
 import { appendAudit } from "@/lib/connectors/audit"
 import { buildA2UISegment } from "@/lib/connectors/a2ui-bridge/a2ui-to-segments"
 import { countPendingConnectorInboundJobs } from "@/lib/db/connector-inbound-jobs"
+import { readForResolution } from "@/lib/db/conversation-overrides"
+import {
+  buildRunActivitySurface,
+  formatRunActivityTimeline,
+  runActivitiesForPresentation,
+  runTitleForPresentation,
+} from "@/lib/connectors/activity/activity-to-a2ui"
+import { resolveActivityI18n } from "@/lib/connectors/activity/i18n"
+import { safeStableActivityId, sanitizeActivityLabel } from "@/lib/execution/run-activity"
 
 const TERMINAL = new Set<RunProjectionSnapshot["status"]>(["completed", "failed", "cancelled"])
 const COALESCE_MS = 2_000
+const APPEND_UPDATE_INTERVAL_MS = 30_000
 const NATIVE_KILL_SWITCH_KEY = "cognia-run-presentation-native-disabled"
 const IMMEDIATE_EVENT_TYPES = new Set<RunEventType>([
   "run.started",
@@ -40,12 +54,20 @@ export interface ProjectionDependencies {
   deliverFallback(
     binding: ExecutionRunBinding,
     snapshot: RunProjectionSnapshot
-  ): Promise<RunPresentationRef>
+  ): Promise<FallbackDeliveryResult>
   saveBinding(binding: ExecutionRunBinding): Promise<void>
   deliverMilestone?(binding: ExecutionRunBinding, snapshot: RunProjectionSnapshot): Promise<void>
   recordDegraded(binding: ExecutionRunBinding, reason: string): Promise<void> | void
   nativeEnabled(binding: ExecutionRunBinding): boolean
   resolveQueueDepth?(binding: ExecutionRunBinding): Promise<number>
+}
+
+type FallbackDeliveryMode = Exclude<ExecutionRunBinding["deliveryMode"], "native">
+
+export interface FallbackDeliveryResult {
+  ref: RunPresentationRef
+  deliveryMode: FallbackDeliveryMode
+  delivered: boolean
 }
 
 function errorMessage(error: unknown): string {
@@ -84,34 +106,161 @@ function deliveryConversationRef(binding: ExecutionRunBinding) {
   return ref
 }
 
-function piiSafeSnapshot(snapshot: RunProjectionSnapshot): RunProjectionSnapshot {
-  if (hasNoLeakingPiiDeep(snapshot)) return snapshot
+interface ImSafeProjection {
+  snapshot: RunProjectionSnapshot
+  redacted: boolean
+}
+
+function imSafeSnapshot(snapshot: RunProjectionSnapshot): RunProjectionSnapshot {
+  const safeStep = (step: RunProjectionSnapshot["activeSteps"][number]) => ({
+    id: safeStableActivityId(step.id),
+    title: sanitizeActivityLabel(step.title, "Step"),
+    status: step.status,
+    ...(step.startedAt !== undefined ? { startedAt: step.startedAt } : {}),
+    ...(step.completedAt !== undefined ? { completedAt: step.completedAt } : {}),
+  })
+  const safeActivities = runActivitiesForPresentation(snapshot)
+  const safeRunId = safeStableActivityId(snapshot.runId)
   return {
-    ...snapshot,
-    title: "Execution run",
-    summary: "Sensitive run details are hidden. Open Cognia to review locally.",
+    runId: safeRunId,
+    kind: snapshot.kind,
+    title: runTitleForPresentation(snapshot),
+    status: snapshot.status,
+    revision: snapshot.revision,
+    startedAt: snapshot.startedAt,
+    updatedAt: snapshot.updatedAt,
+    ...(snapshot.endedAt !== undefined ? { endedAt: snapshot.endedAt } : {}),
+    ...(snapshot.planVersion !== undefined ? { planVersion: snapshot.planVersion } : {}),
+    progress: {
+      completed: snapshot.progress.completed,
+      total: snapshot.progress.total,
+      ...(snapshot.progress.ratio !== undefined ? { ratio: snapshot.progress.ratio } : {}),
+      trustworthy: snapshot.progress.trustworthy,
+    },
+    summary: snapshot.status === "completed" ? "Run completed" : undefined,
     error: snapshot.status === "failed" ? "Run failed; sensitive details are hidden." : undefined,
     waitingReason: snapshot.status === "waiting" ? "Waiting for a local review." : undefined,
-    activeSteps: snapshot.activeSteps.map((step, index) => ({
-      ...step,
-      title: `Step ${index + 1}`,
-      summary: undefined,
-      detail: undefined,
+    activeSteps: snapshot.activeSteps.map(safeStep),
+    recentSteps: snapshot.recentSteps.map(safeStep),
+    pendingSteps: snapshot.pendingSteps.map(safeStep),
+    activities: safeActivities,
+    activityCount: snapshot.activityCount ?? safeActivities.length,
+    omittedActivityCount: snapshot.omittedActivityCount ?? 0,
+    ...(snapshot.connectorQueueDepth !== undefined
+      ? { connectorQueueDepth: snapshot.connectorQueueDepth }
+      : {}),
+    elapsedMs: snapshot.elapsedMs,
+    detailsUrl: `/agent-runs?run=${encodeURIComponent(safeRunId)}`,
+    pendingInterrupt: snapshot.pendingInterrupt
+      ? {
+          id: safeStableActivityId(snapshot.pendingInterrupt.id),
+          title: "Approval required",
+          ...(snapshot.pendingInterrupt.expiresAt !== undefined
+            ? { expiresAt: snapshot.pendingInterrupt.expiresAt }
+            : {}),
+        }
+      : undefined,
+    artifacts: snapshot.artifacts.map((artifact) => ({
+      id: safeStableActivityId(artifact.id),
+      title: "Artifact created",
+      ...(artifact.mimeType ? { mimeType: sanitizeActivityLabel(artifact.mimeType, "") } : {}),
     })),
-    recentSteps: snapshot.recentSteps.map((step, index) => ({
-      ...step,
-      title: `Recent step ${index + 1}`,
-      summary: undefined,
-      detail: undefined,
-    })),
-    pendingSteps: snapshot.pendingSteps.map((step, index) => ({
-      ...step,
-      title: `Pending step ${index + 1}`,
-      summary: undefined,
-      detail: undefined,
-    })),
-    artifacts: [],
+    allowedActions: [...snapshot.allowedActions],
+    ...(snapshot.locale && /^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$/.test(snapshot.locale)
+      ? { locale: snapshot.locale }
+      : {}),
   }
+}
+
+/**
+ * The final outbound boundary. Projection is intentionally explicit instead
+ * of spreading the source snapshot so unknown legacy fields cannot cross an
+ * IM connector. If the normal safe projection ever still trips the shared PII
+ * detector, replace all descriptive content with a constant-safe shell.
+ */
+function projectImSafeSnapshot(snapshot: RunProjectionSnapshot): ImSafeProjection {
+  const projected = imSafeSnapshot(snapshot)
+  const sourceSafe = hasNoLeakingPiiDeep(snapshot)
+  if (hasNoLeakingPiiDeep(projected)) {
+    return { snapshot: projected, redacted: !sourceSafe }
+  }
+
+  const safeRunId = safeStableActivityId(snapshot.runId)
+  const opaque: RunProjectionSnapshot = {
+    runId: safeRunId,
+    kind: snapshot.kind,
+    title: "Execution run",
+    status: snapshot.status,
+    revision: snapshot.revision,
+    startedAt: snapshot.startedAt,
+    updatedAt: snapshot.updatedAt,
+    ...(snapshot.endedAt !== undefined ? { endedAt: snapshot.endedAt } : {}),
+    progress: { completed: 0, total: 0, trustworthy: false },
+    activeSteps: [],
+    recentSteps: [],
+    pendingSteps: [],
+    pendingStepCount: 0,
+    activities: [],
+    activityCount: 0,
+    omittedActivityCount: Math.max(0, snapshot.activityCount ?? snapshot.activities?.length ?? 0),
+    elapsedMs: snapshot.elapsedMs,
+    detailsUrl: `/agent-runs?run=${encodeURIComponent(safeRunId)}`,
+    artifacts: [],
+    allowedActions: [...snapshot.allowedActions],
+  }
+  if (!hasNoLeakingPiiDeep(opaque)) {
+    throw new Error("Unsafe execution projection blocked")
+  }
+  return { snapshot: opaque, redacted: true }
+}
+
+export function resolveFallbackDeliveryMode(input: {
+  canEdit: boolean
+  appendActivity: boolean
+}): FallbackDeliveryMode {
+  if (input.canEdit) return "card-edit"
+  return input.appendActivity ? "append" : "final-only"
+}
+
+export function resolveCapabilityAwareFallbackDeliveryMode(input: {
+  hasEditMethod: boolean
+  messageEditing?: boolean | undefined
+  appendActivity: boolean
+  appendFallback?: boolean | undefined
+}): FallbackDeliveryMode {
+  return resolveFallbackDeliveryMode({
+    canEdit: input.hasEditMethod && input.messageEditing !== false,
+    appendActivity: input.appendActivity && input.appendFallback !== false,
+  })
+}
+
+export function shouldDeliverFallbackUpdate(
+  binding: ExecutionRunBinding,
+  snapshot: RunProjectionSnapshot,
+  mode: FallbackDeliveryMode,
+  now: number = Date.now()
+): boolean {
+  if (TERMINAL.has(snapshot.status)) return true
+  if (mode === "final-only") return false
+  if (mode === "card-edit" || binding.lastProjectedRevision === 0) return true
+  if (
+    snapshot.status === "waiting" ||
+    snapshot.status === "paused" ||
+    snapshot.status === "recovery_required"
+  ) {
+    return true
+  }
+  const lastProjectedStatus = binding.presentationState?.lastProjectedStatus
+  if (
+    snapshot.status === "running" &&
+    (lastProjectedStatus === "waiting" ||
+      lastProjectedStatus === "paused" ||
+      lastProjectedStatus === "recovery_required")
+  ) {
+    return true
+  }
+  const lastAppendAt = binding.presentationState?.lastAppendAt
+  return typeof lastAppendAt !== "number" || now - lastAppendAt >= APPEND_UPDATE_INTERVAL_MS
 }
 
 export async function projectExecutionRunBinding(
@@ -130,8 +279,9 @@ export async function projectExecutionRunBinding(
       ? { connectorQueueDepth: await deps.resolveQueueDepth(binding) }
       : {}),
   }
-  const projectedSnapshot = piiSafeSnapshot(contextualSnapshot)
-  if (projectedSnapshot !== contextualSnapshot) {
+  const projection = projectImSafeSnapshot(contextualSnapshot)
+  const projectedSnapshot = projection.snapshot
+  if (projection.redacted) {
     await deps.recordDegraded(binding, "pii_gate_blocked")
   }
 
@@ -187,12 +337,13 @@ export async function projectExecutionRunBinding(
     }
   }
 
-  const fallbackRef = await deps.deliverFallback(latestBinding, projectedSnapshot)
+  const fallback = await deps.deliverFallback(latestBinding, projectedSnapshot)
+  const fallbackRef = fallback.ref
   const next: ExecutionRunBinding = {
     ...latestBinding,
     ...(fallbackRef.platformMessageId ? { platformMessageId: fallbackRef.platformMessageId } : {}),
     ...(fallbackRef.opaqueState ? { presentationState: fallbackRef.opaqueState } : {}),
-    deliveryMode: fallbackRef.platformMessageId ? "card-edit" : "append",
+    deliveryMode: fallback.deliveryMode,
     lastProjectedRevision: snapshot.revision,
     status: TERMINAL.has(snapshot.status) ? "finished" : "degraded",
     updatedAt: Date.now(),
@@ -202,34 +353,7 @@ export async function projectExecutionRunBinding(
 }
 
 function markdown(snapshot: RunProjectionSnapshot): string {
-  const progress = snapshot.progress.trustworthy
-    ? `${snapshot.progress.completed}/${snapshot.progress.total}${
-        snapshot.progress.ratio === undefined
-          ? ""
-          : ` (${Math.round(snapshot.progress.ratio * 100)}%)`
-      }`
-    : `${snapshot.progress.completed} completed`
-  const steps = [...snapshot.activeSteps, ...snapshot.recentSteps]
-    .slice(0, 6)
-    .map(
-      (step) =>
-        `- ${step.status === "completed" ? "✅" : step.status === "failed" ? "❌" : "⏳"} ${step.title}`
-    )
-  const artifacts = snapshot.artifacts
-    .slice(0, 6)
-    .map((artifact) =>
-      artifact.url ? `- [${artifact.title}](${artifact.url})` : `- 📎 ${artifact.title}`
-    )
-  return [
-    `**${snapshot.title}** · ${snapshot.status} · ${progress}`,
-    snapshot.summary,
-    snapshot.error,
-    ...steps,
-    ...artifacts,
-  ]
-    .filter(Boolean)
-    .join("\n")
-    .slice(0, 12_000)
+  return formatRunActivityTimeline(snapshot, resolveActivityI18n(snapshot.locale))
 }
 
 async function deliverMilestone(
@@ -259,30 +383,34 @@ async function deliverMilestone(
 async function deliverFallback(
   binding: ExecutionRunBinding,
   snapshot: RunProjectionSnapshot
-): Promise<RunPresentationRef> {
+): Promise<FallbackDeliveryResult> {
   const adapter = getRunningAdapter(binding.adapterId)?.adapter
-  const editTargetMessageId = adapter?.edit ? binding.platformMessageId : undefined
+  const override = await readForResolution(binding.conversationKey).catch(() => undefined)
+  const deliveryMode = resolveCapabilityAwareFallbackDeliveryMode({
+    hasEditMethod: typeof adapter?.edit === "function",
+    messageEditing: adapter?.runtimeCapabilities?.messageEditing,
+    appendActivity: override?.appendActivity !== false,
+    appendFallback: adapter?.runtimeCapabilities?.appendFallback,
+  })
+  if (!shouldDeliverFallbackUpdate(binding, snapshot, deliveryMode)) {
+    return {
+      ref: {
+        ...(binding.platformMessageId ? { platformMessageId: binding.platformMessageId } : {}),
+        ...(binding.presentationState ? { opaqueState: binding.presentationState } : {}),
+      },
+      deliveryMode,
+      delivered: false,
+    }
+  }
+  const editTargetMessageId = deliveryMode === "card-edit" ? binding.platformMessageId : undefined
+  const surface = buildRunActivitySurface(snapshot, resolveActivityI18n(snapshot.locale))
   const job = await enqueueOutbound({
     adapterId: binding.adapterId,
     conversationKey: binding.conversationKey,
     request: {
       conversationRef: deliveryConversationRef(binding),
       deliveryTarget: binding.deliveryTarget,
-      segments: [
-        buildA2UISegment(`execution-run:${snapshot.runId}`, {
-          components: {
-            root: { id: "root", component: "Column", children: ["summary"] },
-            summary: { id: "summary", component: "Text", text: markdown(snapshot) },
-          },
-          dataModel: {
-            runId: snapshot.runId,
-            revision: snapshot.revision,
-            status: snapshot.status,
-          },
-          rootId: "root",
-          widget: { fallbackText: markdown(snapshot) },
-        }),
-      ],
+      segments: [buildA2UISegment(`execution-run:${snapshot.runId}`, surface)],
       ...(editTargetMessageId ? { editTargetMessageId } : {}),
       metadata: {
         idempotencyKey: `execution-run:${binding.id}:${snapshot.revision}`,
@@ -306,7 +434,19 @@ async function deliverFallback(
       `Execution run fallback delivery did not complete: ${terminal?.status ?? "missing"}`
     )
   }
-  return { platformMessageId: terminal.platformMessageId ?? binding.platformMessageId }
+  const platformMessageId = terminal.platformMessageId ?? binding.platformMessageId
+  return {
+    ref: {
+      ...(platformMessageId ? { platformMessageId } : {}),
+      opaqueState: {
+        ...binding.presentationState,
+        ...(deliveryMode === "append" ? { lastAppendAt: Date.now() } : {}),
+        lastProjectedStatus: snapshot.status,
+      },
+    },
+    deliveryMode,
+    delivered: true,
+  }
 }
 
 function nativeEnabled(): boolean {
@@ -325,12 +465,15 @@ const defaultDependencies: ProjectionDependencies = {
   deliverFallback,
   deliverMilestone,
   async saveBinding(binding) {
+    const current = await getDb().executionRunBindings.get(binding.id)
+    if (current?.status === "disabled" && binding.status !== "disabled") return
     await getDb().executionRunBindings.put(binding)
   },
   async recordDegraded(binding, reason) {
+    const current = await getDb().executionRunBindings.get(binding.id)
+    if (current?.status === "disabled") return
     await updateExecutionRunBinding(binding.id, {
       status: "degraded",
-      deliveryMode: "card-edit",
       presentationState: {
         ...binding.presentationState,
         degradedReason: reason.slice(0, 500),
@@ -357,24 +500,106 @@ let subscription: Subscription | null = null
 let retentionTimer: ReturnType<typeof setInterval> | null = null
 let heartbeatTimer: ReturnType<typeof setInterval> | null = null
 const timers = new Map<string, ReturnType<typeof setTimeout>>()
-const projecting = new Set<string>()
+const projecting = new Map<string, Promise<void>>()
 
 async function projectLatest(bindingId: string): Promise<void> {
-  if (projecting.has(bindingId)) return
-  projecting.add(bindingId)
-  try {
-    while (true) {
-      const binding = await getDb().executionRunBindings.get(bindingId)
-      if (!binding || binding.status === "disabled" || binding.status === "finished") return
-      const snapshot = (await getDb().executionRuns.get(binding.runId))?.latestSnapshot
-      if (!snapshot || snapshot.revision <= binding.lastProjectedRevision) return
-      await projectExecutionRunBinding(binding, snapshot, defaultDependencies)
+  const existing = projecting.get(bindingId)
+  if (existing) return existing
+  const projection = (async () => {
+    try {
+      while (true) {
+        const binding = await getDb().executionRunBindings.get(bindingId)
+        if (!binding || binding.status === "disabled" || binding.status === "finished") return
+        const snapshot = (await getDb().executionRuns.get(binding.runId))?.latestSnapshot
+        if (!snapshot || snapshot.revision <= binding.lastProjectedRevision) return
+        await projectExecutionRunBinding(binding, snapshot, defaultDependencies)
+      }
+    } catch (error) {
+      console.error(`[run-presentation] projection failed for binding=${bindingId}`, error)
+    } finally {
+      if (projecting.get(bindingId) === projection) projecting.delete(bindingId)
     }
-  } catch (error) {
-    console.error(`[run-presentation] projection failed for binding=${bindingId}`, error)
-  } finally {
-    projecting.delete(bindingId)
+  })()
+  projecting.set(bindingId, projection)
+  return projection
+}
+
+export function areExecutionRunPresentationsFrozen(
+  bindings: readonly ExecutionRunBinding[]
+): boolean {
+  return bindings.every((binding) => binding.status === "finished" || binding.status === "disabled")
+}
+
+/**
+ * Ensure a terminal run card is frozen before the authoritative answer is
+ * enqueued. The function actively projects pending bindings, so correctness
+ * does not depend on the liveQuery subscription having started or fired.
+ */
+export async function waitForExecutionRunPresentationFreeze(
+  runId: string,
+  timeoutMs = 30_000
+): Promise<boolean> {
+  const deadline = Date.now() + Math.max(0, timeoutMs)
+  while (true) {
+    const bindings = await listExecutionRunBindings(runId)
+    if (bindings.length === 0 || areExecutionRunPresentationsFrozen(bindings)) return true
+
+    const remainingMs = deadline - Date.now()
+    if (remainingMs <= 0) {
+      await disableAndDrainRunProjections(bindings)
+      return false
+    }
+    const projection = Promise.all(
+      bindings
+        .filter((binding) => binding.status !== "finished" && binding.status !== "disabled")
+        .map((binding) => projectLatest(binding.id))
+    )
+    const completed = await Promise.race([
+      projection.then(() => true),
+      new Promise<false>((resolve) => {
+        setTimeout(() => resolve(false), remainingMs)
+      }),
+    ])
+    if (!completed) {
+      await disableAndDrainRunProjections(bindings)
+      return false
+    }
+    if (!areExecutionRunPresentationsFrozen(await listExecutionRunBindings(runId))) {
+      await new Promise((resolve) => {
+        setTimeout(resolve, Math.min(250, Math.max(0, deadline - Date.now())))
+      })
+    }
   }
+}
+
+async function disableAndDrainRunProjections(
+  bindings: readonly ExecutionRunBinding[]
+): Promise<void> {
+  const pending = bindings.filter(
+    (binding) => binding.status !== "finished" && binding.status !== "disabled"
+  )
+  await Promise.all(
+    pending.map((binding) =>
+      updateExecutionRunBinding(binding.id, {
+        status: "disabled",
+        updatedAt: Date.now(),
+      })
+    )
+  )
+  await Promise.all(
+    pending.map((binding) => projecting.get(binding.id)).filter(Boolean) as Promise<void>[]
+  )
+  // A stale in-flight projection may have checkpointed after the first write.
+  // Reassert the terminal disabled state only after every platform mutation
+  // has settled, so the caller can safely enqueue the independent answer.
+  await Promise.all(
+    pending.map((binding) =>
+      updateExecutionRunBinding(binding.id, {
+        status: "disabled",
+        updatedAt: Date.now(),
+      })
+    )
+  )
 }
 
 function schedule(
@@ -398,16 +623,60 @@ function schedule(
   )
 }
 
-export async function heartbeatExecutionRunBinding(bindingId: string): Promise<void> {
-  if (projecting.has(bindingId)) return
+export function heartbeatExecutionRunBinding(bindingId: string): Promise<void> {
+  const existing = projecting.get(bindingId)
+  if (existing) return existing
+  const projection = runHeartbeatExecutionRunBinding(bindingId)
+  projecting.set(bindingId, projection)
+  return projection.finally(() => {
+    if (projecting.get(bindingId) === projection) projecting.delete(bindingId)
+  })
+}
+
+async function runHeartbeatExecutionRunBinding(bindingId: string): Promise<void> {
   const binding = await getDb().executionRunBindings.get(bindingId)
-  if (!binding || binding.status !== "active" || binding.deliveryMode !== "native") return
+  if (
+    !binding ||
+    (binding.status !== "active" && binding.status !== "degraded") ||
+    binding.deliveryMode === "final-only"
+  ) {
+    return
+  }
   const snapshot = (await getDb().executionRuns.get(binding.runId))?.latestSnapshot
+  if (!snapshot || TERMINAL.has(snapshot.status)) return
+  if (binding.deliveryMode === "append") {
+    try {
+      const contextualSnapshot: RunProjectionSnapshot = {
+        ...snapshot,
+        ...(binding.locale ? { locale: binding.locale } : {}),
+        elapsedMs: Math.max(0, Date.now() - snapshot.startedAt),
+        connectorQueueDepth: await countPendingConnectorInboundJobs(binding.conversationKey),
+      }
+      const projected = projectImSafeSnapshot(contextualSnapshot)
+      const projectedSnapshot = projected.snapshot
+      if (projected.redacted) {
+        await defaultDependencies.recordDegraded(binding, "pii_gate_blocked")
+      }
+      const result = await defaultDependencies.deliverFallback(binding, projectedSnapshot)
+      if (result.delivered) {
+        await defaultDependencies.saveBinding({
+          ...binding,
+          ...(result.ref.platformMessageId
+            ? { platformMessageId: result.ref.platformMessageId }
+            : {}),
+          ...(result.ref.opaqueState ? { presentationState: result.ref.opaqueState } : {}),
+          updatedAt: Date.now(),
+        })
+      }
+    } catch (error) {
+      await defaultDependencies.recordDegraded(binding, errorMessage(error))
+    }
+    return
+  }
   const driver = defaultDependencies.nativeEnabled(binding)
     ? defaultDependencies.resolveDriver(binding)
     : undefined
-  if (!snapshot || !driver || !binding.platformMessageId || TERMINAL.has(snapshot.status)) return
-  projecting.add(bindingId)
+  if (!driver || !binding.platformMessageId) return
   let latestBinding = binding
   try {
     const contextualSnapshot: RunProjectionSnapshot = {
@@ -416,8 +685,9 @@ export async function heartbeatExecutionRunBinding(bindingId: string): Promise<v
       elapsedMs: Math.max(0, Date.now() - snapshot.startedAt),
       connectorQueueDepth: await countPendingConnectorInboundJobs(binding.conversationKey),
     }
-    const projectedSnapshot = piiSafeSnapshot(contextualSnapshot)
-    if (projectedSnapshot !== contextualSnapshot) {
+    const projected = projectImSafeSnapshot(contextualSnapshot)
+    const projectedSnapshot = projected.snapshot
+    if (projected.redacted) {
       await defaultDependencies.recordDegraded(binding, "pii_gate_blocked")
     }
     const checkpoint = async (checkpointRef: RunPresentationRef) => {
@@ -442,8 +712,6 @@ export async function heartbeatExecutionRunBinding(bindingId: string): Promise<v
     })
   } catch (error) {
     await defaultDependencies.recordDegraded(latestBinding, errorMessage(error))
-  } finally {
-    projecting.delete(bindingId)
   }
 }
 
@@ -485,7 +753,7 @@ export function startExecutionRunPresentationRunner(): () => void {
   heartbeatTimer = setInterval(() => {
     void getDb()
       .executionRunBindings.where("status")
-      .equals("active")
+      .anyOf("active", "degraded")
       .primaryKeys()
       .then((ids) =>
         Promise.all(ids.map((id) => heartbeatExecutionRunBinding(String(id)))).then(() => undefined)

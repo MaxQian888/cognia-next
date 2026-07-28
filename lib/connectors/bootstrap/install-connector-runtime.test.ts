@@ -143,6 +143,7 @@ interface MockLifecycleEntry {
   adapter: { id: string; stop: jest.Mock }
   abortController: AbortController
   restart: jest.Mock
+  owner?: "adapter-instance" | "plugin"
 }
 const lifecycleRegistry = new Map<string, MockLifecycleEntry>()
 const mockRegisterRunning = jest.fn((id: string, entry: unknown) => {
@@ -164,10 +165,33 @@ const mockUnregisterRunning = jest.fn((id: string) => {
   })
 })
 const mockListRunning = jest.fn(() => Array.from(lifecycleRegistry.values()))
+const suspendedLifecycleRegistry = new Map<string, MockLifecycleEntry>()
+const mockSuspendRunningByOwner = jest.fn((owner: "adapter-instance" | "plugin") => {
+  for (const [id, entry] of lifecycleRegistry) {
+    if (entry.owner !== owner) continue
+    lifecycleRegistry.delete(id)
+    suspendedLifecycleRegistry.set(id, entry)
+    entry.abortController.abort()
+    void entry.adapter.stop().catch(() => undefined)
+  }
+})
+const mockResumeSuspendedByOwner = jest.fn(
+  async (owner: "adapter-instance" | "plugin") => {
+    for (const [id, entry] of Array.from(suspendedLifecycleRegistry.entries())) {
+      if (entry.owner !== owner) continue
+      suspendedLifecycleRegistry.delete(id)
+      await entry.restart()
+    }
+  }
+)
 jest.mock("@/lib/connectors/lifecycle", () => ({
   registerRunningAdapter: (...args: [string, unknown]) => mockRegisterRunning(...args),
   unregisterRunningAdapter: (...args: [string]) => mockUnregisterRunning(...args),
   listRunningAdapters: () => mockListRunning(),
+  suspendRunningAdaptersByOwner: (...args: ["adapter-instance" | "plugin"]) =>
+    mockSuspendRunningByOwner(...args),
+  resumeSuspendedAdaptersByOwner: (...args: ["adapter-instance" | "plugin"]) =>
+    mockResumeSuspendedByOwner(...args),
   subscribeCredentialsRotatedToLifecycle: () => () => {},
 }))
 
@@ -242,6 +266,7 @@ beforeEach(() => {
   mockSteerSession.mockResolvedValue({ accepted: true })
   mockListAdapters.mockReturnValue([])
   lifecycleRegistry.clear()
+  suspendedLifecycleRegistry.clear()
   mockStartHeartbeatSweep.mockImplementation(() => ({ dispose: mockSweepDispose }))
   mockStartOutboundRetentionSweep.mockImplementation(() => ({
     dispose: mockRetentionDispose,
@@ -663,6 +688,33 @@ describe("installConnectorRuntime", () => {
       expect(adapter1.stop).toHaveBeenCalledTimes(1)
       expect(adapter2.stop).toHaveBeenCalledTimes(1)
     })
+  })
+
+  it("suspends plugin-owned adapters and resumes them on the next local acquisition", async () => {
+    mockedIsTauri.mockReturnValue(true)
+    mockListEnabled.mockResolvedValue([])
+    const pluginStop = jest.fn().mockResolvedValue(undefined)
+    const pluginRestart = jest.fn().mockResolvedValue(undefined)
+    lifecycleRegistry.set("plugin:chat", {
+      adapter: { id: "plugin:chat", stop: pluginStop },
+      abortController: new AbortController(),
+      restart: pluginRestart,
+      owner: "plugin",
+    })
+
+    const dispose = install({ acquireRuntimeLock: async () => true })
+    await waitFor(() => expect(mockInstallRuntime).toHaveBeenCalled())
+    dispose()
+
+    expect(mockSuspendRunningByOwner).toHaveBeenCalledWith("plugin")
+    expect(pluginStop).toHaveBeenCalledTimes(1)
+    expect(lifecycleRegistry.has("plugin:chat")).toBe(false)
+    expect(suspendedLifecycleRegistry.has("plugin:chat")).toBe(true)
+
+    mockResumeSuspendedByOwner.mockClear()
+    install({ acquireRuntimeLock: async () => true })
+    await waitFor(() => expect(pluginRestart).toHaveBeenCalledTimes(1))
+    expect(mockResumeSuspendedByOwner).toHaveBeenCalledWith("plugin")
   })
 
   it("does not call adapter.stop() for adapters whose start() failed", async () => {
@@ -1120,6 +1172,31 @@ describe("installConnectorRuntime", () => {
       })
       // The still-enabled adapter is left untouched.
       expect(mockUnregisterRunning).not.toHaveBeenCalledWith("cai_A")
+    })
+
+    it("does not hot-remove lifecycle entries owned by connector plugins", async () => {
+      const rowA = makeTelegramRow("cai_A")
+      const { fire } = await installWithWatch([rowA])
+      await waitFor(() =>
+        expect(mockRegisterRunning).toHaveBeenCalledWith("cai_A", expect.anything())
+      )
+      lifecycleRegistry.set("plugin:chat", {
+        adapter: {
+          id: "plugin:chat",
+          stop: jest.fn().mockResolvedValue(undefined),
+        },
+        abortController: new AbortController(),
+        restart: jest.fn().mockResolvedValue(undefined),
+        owner: "plugin",
+      })
+      mockUnregisterRunning.mockClear()
+      mockUnregisterAdapterBus.mockClear()
+
+      fire()
+      await new Promise((resolve) => setTimeout(resolve, 30))
+
+      expect(mockUnregisterRunning).not.toHaveBeenCalledWith("plugin:chat")
+      expect(mockUnregisterAdapterBus).not.toHaveBeenCalledWith("plugin:chat")
     })
 
     it("is a no-op when the enabled set is unchanged (no churn)", async () => {

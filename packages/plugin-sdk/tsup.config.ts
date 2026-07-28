@@ -9,6 +9,7 @@ const runtimeEntries = {
   hooks: "src/hooks/index.ts",
   permissions: "src/permissions/index.ts",
   extensions: "src/extensions/index.ts",
+  connector: "src/api/connector.ts",
   "context-panel": "src/api/context-panel.ts",
   editor: "src/api/editor.ts",
   webview: "src/api/webview.ts",

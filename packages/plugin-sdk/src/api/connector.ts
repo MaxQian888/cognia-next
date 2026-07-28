@@ -17,6 +17,21 @@
  */
 
 export { defineConnector } from "../define/define-connector"
+export { buildA2UICapabilityMatrix } from "@/types/connectors/capability"
 
 export type { PluginConnectorDef } from "@/types/plugin"
-export type { AdapterFactory, PluginAdapterContext } from "@/lib/plugin/bridge/connectors-bridge"
+export type { PlatformAdapter } from "@/types/connectors"
+export type {
+  PluginAdapterContext,
+  PluginAdapterFactory as AdapterFactory,
+} from "@/types/connectors/plugin-adapter"
+export type { ConnectorRuntimeCapabilityMatrix } from "@/types/connectors/runtime-capability"
+export type {
+  RunActivitySnapshot,
+  RunPresentationCapabilities,
+  RunPresentationDriver,
+  RunPresentationMutationOptions,
+  RunPresentationRef,
+  RunPresentationTarget,
+  RunProjectionSnapshot,
+} from "@/types/execution/run"

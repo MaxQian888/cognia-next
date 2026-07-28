@@ -36,4 +36,10 @@ describe("PlatformKind", () => {
     expect(isPlatformKind(123)).toBe(false)
     expect(isPlatformKind(null)).toBe(false)
   })
+
+  it("allows plugin-owned platform ids without treating them as built-ins", () => {
+    const pluginPlatform: PlatformKind = "acme-chat"
+    expect(pluginPlatform).toBe("acme-chat")
+    expect(isPlatformKind(pluginPlatform)).toBe(false)
+  })
 })

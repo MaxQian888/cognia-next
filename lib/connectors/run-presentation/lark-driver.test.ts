@@ -67,6 +67,29 @@ const snapshot = (
   elapsedMs: 1_000,
   artifacts: [],
   allowedActions: status === "running" ? ["stop", "pause"] : [],
+  activities: [
+    {
+      id: "tool:read",
+      kind: "tool",
+      category: "read",
+      status: "completed",
+      label: "Read",
+      target: { kind: "workspace_path", label: "src/release.ts" },
+      startedAt: 10,
+      endedAt: 20,
+    },
+    {
+      id: "step:build",
+      kind: "step",
+      category: "status",
+      status: status === "completed" ? "completed" : "running",
+      label: "Build",
+      startedAt: 21,
+      ...(status === "completed" ? { endedAt: 30 } : {}),
+    },
+  ],
+  activityCount: 4,
+  omittedActivityCount: 2,
 })
 
 describe("Lark run presentation driver", () => {
@@ -97,7 +120,17 @@ describe("Lark run presentation driver", () => {
     expect((calls[2].body as { sequence: number }).sequence).toBe(1)
     expect((calls[3].body as { sequence: number }).sequence).toBe(2)
     expect((calls[4].body as { sequence: number }).sequence).toBe(3)
-    expect(JSON.stringify(calls[2].body)).toContain("Queue depth: 2")
+    expect(JSON.stringify(calls[2].body)).toContain("2 queued turns")
+    expect(JSON.stringify(calls[2].body)).toContain("src/release.ts")
+    expect(JSON.stringify(calls[2].body)).toContain("│")
+    expect(typeof (calls[3].body as { element: unknown }).element).toBe("string")
+    expect(JSON.parse((calls[3].body as { element: string }).element)).toEqual(
+      expect.objectContaining({ tag: "action", element_id: "run_actions" })
+    )
+    const finalCard = JSON.parse((calls[4].body as { card: { data: string } }).card.data) as {
+      config: { streaming_mode: boolean }
+    }
+    expect(finalCard.config.streaming_mode).toBe(false)
     expect(ref.platformMessageId).toBe("msg-1")
     expect(updated.opaqueState?.lastAcknowledgedSequence).toBe(2)
     expect(updated.opaqueState?.elementIds).toEqual({
@@ -116,12 +149,51 @@ describe("Lark run presentation driver", () => {
       return { data: { message_id: "msg-1" } }
     })
     const large = snapshot(1)
-    large.summary = "x".repeat(50_000)
+    large.activities = Array.from({ length: 300 }, (_, index) => ({
+      id: `activity-${index}`,
+      kind: "step" as const,
+      category: "status" as const,
+      status: "completed" as const,
+      label: `${index}-${"x".repeat(500)}`,
+      startedAt: index,
+      endedAt: index,
+    }))
+    large.activityCount = 300
+    large.omittedActivityCount = 288
 
     await driver.open(topicTarget, large)
 
     expect(new TextEncoder().encode(createdData).byteLength).toBeLessThanOrEqual(30_000)
-    expect(createdData).toContain("truncated")
+    expect(createdData).toContain("288 earlier activities hidden")
+    expect(createdData).not.toContain("299-")
+  })
+
+  it("never places raw run ids or caller-provided URLs in CardKit callbacks", async () => {
+    let createdData = ""
+    const driver = createLarkRunPresentationDriver(async (_method, path, body) => {
+      if (path === "/cardkit/v1/cards") {
+        createdData = (body as { data: string }).data
+        return { data: { card_id: "card-safe" } }
+      }
+      return { data: { message_id: "message-safe" } }
+    })
+
+    await driver.open(topicTarget, {
+      ...snapshot(1),
+      runId: "13800138000",
+      detailsUrl: "https://example.com/private?token=secret",
+      pendingInterrupt: {
+        id: "13800138000",
+        title: "Approve private operation",
+      },
+      allowedActions: ["stop", "open_details"],
+    })
+
+    expect(createdData).not.toContain("13800138000")
+    expect(createdData).not.toContain("Approve private operation")
+    expect(createdData).not.toContain("token=secret")
+    expect(createdData).toContain("opaque-")
+    expect(createdData).toContain("/agent-runs?run=")
   })
 
   it("uses full replacement when the action component structure changes", async () => {
@@ -225,6 +297,41 @@ describe("Lark run presentation driver", () => {
       expect.objectContaining({ sequence: 1, uuid: updates[0].uuid, operation: "stream_summary" })
     )
     expect(updated.opaqueState?.pendingMutation).toBeUndefined()
+  })
+
+  it("discards pre-safety persisted mutations instead of replaying their body", async () => {
+    const mutationBodies: unknown[] = []
+    const driver = createLarkRunPresentationDriver(async (_method, path, body) => {
+      if (path === "/cardkit/v1/cards") return { data: { card_id: "card-legacy" } }
+      if (path.includes("/elements/")) mutationBodies.push(body)
+      return { data: { message_id: "msg-legacy" } }
+    })
+    const opened = await driver.open(topicTarget, snapshot(1))
+    const poisoned: RunPresentationRef = {
+      ...opened,
+      opaqueState: {
+        ...opened.opaqueState,
+        pendingMutation: {
+          sequence: 1,
+          uuid: "00000000-0000-5000-a000-000000000001",
+          operation: "stream_summary",
+          method: "PUT",
+          path: "/cardkit/v1/cards/card-legacy/elements/run_summary/content",
+          body: {
+            content: "curl https://example.com/private?token=secret user@example.com",
+            sequence: 1,
+            uuid: "00000000-0000-5000-a000-000000000001",
+          },
+        },
+      },
+    }
+
+    await driver.update(poisoned, snapshot(2))
+
+    const payload = JSON.stringify(mutationBodies)
+    expect(payload).not.toContain("curl")
+    expect(payload).not.toContain("token=secret")
+    expect(payload).not.toContain("user@example.com")
   })
 
   it("retries interaction conflict 200810 before degrading", async () => {

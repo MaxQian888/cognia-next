@@ -203,9 +203,19 @@ export interface PlatformAdapter {
   stop(): Promise<void>
   health(): AdapterHealth
 
-  /** Native projection for durable execution runs. Absence selects the generic A2UI/edit fallback. */
+  /**
+   * Native projection for durable execution runs. This is also the TypeScript
+   * connector-plugin extension contract; the plugin bridge preserves the
+   * driver by identity. Absence selects the generic A2UI/edit/append fallback.
+   * Snapshot labels and targets are already IM-safe and must not be replaced
+   * with raw prompts, tool input/output, commands, queries, or error bodies.
+   */
   readonly runPresentation?: RunPresentationDriver
-  /** Explicit runtime/presentation degradation contract for this adapter. */
+  /**
+   * Explicit runtime/presentation degradation contract for built-in and
+   * TypeScript plugin adapters. Declare actual capabilities; callers must not
+   * infer message editing support from the presence of a platform message id.
+   */
   readonly runtimeCapabilities?: ConnectorRuntimeCapabilityMatrix
   /** Native cursor domain expected by the legacy history stream. */
   readonly historyCursorKind?: "message_id" | "timestamp"

@@ -76,6 +76,40 @@ export interface RunArtifactSnapshot {
   mimeType?: string
 }
 
+export type RunActivityKind = "lifecycle" | "tool" | "step" | "artifact" | "approval"
+
+export type RunActivityCategory =
+  | "search"
+  | "read"
+  | "write"
+  | "command"
+  | "integration"
+  | "skill"
+  | "artifact"
+  | "approval"
+  | "status"
+
+export type RunActivityStatus =
+  "pending" | "running" | "completed" | "failed" | "skipped" | "blocked"
+
+export interface RunActivityTarget {
+  kind: "workspace_path" | "resource"
+  label: string
+  /** Required provenance marker for caller-declared non-sensitive resource titles. */
+  safe?: true
+}
+
+export interface RunActivitySnapshot {
+  id: string
+  kind: RunActivityKind
+  category: RunActivityCategory
+  status: RunActivityStatus
+  label: string
+  target?: RunActivityTarget
+  startedAt: number
+  endedAt?: number
+}
+
 export interface RunProjectionSnapshot {
   runId: string
   kind: ExecutionRunKind
@@ -91,6 +125,12 @@ export interface RunProjectionSnapshot {
   recentSteps: RunStepSnapshot[]
   pendingSteps: RunStepSnapshot[]
   pendingStepCount: number
+  /** Safe, platform-neutral execution timeline. Absent on legacy snapshots. */
+  activities?: RunActivitySnapshot[]
+  /** Total safe activities before applying the rolling presentation window. */
+  activityCount?: number
+  /** Number of safe activities omitted from the rolling presentation window. */
+  omittedActivityCount?: number
   /** Durable inbound turns waiting behind this run in the same conversation. */
   connectorQueueDepth?: number
   elapsedMs: number

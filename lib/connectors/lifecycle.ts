@@ -22,22 +22,22 @@ export interface AdapterRuntimeEntry {
   abortController: AbortController
   /** Starter the registry calls on `requeueAdapter`. */
   restart: () => Promise<void>
+  /** Plugin adapters are lifecycle-managed here but not backed by adapterInstances rows. */
+  owner?: "adapter-instance" | "plugin"
 }
 
 const entries = new Map<string, AdapterRuntimeEntry>()
-
-export function registerRunningAdapter(adapterId: string, entry: AdapterRuntimeEntry): void {
-  entries.set(adapterId, entry)
+interface SuspendedAdapterRuntimeEntry {
+  entry: AdapterRuntimeEntry
+  stopped: Promise<void>
+  cancelled: boolean
+  resuming: boolean
 }
+const suspendedEntries = new Map<string, SuspendedAdapterRuntimeEntry>()
 
-export function unregisterRunningAdapter(adapterId: string): void {
-  const entry = entries.get(adapterId)
-  entries.delete(adapterId)
-  if (!entry) return
+function stopEntry(adapterId: string, entry: AdapterRuntimeEntry): Promise<void> {
   entry.abortController.abort()
-  // Stop is best-effort — the caller may already be in teardown — but
-  // log on rejection so operators see why a transport is leaking.
-  void entry.adapter.stop().catch((err) => {
+  return entry.adapter.stop().catch((err) => {
     console.error(
       `[lifecycle] adapter ${adapterId} failed to stop: ${
         err instanceof Error ? err.message : String(err)
@@ -46,12 +46,82 @@ export function unregisterRunningAdapter(adapterId: string): void {
   })
 }
 
+export function registerRunningAdapter(adapterId: string, entry: AdapterRuntimeEntry): void {
+  entries.set(adapterId, entry)
+}
+
+export function unregisterRunningAdapter(adapterId: string): void {
+  const suspended = suspendedEntries.get(adapterId)
+  if (suspended) {
+    suspended.cancelled = true
+    suspendedEntries.delete(adapterId)
+  }
+  const entry = entries.get(adapterId)
+  entries.delete(adapterId)
+  if (!entry) return
+  // Stop is best-effort — the caller may already be in teardown.
+  void stopEntry(adapterId, entry)
+}
+
 export function getRunningAdapter(adapterId: string): AdapterRuntimeEntry | undefined {
   return entries.get(adapterId)
 }
 
 export function listRunningAdapters(): AdapterRuntimeEntry[] {
   return Array.from(entries.values())
+}
+
+/**
+ * Yield transports owned by one subsystem without losing their restart
+ * closures. Used when the local connector runtime hands ownership to a remote
+ * brain: plugin transports must stop to avoid double-dial, then recover when
+ * local ownership returns.
+ */
+export function suspendRunningAdaptersByOwner(owner: NonNullable<AdapterRuntimeEntry["owner"]>): void {
+  for (const [adapterId, entry] of entries) {
+    if (entry.owner !== owner) continue
+    entries.delete(adapterId)
+    suspendedEntries.set(adapterId, {
+      entry,
+      stopped: stopEntry(adapterId, entry),
+      cancelled: false,
+      resuming: false,
+    })
+  }
+}
+
+/**
+ * Restart transports previously suspended for an owner. Failed restarts stay
+ * suspended so the next local-runtime acquisition can retry them.
+ */
+export async function resumeSuspendedAdaptersByOwner(
+  owner: NonNullable<AdapterRuntimeEntry["owner"]>
+): Promise<void> {
+  const candidates = Array.from(suspendedEntries.entries()).filter(
+    ([, suspended]) => suspended.entry.owner === owner && !suspended.resuming
+  )
+  await Promise.all(
+    candidates.map(async ([adapterId, suspended]) => {
+      suspended.resuming = true
+      await suspended.stopped
+      if (suspended.cancelled) return
+      try {
+        await suspended.entry.restart()
+        if (suspended.cancelled) {
+          unregisterRunningAdapter(adapterId)
+          return
+        }
+        suspendedEntries.delete(adapterId)
+      } catch (error) {
+        suspended.resuming = false
+        console.error(
+          `[lifecycle] suspended adapter ${adapterId} failed to resume: ${
+            error instanceof Error ? error.message : String(error)
+          }`
+        )
+      }
+    })
+  )
 }
 
 /**
@@ -138,5 +208,10 @@ export function __resetLifecycleForTesting(): void {
   for (const entry of entries.values()) {
     entry.abortController.abort()
   }
+  for (const suspended of suspendedEntries.values()) {
+    suspended.cancelled = true
+    suspended.entry.abortController.abort()
+  }
   entries.clear()
+  suspendedEntries.clear()
 }

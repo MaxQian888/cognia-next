@@ -1,9 +1,15 @@
 import type {
   RunPresentationDriver,
   RunPresentationRef,
+  RunActivitySnapshot,
   RunProjectionSnapshot,
-  RunStepSnapshot,
 } from "@/types/execution/run"
+import {
+  formatRunActivityTimeline,
+  runActivitiesForPresentation,
+  runTitleForPresentation,
+} from "@/lib/connectors/activity/activity-to-a2ui"
+import { resolveActivityI18n } from "@/lib/connectors/activity/i18n"
 
 type SlackMethod = "POST"
 export type SlackRunRequest = (method: SlackMethod, path: string, body: unknown) => Promise<unknown>
@@ -12,26 +18,23 @@ function clamp(value: string, max = 256): string {
   return value.length <= max ? value : `${value.slice(0, max - 1)}…`
 }
 
-function taskStatus(status: RunStepSnapshot["status"]): string {
+function activityTaskStatus(status: RunActivitySnapshot["status"]): string {
   if (status === "completed" || status === "skipped") return "complete"
   if (status === "failed") return "error"
-  if (status === "in_progress" || status === "blocked") return "in_progress"
+  if (status === "running" || status === "blocked") return "in_progress"
   return "pending"
 }
 
 function chunks(snapshot: RunProjectionSnapshot): Array<Record<string, unknown>> {
-  const steps = [...snapshot.activeSteps, ...snapshot.recentSteps, ...snapshot.pendingSteps].slice(
-    0,
-    48
-  )
+  const i18n = resolveActivityI18n(snapshot.locale)
   return [
-    { type: "plan_update", title: clamp(snapshot.title) },
-    ...steps.map((step) => ({
+    { type: "plan_update", title: clamp(runTitleForPresentation(snapshot, i18n)) },
+    ...runActivitiesForPresentation(snapshot).map((activity) => ({
       type: "task_update",
-      id: clamp(step.id),
-      title: clamp(step.title),
-      status: taskStatus(step.status),
-      ...(step.summary ? { details: clamp(step.summary) } : {}),
+      id: clamp(activity.id),
+      title: clamp(i18n.activityLabel(activity)),
+      status: activityTaskStatus(activity.status),
+      ...(activity.target ? { details: clamp(activity.target.label) } : {}),
     })),
   ]
 }
@@ -70,7 +73,11 @@ export function createSlackRunPresentationDriver(request: SlackRunRequest): RunP
         channel: remoteChatId,
         thread_ts: target.sourceMessageId,
         task_display_mode:
-          snapshot.kind === "workflow" || snapshot.progress.trustworthy ? "plan" : "dense",
+          (snapshot.kind === "workflow" || snapshot.kind === "plan") &&
+          snapshot.progress.trustworthy &&
+          snapshot.progress.total > 0
+            ? "plan"
+            : "timeline",
         chunks: chunks(snapshot),
         ...(target.recipientUserId ? { recipient_user_id: target.recipientUserId } : {}),
         ...(target.recipientTeamId ? { recipient_team_id: target.recipientTeamId } : {}),
@@ -94,7 +101,10 @@ export function createSlackRunPresentationDriver(request: SlackRunRequest): RunP
         channel,
         ts,
         chunks: chunks(snapshot),
-        markdown_text: snapshot.summary ? clamp(snapshot.summary, 12_000) : undefined,
+        markdown_text: clamp(
+          formatRunActivityTimeline(snapshot, resolveActivityI18n(snapshot.locale)),
+          12_000
+        ),
       })
       return ref
     },

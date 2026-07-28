@@ -14,6 +14,8 @@ export function registerAgentRunController(runId: string, controller: AbortContr
 export function installExecutionRunControlHandlers(): {
   agent: RunControlHandler
   workflow: RunControlHandler
+  goal: RunControlHandler
+  plan: RunControlHandler
   dispose(): void
 } {
   const agent: RunControlHandler = async (command) => {
@@ -57,14 +59,56 @@ export function installExecutionRunControlHandlers(): {
     throw new Error(`Unsupported workflow control: ${command.action}`)
   }
 
+  const goal: RunControlHandler = async (command) => {
+    if (command.action === "open_details") return
+    const run = await getExecutionRun(command.runId)
+    if (!run) throw new Error("Execution run not found")
+    const { getGoalRuntime } = await import("@/lib/goal/runtime")
+    const runtime = getGoalRuntime()
+    const result =
+      command.action === "pause"
+        ? await runtime.pauseGoal(run.sourceId)
+        : command.action === "resume"
+          ? await runtime.resumeGoal(run.sourceId)
+          : command.action === "stop"
+            ? await runtime.stopGoal(run.sourceId)
+            : null
+    if (!result) throw new Error(`Unsupported goal control: ${command.action}`)
+  }
+
+  const plan: RunControlHandler = async (command) => {
+    if (command.action === "open_details") return
+    const run = await getExecutionRun(command.runId)
+    if (!run) throw new Error("Execution run not found")
+    const { getPlanRuntime } = await import("@/lib/agent/plan/runtime")
+    const runtime = getPlanRuntime()
+    const result =
+      command.action === "pause"
+        ? await runtime.pausePlan(run.sourceId)
+        : command.action === "resume"
+          ? await runtime.resumePlan(run.sourceId)
+          : command.action === "stop"
+            ? await runtime.cancelPlan(run.sourceId)
+            : null
+    if (!result) throw new Error(`Unsupported plan control: ${command.action}`)
+  }
+
   const unregisterAgent = registerRunControlHandler("agent-turn", agent)
-  const unregisterWorkflow = registerRunControlHandler("workflow", workflow)
+  const unregisterWorkflows = (["workflow", "team", "scheduled"] as const).map((kind) =>
+    registerRunControlHandler(kind, workflow)
+  )
+  const unregisterGoal = registerRunControlHandler("goal", goal)
+  const unregisterPlan = registerRunControlHandler("plan", plan)
   return {
     agent,
     workflow,
+    goal,
+    plan,
     dispose() {
       unregisterAgent()
-      unregisterWorkflow()
+      for (const unregister of unregisterWorkflows) unregister()
+      unregisterGoal()
+      unregisterPlan()
     },
   }
 }

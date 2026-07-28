@@ -99,6 +99,11 @@ function iconFor(name: string): ToolIconKey {
   return ICON_BY_NAME[name.toLowerCase()] ?? "generic"
 }
 
+/** Resolve the canonical icon bucket from a raw tool name without constructing a UI part. */
+export function toolIconKeyForName(rawName: string): ToolIconKey {
+  return iconFor(bareToolName(rawName))
+}
+
 /**
  * Icon buckets whose bursts fold in the "simplified" agent-flow display — the
  * TUI's `groupContextRuns` philosophy: noisy *context-gathering* (read / search

@@ -13,6 +13,8 @@ import { mapWorkflowRunEvent } from "@/lib/execution/sources/workflow"
 import type { WorkflowFanoutSubscriptionRow } from "@/lib/db/connector-types"
 import type { WorkflowRunEventRow, WorkflowRunRow } from "@/types/workflow/visual"
 import { getConnectorConversationState } from "@/lib/db/connector-conversation-state"
+import type { ExecutionRunKind } from "@/types/execution/run"
+import { startAgentStateExecutionBridge } from "./agent-state-bridge"
 
 export function workflowExecutionRunId(sourceRunId: string): string {
   return `execution:workflow:${sourceRunId}`
@@ -20,6 +22,12 @@ export function workflowExecutionRunId(sourceRunId: string): string {
 
 function bindingId(runId: string, adapterId: string, conversationKey: string): string {
   return `execution-binding:${runId}:${adapterId}:${conversationKey}`
+}
+
+export function executionKindForWorkflowRun(sourceRun: WorkflowRunRow): ExecutionRunKind {
+  if (sourceRun.triggerKind === "trigger.team") return "team"
+  if (sourceRun.triggerKind === "trigger.cron") return "scheduled"
+  return "workflow"
 }
 
 function stepPlan(row: WorkflowRunRow): Array<{ id: string; title: string }> {
@@ -43,7 +51,7 @@ export async function syncWorkflowExecutionRun(
     try {
       await createExecutionRun({
         id: runId,
-        kind: "workflow",
+        kind: executionKindForWorkflowRun(sourceRun),
         sourceId: sourceRun.id,
         sessionId: sourceRun.triggeredBy?.sessionId,
         projectId: sourceRun.projectId,
@@ -130,9 +138,11 @@ export async function syncWorkflowExecutionRun(
 }
 
 let subscription: Subscription | null = null
+let stopAgentStateBridge: (() => void) | null = null
 
 export function startWorkflowExecutionBridge(): () => void {
   if (subscription) return stopWorkflowExecutionBridge
+  stopAgentStateBridge = startAgentStateExecutionBridge()
   subscription = liveQuery(async () => {
     const runs = await getDb().workflowRuns.toArray()
     const rows = await Promise.all(
@@ -164,6 +174,8 @@ export function startWorkflowExecutionBridge(): () => void {
 function stopWorkflowExecutionBridge(): void {
   subscription?.unsubscribe()
   subscription = null
+  stopAgentStateBridge?.()
+  stopAgentStateBridge = null
 }
 
 export function __resetWorkflowExecutionBridgeForTesting(): void {

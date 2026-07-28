@@ -45,6 +45,12 @@
       "require": "./dist/index.cjs",
       "default": "./dist/index.js"
     },
+    "./api/connector": {
+      "types": "./dist/connector.d.ts",
+      "import": "./dist/connector.js",
+      "require": "./dist/connector.cjs",
+      "default": "./dist/connector.js"
+    },
     "./api/context-panel": {
       "types": "./dist/context-panel.d.ts",
       "import": "./dist/context-panel.js",

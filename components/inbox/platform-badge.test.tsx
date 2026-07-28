@@ -50,6 +50,14 @@ describe("PlatformBadge", () => {
     expect(screen.getByTestId("platform-badge-telegram")).toHaveClass("extra-class")
   })
 
+  it("reuses the generic badge and icon fallback for a plugin-owned platform id", () => {
+    render(<PlatformBadge platform="acme-chat" />)
+    const badge = screen.getByTestId("platform-badge-acme-chat")
+    expect(badge).toHaveTextContent("AC")
+    expect(badge).toHaveClass("text-muted-foreground")
+    expect(badge.querySelector("svg")).not.toBeNull()
+  })
+
   it("renders all 14 platform kinds without crashing", () => {
     const PLATFORMS = [
       "telegram",

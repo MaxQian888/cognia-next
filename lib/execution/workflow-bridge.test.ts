@@ -2,7 +2,7 @@
 import "fake-indexeddb/auto"
 
 import { __resetDbForTesting, getDb } from "@/lib/db/schema"
-import { syncWorkflowExecutionRun } from "./workflow-bridge"
+import { executionKindForWorkflowRun, syncWorkflowExecutionRun } from "./workflow-bridge"
 import type { WorkflowRunRow } from "@/types/workflow/visual"
 
 describe("workflow execution bridge", () => {
@@ -67,7 +67,7 @@ describe("workflow execution bridge", () => {
     expect(run?.latestSnapshot).toMatchObject({
       kind: "workflow",
       progress: { total: 1, trustworthy: true },
-      activeSteps: [expect.objectContaining({ id: "step-1", title: "Draft" })],
+      activeSteps: [expect.objectContaining({ id: "step-1", title: "Step 1" })],
     })
     expect(await getDb().executionRunEvents.where("runId").equals(run!.id).count()).toBe(3)
     expect(await getDb().executionRunBindings.where("runId").equals(run!.id).first()).toMatchObject(
@@ -76,5 +76,14 @@ describe("workflow execution bridge", () => {
         deliveryMode: "native",
       }
     )
+  })
+
+  it.each([
+    ["trigger.manual", "workflow"],
+    ["trigger.team", "team"],
+    ["trigger.goal.completed", "workflow"],
+    ["trigger.cron", "scheduled"],
+  ] as const)("maps %s to the shared %s run kind", (triggerKind, expectedKind) => {
+    expect(executionKindForWorkflowRun({ triggerKind } as WorkflowRunRow)).toBe(expectedKind)
   })
 })

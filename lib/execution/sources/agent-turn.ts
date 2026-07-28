@@ -5,32 +5,37 @@ import {
   type AppendRunEventInput,
 } from "@/lib/db/execution-runs"
 import type { RunEvent } from "@/types/execution/run"
+import type { RunActivityCategory } from "@/types/execution/run"
+import {
+  safeToolActivityMetadata,
+  type SafeToolActivityMetadata,
+} from "@/lib/execution/run-activity"
 
 type Append = (runId: string, input: AppendRunEventInput) => Promise<RunEvent>
 
-function safeToolSummary(toolName: string): {
-  category: string
+function safeToolSummary(category: RunActivityCategory): {
   running: string
   completed: string
 } {
-  const value = toolName.toLowerCase()
-  if (/search|browse|web/.test(value)) {
-    return { category: "search", running: "Searching documents", completed: "Search completed" }
+  switch (category) {
+    case "search":
+      return { running: "Searching documents", completed: "Search completed" }
+    case "read":
+      return { running: "Reading files", completed: "Files reviewed" }
+    case "write":
+      return { running: "Updating files", completed: "Files updated" }
+    case "command":
+      return { running: "Running a command", completed: "Command completed" }
+    case "skill":
+      return { running: "Using a skill", completed: "Skill completed" }
+    default:
+      return { running: "Using an integration", completed: "Integration completed" }
   }
-  if (/read|list|find|open/.test(value)) {
-    return { category: "read", running: "Reading files", completed: "Files reviewed" }
-  }
-  if (/write|edit|patch|replace/.test(value)) {
-    return { category: "write", running: "Updating files", completed: "Files updated" }
-  }
-  if (/bash|shell|exec|command|terminal/.test(value)) {
-    return { category: "command", running: "Running a command", completed: "Command completed" }
-  }
-  return {
-    category: "integration",
-    running: "Using an integration",
-    completed: "Integration completed",
-  }
+}
+
+export interface AgentRunEventProducerOptions {
+  /** Absolute root used only to prove that a tool path is safe to make relative. */
+  workspaceRoot?: string
 }
 
 /** Capture-stream adapter that emits summaries only and drops reasoning/raw data. */
@@ -39,9 +44,14 @@ export class AgentRunEventProducer {
   private readonly append: Append
   private anonymousToolCounter = 0
   private readonly stepByToolCall = new Map<string, string>()
+  private readonly metadataByToolCall = new Map<string, SafeToolActivityMetadata>()
   private pending: Promise<void> = Promise.resolve()
 
-  constructor(runId: string, append: Append = runEventJournal.append.bind(runEventJournal)) {
+  constructor(
+    runId: string,
+    append: Append = runEventJournal.append.bind(runEventJournal),
+    private readonly options: AgentRunEventProducerOptions = {}
+  ) {
     this.runId = runId
     this.append = append
   }
@@ -63,22 +73,30 @@ export class AgentRunEventProducer {
     if (event.type === "tool-call") {
       const toolCallId = event.id ?? `anonymous-${++this.anonymousToolCounter}`
       const stepId = `tool:${toolCallId}`
-      const summary = safeToolSummary(event.toolName)
+      const metadata = safeToolActivityMetadata(event.toolName, event.input, this.options)
+      const summary = safeToolSummary(metadata.category)
       const label = summary.running
       this.stepByToolCall.set(toolCallId, stepId)
+      this.metadataByToolCall.set(toolCallId, metadata)
       await this.append(
         this.runId,
-        semanticRunEvent("step.added", { stepId, title: label }, { ts })
+        semanticRunEvent("step.added", { stepId, title: label, safeTitle: true }, { ts })
       )
       await this.append(
         this.runId,
-        semanticRunEvent("step.started", { stepId, title: label }, { ts })
+        semanticRunEvent("step.started", { stepId, title: label, safeTitle: true }, { ts })
       )
       await this.append(
         this.runId,
         semanticRunEvent(
           "tool.started",
-          { toolCallId, toolName: summary.category, summary: summary.running },
+          {
+            toolCallId,
+            toolName: metadata.toolName,
+            category: metadata.category,
+            summary: summary.running,
+            ...(metadata.target ? { target: metadata.target } : {}),
+          },
           { ts }
         )
       )
@@ -88,7 +106,9 @@ export class AgentRunEventProducer {
     if (event.type === "tool-result") {
       const toolCallId = event.id ?? `anonymous-result-${++this.anonymousToolCounter}`
       const stepId = this.stepByToolCall.get(toolCallId) ?? `tool:${toolCallId}`
-      const summary = safeToolSummary(event.toolName)
+      const metadata =
+        this.metadataByToolCall.get(toolCallId) ?? safeToolActivityMetadata(event.toolName)
+      const summary = safeToolSummary(metadata.category)
       const label = summary.running
       const failed = event.isError === true
       await this.append(
@@ -97,8 +117,10 @@ export class AgentRunEventProducer {
           failed ? "tool.failed" : "tool.completed",
           {
             toolCallId,
-            toolName: summary.category,
+            toolName: metadata.toolName,
+            category: metadata.category,
             summary: failed ? "Tool failed" : summary.completed,
+            ...(metadata.target ? { target: metadata.target } : {}),
           },
           { ts }
         )
@@ -111,6 +133,8 @@ export class AgentRunEventProducer {
             stepId,
             title: label,
             summary: failed ? "Tool failed" : summary.completed,
+            safeTitle: true,
+            safeSummary: true,
           },
           { ts }
         )

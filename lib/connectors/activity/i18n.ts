@@ -44,6 +44,22 @@ export interface ActivityI18n {
   appendLine: (tools: number, seconds: number, current: string | null) => string
   /** Terminal one-line note for APPEND mode. `{status}` done|failed, `{seconds}` elapsed. */
   appendFinal: (status: "done" | "failed", seconds: number) => string
+  /** Localized durable run status. */
+  runStatus: (status: import("@/types/execution/run").ExecutionRunStatus) => string
+  /** Localized durable run kind. */
+  runKind: (kind: import("@/types/execution/run").ExecutionRunKind) => string
+  /** Localized deterministic activity label; custom safe labels pass through. */
+  activityLabel: (activity: import("@/types/execution/run").RunActivitySnapshot) => string
+  /** Trustworthy completed/total progress. */
+  progress: (completed: number, total: number, percent: number) => string
+  /** Dynamic-run completed activity count. */
+  completedActivities: (count: number) => string
+  /** Rolling-window omission notice. */
+  omittedActivities: (count: number) => string
+  /** Durable inbound turns waiting behind the active run. */
+  queuedTurns: (count: number) => string
+  /** Empty public activity state. */
+  noPublicActivity: string
 }
 
 const EN: ActivityI18n = {
@@ -64,6 +80,49 @@ const EN: ActivityI18n = {
     (current ? ` · ${current}` : ""),
   appendFinal: (status, seconds) =>
     status === "done" ? `✅ Done (${seconds}s)` : `❌ Failed (${seconds}s)`,
+  runStatus: (status) =>
+    ({
+      queued: "Queued",
+      running: "Working",
+      waiting: "Waiting for review",
+      paused: "Paused",
+      recovery_required: "Recovery required",
+      completed: "Task completed",
+      failed: "Task failed",
+      cancelled: "Task cancelled",
+    })[status],
+  runKind: (kind) =>
+    ({
+      "agent-turn": "Agent",
+      workflow: "Workflow",
+      plan: "Plan",
+      goal: "Goal",
+      team: "Team",
+      scheduled: "Scheduled run",
+    })[kind],
+  activityLabel: (activity) =>
+    ({
+      "Run started": "Run started",
+      "Waiting for review": "Waiting for review",
+      "Run paused": "Run paused",
+      "Run resumed": "Run resumed",
+      "Recovery required": "Recovery required",
+      "Presentation degraded": "Presentation degraded",
+      "Run completed": "Run completed",
+      "Run failed": "Run failed",
+      "Run cancelled": "Run cancelled",
+      "Approval required": "Approval required",
+      Approval: "Approval required",
+      "Artifact created": "Artifact created",
+      Step: "Step",
+      Tool: "Tool",
+      Activity: "Activity",
+    })[activity.label] ?? activity.label,
+  progress: (completed, total, percent) => `${completed}/${total} (${percent}%)`,
+  completedActivities: (count) => `${count} completed`,
+  omittedActivities: (count) => `… ${count} earlier activities hidden`,
+  queuedTurns: (count) => `${count} queued turn${count === 1 ? "" : "s"}`,
+  noPublicActivity: "No public activity yet",
 }
 
 const ZH: ActivityI18n = {
@@ -83,6 +142,49 @@ const ZH: ActivityI18n = {
     `⏳ 处理中 —— ${tools} 工具，${seconds}s` + (current ? ` · ${current}` : ""),
   appendFinal: (status, seconds) =>
     status === "done" ? `✅ 完成（${seconds}s）` : `❌ 失败（${seconds}s）`,
+  runStatus: (status) =>
+    ({
+      queued: "等待执行",
+      running: "处理中",
+      waiting: "等待审核",
+      paused: "已暂停",
+      recovery_required: "需要恢复",
+      completed: "任务已完成",
+      failed: "任务失败",
+      cancelled: "任务已取消",
+    })[status],
+  runKind: (kind) =>
+    ({
+      "agent-turn": "智能体",
+      workflow: "工作流",
+      plan: "计划",
+      goal: "目标",
+      team: "团队",
+      scheduled: "定时任务",
+    })[kind],
+  activityLabel: (activity) =>
+    ({
+      "Run started": "开始执行",
+      "Waiting for review": "等待审核",
+      "Run paused": "执行已暂停",
+      "Run resumed": "继续执行",
+      "Recovery required": "需要恢复",
+      "Presentation degraded": "展示已降级",
+      "Run completed": "任务已完成",
+      "Run failed": "任务失败",
+      "Run cancelled": "任务已取消",
+      "Approval required": "需要审批",
+      Approval: "需要审批",
+      "Artifact created": "已创建产物",
+      Step: "步骤",
+      Tool: "工具",
+      Activity: "活动",
+    })[activity.label] ?? activity.label,
+  progress: (completed, total, percent) => `${completed}/${total}（${percent}%）`,
+  completedActivities: (count) => `已完成 ${count} 项`,
+  omittedActivities: (count) => `… 已隐藏更早的 ${count} 项活动`,
+  queuedTurns: (count) => `另有 ${count} 条消息排队`,
+  noPublicActivity: "暂无可公开的执行活动",
 }
 
 const MAPS: Record<string, ActivityI18n> = {

@@ -1,4 +1,4 @@
-import type { PlatformKind } from "./platform-kind"
+import { isPlatformKind, type PlatformKind } from "./platform-kind"
 import type { ChannelKind } from "./event"
 
 export type TopicIsolationCapability = "native" | "unsupported"
@@ -94,7 +94,10 @@ const BUILT_IN_OVERRIDES: Partial<Record<PlatformKind, Partial<ConnectorRuntimeC
 export function builtInConnectorRuntimeCapabilities(
   platform: PlatformKind
 ): ConnectorRuntimeCapabilityMatrix {
-  return { ...FINAL_ONLY, ...BUILT_IN_OVERRIDES[platform] }
+  return {
+    ...FINAL_ONLY,
+    ...(isPlatformKind(platform) ? BUILT_IN_OVERRIDES[platform] : undefined),
+  }
 }
 
 /** Resolve platform features whose contract varies by conversation scope. */

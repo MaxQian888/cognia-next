@@ -1,21 +1,35 @@
 ---
 title: Connector Adapters
-description: How to contribute platform connector adapters (Telegram, Discord, Slack, etc.) from a plugin.
+description: Contribute TypeScript platform adapters, including native durable-run presentation.
 ---
 
 # Connector Adapters
 
-Plugins can contribute new platform connectors by declaring them in `manifest.connectors[]`. The host registers each adapter with the [ConnectorBus](../platform-connectors) so the plugin can receive and send messages just like built-in adapters.
+TypeScript plugins can contribute a `PlatformAdapter` through
+`manifest.connectors[]`. The host registers the returned object with the same
+`ConnectorBus` used by built-in adapters, so policy, routing, durable outbound
+delivery, and execution-run presentation stay shared.
 
 ## Declaration
 
+The `factory` value is the name of a function exported by the plugin entrypoint.
+
 ```json title="cognia-plugin.json"
 {
-  "permissions": ["connectors.register"],
+  "id": "com.example.acme-chat",
+  "type": "frontend",
+  "capabilities": ["connectors"],
   "connectors": [
     {
-      "type": "custom-im",
-      "factory": "./connectors/my-im.js"
+      "type": "acme-chat",
+      "factory": "createAcmeChatAdapter",
+      "transportModes": ["forward-ws"],
+      "configSchema": {
+        "type": "object",
+        "properties": {
+          "endpoint": { "type": "string" }
+        }
+      }
     }
   ]
 }
@@ -23,67 +37,214 @@ Plugins can contribute new platform connectors by declaring them in `manifest.co
 
 ## Adapter factory
 
-```ts title="connectors/my-im.js"
-export function createAdapter(ctx) {
-  return {
-    type: "custom-im",
-    displayName: "My Custom IM",
-    capabilities: ["text", "image"],
+The factory receives plugin identity and the manifest contribution. It returns
+the complete `PlatformAdapter`; inbound events are emitted through the
+`AdapterContext` passed to `start`.
 
-    async connect(config) {
-      // config comes from the user's Settings → Connections form
-      this.ws = new WebSocket(config.wsUrl)
-      this.ws.onmessage = (msg) => {
-        ctx.api.connectors.inbound({
-          platform: "custom-im",
-          conversationKey: `custom-im:${config.accountId}:${msg.chatId}`,
-          sender: { id: msg.fromId, name: msg.fromName },
-          content: { kind: "text", text: msg.text },
+```ts title="src/index.ts"
+import {
+  buildA2UICapabilityMatrix,
+  type AdapterFactory,
+} from "@cognia/plugin-sdk/api/connector"
+
+export const createAcmeChatAdapter: AdapterFactory = ({ pluginId, connectorDef }) => {
+  let socket: WebSocket | undefined
+  let state: "down" | "running" = "down"
+
+  return {
+    id: `${pluginId}:${connectorDef.type}`,
+    meta: {
+      type: "acme-chat",
+      displayName: "Acme Chat",
+      version: "1.0.0",
+      capabilities: [],
+      transportModes: ["forward-ws"],
+      configSchema: connectorDef.configSchema,
+    },
+
+    async start(ctx) {
+      socket = new WebSocket("wss://configured-by-your-adapter")
+      socket.onmessage = (message) => {
+        const inbound = JSON.parse(String(message.data))
+        void ctx.emit({
+          messageId: inbound.id,
+          adapterId: ctx.adapterId,
+          selfId: inbound.botId,
+          platform: "acme-chat",
+          kind: "create",
+          conversationKey: `acme-chat:${ctx.adapterId}:${inbound.roomId}`,
+          conversationRef: {
+            platform: "acme-chat",
+            adapterId: ctx.adapterId,
+            roomId: inbound.roomId,
+          },
+          sender: {
+            id: `acme-chat:${ctx.adapterId}:${inbound.senderId}`,
+            platform: "acme-chat",
+            adapterId: ctx.adapterId,
+            remoteUserId: inbound.senderId,
+          },
+          channel: {
+            id: inbound.roomId,
+            kind: "group",
+            platformChannelId: inbound.roomId,
+          },
+          mentions: { selfMentioned: false, users: [] },
+          timestamp: inbound.timestamp,
+          plainText: inbound.text,
+          segments: [{ type: "text", text: inbound.text }],
+          raw: inbound,
+          channelData: {},
         })
       }
+      state = "running"
     },
 
-    async disconnect() {
-      this.ws?.close()
+    async stop() {
+      socket?.close()
+      state = "down"
     },
 
-    async send(conversationKey, content) {
-      const [, , chatId] = conversationKey.split(":")
-      this.ws.send(JSON.stringify({ chatId, text: content.text }))
+    health() {
+      return { state }
     },
 
-    async healthCheck() {
-      return this.ws?.readyState === WebSocket.OPEN
+    a2uiCapability: () => buildA2UICapabilityMatrix({ Text: "native" }),
+
+    async send(request) {
+      socket?.send(JSON.stringify(request))
+      return { ok: true }
     },
   }
 }
 ```
 
+The exact inbound and outbound structures are exported by the connector types.
+Conversation keys must be stable and include enough account and topic identity
+to prevent two remote conversations from sharing a local session.
+
+## Durable Agent and workflow presentation
+
+All execution types—Agent, Workflow, Plan, Goal, Team, and Scheduled—flow
+through one host-owned chain:
+
+`ExecutionRun → RunProjectionSnapshot → RunPresentationDriver`
+
+A TypeScript adapter can add `runPresentation` to render the safe snapshot with
+a platform-native timeline. The plugin bridge preserves the driver object
+unchanged. Do not create a plugin-specific run model or derive activities from
+raw prompts and tool payloads.
+
+```ts title="src/fake-run-driver.ts"
+import type {
+  RunPresentationDriver,
+  RunPresentationRef,
+} from "@cognia/plugin-sdk/api/connector"
+
+export const fakeRunDriver: RunPresentationDriver = {
+  capabilities: {
+    textStreaming: true,
+    messageEditing: true,
+    interactiveControls: false,
+  },
+
+  async open(target, snapshot, options) {
+    const ref: RunPresentationRef = {
+      platformMessageId: `run-${snapshot.runId}`,
+      opaqueState: { revision: snapshot.revision },
+    }
+    await options?.checkpoint?.(ref)
+    return ref
+  },
+
+  async update(ref, snapshot, options) {
+    const next = {
+      ...ref,
+      opaqueState: { revision: snapshot.revision },
+    }
+    await options?.checkpoint?.(next)
+    return next
+  },
+
+  async finish(ref, snapshot, options) {
+    const frozen = {
+      ...ref,
+      opaqueState: { revision: snapshot.revision, frozen: true },
+    }
+    await options?.checkpoint?.(frozen)
+    return frozen
+  },
+}
+```
+
+`RunProjectionSnapshot.activities` contains stable activity IDs, deterministic
+status/category labels, optional redacted targets, and timestamps. The host
+excludes reasoning, raw prompts, tool arguments, commands, queries, URL
+parameters, file contents, raw outputs, and error bodies before the driver is
+called. A driver must keep that boundary intact.
+
+`finish` freezes the progress presentation. The final assistant answer is sent
+separately through the normal outbound path in the same conversation or topic.
+
+## Runtime capabilities and fallback
+
+Declare `runtimeCapabilities` beside the driver. These values describe the
+platform's real behavior; a platform message ID alone does not mean a message
+can be edited.
+
+```ts
+return {
+  // ...the base PlatformAdapter members
+  runPresentation: fakeRunDriver,
+  runtimeCapabilities: {
+    topicIsolation: "native",
+    unmentionedDelivery: true,
+    historyPagination: false,
+    liveSteer: true,
+    textStreaming: true,
+    componentMutation: false,
+    fullReplacement: false,
+    messageEditing: true,
+    appendFallback: true,
+    interactiveControls: false,
+    followUpBubbles: false,
+    staticMenus: false,
+    suggestedPrompts: false,
+    ambiguousDelivery: "remote_idempotent",
+  },
+}
+```
+
+When `runPresentation` is absent or fails for the current run, the host uses the
+same safe activity projection and selects the best available delivery mode:
+
+1. native presenter
+2. generic A2UI card edit
+3. throttled append-only updates
+4. terminal status only
+
+A native failure is fixed to the generic path for that run to prevent duplicate
+timelines. The next run may try the native driver again.
+
+## Python connector v1
+
+Python-backed connectors support the serializable `describe`, `start`, `stop`,
+and `send` bridge. They intentionally do not expose `runPresentation` or
+`runtimeCapabilities` in v1 because driver functions and checkpoints cannot
+cross that process boundary safely. They receive the generic A2UI/plain-text
+fallback automatically.
+
 ## Lifecycle
 
-1. **Plugin activate** — `connectors-bridge.ts` calls `registerPluginAdapters(pluginId, manifest, exports)`.
-2. **User configures** — The adapter appears in Settings → Connections → Adapters.
-3. **User enables** — The host calls `adapter.connect(config)`.
-4. **Inbound messages** — The adapter calls `ctx.api.connectors.inbound(event)`; the bus routes it.
-5. **Outbound messages** — The bus calls `adapter.send(conversationKey, content)`.
-6. **Plugin disable / uninstall** — The host calls `adapter.disconnect()` and unregisters the adapter.
-
-## Capabilities
-
-Declare what your adapter supports:
-
-| Capability | Meaning             |
-| ---------- | ------------------- |
-| `text`     | Plain text messages |
-| `image`    | Image attachments   |
-| `file`     | File attachments    |
-| `voice`    | Voice messages      |
-| `reaction` | Message reactions   |
-| `reply`    | Threaded replies    |
-
-## Conversation keys
-
-Use a stable format: `platform:accountId:threadId`. This is how Cognia identifies conversations across inbound and outbound flows.
+1. On plugin enable, the host resolves every declared factory and registers its
+   returned adapter.
+2. On adapter start, the host supplies `AdapterContext`, including the inbound
+   `emit` callback and cancellation signal.
+3. Inbound events enter the shared connector routing pipeline.
+4. Outbound messages and final answers use the durable outbound queue.
+5. Execution updates use the native driver or the capability-aware generic
+   fallback.
+6. On plugin disable or uninstall, the host stops and unregisters the adapter.
 
 ## Related
 
@@ -91,7 +252,7 @@ Use a stable format: `platform:accountId:threadId`. This is how Cognia identifie
   <Card
     title="Platform Connectors"
     href="../platform-connectors"
-    description="How the ConnectorBus works."
+    description="How ConnectorBus routing and delivery work."
   />
   <Card title="Workflow Nodes" href="./workflow-nodes" description="Contributing workflow nodes." />
 </Cards>

@@ -110,6 +110,13 @@ jest.mock("@/lib/connectors/im-rate/registry", () => ({
   evaluateImRate: (...args: unknown[]) => mockEvaluateImRate(...(args as [])),
 }))
 
+const mockWaitForExecutionRunPresentationFreeze = jest.fn(async () => true)
+jest.mock("./run-presentation/runner", () => ({
+  __esModule: true,
+  waitForExecutionRunPresentationFreeze: (...args: unknown[]) =>
+    mockWaitForExecutionRunPresentationFreeze(...args),
+}))
+
 // Spy on the agent-trace root-span close while keeping the rest of the emitter
 // real (resolveSendOptions still mints a real root span via startSpan).
 jest.mock("@cognia/agent-trace/emitter", () => ({
@@ -241,6 +248,7 @@ beforeEach(async () => {
   tryBuildMemoryDepsImpl = jest.fn(async () => undefined)
   endSpanMock.mockClear()
   mockBindExecutionRun.mockClear()
+  mockWaitForExecutionRunPresentationFreeze.mockClear()
   installRuntime(bus, { runAndCapture: DEFAULT_RUN_AND_CAPTURE })
 })
 
@@ -509,6 +517,13 @@ describe("installRuntime — ai-run (live-activity card wiring)", () => {
     __resetBusForTesting()
     const bus = getBus()
     installRuntime(bus, { runAndCapture: capturing })
+    mockWaitForExecutionRunPresentationFreeze.mockImplementationOnce(async () => {
+      const authoritativeReplies = (await getDb().outboundQueue.toArray()).filter(
+        (job) => job.source === "ai-run"
+      )
+      expect(authoritativeReplies).toHaveLength(0)
+      return true
+    })
     // No edit() on the adapter (none registered) → APPEND mode (workflow⇄IM
     // visibility parity): one compact progress line per boundary, NOT the
     // cumulative card.
@@ -521,6 +536,35 @@ describe("installRuntime — ai-run (live-activity card wiring)", () => {
       expect.arrayContaining(["run.started", "tool.started", "run.completed"])
     )
     expect(await getDb().executionRunBindings.where("runId").equals(run!.id).count()).toBe(1)
+    expect(mockWaitForExecutionRunPresentationFreeze).toHaveBeenCalledWith(run!.id)
+  })
+
+  it("audits a bounded freeze timeout before enqueueing the independent final reply", async () => {
+    mockWaitForExecutionRunPresentationFreeze.mockResolvedValueOnce(false)
+    const event = makeEvent({ conversationKey: "telegram:adapter_1:chat_freeze_timeout" })
+
+    await callHandler(event, "ai-run")
+
+    const jobs = await getDb().outboundQueue.toArray()
+    expect(jobs.some((job) => job.source === "ai-run")).toBe(true)
+    expect(await getDb().connectorAudit.toArray()).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          reason: "run_projection_freeze_timeout",
+          conversationKey: event.conversationKey,
+        }),
+      ])
+    )
+  })
+
+  it("uses the configured character name as the safe Agent run title", async () => {
+    await getDb().characters.put({ id: "char_abc", name: "Support Agent" } as never)
+    const event = makeEvent({ conversationKey: "telegram:adapter_1:chat_named" })
+
+    await callHandler(event, "ai-run")
+
+    const run = await getDb().executionRuns.where("kind").equals("agent-turn").first()
+    expect(run?.title).toBe("Support Agent")
   })
 
   it("creates one durable native-preferred binding for an edit-capable adapter", async () => {

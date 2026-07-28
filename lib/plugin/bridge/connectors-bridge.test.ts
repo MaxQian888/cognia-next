@@ -11,13 +11,28 @@ import "fake-indexeddb/auto"
 
 const mockRegisterAdapter = jest.fn()
 const mockUnregisterAdapter = jest.fn()
+const mockDispatchInboundFull = jest.fn().mockResolvedValue(undefined)
 
 jest.mock("@/lib/connectors/bus", () => ({
   getBus: jest.fn(() => ({
     registerAdapter: mockRegisterAdapter,
     unregisterAdapter: mockUnregisterAdapter,
+    dispatchInboundFull: mockDispatchInboundFull,
   })),
   __resetBusForTesting: jest.fn(),
+}))
+
+const mockRunningAdapters = new Map<string, unknown>()
+const mockRegisterRunningAdapter = jest.fn((id: string, entry: unknown) => {
+  mockRunningAdapters.set(id, entry)
+})
+const mockUnregisterRunningAdapter = jest.fn((id: string) => {
+  mockRunningAdapters.delete(id)
+})
+jest.mock("@/lib/connectors/lifecycle", () => ({
+  getRunningAdapter: (id: string) => mockRunningAdapters.get(id),
+  registerRunningAdapter: (id: string, entry: unknown) => mockRegisterRunningAdapter(id, entry),
+  unregisterRunningAdapter: (id: string) => mockUnregisterRunningAdapter(id),
 }))
 
 // Only the transport-facing proxy is faked; `isPythonBackedContribution` and
@@ -113,6 +128,11 @@ describe("connectors-bridge python backend", () => {
 
   beforeEach(() => {
     mockRegisterAdapter.mockClear()
+    mockUnregisterAdapter.mockClear()
+    mockDispatchInboundFull.mockClear()
+    mockRegisterRunningAdapter.mockClear()
+    mockUnregisterRunningAdapter.mockClear()
+    mockRunningAdapters.clear()
     __resetBridgeForTesting()
     __resetPythonEventBusForTesting()
     mockCreateProxy.mockReset()
@@ -161,7 +181,11 @@ describe("connectors-bridge python backend", () => {
     expect(adapter.id).toBe("py.connector:mastodon")
     expect(adapter.meta.displayName).toBe("Py Mail")
     // `health()` answers synchronously from wrapper-tracked state.
-    expect(adapter.health()).toEqual({ state: "down" })
+    expect(adapter.health()).toEqual(expect.objectContaining({ state: "running" }))
+    // Python connector v1 intentionally stays on the generic A2UI/plain-text
+    // projection path; live TypeScript driver functions do not cross IPC.
+    expect(adapter.runPresentation).toBeUndefined()
+    expect(adapter.runtimeCapabilities).toBeUndefined()
   })
 
   it("forwards inbound python pushes into ctx.emit and tracks health", async () => {
@@ -169,17 +193,15 @@ describe("connectors-bridge python backend", () => {
     await registerPluginAdapters("py.connector", pythonManifest(), {})
     const adapter = mockRegisterAdapter.mock.calls[0]![0] as PlatformAdapter
 
-    const emit = jest.fn().mockResolvedValue(undefined)
-    await adapter.start({ adapterId: "py.connector:mastodon", emit } as never)
     expect(adapter.health().state).toBe("running")
 
-    // A push from the Python subprocess must reach the bus via ctx.emit.
+    // A push from the Python subprocess must reach the shared bus context.
     dispatchPythonPluginEvent({
       pluginId: "py.connector",
       kind: "emit",
       data: { contributionId: "mastodon", channel: "inbound", payload: { id: "msg-1" } },
     })
-    expect(emit).toHaveBeenCalledWith({ id: "msg-1" })
+    expect(mockDispatchInboundFull).toHaveBeenCalledWith({ id: "msg-1" })
 
     // Non-inbound channels and other contributions are ignored.
     dispatchPythonPluginEvent({
@@ -187,7 +209,7 @@ describe("connectors-bridge python backend", () => {
       kind: "emit",
       data: { contributionId: "mastodon", channel: "telemetry", payload: { id: "nope" } },
     })
-    expect(emit).toHaveBeenCalledTimes(1)
+    expect(mockDispatchInboundFull).toHaveBeenCalledTimes(1)
 
     // stop() detaches the inbound subscription.
     await adapter.stop()
@@ -197,26 +219,18 @@ describe("connectors-bridge python backend", () => {
       kind: "emit",
       data: { contributionId: "mastodon", channel: "inbound", payload: { id: "msg-2" } },
     })
-    expect(emit).toHaveBeenCalledTimes(1)
+    expect(mockDispatchInboundFull).toHaveBeenCalledTimes(1)
   })
 
-  it("reports start failure as down and detaches the inbound subscription", async () => {
+  it("does not expose a python adapter whose automatic start fails", async () => {
     stubProxy({ start: jest.fn().mockRejectedValue(new Error("python boom")) })
+    const errorSpy = jest.spyOn(console, "error").mockImplementation(() => undefined)
     await registerPluginAdapters("py.connector", pythonManifest(), {})
-    const adapter = mockRegisterAdapter.mock.calls[0]![0] as PlatformAdapter
 
-    const emit = jest.fn()
-    await expect(
-      adapter.start({ adapterId: "py.connector:mastodon", emit } as never)
-    ).rejects.toThrow("python boom")
-    expect(adapter.health()).toEqual({ state: "down", reason: "python boom" })
-
-    dispatchPythonPluginEvent({
-      pluginId: "py.connector",
-      kind: "emit",
-      data: { contributionId: "mastodon", channel: "inbound", payload: { id: "x" } },
-    })
-    expect(emit).not.toHaveBeenCalled()
+    expect(mockUnregisterAdapter).toHaveBeenCalledWith("py.connector:mastodon")
+    expect(mockRegisterRunningAdapter).not.toHaveBeenCalled()
+    expect(getPluginAdapterIds("py.connector")).toHaveLength(0)
+    errorSpy.mockRestore()
   })
 })
 
@@ -225,6 +239,10 @@ describe("connectors-bridge python backend", () => {
 beforeEach(() => {
   mockRegisterAdapter.mockClear()
   mockUnregisterAdapter.mockClear()
+  mockDispatchInboundFull.mockClear()
+  mockRegisterRunningAdapter.mockClear()
+  mockUnregisterRunningAdapter.mockClear()
+  mockRunningAdapters.clear()
   __resetBridgeForTesting()
 })
 
@@ -238,6 +256,52 @@ describe("registerPluginAdapters", () => {
 
     expect(exports.createMastodonAdapter).toHaveBeenCalledTimes(1)
     expect(mockRegisterAdapter).toHaveBeenCalledWith(adapter)
+  })
+
+  it("preserves TypeScript run presentation extensions on the registered adapter", async () => {
+    const runPresentation = {
+      capabilities: { interactiveControls: false },
+      open: jest.fn(),
+      update: jest.fn(),
+      finish: jest.fn(),
+    }
+    const runtimeCapabilities = {
+      topicIsolation: "native",
+      unmentionedDelivery: true,
+      historyPagination: true,
+      liveSteer: true,
+      textStreaming: true,
+      componentMutation: false,
+      fullReplacement: false,
+      messageEditing: true,
+      appendFallback: true,
+      interactiveControls: false,
+      followUpBubbles: false,
+      staticMenus: false,
+      suggestedPrompts: false,
+      ambiguousDelivery: "remote_idempotent",
+    } as const
+    const adapter = {
+      ...makeAdapter("mastodon_timeline"),
+      runPresentation,
+      runtimeCapabilities,
+    } as PlatformAdapter
+    const exports = { createMastodonAdapter: jest.fn().mockResolvedValue(adapter) }
+
+    await registerPluginAdapters(
+      "com.example.mastodon",
+      makeManifest("createMastodonAdapter"),
+      exports
+    )
+
+    const registered = mockRegisterAdapter.mock.calls[0]![0] as PlatformAdapter
+    expect(registered.runPresentation).toBe(runPresentation)
+    expect(registered.runtimeCapabilities).toBe(runtimeCapabilities)
+    expect(adapter.start).toHaveBeenCalledTimes(1)
+    expect(mockRegisterRunningAdapter).toHaveBeenCalledWith(
+      adapter.id,
+      expect.objectContaining({ adapter, owner: "plugin", abortController: expect.anything() })
+    )
   })
 
   it("tracks adapter id under the plugin id", async () => {
@@ -312,6 +376,7 @@ describe("unregisterPluginAdapters", () => {
     await registerPluginAdapters("com.example.mastodon", manifest, exports)
     unregisterPluginAdapters("com.example.mastodon")
 
+    expect(mockUnregisterRunningAdapter).toHaveBeenCalledWith("mastodon_adp_3")
     expect(mockUnregisterAdapter).toHaveBeenCalledWith("mastodon_adp_3")
   })
 

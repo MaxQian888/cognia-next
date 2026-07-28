@@ -27,7 +27,11 @@ import { createElement } from "react"
 import type { LucideIcon } from "lucide-react"
 import { BirdIcon, GitBranchIcon, HashIcon, MailIcon, MessageCircleIcon } from "lucide-react"
 
-import type { PlatformKind } from "@/types/connectors/platform-kind"
+import {
+  isPlatformKind,
+  type BuiltInPlatformKind,
+  type PlatformKind,
+} from "@/types/connectors/platform-kind"
 
 export type PlatformIconComponent = React.ComponentType<{ className?: string }>
 
@@ -82,7 +86,7 @@ const DingTalkIcon = brandIcon(DINGTALK_PATH, "DingTalk")
 /**
  * Per-platform glyph. Brand SVGs where available; lucide fallbacks otherwise.
  */
-const PLATFORM_ICON: Record<PlatformKind, PlatformIconComponent> = {
+const PLATFORM_ICON: Record<BuiltInPlatformKind, PlatformIconComponent> = {
   telegram: TelegramIcon,
   discord: DiscordIcon,
   slack: SlackIcon,
@@ -105,7 +109,7 @@ const FALLBACK_ICON: PlatformIconComponent = MessageCircleIcon as unknown as Pla
 
 /** Resolve the glyph component for a platform kind (never returns undefined). */
 export function getPlatformIcon(kind: PlatformKind): PlatformIconComponent {
-  return PLATFORM_ICON[kind] ?? FALLBACK_ICON
+  return isPlatformKind(kind) ? PLATFORM_ICON[kind] : FALLBACK_ICON
 }
 
 /**

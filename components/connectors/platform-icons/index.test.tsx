@@ -4,7 +4,7 @@
 
 import { render } from "@testing-library/react"
 import { getPlatformIcon } from "./index"
-import { ALL_PLATFORM_KINDS, type PlatformKind } from "@/types/connectors/platform-kind"
+import { ALL_PLATFORM_KINDS } from "@/types/connectors/platform-kind"
 
 describe("getPlatformIcon", () => {
   it("returns a renderable component for every platform kind", () => {
@@ -40,8 +40,8 @@ describe("getPlatformIcon", () => {
     expect(getPlatformIcon("qq-official")).toBe(getPlatformIcon("onebot"))
   })
 
-  it("falls back to a generic glyph for an unknown kind", () => {
-    const Icon = getPlatformIcon("totally-unknown" as PlatformKind)
+  it("falls back to a generic glyph for a plugin-owned platform id", () => {
+    const Icon = getPlatformIcon("acme-chat")
     const { container } = render(<Icon className="size-4" />)
     expect(container.querySelector("svg")).not.toBeNull()
   })

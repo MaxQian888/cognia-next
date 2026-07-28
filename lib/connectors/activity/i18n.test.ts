@@ -66,4 +66,27 @@ describe("resolveActivityI18n", () => {
       expect(i18n.appendFinal("failed", 10).length).toBeGreaterThan(0)
     }
   })
+
+  it("provides localized durable-run timeline labels", () => {
+    const en = resolveActivityI18n("en")
+    const zh = resolveActivityI18n("zh-CN")
+
+    expect(en.runStatus("running")).toBe("Working")
+    expect(zh.runStatus("completed")).toBe("任务已完成")
+    expect(en.runKind("workflow")).toBe("Workflow")
+    expect(zh.runKind("scheduled")).toBe("定时任务")
+    expect(
+      zh.activityLabel({
+        id: "lifecycle:done",
+        kind: "lifecycle",
+        category: "status",
+        status: "completed",
+        label: "Run completed",
+        startedAt: 1,
+      })
+    ).toBe("任务已完成")
+    expect(en.progress(2, 4, 50)).toBe("2/4 (50%)")
+    expect(zh.completedActivities(3)).toBe("已完成 3 项")
+    expect(en.omittedActivities(5)).toBe("… 5 earlier activities hidden")
+  })
 })

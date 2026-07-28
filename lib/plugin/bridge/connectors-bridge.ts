@@ -15,8 +15,11 @@
  * through the existing bus/runner machinery unchanged.
  *
  * NOTE: Plugin connector adapters run in the renderer (TypeScript), same as
- * built-in adapters. Rust transport primitives (axum, keyring) are accessed
- * via the same Tauri command shims in `lib/connectors/tauri/commands.ts`.
+ * built-in adapters. Their `PlatformAdapter.runPresentation` and
+ * `runtimeCapabilities` members are first-class optional extension points and
+ * pass through unchanged. Python-backed connector v1 remains on the generic
+ * A2UI/plain-text projection because live presenter functions cannot cross the
+ * subprocess boundary.
  */
 
 import type { PluginManifest, PluginConnectorDef } from "@/types/plugin/plugin"
@@ -37,6 +40,13 @@ import {
   subscribePythonContributionPush,
 } from "@/lib/plugin/bridge/_shared/python-backed-proxy"
 import { canRunPythonBackedContribution } from "@/lib/plugin/python/experimental-flag"
+import type { PluginAdapterFactory } from "@/types/connectors/plugin-adapter"
+import { buildAdapterContext } from "@/lib/connectors/adapter-context"
+import {
+  getRunningAdapter,
+  registerRunningAdapter,
+  unregisterRunningAdapter,
+} from "@/lib/connectors/lifecycle"
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -46,23 +56,53 @@ import { canRunPythonBackedContribution } from "@/lib/plugin/python/experimental
  * (the full type lives in types/connectors/adapter.ts; we use a structural
  * subset here so the bridge stays decoupled from internal adapter details).
  */
-export interface PluginAdapterContext {
-  pluginId: string
-  connectorDef: PluginConnectorDef
-}
+export type { PluginAdapterContext } from "@/types/connectors/plugin-adapter"
 
 /** A plugin's exported module — keys are function names. */
 export type PluginExports = Record<string, unknown>
 
-/** Factory function signature a plugin must export for each connector. */
-export type AdapterFactory = (
-  ctx: PluginAdapterContext
-) => PlatformAdapter | Promise<PlatformAdapter>
+/**
+ * Factory function signature a TypeScript plugin exports for each connector.
+ *
+ * Returning `runPresentation` opts the adapter into native durable-run
+ * presentation; omitting it selects the host's capability-aware generic
+ * projection. `runtimeCapabilities` must describe the real platform surface
+ * rather than infer editability from a returned message id.
+ */
+export type AdapterFactory = PluginAdapterFactory
 
 // ── Registry ─────────────────────────────────────────────────────────────────
 
 /** pluginId → list of adapter ids registered by that plugin */
 const pluginAdapterIds = new Map<string, string[]>()
+
+async function startPluginAdapter(
+  adapter: PlatformAdapter,
+  bus: ReturnType<typeof getBus>
+): Promise<void> {
+  if (getRunningAdapter(adapter.id)) {
+    throw new Error(`Adapter id is already running: ${adapter.id}`)
+  }
+  const abortController = new AbortController()
+  try {
+    await adapter.start(
+      buildAdapterContext({
+        adapterId: adapter.id,
+        signal: abortController.signal,
+        bus,
+      })
+    )
+  } catch (error) {
+    abortController.abort()
+    throw error
+  }
+  registerRunningAdapter(adapter.id, {
+    adapter,
+    abortController,
+    owner: "plugin",
+    restart: async () => startPluginAdapter(adapter, bus),
+  })
+}
 
 /**
  * Build a `PlatformAdapter` whose behaviour lives in the plugin's Python
@@ -196,6 +236,16 @@ export async function registerPluginAdapters(
     }
 
     bus.registerAdapter(adapter)
+    try {
+      await startPluginAdapter(adapter, bus)
+    } catch (err) {
+      bus.unregisterAdapter(adapter.id)
+      console.error(
+        `[connectors-bridge] plugin ${pluginId}: adapter "${adapter.id}" failed to start —`,
+        err
+      )
+      continue
+    }
     ids.push(adapter.id)
   }
 
@@ -213,6 +263,7 @@ export function unregisterPluginAdapters(pluginId: string): void {
   if (!ids) return
   const bus = getBus()
   for (const id of ids) {
+    unregisterRunningAdapter(id)
     bus.unregisterAdapter(id)
   }
   pluginAdapterIds.delete(pluginId)

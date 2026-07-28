@@ -32,6 +32,20 @@ function snapshot(kind: RunProjectionSnapshot["kind"]): RunProjectionSnapshot {
     elapsedMs: 1_000,
     artifacts: [],
     allowedActions: ["stop"],
+    activities: Array.from({ length: 14 }, (_, index) => ({
+      id: `tool:${index}`,
+      kind: "tool" as const,
+      category: index === 0 ? ("read" as const) : ("integration" as const),
+      status: index === 0 ? ("running" as const) : ("completed" as const),
+      label: index === 0 ? "Read" : `Tool ${index}`,
+      ...(index === 0
+        ? { target: { kind: "workspace_path" as const, label: "src/index.ts" } }
+        : {}),
+      startedAt: index,
+      ...(index === 0 ? {} : { endedAt: index + 1 }),
+    })),
+    activityCount: 14,
+    omittedActivityCount: 2,
   }
 }
 
@@ -65,10 +79,21 @@ describe("Slack run presentation driver", () => {
     expect(calls[0].body.task_display_mode).toBe("plan")
     const chunks = calls[0].body.chunks as Array<{ title?: string }>
     expect(Math.max(...chunks.map((chunk) => chunk.title?.length ?? 0))).toBeLessThanOrEqual(256)
+    const tasks = chunks.filter((chunk) => (chunk as { type?: string }).type === "task_update")
+    expect(tasks).toHaveLength(12)
+    expect(tasks[0]).toEqual(
+      expect.objectContaining({
+        id: "tool:0",
+        title: "Read",
+        status: "in_progress",
+        details: "src/index.ts",
+      })
+    )
     expect(ref.platformMessageId).toBe("C1:123.4")
+    expect(calls[2].body.markdown_text).toContain("Task completed")
   })
 
-  it("uses dense mode for dynamic agent runs and requires an initiating message", async () => {
+  it("uses timeline mode for dynamic agent runs and requires an initiating message", async () => {
     const driver = createSlackRunPresentationDriver(async () => ({ ok: true, ts: "1" }))
     await expect(
       driver.open(
@@ -78,11 +103,11 @@ describe("Slack run presentation driver", () => {
     ).rejects.toThrow("sourceMessageId")
 
     let mode: unknown
-    const dense = createSlackRunPresentationDriver(async (_method, _path, body) => {
+    const timeline = createSlackRunPresentationDriver(async (_method, _path, body) => {
       mode = (body as { task_display_mode: unknown }).task_display_mode
       return { ok: true, ts: "1" }
     })
-    await dense.open(
+    await timeline.open(
       {
         adapterId: "slack-1",
         conversationKey: "slack:slack-1:C1",
@@ -91,6 +116,29 @@ describe("Slack run presentation driver", () => {
       },
       snapshot("agent-turn")
     )
-    expect(mode).toBe("dense")
+    expect(mode).toBe("timeline")
+  })
+
+  it("uses timeline mode when a workflow has no trustworthy structured plan", async () => {
+    let mode: unknown
+    const driver = createSlackRunPresentationDriver(async (_method, _path, body) => {
+      mode = (body as { task_display_mode: unknown }).task_display_mode
+      return { ok: true, ts: "1" }
+    })
+
+    await driver.open(
+      {
+        adapterId: "slack-1",
+        conversationKey: "slack:slack-1:C1",
+        sourceMessageId: "0.1",
+        deliveryTarget,
+      },
+      {
+        ...snapshot("workflow"),
+        progress: { completed: 0, total: 0, trustworthy: false },
+      }
+    )
+
+    expect(mode).toBe("timeline")
   })
 })

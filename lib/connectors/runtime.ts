@@ -72,6 +72,9 @@ import { createExecutionRun, putExecutionRunBinding } from "@/lib/db/execution-r
 import { AgentRunEventProducer } from "@/lib/execution/sources/agent-turn"
 import { registerAgentRunController } from "@/lib/execution/control-handlers"
 import type { ConnectorLiveSteerCoordinator } from "./live-steer"
+import { resolveSessionProjectRoot } from "@/lib/workspace/roots"
+import { getAllProjects } from "@/lib/db/projects"
+import { waitForExecutionRunPresentationFreeze } from "./run-presentation/runner"
 
 /**
  * Turn-capture timeout for connector AI-run turns. Raised above the 5-min chat
@@ -572,6 +575,8 @@ async function resolveInboundSendOptions(params: {
 }): Promise<{
   sendOptions: Awaited<ReturnType<typeof resolveSendOptions>>
   appSettings: AppSettings | undefined
+  runTitle: string
+  workspaceRoot?: string
 }> {
   const { event, session, resolved, override, adapterRow, emitTrace } = params
 
@@ -665,7 +670,15 @@ async function resolveInboundSendOptions(params: {
     traceSurface: "connector",
   })
 
-  return { sendOptions, appSettings }
+  const projects = await getAllProjects().catch(() => [])
+  const workspaceRoot = resolveSessionProjectRoot(session, projects).root?.path
+
+  return {
+    sendOptions,
+    appSettings,
+    runTitle: character?.name?.trim() || "Agent run",
+    ...(workspaceRoot ? { workspaceRoot } : {}),
+  }
 }
 
 /**
@@ -952,14 +965,15 @@ export function installRuntime(bus: ReturnType<typeof getBus>, opts: RuntimeOpti
         // the shared helper so an ai-run and a draft prepare from identical
         // grounding. `emitTrace: true` mints the connector root span, ended on
         // the capture-error / success branches below.
-        const { sendOptions, appSettings } = await resolveInboundSendOptions({
-          event,
-          session,
-          resolved: effectiveResolved,
-          override,
-          adapterRow,
-          emitTrace: true,
-        })
+        const { sendOptions, appSettings, runTitle, workspaceRoot } =
+          await resolveInboundSendOptions({
+            event,
+            session,
+            resolved: effectiveResolved,
+            override,
+            adapterRow,
+            emitTrace: true,
+          })
 
         // ── Suppression gate: short-circuit before the sidecar call ──
         if (sendOptions.suppressedReason) {
@@ -1016,7 +1030,7 @@ export function installRuntime(bus: ReturnType<typeof getBus>, opts: RuntimeOpti
           sourceId: storedMsg.id,
           sessionId: session.id,
           projectId: session.projectId,
-          title: "Agent run",
+          title: runTitle,
           status: "queued",
           initiator: {
             platformIdentityId: event.sender.id,
@@ -1052,7 +1066,9 @@ export function installRuntime(bus: ReturnType<typeof getBus>, opts: RuntimeOpti
             updatedAt: Date.now(),
           })
         }
-        const runProducer = new AgentRunEventProducer(executionRunId)
+        const runProducer = new AgentRunEventProducer(executionRunId, undefined, {
+          workspaceRoot,
+        })
         await runProducer.start()
         // Abort propagation: thread the per-adapter teardown signal (aborted
         // by the install teardown and by a lifecycle requeue/stop) into the
@@ -1168,10 +1184,26 @@ export function installRuntime(bus: ReturnType<typeof getBus>, opts: RuntimeOpti
         unregisterRunController()
         unregisterLiveSteer?.()
 
+        let terminalProjectionRecorded = false
         try {
           await runProducer.finish("completed", Date.now(), "Response ready")
+          terminalProjectionRecorded = true
         } catch {
           /* best-effort — the final reply still flows through below */
+        }
+        if (terminalProjectionRecorded) {
+          const frozen = await waitForExecutionRunPresentationFreeze(executionRunId)
+          if (!frozen) {
+            await appendAudit({
+              adapterId: outboundTarget.adapterId,
+              kind: "adapter.error",
+              at: Date.now(),
+              conversationKey: outboundTarget.conversationKey,
+              reason: "run_projection_freeze_timeout",
+              message: "Execution timeline freeze timed out before the final reply",
+              fields: { runId: executionRunId },
+            }).catch(() => undefined)
+          }
         }
 
         // ── Project text + A2UI surfaces into MessageSegment[] ──

@@ -7,6 +7,7 @@ import {
   summarizeContextCounts,
   summarizeToolCall,
   tallyToolNames,
+  toolIconKeyForName,
   type ToolPartLike,
 } from "./tool-summary"
 
@@ -35,6 +36,14 @@ describe("normalizeToolName", () => {
   it("falls back to tool for nameless dynamic tools", () => {
     const part = { type: "dynamic-tool", state: "input-available" } as unknown as ToolPartLike
     expect(normalizeToolName(part)).toBe("tool")
+  })
+})
+
+describe("toolIconKeyForName", () => {
+  it("reuses the canonical tool-name classification without requiring a UI part", () => {
+    expect(toolIconKeyForName("tool-mcp__cognia-tools__bash")).toBe("terminal")
+    expect(toolIconKeyForName("Read")).toBe("read")
+    expect(toolIconKeyForName("custom_tool")).toBe("generic")
   })
 })
 
