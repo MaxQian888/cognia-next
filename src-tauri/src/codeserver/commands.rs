@@ -29,7 +29,7 @@ fn read_text_or_empty(path: &Path) -> Result<String, String> {
     }
 }
 
-fn atomic_write_text(path: &Path, contents: &str) -> Result<(), String> {
+pub(super) fn atomic_write_text(path: &Path, contents: &str) -> Result<(), String> {
     let parent = path
         .parent()
         .ok_or_else(|| format!("write {}: path has no parent", path.display()))?;

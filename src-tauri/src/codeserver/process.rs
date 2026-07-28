@@ -165,15 +165,7 @@ impl CodeServerState {
             .map_err(|error| format!("resolve code-server root: {error:#}"))?;
         tokio::task::spawn_blocking(move || {
             super::profile::migrate_legacy_profile_state(&migration_root)?;
-            if profile == IdeProfile::Managed {
-                let native = super::profile::ProfilePaths::new(&migration_root, IdeProfile::Native);
-                let managed =
-                    super::profile::ProfilePaths::new(&migration_root, IdeProfile::Managed);
-                super::profile::synchronize_portable_preferences(
-                    &native.user_data_dir,
-                    &managed.user_data_dir,
-                )?;
-            }
+            super::profile::sync_portable_preferences_once(&migration_root, profile)?;
             Ok::<(), String>(())
         })
         .await

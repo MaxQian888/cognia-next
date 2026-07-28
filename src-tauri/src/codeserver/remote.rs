@@ -115,14 +115,7 @@ impl RemoteCodeServerState {
 
         let code_server_root = self.data_dir.join("code-server");
         super::profile::migrate_legacy_profile_state(&code_server_root)?;
-        if profile == IdeProfile::Managed {
-            let native = ProfilePaths::new(&code_server_root, IdeProfile::Native);
-            let managed = ProfilePaths::new(&code_server_root, IdeProfile::Managed);
-            super::profile::synchronize_portable_preferences(
-                &native.user_data_dir,
-                &managed.user_data_dir,
-            )?;
-        }
+        super::profile::sync_portable_preferences_once(&code_server_root, profile)?;
         let paths = ProfilePaths::new(&code_server_root, profile);
         std::fs::create_dir_all(&paths.user_data_dir)
             .map_err(|error| format!("create {}: {error}", paths.user_data_dir.display()))?;

@@ -40,6 +40,15 @@ profile. The old shim remains export-only for one major release. Settings,
 keybindings, and theme are filtered before synchronization; extension state,
 secrets, trust decisions, and tickets are never copied.
 
+That synchronization is a **one-shot seed**, guarded by its own
+`.portable-preferences-v1` marker beside the migration marker, and it is
+**additive** — it writes only the allowlisted keys and leaves everything else in
+the managed profile alone. After the seed, managed `settings.json` belongs to
+the renderer's theme sync and to whatever you set from inside VS Code, and
+managed `keybindings.json` belongs to you outright. Re-running it on every
+launch would hand the native profile the last word on the keys both allowlists
+name, and would delete the rest.
+
 Dev Mode uses the same catalog and authorization path and adds schema
 diagnostics, resource watching, temporary proxy rebuilds, RPC inspection,
 permission simulation, and local development signing.

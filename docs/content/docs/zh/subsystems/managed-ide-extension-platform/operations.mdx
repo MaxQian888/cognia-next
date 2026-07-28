@@ -31,6 +31,12 @@ IDE restart。未提交 artifact 没有 activation marker，code-server 重启�
 一个 major 内保留导出能力。只同步过滤后的 settings、keybinding 与 theme；扩展
 state、secret、trust decision 与 ticket 不复制。
 
+该同步是**一次性播种**，由迁移 marker 旁边独立的 `.portable-preferences-v1`
+把关，并且是**增量的**——只写 allowlist 内的键，managed profile 里的其余内容原样
+保留。播种之后，managed 的 `settings.json` 归渲染端的主题同步与你在 VS Code 内的
+设置所有，`keybindings.json` 完全归你。每次启动都重跑，会让 native profile 对两个
+allowlist 共有的键拥有最终发言权，并抹掉其余内容。
+
 Dev Mode 复用相同 catalog 与授权路径，并增加 schema diagnostics、资源监听、临时
 proxy rebuild、RPC inspection、permission simulation 与本地开发签名。
 

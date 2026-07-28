@@ -103,35 +103,131 @@ fn copy_tree_missing(source: &Path, destination: &Path) -> Result<(), String> {
     Ok(())
 }
 
-/// Refresh the managed profile's portable preferences from the native trust
-/// domain. This is intentionally one-way: native extension settings and
-/// keybindings remain authoritative, while managed receives only the allowlist.
+/// Marker for the one-shot native → managed preference seed.
+///
+/// A sibling of `.legacy-migrated-v1` rather than part of it: the seed has to
+/// run on the first **managed** launch, which can be long after the legacy tree
+/// was migrated — a user may live in the native profile for weeks before ever
+/// opening the managed one.
+const PORTABLE_PREFERENCES_MARKER: &str = ".portable-preferences-v1";
+
+/// Seed the managed profile's portable preferences from the native trust
+/// domain, exactly once.
+///
+/// This used to run on every managed launch, and
+/// [`synchronize_portable_preferences`] replaced whole files. Managed
+/// `settings.json` is also written by `codeserver_write_user_settings` and by
+/// the renderer's theme sync, and managed `keybindings.json` has no other
+/// writer at all — so every launch deleted whatever the user had set from
+/// inside VS Code, and handed the native profile the last word on the eight
+/// keys the two allowlists share. Two authorities over one key is the defect;
+/// seeding once is what the operations guide always described.
+pub fn sync_portable_preferences_once(
+    code_server_root: &Path,
+    profile: IdeProfile,
+) -> Result<(), String> {
+    if profile != IdeProfile::Managed {
+        return Ok(());
+    }
+    let marker = code_server_root
+        .join("profiles")
+        .join(PORTABLE_PREFERENCES_MARKER);
+    if marker.exists() {
+        return Ok(());
+    }
+    let native = ProfilePaths::new(code_server_root, IdeProfile::Native);
+    let managed = ProfilePaths::new(code_server_root, IdeProfile::Managed);
+    synchronize_portable_preferences(&native.user_data_dir, &managed.user_data_dir)?;
+    let parent = marker
+        .parent()
+        .ok_or_else(|| "invalid preference marker".to_string())?;
+    std::fs::create_dir_all(parent)
+        .map_err(|error| format!("create {}: {error}", parent.display()))?;
+    // Written only after a successful seed, so a partial failure retries on the
+    // next launch instead of being recorded as done.
+    std::fs::write(&marker, b"1\n").map_err(|error| format!("write {}: {error}", marker.display()))
+}
+
+/// Copy the managed profile's portable preferences across from the native trust
+/// domain. One-way and **additive**: only the allowlisted keys are written, so
+/// anything else already in the managed profile — the renderer's theme
+/// projection, and whatever the user set from inside VS Code — survives.
+///
+/// Callers should go through [`sync_portable_preferences_once`].
 pub fn synchronize_portable_preferences(native: &Path, managed: &Path) -> Result<(), String> {
     let native_user = native.join("User");
     let managed_user = managed.join("User");
     std::fs::create_dir_all(&managed_user)
         .map_err(|error| format!("create {}: {error}", managed_user.display()))?;
-    let settings_path = native_user.join("settings.json");
-    if let Ok(raw) = std::fs::read_to_string(&settings_path) {
-        if let Ok(value) = serde_json::from_str::<Value>(&crate::agents::io::strip_jsonc(&raw)) {
-            let filtered = filter_synchronized_settings(&value);
-            let bytes = serde_json::to_vec_pretty(&filtered)
-                .map_err(|error| format!("encode synchronized settings: {error}"))?;
-            std::fs::write(managed_user.join("settings.json"), bytes)
-                .map_err(|error| format!("write managed settings: {error}"))?;
+
+    if let Some(native_settings) = read_jsonc(&native_user.join("settings.json")) {
+        let projected = filter_synchronized_settings(&native_settings);
+        let mut merged = read_jsonc(&managed_user.join("settings.json"))
+            .and_then(|value| value.as_object().cloned())
+            .unwrap_or_default();
+        for (key, value) in projected.as_object().into_iter().flatten() {
+            merged.insert(key.clone(), value.clone());
         }
+        write_json_pretty(&managed_user.join("settings.json"), &Value::Object(merged))?;
     }
-    let keybindings_path = native_user.join("keybindings.json");
-    if let Ok(raw) = std::fs::read_to_string(&keybindings_path) {
-        if let Ok(value) = serde_json::from_str::<Value>(&crate::agents::io::strip_jsonc(&raw)) {
-            let filtered = filter_synchronized_keybindings(&value);
-            let bytes = serde_json::to_vec_pretty(&filtered)
-                .map_err(|error| format!("encode synchronized keybindings: {error}"))?;
-            std::fs::write(managed_user.join("keybindings.json"), bytes)
-                .map_err(|error| format!("write managed keybindings: {error}"))?;
-        }
+
+    if let Some(native_keybindings) = read_jsonc(&native_user.join("keybindings.json")) {
+        let projected = filter_synchronized_keybindings(&native_keybindings);
+        let existing = read_jsonc(&managed_user.join("keybindings.json"));
+        let merged = merge_keybindings(existing.as_ref(), &projected);
+        write_json_pretty(&managed_user.join("keybindings.json"), &merged)?;
     }
     Ok(())
+}
+
+/// Read a JSON-with-comments document, tolerating an absent or malformed file
+/// the same way the original implementation did.
+fn read_jsonc(path: &Path) -> Option<Value> {
+    let raw = std::fs::read_to_string(path).ok()?;
+    serde_json::from_str::<Value>(&crate::agents::io::strip_jsonc(&raw)).ok()
+}
+
+fn write_json_pretty(path: &Path, value: &Value) -> Result<(), String> {
+    let text = serde_json::to_string_pretty(value)
+        .map_err(|error| format!("encode {}: {error}", path.display()))?;
+    // Reuses the writer the settings command already goes through, so VS Code's
+    // file watcher never observes a half-written document.
+    super::commands::atomic_write_text(path, &text)
+}
+
+/// Union the seeded bindings with whatever the managed profile already had,
+/// keyed on the `(key, when, command)` triple so a re-seed is idempotent and a
+/// user's own binding for an unlisted command is never dropped.
+fn merge_keybindings(existing: Option<&Value>, projected: &Value) -> Value {
+    let identity = |entry: &Value| {
+        (
+            entry
+                .get("key")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_string(),
+            entry
+                .get("when")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_string(),
+            entry
+                .get("command")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_string(),
+        )
+    };
+    let projected_entries: Vec<&Value> = projected.as_array().into_iter().flatten().collect();
+    let seeded: std::collections::HashSet<_> =
+        projected_entries.iter().map(|e| identity(e)).collect();
+    let mut merged: Vec<Value> = projected_entries.into_iter().cloned().collect();
+    for entry in existing.into_iter().filter_map(Value::as_array).flatten() {
+        if !seeded.contains(&identity(entry)) {
+            merged.push(entry.clone());
+        }
+    }
+    Value::Array(merged)
 }
 
 fn filter_synchronized_settings(value: &Value) -> Value {
@@ -303,7 +399,7 @@ mod tests {
     }
 
     #[test]
-    fn synchronization_refreshes_preferences_after_the_one_shot_migration() {
+    fn direct_synchronization_overlays_the_allowlist_without_clobbering() {
         let root = tempfile::tempdir().unwrap();
         let native = ProfilePaths::new(root.path(), IdeProfile::Native);
         let managed = ProfilePaths::new(root.path(), IdeProfile::Managed);
@@ -315,6 +411,19 @@ mod tests {
         .unwrap();
         migrate_legacy_profile_state(root.path()).unwrap();
 
+        // Stand in for the two writers that own this file after the seed: the
+        // renderer's theme projection and the user typing inside VS Code.
+        std::fs::write(
+            managed.user_data_dir.join("User/settings.json"),
+            // `br##"…"##` because the colour literal contains `"#`, which would
+            // otherwise close a single-hash raw string.
+            br##"{
+              "editor.fontSize": 14,
+              "workbench.colorCustomizations": { "editorCursor.foreground": "#ff0000" },
+              "editor.stickyScroll.enabled": true
+            }"##,
+        )
+        .unwrap();
         std::fs::write(
             native.user_data_dir.join("User/settings.json"),
             br#"{
@@ -331,5 +440,129 @@ mod tests {
         .unwrap();
         assert_eq!(value["editor.fontSize"], 18);
         assert!(value.get("native.extension.token").is_none());
+        // The whole point of the change: keys the allowlist does not name are
+        // no longer collateral damage.
+        assert!(value.get("workbench.colorCustomizations").is_some());
+        assert_eq!(value["editor.stickyScroll.enabled"], true);
+    }
+
+    #[test]
+    fn synchronization_preserves_user_authored_keybindings() {
+        let root = tempfile::tempdir().unwrap();
+        let native = ProfilePaths::new(root.path(), IdeProfile::Native);
+        let managed = ProfilePaths::new(root.path(), IdeProfile::Managed);
+        std::fs::create_dir_all(native.user_data_dir.join("User")).unwrap();
+        std::fs::create_dir_all(managed.user_data_dir.join("User")).unwrap();
+        // This sync is the ONLY writer of managed keybindings, so a whole-file
+        // replacement deleted anything the user bound inside the managed IDE.
+        std::fs::write(
+            managed.user_data_dir.join("User/keybindings.json"),
+            br#"[{ "key": "ctrl+k m", "command": "mine.custom" }]"#,
+        )
+        .unwrap();
+        std::fs::write(
+            native.user_data_dir.join("User/keybindings.json"),
+            br#"[
+              { "key": "ctrl+p", "command": "workbench.action.quickOpen" },
+              { "key": "ctrl+e", "command": "evil.extension.exfiltrate" }
+            ]"#,
+        )
+        .unwrap();
+
+        synchronize_portable_preferences(&native.user_data_dir, &managed.user_data_dir).unwrap();
+
+        let value: Value = serde_json::from_slice(
+            &std::fs::read(managed.user_data_dir.join("User/keybindings.json")).unwrap(),
+        )
+        .unwrap();
+        let commands: Vec<&str> = value
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|entry| entry.get("command").and_then(Value::as_str))
+            .collect();
+        assert!(commands.contains(&"workbench.action.quickOpen"));
+        assert!(commands.contains(&"mine.custom"));
+        assert!(!commands.contains(&"evil.extension.exfiltrate"));
+    }
+
+    #[test]
+    fn portable_preferences_are_seeded_once_and_never_again() {
+        let root = tempfile::tempdir().unwrap();
+        let native = ProfilePaths::new(root.path(), IdeProfile::Native);
+        let managed = ProfilePaths::new(root.path(), IdeProfile::Managed);
+        std::fs::create_dir_all(native.user_data_dir.join("User")).unwrap();
+        std::fs::write(
+            native.user_data_dir.join("User/settings.json"),
+            br#"{ "editor.fontSize": 14 }"#,
+        )
+        .unwrap();
+
+        sync_portable_preferences_once(root.path(), IdeProfile::Managed).unwrap();
+        assert!(root
+            .path()
+            .join("profiles")
+            .join(PORTABLE_PREFERENCES_MARKER)
+            .exists());
+
+        // Both sides move the way they would in real use: the renderer rewrites
+        // managed, the user changes native. A second launch must not touch
+        // managed again — that was the data loss.
+        std::fs::write(
+            managed.user_data_dir.join("User/settings.json"),
+            br#"{ "editor.fontSize": 22 }"#,
+        )
+        .unwrap();
+        std::fs::write(
+            native.user_data_dir.join("User/settings.json"),
+            br#"{ "editor.fontSize": 9 }"#,
+        )
+        .unwrap();
+        sync_portable_preferences_once(root.path(), IdeProfile::Managed).unwrap();
+
+        let value: Value = serde_json::from_slice(
+            &std::fs::read(managed.user_data_dir.join("User/settings.json")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(value["editor.fontSize"], 22);
+    }
+
+    #[test]
+    fn a_native_launch_never_touches_the_managed_profile() {
+        let root = tempfile::tempdir().unwrap();
+        let managed = ProfilePaths::new(root.path(), IdeProfile::Managed);
+
+        sync_portable_preferences_once(root.path(), IdeProfile::Native).unwrap();
+
+        assert!(!root
+            .path()
+            .join("profiles")
+            .join(PORTABLE_PREFERENCES_MARKER)
+            .exists());
+        assert!(!managed.user_data_dir.join("User").exists());
+    }
+
+    #[test]
+    fn a_failed_seed_leaves_no_marker_so_the_next_launch_retries() {
+        let root = tempfile::tempdir().unwrap();
+        let native = ProfilePaths::new(root.path(), IdeProfile::Native);
+        let managed = ProfilePaths::new(root.path(), IdeProfile::Managed);
+        std::fs::create_dir_all(native.user_data_dir.join("User")).unwrap();
+        std::fs::write(
+            native.user_data_dir.join("User/settings.json"),
+            br#"{ "editor.fontSize": 14 }"#,
+        )
+        .unwrap();
+        // Managed's `User` path is occupied by a regular file, so create_dir_all
+        // fails and the seed cannot complete.
+        std::fs::create_dir_all(&managed.user_data_dir).unwrap();
+        std::fs::write(managed.user_data_dir.join("User"), b"not a directory").unwrap();
+
+        assert!(sync_portable_preferences_once(root.path(), IdeProfile::Managed).is_err());
+        assert!(!root
+            .path()
+            .join("profiles")
+            .join(PORTABLE_PREFERENCES_MARKER)
+            .exists());
     }
 }
