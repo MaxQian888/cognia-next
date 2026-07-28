@@ -1,3 +1,4 @@
+import { CountUp } from "@web/components/count-up"
 import { Reveal } from "@web/components/reveal"
 import { Section, SectionHeading } from "@web/components/section"
 import { SiteLink } from "@web/components/site-link"
@@ -31,22 +32,24 @@ export function TrustSection({ copy, common, evidence, locale, docsOrigin }: Tru
   const state = freshness(evidence)
   const release = latestRelease(evidence)
 
-  const stats: Array<{ label: string; value: string }> = [
+  // `string | number` on purpose: `CountUp` counts a number and renders a
+  // string verbatim, so "52" ticks while "AGPL-3.0-or-later" and "—" do not.
+  const stats: Array<{ label: string; value: string | number }> = [
     {
       label: copy.starsLabel,
-      value: evidence.repo.stars === null ? "—" : String(evidence.repo.stars),
+      value: evidence.repo.stars === null ? "—" : evidence.repo.stars,
     },
     {
       label: copy.contributorsLabel,
-      value: evidence.contributors === null ? "—" : String(evidence.contributors),
+      value: evidence.contributors === null ? "—" : evidence.contributors,
     },
     { label: copy.licenseLabel, value: evidence.repo.license ?? "—" },
     { label: copy.releasesLabel, value: release?.tagName ?? copy.noReleasesYet },
   ]
 
   return (
-    <Section tone="paper">
-      <SectionHeading title={copy.title} subtitle={copy.subtitle} />
+    <Section id="trust" tone="paper">
+      <SectionHeading eyebrow={copy.eyebrow} title={copy.title} subtitle={copy.subtitle} />
 
       <Reveal className="mt-14">
         <div className="grid gap-14 lg:grid-cols-[minmax(0,1fr)_minmax(0,14rem)] lg:gap-16">
@@ -108,7 +111,9 @@ export function TrustSection({ copy, common, evidence, locale, docsOrigin }: Tru
               <dt className="font-mono text-xs uppercase tracking-widest text-muted">
                 {stat.label}
               </dt>
-              <dd className="mt-2 text-2xl font-medium tracking-tight text-ink">{stat.value}</dd>
+              <dd className="mt-2 text-2xl font-medium tracking-tight text-ink">
+                <CountUp value={stat.value} />
+              </dd>
             </div>
           ))}
         </dl>

@@ -4,6 +4,7 @@ import {
   formatDate,
   formatMonth,
   freshness,
+  bumpCounts,
   groupChangelog,
   isInstallerAsset,
   latestRelease,
@@ -177,6 +178,30 @@ describe("groupChangelog", () => {
 
   it("returns nothing for an empty feed", () => {
     expect(groupChangelog([])).toEqual([])
+  })
+})
+
+describe("bumpCounts", () => {
+  it("counts each severity", () => {
+    const entries: ChangesetEntry[] = [
+      { id: "a", bump: "minor", summary: "A", date: null },
+      { id: "b", bump: "patch", summary: "B", date: null },
+      { id: "c", bump: "patch", summary: "C", date: null },
+      { id: "d", bump: "major", summary: "D", date: null },
+    ]
+    expect(bumpCounts(entries)).toEqual({ major: 1, minor: 1, patch: 2 })
+  })
+
+  it("keeps every key at zero for an empty feed, so the bar has a stable shape", () => {
+    expect(bumpCounts([])).toEqual({ major: 0, minor: 0, patch: 0 })
+  })
+
+  it("skips an unrecognised bump rather than inventing a severity for it", () => {
+    const entries = [
+      { id: "a", bump: "patch", summary: "A", date: null },
+      { id: "b", bump: "nonsense", summary: "B", date: null },
+    ] as unknown as ChangesetEntry[]
+    expect(bumpCounts(entries)).toEqual({ major: 0, minor: 0, patch: 1 })
   })
 })
 

@@ -35,6 +35,30 @@ describe("SiteLink", () => {
     expect(link).toHaveAttribute("target", "_blank")
   })
 
+  it("marks an external destination as leaving the origin", () => {
+    const { container } = render(
+      <SiteLink
+        target={{ label: "Source", href: "https://github.com/x/y" }}
+        locale="en"
+        docsOrigin={DOCS}
+      />
+    )
+    const svg = container.querySelector("a svg")
+    expect(svg).toBeInTheDocument()
+    // Inside the anchor and hidden, so the accessible name stays exactly the
+    // label — this is what lets ~40 links gain a mark without touching a single
+    // `getByRole(…, { name })` assertion anywhere on the site.
+    expect(svg).toHaveAttribute("aria-hidden", "true")
+    expect(screen.getByRole("link", { name: "Source" })).toBeInTheDocument()
+  })
+
+  it("does not mark internal routes, which stay in this tab", () => {
+    const { container } = render(
+      <SiteLink target={{ label: "Trust", route: "/trust" }} locale="en" docsOrigin={DOCS} />
+    )
+    expect(container.querySelector("a svg")).toBeNull()
+  })
+
   it("renders children in place of the label when given", () => {
     render(
       <SiteLink target={{ label: "Trust", route: "/trust" }} locale="en" docsOrigin={DOCS}>

@@ -49,7 +49,10 @@ describe("WorkbenchBento", () => {
         reconstruction={en.reconstruction}
       />
     )
-    const line = container.querySelector('[aria-hidden="true"].bg-action\\/50')
+    // The path is now drawn by `Hairline`, which is `aria-hidden` in both the
+    // animated and the reduced-motion branch. The meaning it carries lives in
+    // the borders, the copy and the one screen-reader sentence beside it.
+    const line = container.querySelector('[aria-hidden="true"].bg-action')
     expect(line).toBeInTheDocument()
   })
 

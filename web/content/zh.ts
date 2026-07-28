@@ -96,6 +96,7 @@ export const zh: SiteCopy = {
     themeLight: "浅色",
     themeDark: "深色",
     themeSystem: "跟随系统",
+    sectionIndexLabel: "本页章节",
   },
 
   footer: {
@@ -167,6 +168,10 @@ export const zh: SiteCopy = {
     stale: "上次成功读取 {date}",
     learnMore: "了解更多",
     contextPathLabel: "贯穿工作台的共享上下文路径",
+    breadcrumbHome: "首页",
+    onThisPage: "本页内容",
+    copyCommand: "复制",
+    copiedCommand: "已复制",
   },
 
   reconstruction: {
@@ -292,12 +297,21 @@ export const zh: SiteCopy = {
         { label: "受权限约束的动作", detail: "工具声明它会碰什么，由你确认" },
         { label: "桌面优先", detail: "本地文件、终端、长时间任务" },
       ],
+      ticket: {
+        label: "本页跟随的任务",
+        repositoryLabel: "仓库",
+        branchLabel: "分支",
+        checkLabel: "失败的检查",
+        planLabel: "计划",
+        stateLabel: "状态",
+      },
       stageAlt:
         "Cognia 桌面工作空间：左侧活动栏，中间是展示 Agent 计划的对话线程，右侧工作台里是当前任务的仓库 diff。",
       stageCaption: "这个工作空间正在跑的，就是本页从头到尾跟随的那条任务。",
     },
 
     signature: {
+      eyebrow: "一条任务，从头到尾",
       title: "一条任务。每一步都看得见。",
       subtitle: "计划、工具、审批、测试与产物，留在同一条可审阅的线程里。",
       taskLabel: "任务",
@@ -373,6 +387,7 @@ export const zh: SiteCopy = {
     },
 
     workbench: {
+      eyebrow: "你的工作台",
       title: "任务需要的一切，在同一个工作台里。",
       subtitle:
         "对话、Agent、工作流、知识与插件不是五个共用登录态的产品。它们读写同一份工作上下文。",
@@ -399,6 +414,7 @@ export const zh: SiteCopy = {
     },
 
     desktop: {
+      eyebrow: "桌面优先",
       title: "一个贴着工作本身的工作空间。",
       subtitle: "工作在你的机器上：文件、终端、仓库、工具。工作空间也在。",
       capabilities: [
@@ -416,6 +432,7 @@ export const zh: SiteCopy = {
     },
 
     run: {
+      eyebrow: "按你的方式运行",
       title: "选择模型。看清边界。",
       subtitle:
         "不同的活儿配得上不同的运行时。每一种方式都写清：什么会离开你的设备、谁会收到它、哪些动作需要你确认。",
@@ -472,6 +489,7 @@ export const zh: SiteCopy = {
     },
 
     connections: {
+      eyebrow: "有后果的连接",
       title: "接上工具，别丢了任务。",
       subtitle: "一个连接只有在你能说清它读什么、能做什么、什么时候必须问，才是有用的。",
       headings: {
@@ -513,6 +531,7 @@ export const zh: SiteCopy = {
     },
 
     trust: {
+      eyebrow: "可核对的信任",
       title: "在开放中构建。在使用中受控。",
       subtitle: "四件你可以自己核验的事——不用相信一个营销页面对其中任何一件的说法。",
       cards: [
@@ -561,8 +580,28 @@ export const zh: SiteCopy = {
     },
 
     finalCta: {
+      eyebrow: "从这里开始",
       title: "把你的 Agent 收进一个开放的工作空间。",
       support: "桌面优先。开源。为真实工作而建。",
+      indexLabel: "今天你能拿到什么",
+      rows: [
+        { key: "license", label: "许可证" },
+        { key: "platforms", label: "支持平台" },
+        { key: "release", label: "最新发布" },
+        { key: "changes", label: "待发布的变更" },
+      ],
+      changesSuffix: "条，自上次发布以来",
+    },
+
+    sectionIndex: {
+      hero: "概览",
+      task: "一条任务",
+      workbench: "工作台",
+      desktop: "桌面",
+      run: "运行方式",
+      connections: "连接",
+      trust: "信任",
+      start: "开始",
     },
   },
 
@@ -867,6 +906,7 @@ export const zh: SiteCopy = {
       title: "主张与来源",
       subtitle: "这张表里没有一行是手工维护的。每一行都指向该主张被读取的那件东西。",
       headings: { claim: "主张", source: "来源" },
+      liveLabel: "实时数据",
       rows: [
         {
           claim: "应用以 AGPL-3.0-or-later 授权",
@@ -921,6 +961,7 @@ export const zh: SiteCopy = {
       ],
     },
     platformsTitle: "平台",
+    platformHint: { label: "已识别", unknown: "未能识别平台" },
   },
 
   useCases: {
@@ -933,6 +974,9 @@ export const zh: SiteCopy = {
       provenance:
         "这条剧本是 dogfooding：它描述的是如何用 Cognia 开发 Cognia 自己的仓库。它不是客户案例，也不含任何效能数字。",
       scriptTitle: "剧本，一步一步",
+      stageAlt:
+        "Cognia 工作台正在跑这条剧本：左边是承载任务的线程，右边的工作空间里是它产出的东西。",
+      stageCaption: "同一个工作台，跑的就是本页这条剧本。",
       steps: [
         {
           rail: "上下文",
@@ -1012,6 +1056,9 @@ export const zh: SiteCopy = {
       provenance:
         "这条剧本使用的是今天已经在跑的能力——阅读、抽取、捕获与记忆。它描述的是工具做了什么，不是某个研究者用它们取得了什么成果。",
       scriptTitle: "剧本，一步一步",
+      stageAlt:
+        "Cognia 工作台正在跑这条剧本：左边是承载任务的线程，右边的工作空间里是它产出的东西。",
+      stageCaption: "同一个工作台，跑的就是本页这条剧本。",
       steps: [
         {
           rail: "收集",
@@ -1091,5 +1138,7 @@ export const zh: SiteCopy = {
     emptyState: "暂无条目。",
     bumpLabels: { major: "破坏性", minor: "功能", patch: "修复" },
     entryCount: "{count} 条",
+    distributionLabel: "按版本级别",
+    monthIndexLabel: "跳到某个月份",
   },
 }

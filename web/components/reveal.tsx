@@ -2,6 +2,7 @@
 
 import { motion, useReducedMotion } from "motion/react"
 import type { ReactNode } from "react"
+import { EASE_ENTRANCE } from "@web/lib/motion"
 
 interface RevealProps {
   children: ReactNode
@@ -47,7 +48,7 @@ export function Reveal({
 
   const initial = variant === "scale" ? { opacity: 0, scale: 0.96 } : { opacity: 0, y: 12 }
   const target = variant === "scale" ? { opacity: 1, scale: 1 } : { opacity: 1, y: 0 }
-  const transition = { duration: 0.5, delay, ease: [0.22, 0.61, 0.36, 1] as const }
+  const transition = { duration: 0.5, delay, ease: EASE_ENTRANCE }
 
   if (trigger === "mount") {
     return (

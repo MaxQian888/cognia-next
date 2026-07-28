@@ -1,4 +1,9 @@
 @import "tailwindcss";
+/* Supplies the `animate-in` / `data-[state=open]:…` utility vocabulary that
+ * shadcn's generated markup assumes. Utilities are emitted only for classes
+ * actually used, and everything it emits is time-driven `animation`, so the
+ * reduced-motion belt below already governs it. */
+@import "tw-animate-css";
 
 /* ADR-0092 §10 — one semantic token set, two modes. `dark:` utilities key off a
  * class on <html> so next-themes can drive it without a flash. */
@@ -46,6 +51,11 @@
   --on-stage: #f3f1ec;
   --on-stage-muted: #8e959b;
   --on-stage-hairline: #2a333a;
+
+  /* The site's entrance curve. Kept in lockstep with `EASE_ENTRANCE` in
+     `web/lib/motion.ts`, which the motion components use and whose suite
+     asserts this declaration still matches. */
+  --ease-entrance: cubic-bezier(0.22, 0.61, 0.36, 1);
 }
 
 .dark {
@@ -177,9 +187,84 @@
       pointer-events: none;
     }
 
-    /* Beats the UA's `details:not([open]) > *:not(summary) { display: none }`. */
+    /* Beats the UA's `details:not([open]) > *:not(summary) { display: none }`
+     * in engines that still hide the closed state that way. */
     .footer-accordion > .footer-accordion-panel {
       display: block !important;
+    }
+
+    /* Chrome 131+, Safari 18.4+ and Firefox 139+ no longer use that rule: the
+     * closed state is enforced by `details::details-content {
+     * content-visibility: hidden }`. The panel above therefore computed
+     * `display: block` and still measured 0px tall, which is how all fifteen
+     * footer links ended up present in the DOM and invisible on desktop.
+     *
+     * This is a SEPARATE rule block on purpose. An unknown pseudo-element
+     * invalidates the entire selector list it appears in, so merging the two
+     * would take the legacy fallback down with it in any engine that does not
+     * know `::details-content`. */
+    .footer-accordion::details-content {
+      content-visibility: visible;
+    }
+  }
+
+  /* --------------------------------------------------------------------
+   * Trace — the card interaction (ADR-0092 §6).
+   *
+   * A 1px accent rule sweeps across the top of a cell on hover or keyboard
+   * focus. Three rules make this safe rather than decorative noise:
+   *
+   *   1. `@media (hover: hover)` is mandatory. On a touch screen `:hover`
+   *      latches after a tap, so without it the accent sticks to whichever
+   *      cell was last touched and never clears.
+   *   2. `:focus-within` is mandatory. These cells contain `learn more`
+   *      links; a keyboard user must get the same affordance a mouse user
+   *      does, or the interaction is sighted-pointer-only.
+   *   3. Cyan appears only as the rule. It is 1.69:1 on paper — a line, a
+   *      dot or a fill, never text and never the sole carrier of meaning.
+   *      Nothing in a cell is hidden until hover.
+   *
+   * Reduced motion is handled by the belt above, which collapses the
+   * transition to 0.01ms: the rule snaps to full width instead of sweeping,
+   * which is the correct end state rather than a suppressed one.
+   * -------------------------------------------------------------------- */
+  @media (hover: hover) {
+    .trace {
+      position: relative;
+      transition:
+        background-color 200ms ease,
+        border-color 200ms ease;
+    }
+
+    .trace::after {
+      content: "";
+      position: absolute;
+      inset-inline: 0;
+      top: 0;
+      height: 1px;
+      background: var(--action);
+      transform: scaleX(0);
+      transform-origin: left;
+      transition: transform 260ms var(--ease-entrance);
+      pointer-events: none;
+    }
+
+    .trace:hover::after,
+    .trace:focus-within::after {
+      transform: scaleX(1);
+    }
+
+    .trace:hover,
+    .trace:focus-within {
+      background-color: var(--surface);
+    }
+  }
+
+  /* Windows high-contrast replaces `background` with a system colour; without
+   * this the rule disappears entirely in forced-colors mode. */
+  @media (forced-colors: active) {
+    .trace::after {
+      background: CanvasText;
     }
   }
 

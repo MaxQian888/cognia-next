@@ -100,8 +100,13 @@ export function SignatureDemo({ copy, reconstruction }: SignatureDemoProps) {
   const active = copy.steps[rail.index]
 
   return (
-    <Section tone="stage">
-      <SectionHeading title={copy.title} subtitle={copy.subtitle} tone="stage" />
+    <Section id="task" tone="stage">
+      <SectionHeading
+        eyebrow={copy.eyebrow}
+        title={copy.title}
+        subtitle={copy.subtitle}
+        tone="stage"
+      />
 
       <p className="mt-12 border-l-2 border-action pl-4 text-lg leading-relaxed text-on-stage md:text-xl">
         <span className="mr-3 font-mono text-xs uppercase tracking-widest text-on-stage-muted">

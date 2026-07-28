@@ -17,7 +17,13 @@ export function PluginsPage({ locale }: { locale: Locale }) {
   const copy = getCopy(locale)
   return (
     <SiteShell locale={locale} route="/plugins">
-      <PageHeader copy={copy.plugins.header} />
+      <PageHeader
+        copy={copy.plugins.header}
+        common={copy.common}
+        locale={locale}
+        sections={copy.plugins.sections}
+        docsOrigin={docsUrl()}
+      />
       <CapabilitySections
         sections={copy.plugins.sections}
         learnMore={copy.common.learnMore}

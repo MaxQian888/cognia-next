@@ -1,5 +1,6 @@
 import Link from "next/link"
 import type { ReactNode } from "react"
+import { Icon } from "@web/components/icon"
 import type { LinkTarget } from "@web/content/types"
 import { resolveLink } from "@web/lib/links"
 import type { Locale } from "@web/lib/locale"
@@ -26,6 +27,13 @@ interface SiteLinkProps {
  * anything on another origin — including the documentation site — becomes a
  * plain anchor that opens in a new tab and carries `rel="noreferrer"`, so the
  * decision is made once instead of at forty call sites.
+ *
+ * External links also carry a small outbound mark. It is the highest-value icon
+ * on the site: "this leaves the origin and opens a new tab" is currently
+ * something the reader has to guess at every docs, GitHub and licence link, and
+ * marking it here covers all of them at once. It sits inside the anchor and is
+ * `aria-hidden`, so no accessible name changes — `target="_blank"` is already
+ * announced by assistive technology.
  */
 export function SiteLink({
   target,
@@ -42,6 +50,7 @@ export function SiteLink({
     return (
       <a href={href} className={className} hrefLang={hrefLang} target="_blank" rel="noreferrer">
         {content}
+        <Icon name="external" size={14} className="ml-1 inline-block align-[-0.1em]" />
       </a>
     )
   }

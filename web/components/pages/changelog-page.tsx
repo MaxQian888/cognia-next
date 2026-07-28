@@ -4,6 +4,7 @@ import { format, getCopy } from "@web/content"
 import type { Bump } from "@web/lib/evidence"
 import { formatDate, formatMonth, groupChangelog } from "@web/lib/evidence"
 import type { Locale } from "@web/lib/locale"
+import { docsUrl } from "@web/lib/site"
 import { PageHeader } from "./page-header"
 
 /**
@@ -37,7 +38,12 @@ export function ChangelogPage({ locale }: { locale: Locale }) {
 
   return (
     <SiteShell locale={locale} route="/changelog">
-      <PageHeader copy={copy.changelog.header} />
+      <PageHeader
+        copy={copy.changelog.header}
+        common={copy.common}
+        locale={locale}
+        docsOrigin={docsUrl()}
+      />
 
       {released.length > 0 ? (
         <Section tone="paper">

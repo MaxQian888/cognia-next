@@ -1,3 +1,4 @@
+import { Button } from "@web/components/ui/button"
 import type { CommonCopy } from "@web/content/types"
 import type { ReleaseState } from "@web/lib/evidence"
 import type { Locale } from "@web/lib/locale"
@@ -37,30 +38,29 @@ export function DownloadCta({
 
   if (variant === "compact") {
     return (
-      <SiteLink
-        target={{ label, route: "/download" }}
-        locale={locale}
-        docsOrigin={docsOrigin}
-        className="inline-flex items-center rounded-control bg-ink px-4 py-2 text-sm font-medium text-paper transition-opacity hover:opacity-90"
-      />
+      <Button asChild size="md">
+        <SiteLink target={{ label, route: "/download" }} locale={locale} docsOrigin={docsOrigin} />
+      </Button>
     )
   }
 
   return (
     <div className="flex flex-col gap-5">
       <div className="flex flex-wrap items-center gap-3">
-        <SiteLink
-          target={{ label, route: "/download" }}
-          locale={locale}
-          docsOrigin={docsOrigin}
-          className="inline-flex items-center rounded-control bg-ink px-6 py-3 text-base font-medium text-paper transition-opacity hover:opacity-90"
-        />
-        <SiteLink
-          target={{ label: copy.viewSource, href: REPO_URL }}
-          locale={locale}
-          docsOrigin={docsOrigin}
-          className="inline-flex items-center rounded-control border border-hairline-strong px-6 py-3 text-base font-medium text-ink transition-colors hover:bg-surface"
-        />
+        <Button asChild size="lg">
+          <SiteLink
+            target={{ label, route: "/download" }}
+            locale={locale}
+            docsOrigin={docsOrigin}
+          />
+        </Button>
+        <Button asChild variant="outline" size="lg">
+          <SiteLink
+            target={{ label: copy.viewSource, href: REPO_URL }}
+            locale={locale}
+            docsOrigin={docsOrigin}
+          />
+        </Button>
       </div>
 
       {state.hasRelease ? (

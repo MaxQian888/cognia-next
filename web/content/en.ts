@@ -97,6 +97,7 @@ export const en: SiteCopy = {
     themeLight: "Light",
     themeDark: "Dark",
     themeSystem: "System",
+    sectionIndexLabel: "Sections on this page",
   },
 
   footer: {
@@ -168,6 +169,10 @@ export const en: SiteCopy = {
     stale: "last successful read {date}",
     learnMore: "Learn more",
     contextPathLabel: "Shared context path across the workbench",
+    breadcrumbHome: "Home",
+    onThisPage: "On this page",
+    copyCommand: "Copy",
+    copiedCommand: "Copied",
   },
 
   reconstruction: {
@@ -300,12 +305,21 @@ export const en: SiteCopy = {
         { label: "Permissioned actions", detail: "Tools declare what they touch; you confirm" },
         { label: "Desktop first", detail: "Local files, terminal, long-running tasks" },
       ],
+      ticket: {
+        label: "The task on this page",
+        repositoryLabel: "Repository",
+        branchLabel: "Branch",
+        checkLabel: "Failing check",
+        planLabel: "Plan",
+        stateLabel: "State",
+      },
       stageAlt:
         "The Cognia desktop workspace: a left activity rail, a chat thread showing an agent's plan, and a right-hand workbench holding the repository diff for the task in progress.",
       stageCaption: "The workspace running the task this page follows, end to end.",
     },
 
     signature: {
+      eyebrow: "One task, end to end",
       title: "One task. Every step visible.",
       subtitle: "Plan, tools, approvals, tests, and artifacts stay in one reviewable thread.",
       taskLabel: "Task",
@@ -381,6 +395,7 @@ export const en: SiteCopy = {
     },
 
     workbench: {
+      eyebrow: "Your workbench",
       title: "Everything the task needs, in one workbench.",
       subtitle:
         "Chat, agents, workflows, knowledge and plugins are not five products with a shared login. They read and write the same working context.",
@@ -419,6 +434,7 @@ export const en: SiteCopy = {
     },
 
     desktop: {
+      eyebrow: "Desktop first",
       title: "A workspace that stays close to the work.",
       subtitle:
         "The work is on your machine: the files, the terminal, the repository, the tools. So is the workspace.",
@@ -449,6 +465,7 @@ export const en: SiteCopy = {
     },
 
     run: {
+      eyebrow: "Run it your way",
       title: "Choose the model. See the boundary.",
       subtitle:
         "Different work deserves different runtimes. Each option states what leaves your device, who receives it, and what needs your confirmation.",
@@ -506,6 +523,7 @@ export const en: SiteCopy = {
     },
 
     connections: {
+      eyebrow: "Connections with consequences",
       title: "Connect tools without losing the task.",
       subtitle:
         "A connection is only useful if you can say what it reads, what it may do, and when it has to ask.",
@@ -549,6 +567,7 @@ export const en: SiteCopy = {
     },
 
     trust: {
+      eyebrow: "Trust receipts",
       title: "Built in the open. Controlled in use.",
       subtitle:
         "Four things you can check yourself, without taking a marketing page's word for any of them.",
@@ -598,8 +617,28 @@ export const en: SiteCopy = {
     },
 
     finalCta: {
+      eyebrow: "Start here",
       title: "Bring your agents into one open workspace.",
       support: "Desktop first. Open source. Built for real work.",
+      indexLabel: "What you get today",
+      rows: [
+        { key: "license", label: "License" },
+        { key: "platforms", label: "Platforms" },
+        { key: "release", label: "Latest release" },
+        { key: "changes", label: "Changes waiting" },
+      ],
+      changesSuffix: "entries since the last release",
+    },
+
+    sectionIndex: {
+      hero: "Overview",
+      task: "One task",
+      workbench: "Workbench",
+      desktop: "Desktop",
+      run: "Run",
+      connections: "Connections",
+      trust: "Trust",
+      start: "Start",
     },
   },
 
@@ -909,6 +948,7 @@ export const en: SiteCopy = {
       subtitle:
         "Nothing in this table is maintained by hand. Each row points at the artefact the claim is read from.",
       headings: { claim: "Claim", source: "Source" },
+      liveLabel: "Live figures",
       rows: [
         {
           claim: "The application is licensed AGPL-3.0-or-later",
@@ -967,6 +1007,7 @@ export const en: SiteCopy = {
       ],
     },
     platformsTitle: "Platforms",
+    platformHint: { label: "Detected", unknown: "Platform not detected" },
   },
 
   useCases: {
@@ -980,6 +1021,9 @@ export const en: SiteCopy = {
       provenance:
         "This script is dogfooding: it describes how Cognia's own repository is worked on, using Cognia. It is not a customer story and contains no performance claims.",
       scriptTitle: "The script, step by step",
+      stageAlt:
+        "The Cognia workbench running this script: the thread that carries the task on the left, and the workspace holding what it produced on the right.",
+      stageCaption: "The same workbench, running the script on this page.",
       steps: [
         {
           rail: "Context",
@@ -1060,6 +1104,9 @@ export const en: SiteCopy = {
       provenance:
         "This script uses capabilities that ship today — reading, extraction, capture and memory. It describes what the tools do, not what a researcher achieved with them.",
       scriptTitle: "The script, step by step",
+      stageAlt:
+        "The Cognia workbench running this script: the thread that carries the task on the left, and the workspace holding what it produced on the right.",
+      stageCaption: "The same workbench, running the script on this page.",
       steps: [
         {
           rail: "Collect",
@@ -1139,5 +1186,7 @@ export const en: SiteCopy = {
     emptyState: "No entries yet.",
     bumpLabels: { major: "Breaking", minor: "Feature", patch: "Fix" },
     entryCount: "{count} entries",
+    distributionLabel: "By bump",
+    monthIndexLabel: "Jump to a month",
   },
 }

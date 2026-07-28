@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react"
+import { render, screen, within } from "@testing-library/react"
 import { en } from "@web/content/en"
 import { zh } from "@web/content/zh"
 import { UseCasePage } from "./use-case-page"
@@ -24,12 +24,19 @@ describe("UseCasePage — development", () => {
     expect(steps).toHaveLength(en.useCases.development.steps.length)
   })
 
+  // Scoped to the script list on purpose. The page now also renders a
+  // `ProductStage` whose own labels overlap the rail vocabulary ("Artifact"),
+  // so a page-wide `getByText` matches twice and says nothing about whether
+  // the step actually rendered.
   it("names every step's rail label, title and detail", () => {
-    render(<UseCasePage locale="en" variant="development" />)
+    const { container } = render(<UseCasePage locale="en" variant="development" />)
+    const list = container.querySelector("ol")
+    expect(list).not.toBeNull()
+    const steps = within(list!)
     for (const step of en.useCases.development.steps) {
-      expect(screen.getByText(step.rail)).toBeInTheDocument()
-      expect(screen.getByRole("heading", { name: step.title })).toBeInTheDocument()
-      expect(screen.getByText(step.detail)).toBeInTheDocument()
+      expect(steps.getByText(step.rail)).toBeInTheDocument()
+      expect(steps.getByRole("heading", { name: step.title })).toBeInTheDocument()
+      expect(steps.getByText(step.detail)).toBeInTheDocument()
     }
   })
 

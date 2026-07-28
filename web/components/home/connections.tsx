@@ -20,8 +20,8 @@ export function Connections({ copy }: ConnectionsProps) {
   const terms = [copy.headings.reads, copy.headings.canAct, copy.headings.requiresApproval]
 
   return (
-    <Section tone="surface">
-      <SectionHeading title={copy.title} subtitle={copy.subtitle} />
+    <Section id="connections" tone="surface">
+      <SectionHeading eyebrow={copy.eyebrow} title={copy.title} subtitle={copy.subtitle} />
 
       <Reveal className="mt-14">
         <ul className="grid gap-px overflow-hidden rounded-stage border border-hairline bg-hairline md:grid-cols-2 xl:grid-cols-4">
@@ -30,7 +30,16 @@ export function Connections({ copy }: ConnectionsProps) {
               {/* Receipt header: an index mark and the connection's name, so the
                * four read as numbered records rather than as four cards. */}
               <div className="flex items-baseline gap-3 border-b border-hairline pb-4">
-                <span aria-hidden className="font-mono text-[10px] text-action">
+                {/* The index reads in `muted`, not `action`: cyan is 1.69:1 on
+                 * this substrate, and the token's own rule is that it is a
+                 * line, a dot or a fill — never a text colour. The accent it
+                 * used to carry moves to the dot beside it, which is
+                 * decoration and free to be low-contrast. */}
+                <span
+                  aria-hidden
+                  className="size-1 shrink-0 translate-y-[-0.15em] rounded-full bg-action"
+                />
+                <span aria-hidden className="font-mono text-[10px] text-muted">
                   {String(index + 1).padStart(2, "0")}
                 </span>
                 <p className="font-medium text-ink">{item.name}</p>

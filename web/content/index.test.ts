@@ -1,5 +1,6 @@
 import { LOCALES } from "@web/lib/locale"
 import { format, getCopy } from "./index"
+import { HOME_SECTIONS } from "./types"
 
 describe("getCopy", () => {
   it("returns a bundle for every supported locale", () => {
@@ -20,6 +21,56 @@ describe("getCopy", () => {
  */
 describe("locale parity beyond the type system", () => {
   const [a, b] = [getCopy("en"), getCopy("zh")]
+
+  it("gives every homepage section a rail label, and no extras", () => {
+    // The rail's labels, the `id` each section renders and this record are one
+    // fact, not three. Without this, adding a section silently produces a rail
+    // entry with an `undefined` label — or a rail that points at no anchor.
+    for (const copy of [a, b]) {
+      expect(Object.keys(copy.home.sectionIndex).sort()).toEqual([...HOME_SECTIONS].sort())
+    }
+  })
+
+  it("keeps the closing index rows aligned by key, since the key selects the value", () => {
+    expect(b.home.finalCta.rows.map((r) => r.key)).toEqual(a.home.finalCta.rows.map((r) => r.key))
+  })
+
+  it("gives both use-case pages a described stage", () => {
+    for (const copy of [a, b]) {
+      for (const variant of ["development", "research"] as const) {
+        expect(copy.useCases[variant].stageAlt.length).toBeGreaterThan(0)
+        expect(copy.useCases[variant].stageCaption.length).toBeGreaterThan(0)
+      }
+    }
+  })
+
+  it("translates every new label rather than leaving English in the zh bundle", () => {
+    // A copy-paste that leaves the English string in `zh.ts` type-checks
+    // perfectly, so it has to be caught here.
+    expect(b.common.onThisPage).not.toBe(a.common.onThisPage)
+    expect(b.common.copyCommand).not.toBe(a.common.copyCommand)
+    expect(b.nav.sectionIndexLabel).not.toBe(a.nav.sectionIndexLabel)
+    expect(b.home.finalCta.indexLabel).not.toBe(a.home.finalCta.indexLabel)
+    expect(b.home.hero.ticket.label).not.toBe(a.home.hero.ticket.label)
+  })
+
+  it("gives every homepage section an eyebrow in both locales", () => {
+    for (const copy of [a, b]) {
+      const home = copy.home
+      for (const eyebrow of [
+        home.hero.eyebrow,
+        home.signature.eyebrow,
+        home.workbench.eyebrow,
+        home.desktop.eyebrow,
+        home.run.eyebrow,
+        home.connections.eyebrow,
+        home.trust.eyebrow,
+        home.finalCta.eyebrow,
+      ]) {
+        expect(eyebrow.length).toBeGreaterThan(0)
+      }
+    }
+  })
 
   it("keeps the signature task's six steps aligned by key and order", () => {
     expect(b.home.signature.steps.map((s) => s.key)).toEqual(

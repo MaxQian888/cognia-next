@@ -32,8 +32,8 @@ export function RunMatrix({ copy, learnMore, locale, docsOrigin }: RunMatrixProp
   ]
 
   return (
-    <Section tone="paper">
-      <SectionHeading title={copy.title} subtitle={copy.subtitle} />
+    <Section id="run" tone="paper">
+      <SectionHeading eyebrow={copy.eyebrow} title={copy.title} subtitle={copy.subtitle} />
 
       {/* Desktop: one table. */}
       <Reveal className="mt-14 hidden lg:block">

@@ -1,7 +1,7 @@
 import { render, screen } from "@testing-library/react"
 import { en } from "@web/content/en"
 import { zh } from "@web/content/zh"
-import type { ReleaseState } from "@web/lib/evidence"
+import type { Evidence, ReleaseState } from "@web/lib/evidence"
 import { FinalCta } from "./final-cta"
 
 const DOCS = "https://docs.cognia.example"
@@ -14,9 +14,24 @@ const noRelease: ReleaseState = {
   byPlatform: { macos: [], windows: [], linux: [] },
 }
 
-function renderCta(locale: "en" | "zh" = "en", state = noRelease) {
+function evidence(overrides: Partial<Evidence> = {}): Evidence {
+  return {
+    readAt: "2026-07-26T00:00:00.000Z",
+    lastGoodReadAt: "2026-07-26T00:00:00.000Z",
+    errors: [],
+    repo: { stars: 52, license: "AGPL-3.0-or-later", description: null },
+    contributors: 2,
+    releases: [],
+    changesets: [],
+    ...overrides,
+  }
+}
+
+function renderCta(locale: "en" | "zh" = "en", state = noRelease, data: Evidence = evidence()) {
   const copy = locale === "en" ? en : zh
-  return render(<FinalCta locale={locale} copy={copy} releaseState={state} docsOrigin={DOCS} />)
+  return render(
+    <FinalCta locale={locale} copy={copy} releaseState={state} evidence={data} docsOrigin={DOCS} />
+  )
 }
 
 describe("FinalCta", () => {
@@ -59,5 +74,20 @@ describe("FinalCta", () => {
       "href",
       `${DOCS}/zh/docs`
     )
+  })
+})
+
+// The evidence pipeline can come back without a license — a rate-limited or
+// failed read leaves `repo.license` null — and the row must still say
+// something true rather than rendering an empty cell.
+describe("FinalCta with incomplete evidence", () => {
+  it("falls back to the footer's license note when the repo read has none", () => {
+    renderCta("en", noRelease, evidence({ repo: { stars: 52, license: null, description: null } }))
+    expect(screen.getByText(en.footer.licenseNote)).toBeInTheDocument()
+  })
+
+  it("still names the license when the read did return one", () => {
+    renderCta("en", noRelease, evidence())
+    expect(screen.getByText("AGPL-3.0-or-later")).toBeInTheDocument()
   })
 })

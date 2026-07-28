@@ -147,6 +147,24 @@ export interface ChangelogGroup {
 }
 
 /**
+ * How the pending changes divide across the three semver bumps.
+ *
+ * Every key is present even at zero, so the proportion bar it feeds renders a
+ * stable three-segment shape rather than appearing and disappearing as the
+ * changeset set shifts.
+ */
+export function bumpCounts(entries: ChangesetEntry[]): Record<Bump, number> {
+  const counts: Record<Bump, number> = { major: 0, minor: 0, patch: 0 }
+  for (const entry of entries) {
+    // A changeset with an unrecognised bump is skipped rather than counted as a
+    // patch: inventing a severity is worse than a bar that does not sum to the
+    // entry count, and the count itself is stated separately.
+    if (entry.bump in counts) counts[entry.bump] += 1
+  }
+  return counts
+}
+
+/**
  * Group unreleased entries by the month they landed, newest first. Undated
  * entries sort last rather than being dropped — an entry with no git history
  * still describes a real change.

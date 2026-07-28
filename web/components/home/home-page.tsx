@@ -1,5 +1,7 @@
+import { SectionIndexRail } from "@web/components/section-index-rail"
 import { SiteShell, evidence } from "@web/components/site-shell"
 import { getCopy } from "@web/content"
+import { HOME_SECTIONS } from "@web/content/types"
 import { releaseState } from "@web/lib/evidence"
 import type { Locale } from "@web/lib/locale"
 import { RELEASES_URL, docsUrl } from "@web/lib/site"
@@ -28,6 +30,14 @@ export function HomePage({ locale }: { locale: Locale }) {
 
   return (
     <SiteShell locale={locale} route="/">
+      {/* Eight sections and nine thousand pixels with no chrome between them:
+       * without this a reader partway down cannot tell how much argument is
+       * left, or get back to a section they skimmed. */}
+      <SectionIndexRail
+        sections={HOME_SECTIONS}
+        labels={copy.home.sectionIndex}
+        label={copy.nav.sectionIndexLabel}
+      />
       <Hero locale={locale} copy={copy} releaseState={state} docsOrigin={docsOrigin} />
       <SignatureDemo copy={copy.home.signature} reconstruction={copy.reconstruction} />
       <WorkbenchBento
@@ -50,7 +60,13 @@ export function HomePage({ locale }: { locale: Locale }) {
         locale={locale}
         docsOrigin={docsOrigin}
       />
-      <FinalCta locale={locale} copy={copy} releaseState={state} docsOrigin={docsOrigin} />
+      <FinalCta
+        locale={locale}
+        copy={copy}
+        releaseState={state}
+        evidence={evidence}
+        docsOrigin={docsOrigin}
+      />
     </SiteShell>
   )
 }

@@ -1,3 +1,4 @@
+import { Hairline } from "@web/components/hairline"
 import { Reveal } from "@web/components/reveal"
 import { Section, SectionHeading } from "@web/components/section"
 import { DEMO_TASK } from "@web/content/demo-task"
@@ -53,16 +54,19 @@ export function WorkbenchBento({ copy, common, reconstruction }: WorkbenchBentoP
   const station = <span aria-hidden className="size-1 shrink-0 rounded-full bg-action" />
 
   return (
-    <Section tone="paper">
-      <SectionHeading title={copy.title} subtitle={copy.subtitle} />
+    <Section id="workbench" tone="paper">
+      <SectionHeading eyebrow={copy.eyebrow} title={copy.title} subtitle={copy.subtitle} />
 
       <Reveal className="mt-14">
         <div className="relative overflow-hidden rounded-stage border border-hairline">
           <span className="sr-only">{common.contextPathLabel}</span>
-          <div
-            aria-hidden
-            className="pointer-events-none absolute inset-x-0 top-1/2 z-10 hidden h-px bg-action/50 lg:block"
-          />
+          {/* Drawn, not painted. A cyan rule threading six regions is the one
+           * place on the page where the motion *is* the argument — the shared
+           * context arriving across the workbench — so it earns the Draw
+           * vocabulary rather than sitting there as a static line. */}
+          <div className="pointer-events-none absolute inset-x-0 top-1/2 z-10 hidden lg:block">
+            <Hairline tone="action" className="opacity-60" />
+          </div>
 
           <div className="grid gap-px bg-hairline lg:grid-cols-4">
             <div className={cell}>

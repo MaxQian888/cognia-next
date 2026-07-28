@@ -61,6 +61,8 @@ export interface NavCopy {
   themeLight: string
   themeDark: string
   themeSystem: string
+  /** Accessible name for the homepage's reading-position rail. */
+  sectionIndexLabel: string
 }
 
 /**
@@ -117,6 +119,13 @@ export interface CommonCopy {
   learnMore: string
   /** Screen-reader label for the decorative context path in the bento. */
   contextPathLabel: string
+  /** First crumb on every sub-page. */
+  breadcrumbHome: string
+  /** Heading for a sub-page's in-page anchor index. */
+  onThisPage: string
+  /** Copy-to-clipboard control on the build commands. */
+  copyCommand: string
+  copiedCommand: string
 }
 
 /* -------------------------------------------------------------------------- */
@@ -128,11 +137,29 @@ export interface TrustRailItem {
   detail: string
 }
 
+/**
+ * Labels for the hero's task ticket.
+ *
+ * Every *value* the ticket shows comes from `DEMO_TASK` and the reconstruction
+ * copy that the workbench below it already renders — the ticket introduces no
+ * new factual claim, only the labels that let the first screen state the
+ * signature task instead of describing it in prose.
+ */
+export interface HeroTicketCopy {
+  label: string
+  repositoryLabel: string
+  branchLabel: string
+  checkLabel: string
+  planLabel: string
+  stateLabel: string
+}
+
 export interface HeroCopy {
   eyebrow: string
   title: string
   subtitle: string
   trustRail: TrustRailItem[]
+  ticket: HeroTicketCopy
   stageAlt: string
   stageCaption: string
 }
@@ -162,6 +189,7 @@ export interface SignatureStep {
 }
 
 export interface SignatureCopy {
+  eyebrow: string
   title: string
   subtitle: string
   taskLabel: string
@@ -182,12 +210,14 @@ export interface BentoPanel {
 }
 
 export interface WorkbenchCopy {
+  eyebrow: string
   title: string
   subtitle: string
   panels: BentoPanel[]
 }
 
 export interface DesktopCopy {
+  eyebrow: string
   title: string
   subtitle: string
   capabilities: Array<{ label: string; body: string }>
@@ -207,6 +237,7 @@ export interface RunStrategy {
 }
 
 export interface RunCopy {
+  eyebrow: string
   title: string
   subtitle: string
   headings: {
@@ -229,6 +260,7 @@ export interface ConnectionItem {
 }
 
 export interface ConnectionsCopy {
+  eyebrow: string
   title: string
   subtitle: string
   headings: {
@@ -256,6 +288,7 @@ export interface ProvenanceStep {
 }
 
 export interface TrustCopy {
+  eyebrow: string
   title: string
   subtitle: string
   cards: TrustCard[]
@@ -269,10 +302,42 @@ export interface TrustCopy {
   noReleasesYet: string
 }
 
+/**
+ * One row of the closing "what you get today" index.
+ *
+ * `key` selects the value at render time — every one is derived from the
+ * evidence snapshot or from copy already on the page, so the block states
+ * nothing that is not verifiable elsewhere on the site.
+ */
+export type FinalCtaRowKey = "license" | "platforms" | "release" | "changes"
+
+export interface FinalCtaRow {
+  key: FinalCtaRowKey
+  label: string
+}
+
 export interface FinalCtaCopy {
+  eyebrow: string
   title: string
   support: string
+  indexLabel: string
+  rows: FinalCtaRow[]
+  changesSuffix: string
 }
+
+/** The eight homepage section ids, in document order. */
+export const HOME_SECTIONS = [
+  "hero",
+  "task",
+  "workbench",
+  "desktop",
+  "run",
+  "connections",
+  "trust",
+  "start",
+] as const
+
+export type HomeSectionId = (typeof HOME_SECTIONS)[number]
 
 export interface HomeCopy {
   hero: HeroCopy
@@ -283,6 +348,13 @@ export interface HomeCopy {
   connections: ConnectionsCopy
   trust: TrustCopy
   finalCta: FinalCtaCopy
+  /**
+   * Short labels for the reading-position rail, one per section id.
+   *
+   * Keyed by `HomeSectionId` so the rail's labels, the `id` each section
+   * renders and this record are one fact rather than three that can drift.
+   */
+  sectionIndex: Record<HomeSectionId, string>
 }
 
 /* -------------------------------------------------------------------------- */
@@ -341,6 +413,8 @@ export interface TrustPageCopy {
     subtitle: string
     rows: Array<{ claim: string; source: string; href?: string; docsPath?: string }>
     headings: { claim: string; source: string }
+    /** Heading for the live figures strip that opens the section. */
+    liveLabel: string
   }
 }
 
@@ -353,6 +427,11 @@ export interface DownloadPageCopy {
   }
   requirements: { title: string; items: string[] }
   platformsTitle: string
+  /**
+   * Detected-platform hint beside the call to action. `CommonCopy.download`
+   * already declares `detecting`, which until now nothing rendered.
+   */
+  platformHint: { label: string; unknown: string }
 }
 
 export interface UseCaseStep {
@@ -369,6 +448,9 @@ export interface UseCasePageCopy {
   scriptTitle: string
   steps: UseCaseStep[]
   capabilities: CapabilitySection
+  /** These pages carry no visual today; they get the workbench stage. */
+  stageAlt: string
+  stageCaption: string
 }
 
 export interface ChangelogPageCopy {
@@ -379,6 +461,10 @@ export interface ChangelogPageCopy {
   emptyState: string
   bumpLabels: { major: string; minor: string; patch: string }
   entryCount: string
+  /** Heading for the major/minor/patch proportion bar. */
+  distributionLabel: string
+  /** Accessible name for the sticky month rail. */
+  monthIndexLabel: string
 }
 
 /* -------------------------------------------------------------------------- */

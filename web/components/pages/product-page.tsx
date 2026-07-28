@@ -14,7 +14,13 @@ export function ProductPage({ locale }: { locale: Locale }) {
   const copy = getCopy(locale)
   return (
     <SiteShell locale={locale} route="/product">
-      <PageHeader copy={copy.product.header} />
+      <PageHeader
+        copy={copy.product.header}
+        common={copy.common}
+        locale={locale}
+        sections={copy.product.sections}
+        docsOrigin={docsUrl()}
+      />
       <CapabilitySections
         sections={copy.product.sections}
         learnMore={copy.common.learnMore}

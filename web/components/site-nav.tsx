@@ -4,8 +4,10 @@ import { useEffect } from "react"
 import type { SiteCopy } from "@web/content/types"
 import type { ReleaseState } from "@web/lib/evidence"
 import { useDismissable } from "@web/hooks/use-dismissable"
+import { Icon } from "./icon"
 import type { Locale } from "@web/lib/locale"
 import { REPO_URL } from "@web/lib/site"
+import { cn } from "@web/lib/utils"
 import { DownloadCta } from "./download-cta"
 import { LanguageSwitcher } from "./language-switcher"
 import { SiteLink } from "./site-link"
@@ -89,9 +91,14 @@ export function SiteNav({ locale, route, copy, releaseState, docsOrigin }: SiteN
               onClick={toggleMenu}
               aria-expanded={menuOpen}
               aria-haspopup="true"
-              className="rounded-control px-3 py-2 text-sm text-muted transition-colors hover:text-ink"
+              className="inline-flex items-center gap-1.5 rounded-control px-3 py-2 text-sm text-muted transition-colors hover:text-ink"
             >
               {copy.nav.productMenu.label}
+              <Icon
+                name="chevronDown"
+                size={14}
+                className={cn("transition-transform duration-200", menuOpen && "rotate-180")}
+              />
             </button>
             {menuOpen ? (
               <div
@@ -164,8 +171,12 @@ export function SiteNav({ locale, route, copy, releaseState, docsOrigin }: SiteN
             type="button"
             onClick={toggleSheet}
             aria-expanded={sheetOpen}
-            className="rounded-control border border-hairline px-3 py-2 text-sm text-ink lg:hidden"
+            className="inline-flex items-center gap-1.5 rounded-control border border-hairline px-3 py-2 text-sm text-ink lg:hidden"
           >
+            {/* Beside the words, never instead of them: the label is what
+             * names this control for assistive technology and for anyone who
+             * does not read the glyph. */}
+            <Icon name={sheetOpen ? "close" : "menu"} size={14} />
             {sheetOpen ? copy.nav.closeMenu : copy.nav.openMenu}
           </button>
         </div>

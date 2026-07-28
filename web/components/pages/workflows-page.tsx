@@ -18,7 +18,13 @@ export function WorkflowsPage({ locale }: { locale: Locale }) {
   const copy = getCopy(locale)
   return (
     <SiteShell locale={locale} route="/workflows">
-      <PageHeader copy={copy.workflows.header} />
+      <PageHeader
+        copy={copy.workflows.header}
+        common={copy.common}
+        locale={locale}
+        sections={copy.workflows.sections}
+        docsOrigin={docsUrl()}
+      />
       <CapabilitySections
         sections={copy.workflows.sections}
         learnMore={copy.common.learnMore}

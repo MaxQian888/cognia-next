@@ -19,8 +19,8 @@ interface DesktopSectionProps {
  */
 export function DesktopSection({ copy, locale }: DesktopSectionProps) {
   return (
-    <Section tone="surface">
-      <SectionHeading title={copy.title} subtitle={copy.subtitle} />
+    <Section id="desktop" tone="surface">
+      <SectionHeading eyebrow={copy.eyebrow} title={copy.title} subtitle={copy.subtitle} />
 
       <div className="mt-16 grid gap-14 lg:grid-cols-[minmax(0,22rem)_minmax(0,1fr)] lg:gap-20">
         <ul className="flex flex-col">

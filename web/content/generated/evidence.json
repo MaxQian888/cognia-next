@@ -1,6 +1,6 @@
 {
-  "readAt": "2026-07-26T13:38:39.383Z",
-  "lastGoodReadAt": "2026-07-26T13:38:39.383Z",
+  "readAt": "2026-07-26T18:48:44.774Z",
+  "lastGoodReadAt": "2026-07-26T18:48:44.774Z",
   "errors": [],
   "repo": {
     "stars": 52,
@@ -200,7 +200,7 @@
       "id": "chat-dock-linkage-and-mobile-parity",
       "bump": "minor",
       "summary": "Chat right-rail (Context Workbench / artifact dock) linkage and interaction fixes. Panels that declare a preferred width now actually resize the dock — from the activity rail, the group tabs, the overflow menu, and every external reveal (the browser opener, now in the title bar's Views menu, the Edit/Write review bridge, save-to-project) — applied as a high-water mark so it never undoes a width you dragged to, and sized from the arriving panel so the workspace reaches its own 65% cap instead of the artifact one. Leaving the workspace profile now animates back under the compact cap rather than snapping. The Review activity opens on the artifact library instead of an AI-proposal panel that rendered a blank pane when no proposal existed (that panel now explains itself). Mobile reaches parity with the desktop: a dismissed dock stays dismissed instead of throwing a full-height sheet back over the conversation on every new artifact, the unread mark finally has a host, and the mobile top bar gains the dock's only standing entry point. Collapsing the dock now unmounts its contents once it has retracted, releasing Monaco, the resource chat pane, and the process-wide embedded-webview lease a zero-width panel used to hold. Adds reverse linkage from the dock back into the conversation: jump to the message an artifact came from (metadata panel, tab double-click, tab context menu), reference a whole artifact into the composer, and highlight the tab whose source turn is on screen. Also mirrors the focus-mode takeover animation on exit and labels the group-overflow button with the current panel and sibling count.",
-      "date": null
+      "date": "2026-07-27T00:47:38+08:00"
     },
     {
       "id": "chat-flow-mode-standard-detailed-live-switch",
@@ -224,7 +224,7 @@
       "id": "chat-right-rail-linkage",
       "bump": "minor",
       "summary": "Chat right rail: fix cross-session bleed and three interaction breaks in the Context Workbench.\n\n- Artifact tabs and the active artifact are now tracked per conversation, so switching chats no longer leaves the dock showing one session's tab strip and preview beside another's artifact list and browser. The 12-tab cap is per conversation too.\n- The narrow-screen Sheet takes its visibility from one field, so a new artifact can no longer throw it back over a conversation the user just dismissed, and a terminal link or Edit/Write review reveal keeps the file it was pointing at.\n- Collapsing the dock with ⌘J, the Views menu or the header toggle now leaves focus mode, instead of reopening as a full-screen takeover.\n- The narrow/wide highlight follows the dock's real width rather than the mode a panel asked for.\n- The embedded browser and the project workspace survive an artifact tab switch, keeping the page, the open editors and the file tree.\n- The activity rail has an explicit order (preview first), the selection composer moved into the artifact's AI panel where the rail can reach it, and the artifact tabs stay visible when a conversation has tabs open but none active.\n- Staged artifact references show which one is the edit target and let you switch it; a whole-artifact reference is labelled as such.\n- Added a \"Reset layout\" entry to the workbench header for the chat dock and the canvas shell, and fixed a workspace-width drag that failed to persist below 24%.",
-      "date": null
+      "date": "2026-07-27T00:47:38+08:00"
     },
     {
       "id": "chat-right-rail-scroll-and-sheet-timing",
@@ -482,7 +482,7 @@
       "id": "eighty-donkeys-repeat",
       "bump": "minor",
       "summary": "Render images as images everywhere in chat: reading an image file now shows the picture (with lightbox, zoom and download) instead of a base64 wall, tool results carrying image/audio/resource blocks keep their content in simplified mode and inside sub-agent trees, plugin tools can return real media, and `take_screenshot` now hands the model an image it can actually see.",
-      "date": null
+      "date": "2026-07-27T00:54:43+08:00"
     },
     {
       "id": "eval-cost-guard-and-affordances",
@@ -758,7 +758,7 @@
       "id": "lucky-mirrors-observe",
       "bump": "minor",
       "summary": "Website: the homepage now shows the product instead of describing it. Every large product visual was\nan empty frame holding a sentence of alt text, because the screenshot matrix is still blocked on a\nproduct-side seed seam — so the hero's near-full-width stage was a blank box about a screen tall.\nThe stage now falls back to a DOM reconstruction of the workbench (activity rail, task thread, and\nthe change open in the workspace dock), permanently labelled as a reconstruction rather than passed\noff as a screenshot, and a real capture still wins whenever one exists.\n\nThe signature task section gained the six interfaces the design asks for and previously only talked\nabout: repository context, the proposed plan, the change as an actual unified diff, the permission\ncheckpoint with its action, target and scope, the failing check's output, and the launch-notes\nartifact. The desktop section gained its macro crop — command palette over the integrated terminal,\nwith the notification a waiting task sends. The workbench bento's regions now carry fragments of the\nsame task instead of a paragraph each, the connection receipts read as numbered records, and the\ntwelve-column rhythm lines behind the hero are drawn at last.\n\nAlso fixes the hero's product visual being invisible until you scrolled: it was gated on an in-view\ntrigger it could never satisfy, since its top sits at the fold.",
-      "date": null
+      "date": "2026-07-27T00:33:13+08:00"
     },
     {
       "id": "lucky-pianos-shave",
@@ -818,7 +818,7 @@
       "id": "notification-center-triage-and-archive",
       "bump": "minor",
       "summary": "Upgrade the notification center into a responsive inbox and archive. Opening the center now advances visible notifications from unseen to seen, active and archived items have distinct views with source filtering, archived items can be restored, and row actions have accurate labels. The popover is also constrained on narrow screens, where it previously overflowed the viewport.",
-      "date": null
+      "date": "2026-07-27T00:39:27+08:00"
     },
     {
       "id": "ocr-provider-audit-fixes",
@@ -854,7 +854,7 @@
       "id": "olive-poems-shake",
       "bump": "minor",
       "summary": "Chat rendering: keep streaming and finalised markdown visually identical, fix image layout shift, share one lightbox per message, and let plugins render their own tool results.\n\n- Images, tables, GitHub alerts and task lists now render the same while a reply streams as they do once it finishes, so a turn no longer re-lays-out when it completes. `<details>` and `<kbd>` reach the shared renderer too, but only through markdown syntax: raw HTML still waits for the finalised branch, because parsing it per token would put `rehype-raw` on the streaming path.\n- Images reserve their space while loading (the loading skeleton was previously invisible and the page shifted when an image landed), hint the browser to decode asynchronously, and no longer print alt text as a visible caption.\n- Every image in a message — markdown, attachments, tool screenshots — opens in one lightbox you can page through, and optical-compaction archive frames are now zoomable.\n- New `tool-renderer` plugin capability: a plugin that ships an MCP tool can contribute the result card for it, via `manifest.toolRenderers[]` or `ctx.toolResult.registerToolResultRenderer()`.",
-      "date": null
+      "date": "2026-07-27T00:54:43+08:00"
     },
     {
       "id": "onebot-napcat-identity-forward-fidelity",
@@ -890,7 +890,7 @@
       "id": "pet-reacts-to-four-more-subsystems",
       "bump": "minor",
       "summary": "The desktop pet now reacts to four more subsystems, so it stops looking idle while the app is clearly busy. It notices when something is waiting on you (the Control Center's unified attention projection — chat approvals, team HITL gates, external-agent permission and input waits), when renderer background tasks start and settle, when a content capture is waiting for confirmation and when one lands, and when Source Control is mid-operation (commit / push / pull / fetch / sync / stage / checkout / stash / discard) or has failed.\n\nEach adapter observes the narrowest seam it can and forwards no content: attention emits only on zero/non-zero edges so a burst of pending items does not produce a burst of reactions and stale journal entries are excluded; background tasks use the low-frequency start/settle seam rather than the subagent store that updates per token; capture reads a content-free persistence event, so no clipboard text, URL, image, fingerprint or source-app data reaches the pet event bus; and Source Control aggregates concurrent operations into one busy batch and forwards neither repository paths nor error text.\n\n`PetRenderer` is also memoised, so an unrelated parent re-render no longer re-runs the whole sprite tree.",
-      "date": null
+      "date": "2026-07-27T00:40:58+08:00"
     },
     {
       "id": "pet-sprite-v2-import",
@@ -914,7 +914,7 @@
       "id": "plugin-author-scaffold-installable",
       "bump": "minor",
       "summary": "Plugin scaffold produces an installable project again. `cognia plugin new --kind ts` previously emitted a `package.json` depending on `@cognia/plugin-sdk` and `@cognia/plugin-ui` at `^0.1.0` — neither is published to any registry, so `pnpm install` failed outright and no third-party author could get past the first step. The scaffold now vendors the TypeScript declarations it needs (SDK, UI kit, and the `provider-types` / `provider-core` surface the SDK's public types reach into) and resolves them through `tsconfig.json` `paths`, declaring only real published packages as dependencies. Runtime is unchanged: both `@cognia/*` specifiers stay external and the host supplies its own instances.\n\nAlso fixes scaffold gaps that the broken install had been masking: `src/panel.tsx`, `src/panel.css` (referenced by `plugin.json`'s `styles`) and `src/panel.test.tsx` were never written despite `src/index.ts` importing them; Jest's `testMatch` skipped `.tsx` tests entirely; and the build script declared no externals at all, so a scaffolded plugin bundled its own React — including the jsx-runtime subpaths a bare `--external:react` would not have covered — and threw `Invalid hook call` the moment one of its components rendered in the host tree. The externals now mirror the loader's shared-module whitelist exactly, plus `react-dom`, which is externalised on purpose: it is not a shared module, so leaving it unbundled turns reaching for it into the loader's explicit \"not available to plugins\" error instead of a second reconciler quietly rendering into a detached tree.",
-      "date": null
+      "date": "2026-07-27T00:49:13+08:00"
     },
     {
       "id": "plugin-binary-trust-model-rebuild",
@@ -1016,13 +1016,19 @@
       "id": "plugin-ui-motion-and-overlays",
       "bump": "minor",
       "summary": "Plugins can now animate and open overlays. `@cognia/plugin-ui` gains a motion facade (`Fade`, `SlideUp`, `Stagger`, `Collapse`, `motionTokens`, `useMotionPrefs`) and six overlay components (`DropdownMenu`, `Popover`, `ContextMenu`, `Sheet`, `HoverCard`, `Command`).\n\nBoth close gaps a plugin author could not work around. `react-dom` is deliberately withheld from plugin bundles so a contribution cannot `createPortal` out of its slot and its scoped stylesheet — which also meant a plugin could not build _any_ anchored overlay, making the commonest shape of all, a toolbar button that opens a menu, impossible. And while the host has a full motion vocabulary, none of it was reachable: plugins had a single `--motion-duration-scale` variable and had to invent their own curves, so plugin UI never quite moved like the app around it.\n\nThe motion tokens now live in `@cognia/plugin-ui/motion-tokens` with `lib/ui/motion.ts` re-exporting them, so host and plugin animation are the same values by construction rather than by convention. `useMotionPrefs()` tracks the user's reduced-motion and duration settings live, and every facade component degrades to a plain element when animation is suppressed.\n\n`Command` ships without `CommandDialog` and `Sheet` exposes a `closeLabel` prop instead of a hard-coded English string — centered modals remain the runtime `ctx.modal.openModal()` API's job, and plugins have no access to the app's translation catalog.",
-      "date": null
+      "date": "2026-07-27T00:50:38+08:00"
+    },
+    {
+      "id": "plugin-ui-primitives-and-layout",
+      "bump": "minor",
+      "summary": "Plugin authors get the rest of the component surface and their first real layout control.\n\n`@cognia/plugin-ui` adds twelve primitives — `Accordion`, `Avatar`, `Collapsible`, `Progress`, `RadioGroup`, `ScrollArea`, `Separator`, `Skeleton`, `Slider`, `Switch`, `Table`, `Textarea` — bringing the kit to eighteen components plus the motion facade. `Progress` deliberately diverges from the host's version, which destructures `value` and then never forwards it to the Radix root: the bar is stuck reporting `indeterminate` and emits no `aria-valuenow`, so it is silent to screen readers. The fork forwards `value` and `max`, normalises the indicator against `max` rather than a hard-coded 100, and clamps out-of-range values. A plugin could not have worked around this from the outside, since `value` was being swallowed before it reached Radix.\n\nOn the layout side, three additions that plugins previously had no equivalent of:\n\n- `ctx.modal.openModal(component, args, options)` accepts `size` (`sm`/`md`/`lg`/`full`) and `variant` (`center`/`sheet-right`/`sheet-bottom`). `manifest.modalMounts[]` takes the same options as declared defaults, validated at install, so deep links and slash commands — which have no call site to pass anything — are not stuck with centered modals. Existing two-argument calls are unchanged.\n- Context-panel width now persists per panel id and is restored on reveal, reusing the workbench's existing persisted layout store rather than introducing a second writer.\n- `registerExtension(point, component, options)` accepts `minWidth` / `maxWidth` hints. The slot honours them clamped to its own bounds, so a contribution can ask for room without being able to break the host's layout.",
+      "date": "2026-07-27T00:50:38+08:00"
     },
     {
       "id": "plugin-ui-surface",
       "bump": "minor",
       "summary": "Third-party plugins can now ship React UI. Installed plugins previously could not: their bundles were built with `--external:react` while the loader's `require` threw for every specifier, so any plugin component crashed on its first hook. The loader now resolves a closed whitelist (`react`, its jsx runtimes, `@cognia/plugin-sdk`, and the new `@cognia/plugin-ui` component kit) from the host's own module graph, so plugins share one React and one set of components. `react-dom` is deliberately withheld, keeping contributions inside the slot they were mounted into.\n\n`manifest.styles` also works for the first time — it was declared, packaged by the CLI, watched by `plugin dev`, and then silently dropped at runtime. Stylesheets are now injected wrapped in `@scope`, bounded to the contributing plugin's own subtree, with name-defining at-rules (`@keyframes`, `@font-face`, `@property`, `@counter-style`) hoisted back out since `@scope` cannot hold them.\n\nPlugin UI gains the host's design system as a documented contract: `ThemeState` now reports applied motion, density, typography and radius, so JavaScript-driven animation can honour the user's reduce-motion preference (previously visible only to CSS, meaning plugin animations kept running after the user asked them to stop). Webviews get the same tokens injected, having previously inherited nothing. Each of the 57 UI extension points now declares a form factor, delivered to contributions as a prop, and slot wrappers are query containers so plugin CSS can use `@container`.\n\nAlso corrects the plugin authoring docs, which described a `surfaces[]` manifest field and a `ctx.api.extension.mount()` API that have never existed, and claimed the host loads plugins via dynamic `import()`.",
-      "date": null
+      "date": "2026-07-27T00:50:38+08:00"
     },
     {
       "id": "pro-ide-agent-bidirectional",
@@ -1034,7 +1040,7 @@
       "id": "pro-ide-appearance-parity-and-bridge",
       "bump": "minor",
       "summary": "Pro IDE now matches the app: one shared palette resolver drives the DOM, the native shell and the embedded code-server (so the accent override, high contrast and colorblind modes finally reach it), a full workbench colour table paints the title bar, status bar, tabs, terminal, menus and widgets that used to stay stock VS Code grey, and the pane webview is painted in the app background instead of flashing white. Editor preferences, reduced motion and the display language now sync too, and the companion extension gained save-before-turn, diff preview, reveal-in-explorer, terminal and notification support plus push events so \"what the user is looking at\" stays live without polling.",
-      "date": null
+      "date": "2026-07-27T00:22:10+08:00"
     },
     {
       "id": "pro-ide-code-server",
@@ -1094,7 +1100,7 @@
       "id": "remote-computer-use-supervision",
       "bump": "minor",
       "summary": "Make remote supervision of desktop Computer Use actually work when your phone is asleep. Previously a per-call consent prompt only reached devices with an open WebSocket, so a backgrounded phone never saw it and the request fail-closed after a hard-coded 30 seconds — remote computer-use effectively could not be approved away from the desk. Consent prompts are now a push trigger, so a locked phone gets a notification naming the action and the app it targets (never the window title or the command detail, which stay on the encrypted channel). Each prompt now carries a downscaled screenshot of the host screen so you can see what you are approving instead of deciding from a bare set of coordinates; if the desktop is focused on a password or credential prompt the frame is blanked and labelled as such, regardless of the global screenshot-redaction setting. The consent wait is now configurable (Settings → Automation → Model behavior) and defaults to 90 seconds, bounded so an answer can never arrive after the underlying tool call has already given up. Finally, \"always allow this session\" is replaced by a time-boxed grant — 15, 30, or 60 minutes — that is scoped to the conversation it was granted in, so an agent can work through a task uninterrupted without leaving a standing authorization behind.",
-      "date": null
+      "date": "2026-07-27T00:42:53+08:00"
     },
     {
       "id": "remote-development-remote-host",
@@ -1148,13 +1154,13 @@
       "id": "scheduler-missed-run-storm",
       "bump": "patch",
       "summary": "Fix a scheduler startup storm: when the app had been closed for longer than a recurring task's period, the timing driver replayed every missed slot back-to-back — flooding the log with `execution skipped due to overlap-skipped` warnings, writing one skipped execution record per missed slot, and re-firing recurring work (most visibly the IM usage-status refresh, which pushed repeated presence updates). An overdue window now goes through the missed-run policy once (`runMissedOnStartup` / `maxMissedRuns` / `catchupWindowMs`) and re-arms on the next future slot.",
-      "date": null
+      "date": "2026-07-27T00:38:41+08:00"
     },
     {
       "id": "scheduler-run-budget-and-lifecycle",
       "bump": "minor",
       "summary": "Harden scheduled-task execution semantics. Due slots are claimed atomically and reserve `maxRuns` before overlapping work can start, cadence advances from the persisted slot, overlap queues and retry chains retain their trigger context, and stop, pause, delete, startup, and Rust-daemon arm/disarm races no longer leave stale executions, retries, or alarms behind.",
-      "date": null
+      "date": "2026-07-27T00:38:41+08:00"
     },
     {
       "id": "scheduler-stale-execution-reconcile",
@@ -1208,7 +1214,7 @@
       "id": "shell-de-crowding",
       "bump": "minor",
       "summary": "Shell de-crowding: before you typed a character, the desktop main window mounted 65 interactive controls across its five chrome bands — title bar, guild rail, chat header, composer toolbar and status bar — plus a tab strip that rendered for a single conversation. It now mounts 32 with no control removed — every demoted control moved to the one surface that owns its concern. The chat header drops from six icon buttons to two (⚙ and the artifact dock; Insights became a row in the session sheet, the browser opener moved to Views, the agent-flow switch already existed in the sheet) and from two title rows to one. The composer toolbar drops from twelve inline controls to four: the model chip now carries its effort level inside its own picker, the permission chip stays, and sandbox / agent mode / external agent / runtime / plugin slots moved into \"⋯\"; Skills, Enhance and web search joined attachments under a new `+` menu on the input. The title bar's four panel-toggle buttons merged into a single Views menu that also inherited theme, language and zoom from the status bar, and the pet / OCR / clipboard quick actions and the duplicate account button are off by default. The guild rail ships three pins (Inbox, Workflows, Agent Teams) instead of eleven, with the rest one click away under \"More\". The status bar keeps ambient status only: its sidebar toggle and permission picker were duplicates of live controls, and its session name and shell badge (\"Desktop\" / \"Web\") were restatements, so those four readouts are gone rather than relocated. The attention panel, the tab strip and the composer's shortcut hints now render only when they have something to say.\n\nTwo fixes came with it: the native View menu gained **Toggle Right Sidebar** and **Toggle Terminal**, which on macOS had no menu entry at all, and the session settings sheet now offers every permission mode — its local list had silently omitted `dontAsk` and `auto`.\n\nExisting installs are migrated (`cognia-ui` persist v3) and see a one-time note explaining where the moved controls went; anything you had customised yourself is preserved, and every hidden segment can be switched back on from Views.",
-      "date": null
+      "date": "2026-07-27T00:46:16+08:00"
     },
     {
       "id": "simplified-mode-tui-folding",
@@ -1238,7 +1244,7 @@
       "id": "storage-backup-provider-completion",
       "bump": "minor",
       "summary": "Encrypted backup to WebDAV and consumer cloud storage now actually works end to end, and stops trusting bad certificates by default.\n\nThree contracts were incomplete. The desktop HTTP bridge rejected the WebDAV verbs the protocol requires, so connection tests, collection creation and directory listing failed on Tauri — `HEAD`, `OPTIONS`, `PROPFIND` and `MKCOL` are now allowlisted, and unknown methods stay rejected. Every WebDAV client implicitly accepted invalid TLS certificates while Tauri ignored the flag entirely; `allowInvalidCertificates` now defaults to `false` across settings, the TypeScript transport, Tauri serialization and reqwest, and when you do enable it, it applies only to that one endpoint's request client. And scheduled-backup selection controls no longer disagree with the payload that gets written: every selection maps to an exact payload, API keys stay out of scheduled runs, and the complete non-builtin plugin domain round-trips through export and restore.\n\nSetup also gets shorter. Nutstore, Koofr, pCloud (US and EU) and Yandex Disk ship as presets with their documented endpoints applied for you; self-hosted Nextcloud and ownCloud stay user-supplied, because the host and username path are private configuration. Google Drive, Dropbox, OneDrive and iCloud Drive are supported as a distinct mode that writes the encrypted file into a folder their own desktop client already syncs — no unofficial APIs and no second sync engine. You can also hand configuration to the assistant without pasting anything sensitive: the AI-guided entry point names only the provider and its public documentation, never credentials or private paths.",
-      "date": null
+      "date": "2026-07-27T00:37:50+08:00"
     },
     {
       "id": "streaming-artifact-placeholder",

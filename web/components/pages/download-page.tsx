@@ -1,5 +1,8 @@
 import { DownloadCta } from "@web/components/download-cta"
 import { Section, SectionHeading } from "@web/components/section"
+import { CopyButton } from "@web/components/copy-button"
+import { PlatformHint } from "@web/components/platform-hint"
+import { RevealGroup, RevealItem } from "@web/components/reveal-group"
 import { SiteShell, evidence } from "@web/components/site-shell"
 import { format, getCopy } from "@web/content"
 import { type Platform, formatDate, releaseState } from "@web/lib/evidence"
@@ -27,10 +30,19 @@ export function DownloadPage({ locale }: { locale: Locale }) {
 
   return (
     <SiteShell locale={locale} route="/download">
-      <PageHeader copy={copy.download.header} />
+      <PageHeader
+        copy={copy.download.header}
+        common={copy.common}
+        locale={locale}
+        docsOrigin={docsUrl()}
+      />
 
       <Section tone="paper">
         <DownloadCta locale={locale} copy={copy.common} state={state} docsOrigin={docsUrl()} />
+
+        <div className="mt-6">
+          <PlatformHint common={copy.common} copy={copy.download.platformHint} />
+        </div>
 
         {state.hasRelease ? (
           <div className="mt-16">
@@ -79,32 +91,48 @@ export function DownloadPage({ locale }: { locale: Locale }) {
           title={copy.download.buildFromSource.title}
           subtitle={copy.download.buildFromSource.body}
         />
-        <ol className="mt-10 flex max-w-3xl flex-col gap-5">
+        <RevealGroup
+          as="ol"
+          count={copy.download.buildFromSource.steps.length}
+          className="mt-10 flex max-w-3xl flex-col gap-5"
+        >
           {copy.download.buildFromSource.steps.map((step, index) => (
-            <li key={step.command}>
-              <p className="font-mono text-xs uppercase tracking-widest text-muted">
-                {format("{index}", { index: String(index + 1).padStart(2, "0") })} · {step.label}
-              </p>
+            <RevealItem key={step.command} as="li">
+              <div className="flex items-center justify-between gap-4">
+                <p className="font-mono text-xs uppercase tracking-widest text-muted">
+                  {format("{index}", { index: String(index + 1).padStart(2, "0") })} · {step.label}
+                </p>
+                <CopyButton
+                  value={step.command}
+                  copyLabel={copy.common.copyCommand}
+                  copiedLabel={copy.common.copiedCommand}
+                />
+              </div>
               <pre className="mt-2 overflow-x-auto rounded-control border border-hairline bg-paper px-4 py-3">
                 <code className="font-mono text-sm text-ink">{step.command}</code>
               </pre>
-            </li>
+            </RevealItem>
           ))}
-        </ol>
+        </RevealGroup>
       </Section>
 
       <Section tone="paper">
         <SectionHeading title={copy.download.requirements.title} />
-        <ul className="mt-10 flex max-w-3xl flex-col">
+        <RevealGroup
+          as="ul"
+          count={copy.download.requirements.items.length}
+          className="mt-10 grid gap-x-16 md:grid-cols-2"
+        >
           {copy.download.requirements.items.map((item) => (
-            <li
+            <RevealItem
               key={item}
-              className="border-t border-hairline py-5 leading-relaxed text-muted first:border-t-0 first:pt-0"
+              as="li"
+              className="border-t border-hairline py-5 leading-relaxed text-muted"
             >
               {item}
-            </li>
+            </RevealItem>
           ))}
-        </ul>
+        </RevealGroup>
       </Section>
     </SiteShell>
   )

@@ -22,7 +22,13 @@ export function TrustPage({ locale }: { locale: Locale }) {
 
   return (
     <SiteShell locale={locale} route="/trust">
-      <PageHeader copy={copy.trust.header} />
+      <PageHeader
+        copy={copy.trust.header}
+        common={copy.common}
+        locale={locale}
+        sections={copy.trust.sections}
+        docsOrigin={docsOrigin}
+      />
       <CapabilitySections
         sections={copy.trust.sections}
         learnMore={copy.common.learnMore}
