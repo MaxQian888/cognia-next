@@ -78,6 +78,7 @@ describe("GoalsHistoryTable", () => {
     await waitFor(() => expect(screen.getByTestId("goals-history-delete")).toBeInTheDocument())
     fireEvent.click(screen.getByTestId("goals-history-delete"))
     fireEvent.click(await screen.findByTestId("goals-history-delete-confirm"))
+    await waitFor(async () => expect(await getDb().chatGoals.count()).toBe(0))
     await waitFor(() => expect(screen.getByTestId("goals-history-empty")).toBeInTheDocument())
   })
 

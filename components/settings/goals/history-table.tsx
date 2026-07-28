@@ -60,7 +60,8 @@ const SORT_KEYS: readonly GoalSortKey[] = ["created", "turns", "tokens"]
 
 export function GoalsHistoryTable() {
   const t = useTranslations("goal")
-  const goals = useLiveQuery(() => listAllGoals(500), [])
+  const [historyRevision, setHistoryRevision] = useState(0)
+  const goals = useLiveQuery(() => listAllGoals(500), [historyRevision])
 
   const [query, setQuery] = useState("")
   const [statusFilter, setStatusFilter] = useState<string>(ALL_STATUS)
@@ -97,6 +98,7 @@ export function GoalsHistoryTable() {
     if (!pendingDelete) return
     await getGoalRuntime().deleteGoal(pendingDelete.id)
     setPendingDelete(null)
+    setHistoryRevision((revision) => revision + 1)
   }
 
   return (
