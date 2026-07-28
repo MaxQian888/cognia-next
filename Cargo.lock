@@ -2354,6 +2354,7 @@ dependencies = [
  "chrono",
  "chrono-tz",
  "cognia-core",
+ "cognia-secrets",
  "cron",
  "dirs 6.0.0",
  "hmac 0.13.0",
