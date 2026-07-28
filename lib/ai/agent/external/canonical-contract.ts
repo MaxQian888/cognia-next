@@ -204,11 +204,14 @@ export function normalizeExternalAgentValiditySnapshot(
     hasAgentCapabilities: Boolean(snapshot.negotiation?.agentCapabilities),
     sessionExtensions,
   }
-  const recoveryHints =
-    snapshot.recoveryHints ??
-    (ecosystem?.recommendedActions && ecosystem.recommendedActions.length > 0
-      ? ecosystem.recommendedActions
-      : resolveRecoveryHints(reasonCode))
+  // `recoveryHints` is a list of i18n key ids — its only consumer resolves each
+  // through `t(\`recoveryHint.${id}\`)`. `ecosystem.recommendedActions` is
+  // English prose assembled from runtime data (a command name, a docs URL), so
+  // substituting it here fell straight through that lookup and printed raw
+  // English into a Chinese UI — for `ecosystem_prerequisite_missing`, the very
+  // code the localized advice was written for. The two are rendered as separate
+  // lines by the panel; they are not interchangeable.
+  const recoveryHints = snapshot.recoveryHints ?? resolveRecoveryHints(reasonCode)
 
   return {
     executable: snapshot.executable ?? executionEligibility === "eligible",

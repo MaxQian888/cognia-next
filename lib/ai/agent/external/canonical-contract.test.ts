@@ -68,8 +68,11 @@ describe("normalizeExternalAgentValiditySnapshot — reason resolution", () => {
         recommendedActions: ["Click the docs link"],
       },
     })
+    // `canonicalReason` is prose by contract, so falling back to the ecosystem's
+    // first recommended action is right. `recoveryHints` are i18n key ids, so
+    // they stay keyed off the reason code — the two fields are not a pair.
     expect(out.canonicalReason).toBe("Click the docs link")
-    expect(out.recoveryHints).toEqual(["Click the docs link"])
+    expect(out.recoveryHints).toEqual(["useOfficialWorkflow", "selectLocalSurface"])
   })
 
   it("uses the documented-only fallback string when no other hint exists", () => {
@@ -269,7 +272,12 @@ describe("normalizeExternalAgentValiditySnapshot — recovery hints map", () => 
     expect(emitted.filter((id) => !(id in messages.diagnostics.recoveryHint))).toEqual([])
   })
 
-  it("prefers ecosystem.recommendedActions when present", () => {
+  it("keeps recovery hints as key ids even when the ecosystem has prose advice", () => {
+    // Substituting `recommendedActions` here is what broke the localized
+    // advice: the panel resolves every hint through
+    // `t(`recoveryHint.${id}`)`, so English prose fell through that lookup and
+    // printed verbatim into a Chinese UI. The two survive as separate fields
+    // and the panel renders them on separate lines.
     const out = normalizeExternalAgentValiditySnapshot({
       canonicalReasonCode: "permission_denied",
       ecosystem: {
@@ -278,7 +286,21 @@ describe("normalizeExternalAgentValiditySnapshot — recovery hints map", () => 
         recommendedActions: ["Click here", "Or there"],
       },
     })
-    expect(out.recoveryHints).toEqual(["Click here", "Or there"])
+    expect(out.recoveryHints).toEqual(["adjustPermissionMode"])
+    expect(out.ecosystem?.recommendedActions).toEqual(["Click here", "Or there"])
+  })
+
+  it("still lets a caller override the hints outright", () => {
+    const out = normalizeExternalAgentValiditySnapshot({
+      canonicalReasonCode: "permission_denied",
+      ecosystem: {
+        adapterId: "codex",
+        supportTier: "executable",
+        recommendedActions: ["Click here"],
+      },
+      recoveryHints: ["custom"],
+    })
+    expect(out.recoveryHints).toEqual(["custom"])
   })
 
   it("respects an explicit recoveryHints override", () => {
