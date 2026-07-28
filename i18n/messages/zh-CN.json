@@ -4712,6 +4712,12 @@
       "title": "发送失败",
       "unflushedEditorBuffers": "本回合开始前有 {count} 个打开的文件未能保存，agent 可能读到过期内容：{files}"
     },
+    "jump": {
+      "back": "返回原处",
+      "newMessages": "{count} 条新消息",
+      "notFound": "该消息已不在此对话中。",
+      "toBottom": "回到最新"
+    },
     "list": {
       "clear": "清空",
       "clearAction": "删除消息",
@@ -4840,6 +4846,9 @@
       "branchTooltip": "从这里分支",
       "copyDone": "已复制！",
       "copyLabel": "复制消息",
+      "copyLinkDone": "链接已复制！",
+      "copyLinkLabel": "复制消息链接",
+      "copyLinkTooltip": "复制指向这条消息的链接",
       "copyTooltip": "复制消息",
       "editLabel": "编辑并重发",
       "editTooltip": "编辑并重发",
@@ -5240,7 +5249,9 @@
       "replyCount": "{count} 条回复",
       "showAll": "显示全部轮次",
       "showBookmarked": "只看已收藏的对话轮次",
+      "starredReply": "已收藏的回复",
       "title": "时间线",
+      "today": "今天",
       "yesterday": "昨天"
     },
     "toolApproval": {
@@ -11026,25 +11037,6 @@
       "title": "智能体队列",
       "waiting": "{count} 个待处理"
     },
-    "githubDelivery": {
-      "backAria": "返回设置",
-      "intro": "查看 GitHub Delivery 机器人的默认合并策略。仓库、凭据、审计日志和用量均在已配对的桌面端。",
-      "manageOnDesktop": "GitHub Delivery 在桌面端管理。请在桌面端连接仓库、配置 App 凭据、调整策略并查看审计日志。",
-      "policy": {
-        "allowedAuthors": "允许的作者",
-        "description": "仓库在桌面端被覆盖前继承的默认策略。",
-        "maxDailyMerges": "每日最大合并数",
-        "off": "关闭",
-        "perDay": "每天 {count} 次",
-        "protectedBranches": "受保护分支",
-        "requireGreenCi": "要求 CI 通过",
-        "requireHumanApproval": "要求人工审批",
-        "required": "必需",
-        "title": "默认策略"
-      },
-      "runtimeNote": "投递机器人在已配对的桌面端运行。审计决策和速率限制用量可在桌面端实时查看。",
-      "title": "GitHub Delivery"
-    },
     "home": {
       "actions": {
         "agentTeams": "智能体团队",
@@ -11252,7 +11244,6 @@
         "reportTitle": "反馈问题"
       },
       "feedbackRow": "反馈与诊断",
-      "githubDeliveryRow": "GitHub 投递",
       "goalsRow": "目标",
       "help": {
         "docsDescription": "在系统浏览器中打开 cognia 文档。",
@@ -11440,6 +11431,8 @@
       "branchVariants": "回复版本",
       "copy": "复制文本",
       "copyFailed": "复制失败：{message}",
+      "copyLink": "复制消息链接",
+      "copyLinkSuccess": "消息链接已复制。",
       "copySuccess": "已复制到剪贴板。",
       "delete": "删除消息",
       "deleteConfirm": "删除",
@@ -17979,6 +17972,10 @@
     "ask": "提问",
     "chooseLanguage": "选择翻译语言",
     "copy": "复制",
+    "errors": {
+      "generic": "该操作未能完成",
+      "piiBlocked": "含敏感信息，未存入记忆"
+    },
     "explain": "解释",
     "languages": {
       "de": "德语",
@@ -17993,6 +17990,9 @@
       "explain": "请解释这段内容。",
       "translate": "请将这段内容翻译成{language}。"
     },
+    "remember": "记忆",
+    "speak": "朗读",
+    "stopSpeaking": "停止朗读",
     "translate": "翻译",
     "truncated": "已截断",
     "truncatedHint": "选区超过 20,000 个字符，已截断。"
@@ -22377,7 +22377,6 @@
       "fleet": "监控并控制本机任意位置启动的编码 Agent（Claude Code、Codex、OpenCode）、灵动岛悬浮层，以及最近会话历史。",
       "gateway": "本地 OpenAI / Anthropic 兼容端点，让外部工具（Claude Code、任意 OpenAI 客户端）借用你的服务商、路由和凭据。",
       "general": "默认模型、工作目录、系统提示词、权限模式与始终允许的工具。",
-      "githubDelivery": "面向你的 GitHub 仓库的 AI 驱动 PR 评审、Issue → PR 闭环与发布自动化。",
       "goals": "持久化的聊天目标(ADR-0019)。用 /goal 设定目标后,agent 自动续 turn,直到 judge 模型确认达成,或预算 / 超时触发退出。",
       "hooks": "生命周期钩子（~/.claude/settings.json）。21 种事件 × 匹配器 × 命令或 webhook 处理器。整文档原样写回，不会丢失未识别字段。",
       "logs": "日志级别、传输（控制台 / IndexedDB / 原生 / 远程 / Langfuse / OpenTelemetry）、保留策略、脱敏与按模块的采样。",
@@ -22460,7 +22459,9 @@
         "permissionHint": "macOS 需要辅助功能和输入监控权限；Cognia 不申请屏幕录制权限。",
         "saveDisabledApps": "保存应用列表",
         "title": "系统划词工具栏",
-        "toggle": "切换系统划词工具栏"
+        "toggle": "切换系统划词工具栏",
+        "translateLanguage": "默认翻译语言",
+        "translateLanguageHint": "供工具栏的「翻译」按钮及其 ⌥⇧3 快捷键使用。"
       },
       "subtitle": "仅在原生桌面 App 运行时生效的设置。",
       "system": "系统",
@@ -22562,9 +22563,15 @@
         "clearConfirm": "清空日志",
         "clearConfirmDesc": "将删除全部 {count} 条审计记录，无法恢复。",
         "clearConfirmTitle": "确认清空 MCP 审计日志？",
+        "deniedOnly": "仅看拒绝",
         "description": "最近 50 条调用记录。总计上限 5000 条 — 超出后自动清理旧记录。",
+        "detailAria": "展开或收起 {tool} 的详情",
         "empty": "暂无调用记录。",
+        "filterToolPlaceholder": "按工具筛选…",
         "latency": "延迟",
+        "reason": "原因",
+        "rowLimit": "行数",
+        "rowLimitValue": "{count} 行",
         "scope": "范围",
         "status": "状态",
         "statusDeny": "拒绝",
@@ -22577,7 +22584,39 @@
       "badgeIdle": "空闲",
       "badgeLive": "运行中",
       "badgeWeb": "web",
+      "description": "把本应用的知识与运行时能力开放给外部 MCP 客户端。",
       "loading": "加载中…",
+      "nav": {
+        "groups": {
+          "accessGroup": "接入",
+          "contentGroup": "内容",
+          "serviceGroup": "服务"
+        },
+        "items": {
+          "audit": {
+            "description": "桥接处理过的每一次调用",
+            "label": "审计日志"
+          },
+          "scopes": {
+            "description": "外部客户端可以调用的能力",
+            "label": "权限范围"
+          },
+          "server": {
+            "description": "启用桥接并管理其令牌",
+            "label": "服务与令牌"
+          },
+          "setup": {
+            "description": "MCP 客户端的配置片段",
+            "label": "客户端接入"
+          },
+          "wiki": {
+            "description": "重建与检查计划",
+            "label": "Wiki 维护"
+          }
+        },
+        "mobileTrigger": "面板",
+        "title": "外部桥接设置"
+      },
       "scopeDescriptions": {
         "agent:dispatch": "⚠ 允许外部代理无界面运行你的内置/插件子代理或角色（工具循环 + 模型调用）。返回文本经 PII 脱敏。默认关闭。",
         "agent:team": "⚠ 允许外部代理无界面启动智能体团队——它们本无法触及的多智能体编排。默认关闭。",
@@ -22601,6 +22640,20 @@
       },
       "scopes": {
         "description": "每个范围默认关闭，需手动启用。默认安装仅开启公开代码 Wiki 相关范围。",
+        "grantedCount": "已授予 {granted}/{total}",
+        "groups": {
+          "agent": "Agent",
+          "inbound": "入站",
+          "inbox": "收件箱",
+          "mcp": "计算机操作",
+          "memory": "记忆",
+          "plugin": "插件",
+          "rag": "检索",
+          "runtime": "运行时",
+          "wiki": "Wiki"
+        },
+        "plannedBadge": "规划中",
+        "plannedReason": "已推迟到 Phase 1 之后：访问用户仓库需要逐仓库授权，该机制尚未实现。此范围保留在 API 中以便处理器继续编译，但无法被授予。",
         "title": "权限范围",
         "toggleAria": "切换 {scope}"
       },
@@ -22608,6 +22661,8 @@
         "bearerTokenLabel": "Bearer Token（仅 HTTP）",
         "copyTokenAria": "复制 Token",
         "hide": "隐藏",
+        "httpPort": "HTTP 端口",
+        "httpPortHelp": "HTTP 传输监听的端口，下方的接入片段会使用该值。",
         "regenerateWarning": "⚠ 重新生成将立即作废旧 Token。",
         "rotateConfirmAction": "轮换 Token",
         "rotateConfirmCancel": "取消",
@@ -22624,7 +22679,8 @@
         "toastTokenCopied": "Token 已复制到剪贴板。",
         "toastTokenRegenerated": "新 Token 已生成，旧 Token 立即失效。",
         "toggleAriaLabel": "启用 MCP 服务器",
-        "tokenNone": "（无）"
+        "tokenNone": "（无）",
+        "tokenRotatedAt": "令牌最近轮换于 {time}"
       },
       "setup": {
         "clientLabel": "客户端",
@@ -22646,6 +22702,7 @@
           "goose": "Goose"
         }
       },
+      "title": "外部桥接",
       "wikiIndex": {
         "articleCount": "文章数",
         "description": "为外部 Agent 索引 Cognia 代码库，使其可通过 MCP 查询。",
@@ -22852,17 +22909,25 @@
       "allowlistPlaceholder": "192.168.1.0/24",
       "anthropicSnippet": "Anthropic 客户端（Claude Code）",
       "authNote": "用 API 密钥作为凭据——Authorization: Bearer '<key>' 或 x-api-key: '<key>'。",
+      "badgeRunning": "运行中",
+      "badgeStopped": "已停止",
       "bindHelp": "回环仅限本机访问；局域网允许同网段其他设备访问——需同时放宽下方 IP 白名单才会真正生效。",
       "bindInterface": "绑定接口",
       "bindLan": "局域网（0.0.0.0）",
       "bindLoopback": "回环（127.0.0.1）",
+      "bindTimeBadge": "需重启生效",
       "cancel": "取消",
       "clearLog": "清空日志",
+      "colCost": "成本",
+      "colError": "错误",
       "colKey": "密钥",
       "colLatency": "延迟",
       "colModel": "模型",
       "colProvider": "服务商",
+      "colRemoteIp": "客户端 IP",
+      "colRoute": "路由",
       "colStatus": "状态",
+      "colStream": "流式",
       "colTime": "时间",
       "colTokens": "Token",
       "concurrencyHeading": "上游保护",
@@ -22875,11 +22940,14 @@
       "connectTimeoutHelp": "对每个请求（含流式）约束卡住的上游连接。",
       "cooldownFallback": "限流冷却（秒）",
       "cooldownFallbackHelp": "当 429 未带 Retry-After 头时，把该账号冷却这么久，避免故障转移立刻重选它。0 = 只遵循上游返回头。",
-      "cooldownsCoolingUntil": "冷却至 {time}",
+      "cooldownHeading": "冷却",
+      "cooldownHelp": "被限流或失败的上游账号会被跳过多久。",
       "cooldownsEmpty": "当前没有被暂停的上游账号。",
       "cooldownsHeading": "被暂停的上游账号",
       "cooldownsHelp": "正在冷却（被限流）或已被永久停用（额度 / 鉴权）的账号。冷却结束后自动清除。",
       "cooldownsPermanent": "已停用",
+      "cooldownsRecovered": "已恢复",
+      "cooldownsRecoversIn": "{seconds} 秒后恢复",
       "cooldownsRefresh": "刷新",
       "copied": "已复制",
       "copy": "复制",
@@ -22906,6 +22974,8 @@
       "fieldStripAllow": "字段剥离例外",
       "fieldStripAllowHelp": "为某个服务商放行一个被剥离字段，写作 provider:field。",
       "fieldStripAllowPlaceholder": "openai:service_tier",
+      "fieldStripHeading": "出站字段剥离",
+      "fieldStripHelp": "请求体到达上游前会被移除的字段。",
       "hide": "隐藏",
       "hideRawModels": "仅列出别名",
       "hideRawModelsHelp": "在 /v1/models 中隐藏原始服务商模型 id，只公布路由别名。直接的 provider:model 调用仍然有效。",
@@ -22934,6 +23004,9 @@
       "keysHeading": "API 密钥",
       "keysHelp": "为每个外部工具签发一把作用域密钥。每把可限制可用模型、设定有效期与独立限流，并可单独停用或删除。",
       "lanWarning": "开启局域网绑定会把网关暴露到本地网络。请收紧 IP 白名单并为每个密钥设定作用域——只有白名单内、且持有效密钥的 IP 才能通过。",
+      "listenerHeading": "监听器",
+      "listenerHelp": "网关绑定的位置，以及谁可以访问它。",
+      "liveBadge": "立即生效",
       "logCleared": "日志已清空",
       "logEmpty": "暂无请求。",
       "logFilterAll": "全部",
@@ -22943,21 +23016,67 @@
       "logFilterOk": "成功",
       "logHeading": "请求日志",
       "logHelp": "每一次入站请求，重启后仍保留。",
+      "logRowDetailAria": "展开或收起请求 {id} 的详情",
       "maxConcurrentPerKey": "最大并发 / 网关密钥",
       "maxConcurrentPerKeyHelp": "每个 API 密钥允许的同时在途请求数，chat、embeddings、responses 共用同一并发上限。0 = 不限。流式对话会占用并发槽直到整条流结束。",
       "maxConcurrentPerUpstreamKey": "最大并发 / 上游账号",
       "maxConcurrentPerUpstreamKeyHelp": "每个池内上游账号允许的同时在途调用数，所有端点共用同一并发上限。0 = 不限。流式对话会占用并发槽直到整条流结束。",
       "maxRetries": "最大尝试数",
       "maxRetriesHelp": "每个请求尝试的候选上限。0 = 走完整条回退链。",
+      "nav": {
+        "groups": {
+          "observabilityGroup": "可观测",
+          "routingGroup": "路由与保护",
+          "serviceGroup": "服务"
+        },
+        "items": {
+          "exposure": {
+            "description": "/v1/models 对外公布的内容",
+            "label": "模型暴露"
+          },
+          "keys": {
+            "description": "作用域凭证与配额",
+            "label": "API 密钥"
+          },
+          "listener": {
+            "description": "端口、网络接口与访问白名单",
+            "label": "监听器"
+          },
+          "logs": {
+            "description": "最近调用、成本与错误",
+            "label": "请求日志"
+          },
+          "overview": {
+            "description": "运行状态、流量与自检",
+            "label": "概览"
+          },
+          "reliability": {
+            "description": "超时、重试与速率限制",
+            "label": "可靠性"
+          },
+          "tickets": {
+            "description": "会话级冻结路由",
+            "label": "路由票据"
+          },
+          "upstream": {
+            "description": "并发、冷却与字段剥离",
+            "label": "上游保护"
+          }
+        },
+        "mobileTrigger": "面板",
+        "title": "网关设置"
+      },
       "newKeyHeading": "密钥已创建",
       "newKeyReveal": "请立即复制此密钥——出于安全考虑它只显示这一次。",
       "openaiSnippet": "OpenAI 客户端",
       "overloadCooldown": "过载冷却（秒）",
       "overloadCooldownHelp": "遇到 529 过载响应后，把该账号冷却这么久。",
       "port": "端口",
+      "portHelp": "监听器绑定的端口。",
       "quotaExceeded": "额度已用尽",
       "quotaReset": "额度用量已重置",
       "rateLimit": "全局每分钟请求数",
+      "rateLimitHelp": "所有密钥合计的每分钟请求数。",
       "reliabilityHeading": "可靠性与访问",
       "reliabilityHelp": "超时、故障转移重试，以及谁可以连接。",
       "remove": "移除",
@@ -22965,14 +23084,35 @@
       "requestTimeoutHelp": "非流式请求的总时长上限。0 表示不限；流式响应永不受此约束。",
       "requiresKey": "启用网关前请先创建 API 密钥。",
       "resetQuota": "重置用量",
-      "restartHint": "网络相关改动（端口、绑定接口、白名单、连接超时、全局限流）将在下次重启监听器后生效。",
+      "restartListener": "重启监听器",
+      "restartRequired": "运行中的监听器仍在使用旧配置，重启后这些修改才会生效。",
+      "restarted": "监听器已重启",
       "retryStatusCodes": "触发重试的状态码",
       "retryStatusCodesHelp": "遇到这些上游 HTTP 状态码时转移到下一个服务商，而非直接返回。",
       "retryStatusCodesPlaceholder": "429, 503",
       "reveal": "显示",
       "save": "保存",
       "saved": "已保存",
+      "selfCheckBillingWarning": "每个候选都会收到真实请求，并由对应供应商计费。",
+      "selfCheckHeading": "上游自检",
+      "selfCheckHelp": "按真实路由路径解析模型，并对每个候选发起一次最小请求。",
+      "selfCheckModel": "模型或别名",
+      "selfCheckModelPlaceholder": "例如 fast",
+      "selfCheckNeedsRunning": "请先启动网关再运行自检。",
+      "selfCheckNoStatus": "无响应",
+      "selfCheckRun": "运行自检",
       "serverHeading": "服务器",
+      "snapshotGeneratedAt": "路由快照发布于 {time}",
+      "snapshotNone": "尚未发布任何路由快照。",
+      "statAliases": "别名",
+      "statCalls": "已处理请求",
+      "statLastCall": "最近请求",
+      "statNever": "从未",
+      "statProviders": "供应商",
+      "streamIdleTimeout": "流式空闲超时（秒）",
+      "streamIdleTimeoutHelp": "上游在此时长内未发送任何字节时放弃该流式响应。填 0 表示无限等待——若上游始终不关闭连接，会泄漏一个并发槽。",
+      "streamNo": "否",
+      "streamYes": "是",
       "strippedFields": "剥离的请求字段",
       "strippedFieldsHelp": "从每个上游请求体中移除的客户端字段（计费 / 隐私 / 行为开关）。点号路径可命中嵌套叶子。",
       "strippedFieldsPlaceholder": "service_tier, store",
@@ -22980,6 +23120,25 @@
       "summaryErrors": "错误数",
       "summaryRequests": "请求数",
       "summaryTokens": "Token（入/出）",
+      "tickets": {
+        "activeHeading": "活跃票据",
+        "activeHelp": "仅展示元数据——票据密钥从不存储或显示。",
+        "description": "签发给 Agent 子进程的会话级冻结路由（ADR-0090）。",
+        "disabledDescription": "此能力关闭时不会签发任何票据，列表将始终为空。请在上方打开以开始签发。",
+        "disabledTitle": "路由票据未启用",
+        "enableHelp": "仅保存在本机，默认关闭。",
+        "enableLabel": "启用路由票据",
+        "experimentalBadge": "实验性",
+        "noneActive": "尚未签发任何票据。",
+        "refresh": "刷新",
+        "revoke": "吊销",
+        "revokeAria": "吊销票据 {id}",
+        "revoked": "票据已吊销",
+        "routingWarning": "此开关会改变 Agent 运行的路由方式，而不仅仅影响本页显示。除非你正在测试 ADR-0090，否则请保持关闭。",
+        "statusRevoked": "已吊销",
+        "ticketMeta": "会话 {session} · {candidates} 个候选 · {expires} 过期",
+        "title": "路由票据"
+      },
       "title": "入站网关"
     },
     "general": {
@@ -23029,106 +23188,6 @@
       "selectWorkingDirectory": "选择工作目录",
       "useSdkDefault": "使用 SDK 默认值",
       "workingDirectory": "工作目录"
-    },
-    "githubDelivery": {
-      "audit": {
-        "all": "全部",
-        "allActions": "全部动作",
-        "allRepos": "全部仓库",
-        "allowed": "已允许",
-        "clear": "清除",
-        "count": "{total} 条中的 {shown} 条",
-        "denied": "已拒绝",
-        "disabled": "审计日志需要启用 GitHub 投递插件。",
-        "emptyFiltered": "没有符合当前筛选条件的记录。",
-        "emptyNone": "暂无审计记录。工作流运行时会自动记录允许/拒绝决策。",
-        "loading": "正在加载审计日志…",
-        "run": "运行：{id}"
-      },
-      "common": {
-        "pluginDisabled": "GitHub 投递插件尚未启用。"
-      },
-      "credentials": {
-        "appIdLabel": "App ID",
-        "appKeyAlertDesc": "存储于 IndexedDB（按来源隔离）。在桌面版构建中，首次激活时会镜像到操作系统密钥环。",
-        "appKeyAlertTitle": "私钥绝不会离开你的设备",
-        "appTitle": "GitHub App 设置",
-        "back": "返回",
-        "errIdsNumeric": "App ID 与 Installation ID 必须为数字。",
-        "errPatEmpty": "PAT 不能为空。",
-        "errPkEmpty": "App 私钥（PEM）不能为空。",
-        "errRepoFormat": "仓库必须为 `owner/name` 格式。",
-        "installLabel": "Installation ID",
-        "patAlertDesc": "选择「仅选定仓库」并赋予具体权限（issues：读/写，pull-requests：读/写，contents：读）。",
-        "patAlertTitle": "使用细粒度作用域的令牌",
-        "patTitle": "个人访问令牌（PAT）",
-        "pickerAppCta": "设置 App",
-        "pickerAppDesc": "更高的速率限制、更细粒度的安装作用域、按安装维度的审计记录。",
-        "pickerAppTitle": "GitHub App（推荐）",
-        "pickerPatCta": "设置 PAT",
-        "pickerPatDesc": "设置更快。绑定到你的账户；适用于个人仓库与试运行。",
-        "pickerPatTitle": "个人访问令牌（快速上手）",
-        "pkLabel": "私钥（PEM）",
-        "repoLabel": "仓库（owner/name）",
-        "save": "保存",
-        "savedToast": "已保存 {repo}，它现在会出现在「仓库」标签页中。",
-        "tokenLabel": "令牌"
-      },
-      "description": "面向你的 GitHub 仓库的 AI 驱动 PR 评审、Issue → PR 闭环与发布自动化。",
-      "policies": {
-        "allowedAuthors": "允许的作者",
-        "defaultHint": "机器人执行的每个动作都会依据此策略校验。按仓库的覆盖优先级更高；按节点检查器的覆盖具有最终优先级。",
-        "defaultTitle": "默认策略",
-        "maxDailyMerges": "每日最大合并数",
-        "off": "关闭",
-        "perDay": "{count} / 天",
-        "protectedBranches": "受保护分支（正则）",
-        "quietHoursDesc": "在免打扰时段内机器人动作会被暂停。当前未配置全局时段——如需静默周末/夜间活动，请按仓库设置。",
-        "quietHoursTitle": "免打扰时段",
-        "requireGreenCi": "要求 CI 通过",
-        "requireHumanApproval": "要求人工批准",
-        "required": "必需"
-      },
-      "repos": {
-        "addCta": "添加仓库",
-        "badgeApp": "App",
-        "badgePat": "PAT",
-        "disabledHint": "请在 设置 → 插件 → 市场 中安装或启用该插件，然后返回此处。",
-        "disabledTitle": "GitHub 投递插件尚未启用。",
-        "loading": "正在加载仓库…",
-        "noEvents": "暂无事件",
-        "noneHint": "通过安装向导（凭据标签页）添加仓库即可开始接收事件。",
-        "noneTitle": "尚未配置任何仓库。",
-        "polling": "轮询",
-        "tunnel": {
-          "copied": "已复制",
-          "copyAria": "复制公网地址",
-          "localLabel": "本地 webhook：",
-          "publicLabel": "公网：",
-          "start": "启动 cloudflared 隧道",
-          "starting": "正在启动…",
-          "stop": "停止隧道",
-          "unavailable": "入站 webhook 尚不可用：本地端口上没有任何服务在监听，GitHub 的投递会失败。当前仓库通过轮询跟踪。",
-          "webOnly": "公网隧道需要桌面模式（PATH 中需有 cloudflared 可执行文件）。"
-        },
-        "webhook": "webhook",
-        "worktree": "工作树：{mode}"
-      },
-      "tabs": {
-        "audit": "审计",
-        "credentials": "凭据",
-        "policies": "策略",
-        "repos": "仓库",
-        "usage": "用量"
-      },
-      "title": "GitHub 投递",
-      "usage": {
-        "addRepoHint": "在「凭据」标签页添加仓库即可开始跟踪 API 配额用量。",
-        "disabled": "API 配额需要启用 GitHub 投递插件。",
-        "loading": "正在加载…",
-        "refresh": "刷新",
-        "updated": "更新于 {time}"
-      }
     },
     "groupAi": "AI 核心",
     "groupData": "数据",
@@ -25196,7 +25255,6 @@
       "fleet": "Agent 舰队",
       "gateway": "入站网关",
       "general": "常规",
-      "githubDelivery": "GitHub 投递",
       "goals": "目标",
       "hooks": "钩子",
       "logs": "日志",
@@ -30378,188 +30436,6 @@
           }
         }
       },
-      "github": {
-        "addLabel": "添加标签",
-        "closeIssue": {
-          "reason": {
-            "label": "关闭原因",
-            "options": {
-              "completed": "已完成",
-              "not_planned": "不再计划"
-            }
-          }
-        },
-        "comment": {
-          "body": {
-            "hint": "支持 '{{ }}' 表达式。",
-            "label": "评论正文"
-          }
-        },
-        "createRelease": {
-          "body": {
-            "hint": "支持 '{{ }}' 表达式和 Markdown。",
-            "label": "正文"
-          },
-          "draft": {
-            "label": "草稿"
-          },
-          "name": {
-            "label": "发布名称"
-          },
-          "prerelease": {
-            "label": "预发布版本"
-          },
-          "tag": {
-            "label": "标签",
-            "placeholder": "v1.0.0"
-          }
-        },
-        "generateChangelog": {
-          "currentVersion": {
-            "hint": "用于计算版本号增量的起始版本。默认 0.0.0。",
-            "label": "当前版本号"
-          },
-          "since": {
-            "label": "起点（标签或 SHA）",
-            "placeholder": "v1.0.0"
-          }
-        },
-        "issueNumber": {
-          "label": "Issue 编号"
-        },
-        "issuePrNumber": {
-          "label": "Issue / PR 编号"
-        },
-        "labelIssue": {
-          "add": {
-            "label": "添加的标签",
-            "placeholder": "cognia:claim"
-          },
-          "remove": {
-            "label": "移除的标签",
-            "placeholder": "wontfix"
-          }
-        },
-        "mergePr": {
-          "commitTitle": {
-            "label": "提交标题（可选）"
-          },
-          "mergeMethod": {
-            "label": "合并方式",
-            "options": {
-              "merge": "合并提交",
-              "rebase": "Rebase 后合并",
-              "squash": "Squash 后合并"
-            }
-          }
-        },
-        "openPr": {
-          "base": {
-            "hint": "合并目标分支。",
-            "label": "目标分支（base）",
-            "placeholder": "main"
-          },
-          "body": {
-            "hint": "支持 Markdown。",
-            "label": "正文"
-          },
-          "draft": {
-            "hint": "以草稿状态打开 PR。",
-            "label": "草稿"
-          },
-          "head": {
-            "hint": "包含改动的分支。",
-            "label": "源分支（head）",
-            "placeholder": "feat/x"
-          },
-          "title": {
-            "label": "标题"
-          }
-        },
-        "prNumber": {
-          "label": "PR 编号"
-        },
-        "pushTag": {
-          "sha": {
-            "hint": "推荐使用完整 40 位 SHA。",
-            "label": "提交 SHA"
-          },
-          "tag": {
-            "label": "标签名",
-            "placeholder": "v1.0.0"
-          }
-        },
-        "repoFullName": {
-          "hint": "格式：owner/name。支持 '{{ }}' 表达式。",
-          "label": "仓库",
-          "placeholder": "octocat/hello-world"
-        },
-        "reviewPr": {
-          "body": {
-            "hint": "支持 '{{ }}' 表达式。",
-            "label": "审查正文"
-          },
-          "event": {
-            "label": "审查结论",
-            "options": {
-              "approve": "批准",
-              "comment": "评论",
-              "requestChanges": "要求修改"
-            }
-          }
-        },
-        "reviewPrInline": {
-          "apiKey": {
-            "hint": "敏感信息。会写入工作流定义 — 推荐改用凭证引用。",
-            "label": "API Key"
-          },
-          "baseURL": {
-            "hint": "可选。用于自建或代理的提供方。",
-            "label": "Base URL",
-            "placeholder": "https://api.anthropic.com"
-          },
-          "focus": {
-            "hint": "可选的审查角度，例如「安全」或「性能」。支持 '{{ }}' 表达式。",
-            "label": "审查重点"
-          },
-          "maxFiles": {
-            "hint": "需要检查的改动文件数量（1-30）。默认 5。",
-            "label": "最多审查文件数"
-          },
-          "model": {
-            "label": "模型",
-            "placeholder": "claude-sonnet-4-6"
-          },
-          "provider": {
-            "hint": "必须匹配已配置的 provider id（例如 anthropic、openai）。",
-            "label": "LLM 提供方",
-            "placeholder": "anthropic"
-          }
-        },
-        "runIssueLoop": {
-          "branchTemplate": {
-            "hint": "`{n}` 会被替换为 issue 编号。",
-            "label": "分支模板"
-          },
-          "runtime": {
-            "hint": "内建模式使用 Claude Agent SDK。选择已配置的 External Agent 可运行同一交付链路，失败时不会回退。",
-            "label": "AI 运行时"
-          },
-          "worktreeMode": {
-            "label": "工作树后端",
-            "options": {
-              "e2b": "E2B 沙箱（需要 e2b-sandbox 插件）",
-              "local": "本地 git worktree"
-            }
-          }
-        },
-        "webhookTrigger": {
-          "events": {
-            "hint": "选择一个或多个。Rust 接收器会校验 x-hub-signature-256 头。",
-            "label": "监听的事件"
-          }
-        }
-      },
       "goalAnalytics": {
         "limit": {
           "hint": "最大行数。",
@@ -32776,60 +32652,6 @@
             "label": "Git 暂存"
           }
         },
-        "github": {
-          "closeIssue": {
-            "description": "关闭 Issue，可选关闭原因（completed / not_planned）。",
-            "label": "关闭 Issue"
-          },
-          "closePr": {
-            "description": "关闭打开的 PR 而不合并。",
-            "label": "关闭 GitHub PR"
-          },
-          "commentIssue": {
-            "description": "在 Issue 上发布评论。",
-            "label": "在 Issue 上评论"
-          },
-          "commentPr": {
-            "description": "在 PR 上发布评论。",
-            "label": "在 PR 上评论"
-          },
-          "createRelease": {
-            "description": "创建 Release。草稿始终允许，发布的 Release 受策略约束。",
-            "label": "创建 Release"
-          },
-          "generateChangelog": {
-            "description": "基于 Conventional Commits 计算语义化版本号增量并生成 Markdown 发布说明。",
-            "label": "生成变更日志"
-          },
-          "labelIssue": {
-            "description": "在 Issue 或 PR 上添加或移除标签。",
-            "label": "为 Issue/PR 打标签"
-          },
-          "mergePr": {
-            "description": "合并 PR。按策略需要 CI 通过 + 人工批准。",
-            "label": "合并 GitHub PR"
-          },
-          "openPr": {
-            "description": "通过 GitHub Delivery 插件打开 PR（受策略约束）。",
-            "label": "打开 GitHub PR"
-          },
-          "pushTag": {
-            "description": "推送 git 标签到仓库。",
-            "label": "推送标签"
-          },
-          "reviewPr": {
-            "description": "在 PR 上提交审查意见（APPROVE / REQUEST_CHANGES / COMMENT）。",
-            "label": "审查 GitHub PR"
-          },
-          "reviewPrInline": {
-            "description": "用 LLM 为 PR 生成结构化审查（整体评语 + 行级行内评论）。",
-            "label": "AI 行内审查"
-          },
-          "runIssueLoop": {
-            "description": "端到端的 Issue → AI 工作树 → PR 闭环：克隆仓库、驱动 AI、打开 PR。",
-            "label": "Issue → PR 循环"
-          }
-        },
         "goal": {
           "analytics": {
             "description": "计算目标的完成度、状态、token 与时间线分析。",
@@ -33360,12 +33182,6 @@
           "event": {
             "description": "当 UIA 焦点 / 结构 / 属性事件匹配时触发。",
             "label": "UIA 事件触发"
-          }
-        },
-        "github": {
-          "webhook": {
-            "description": "当 GitHub 推送 Webhook（PR 打开、Issue 标签、推送等）时触发，会校验 x-hub-signature-256。",
-            "label": "GitHub 事件触发"
           }
         },
         "goal": {

@@ -76,27 +76,47 @@
     }
   },
   "aiBrowserModel": {
-    "cacheEnabled": { "label": "Cache model" },
+    "cacheEnabled": {
+      "label": "Cache model"
+    },
     "candidateLabels": {
       "label": "Candidate labels",
       "placeholder": "positive, negative"
     },
-    "device": { "label": "Device" },
-    "dtype": { "label": "Data type" },
+    "device": {
+      "label": "Device"
+    },
+    "dtype": {
+      "label": "Data type"
+    },
     "hypothesisTemplate": {
       "label": "Hypothesis template",
       "placeholder": "This example is '{}'."
     },
-    "input": { "label": "Input" },
+    "input": {
+      "label": "Input"
+    },
     "inputJson": {
       "label": "Input JSON",
       "placeholder": "Optional structured model input"
     },
-    "language": { "label": "Language", "placeholder": "en" },
-    "maxCachedModels": { "label": "Cached models" },
-    "maxLength": { "label": "Maximum length" },
-    "maxNewTokens": { "label": "Maximum new tokens" },
-    "modelId": { "label": "Model ID", "placeholder": "Xenova/model-name" },
+    "language": {
+      "label": "Language",
+      "placeholder": "en"
+    },
+    "maxCachedModels": {
+      "label": "Cached models"
+    },
+    "maxLength": {
+      "label": "Maximum length"
+    },
+    "maxNewTokens": {
+      "label": "Maximum new tokens"
+    },
+    "modelId": {
+      "label": "Model ID",
+      "placeholder": "Xenova/model-name"
+    },
     "operation": {
       "disposeAll": "Dispose all models",
       "disposeModel": "Dispose model",
@@ -105,7 +125,10 @@
       "preload": "Preload model",
       "status": "Runtime status"
     },
-    "preset": { "label": "Model preset", "placeholder": "Select a curated model" },
+    "preset": {
+      "label": "Model preset",
+      "placeholder": "Select a curated model"
+    },
     "returnTimestamps": {
       "label": "Return timestamps",
       "none": "None",
@@ -118,7 +141,9 @@
       "wasm": "WASM",
       "webgpu": "WebGPU"
     },
-    "task": { "label": "Task" },
+    "task": {
+      "label": "Task"
+    },
     "tasks": {
       "audio-classification": "Audio classification",
       "automatic-speech-recognition": "Automatic speech recognition",
@@ -141,9 +166,15 @@
       "zero-shot-classification": "Zero-shot classification",
       "zero-shot-image-classification": "Zero-shot image classification"
     },
-    "temperature": { "label": "Temperature" },
-    "timeoutMs": { "label": "Timeout (ms)" },
-    "topK": { "label": "Top K" }
+    "temperature": {
+      "label": "Temperature"
+    },
+    "timeoutMs": {
+      "label": "Timeout (ms)"
+    },
+    "topK": {
+      "label": "Top K"
+    }
   },
   "aiClassify": {
     "apiFlavor": {
@@ -1137,188 +1168,6 @@
         "hint": "Comma-separated file paths or globs. Leave empty to stage all changes.",
         "label": "Paths to stage",
         "placeholder": "src/index.ts, docs/*.md"
-      }
-    }
-  },
-  "github": {
-    "addLabel": "Add label",
-    "closeIssue": {
-      "reason": {
-        "label": "Close reason",
-        "options": {
-          "completed": "Completed",
-          "not_planned": "Not planned"
-        }
-      }
-    },
-    "comment": {
-      "body": {
-        "hint": "Supports '{{ }}' expressions.",
-        "label": "Comment body"
-      }
-    },
-    "createRelease": {
-      "body": {
-        "hint": "Supports '{{ }}' expressions and Markdown.",
-        "label": "Body"
-      },
-      "draft": {
-        "label": "Draft"
-      },
-      "name": {
-        "label": "Release name"
-      },
-      "prerelease": {
-        "label": "Prerelease"
-      },
-      "tag": {
-        "label": "Tag",
-        "placeholder": "v1.0.0"
-      }
-    },
-    "generateChangelog": {
-      "currentVersion": {
-        "hint": "Starting version for the bump calc. Defaults to 0.0.0.",
-        "label": "Current version"
-      },
-      "since": {
-        "label": "Since (tag or SHA)",
-        "placeholder": "v1.0.0"
-      }
-    },
-    "issueNumber": {
-      "label": "Issue number"
-    },
-    "issuePrNumber": {
-      "label": "Issue/PR number"
-    },
-    "labelIssue": {
-      "add": {
-        "label": "Labels to add",
-        "placeholder": "cognia:claim"
-      },
-      "remove": {
-        "label": "Labels to remove",
-        "placeholder": "wontfix"
-      }
-    },
-    "mergePr": {
-      "commitTitle": {
-        "label": "Commit title (optional)"
-      },
-      "mergeMethod": {
-        "label": "Merge method",
-        "options": {
-          "merge": "Merge commit",
-          "rebase": "Rebase and merge",
-          "squash": "Squash and merge"
-        }
-      }
-    },
-    "openPr": {
-      "base": {
-        "hint": "The branch to merge into.",
-        "label": "Base branch",
-        "placeholder": "main"
-      },
-      "body": {
-        "hint": "Markdown supported.",
-        "label": "Body"
-      },
-      "draft": {
-        "hint": "Open as draft PR.",
-        "label": "Draft"
-      },
-      "head": {
-        "hint": "The branch with your changes.",
-        "label": "Head branch",
-        "placeholder": "feat/x"
-      },
-      "title": {
-        "label": "Title"
-      }
-    },
-    "prNumber": {
-      "label": "PR number"
-    },
-    "pushTag": {
-      "sha": {
-        "hint": "Full 40-char SHA recommended.",
-        "label": "Commit SHA"
-      },
-      "tag": {
-        "label": "Tag name",
-        "placeholder": "v1.0.0"
-      }
-    },
-    "repoFullName": {
-      "hint": "Format: owner/name. Supports '{{ }}' expressions.",
-      "label": "Repository",
-      "placeholder": "octocat/hello-world"
-    },
-    "reviewPr": {
-      "body": {
-        "hint": "Supports '{{ }}' expressions.",
-        "label": "Review body"
-      },
-      "event": {
-        "label": "Review verdict",
-        "options": {
-          "approve": "Approve",
-          "comment": "Comment",
-          "requestChanges": "Request changes"
-        }
-      }
-    },
-    "reviewPrInline": {
-      "apiKey": {
-        "hint": "Secret. Stored in the workflow definition — consider a credential ref instead.",
-        "label": "API key"
-      },
-      "baseURL": {
-        "hint": "Optional. For self-hosted or proxied providers.",
-        "label": "Base URL",
-        "placeholder": "https://api.anthropic.com"
-      },
-      "focus": {
-        "hint": "Optional review angle, e.g. 'security' or 'performance'. Supports '{{ }}' expressions.",
-        "label": "Focus"
-      },
-      "maxFiles": {
-        "hint": "How many changed files to inspect (1–30). Default 5.",
-        "label": "Max files"
-      },
-      "model": {
-        "label": "Model",
-        "placeholder": "claude-sonnet-4-6"
-      },
-      "provider": {
-        "hint": "Must match a configured provider id (e.g. anthropic, openai).",
-        "label": "LLM provider",
-        "placeholder": "anthropic"
-      }
-    },
-    "runIssueLoop": {
-      "branchTemplate": {
-        "hint": "`{n}` is replaced by the issue number.",
-        "label": "Branch template"
-      },
-      "runtime": {
-        "hint": "Built-in uses Claude Agent SDK. Choose a configured External Agent to run the same delivery path without fallback.",
-        "label": "AI runtime"
-      },
-      "worktreeMode": {
-        "label": "Worktree backend",
-        "options": {
-          "e2b": "E2B sandbox (requires e2b-sandbox plugin)",
-          "local": "Local git worktree"
-        }
-      }
-    },
-    "webhookTrigger": {
-      "events": {
-        "hint": "Pick one or more. The Rust receiver verifies the x-hub-signature-256 header.",
-        "label": "Events to listen for"
       }
     }
   },

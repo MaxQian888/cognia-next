@@ -5,7 +5,14 @@ description: "把 AI 驱动的 PR 审阅、Issue → PR 闭环、Release 自动�
 
 # ADR 0018 — GitHub Delivery
 
-**状态：** 已接受
+**状态：** 已接受 —— **2026-07-28 已移除。** 内置交付栈（Settings 区、
+`/github-delivery` 看板、13 个 `action.github.*` workflow kind、
+`trigger.github.webhook` 以及 `plugins/github-delivery/`）已移除，改由
+Marketplace Integration 运行时承接（ADR-0026）。兼容安装包位于
+`packages/plugin-sdk/contract/compat/`，保留一个 major 版本。通用部分留存：
+`lib/github/pr-observe/` 仍为 Agent Team 的 PR 反馈闭环供数，
+`lib/github/workspace-backend-registry.ts` 仍是面向插件的 workspace backend 接缝。
+本记录仅作决策史保留 —— 下文描述的均非在产代码。
 **日期：** 2026-05-12
 **分支：** `feat/github-delivery`
 

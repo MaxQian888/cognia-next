@@ -76,18 +76,47 @@
     }
   },
   "aiBrowserModel": {
-    "cacheEnabled": { "label": "缓存模型" },
-    "candidateLabels": { "label": "候选标签", "placeholder": "正向, 负向" },
-    "device": { "label": "设备" },
-    "dtype": { "label": "数据类型" },
-    "hypothesisTemplate": { "label": "假设模板", "placeholder": "这个示例是 '{}'。" },
-    "input": { "label": "输入" },
-    "inputJson": { "label": "输入 JSON", "placeholder": "可选的结构化模型输入" },
-    "language": { "label": "语言", "placeholder": "zh" },
-    "maxCachedModels": { "label": "缓存模型数" },
-    "maxLength": { "label": "最大长度" },
-    "maxNewTokens": { "label": "最大新令牌数" },
-    "modelId": { "label": "模型 ID", "placeholder": "Xenova/model-name" },
+    "cacheEnabled": {
+      "label": "缓存模型"
+    },
+    "candidateLabels": {
+      "label": "候选标签",
+      "placeholder": "正向, 负向"
+    },
+    "device": {
+      "label": "设备"
+    },
+    "dtype": {
+      "label": "数据类型"
+    },
+    "hypothesisTemplate": {
+      "label": "假设模板",
+      "placeholder": "这个示例是 '{}'。"
+    },
+    "input": {
+      "label": "输入"
+    },
+    "inputJson": {
+      "label": "输入 JSON",
+      "placeholder": "可选的结构化模型输入"
+    },
+    "language": {
+      "label": "语言",
+      "placeholder": "zh"
+    },
+    "maxCachedModels": {
+      "label": "缓存模型数"
+    },
+    "maxLength": {
+      "label": "最大长度"
+    },
+    "maxNewTokens": {
+      "label": "最大新令牌数"
+    },
+    "modelId": {
+      "label": "模型 ID",
+      "placeholder": "Xenova/model-name"
+    },
     "operation": {
       "disposeAll": "释放所有模型",
       "disposeModel": "释放模型",
@@ -96,7 +125,10 @@
       "preload": "预加载模型",
       "status": "运行时状态"
     },
-    "preset": { "label": "模型预设", "placeholder": "选择精选模型" },
+    "preset": {
+      "label": "模型预设",
+      "placeholder": "选择精选模型"
+    },
     "returnTimestamps": {
       "label": "返回时间戳",
       "none": "不返回",
@@ -109,7 +141,9 @@
       "wasm": "WASM",
       "webgpu": "WebGPU"
     },
-    "task": { "label": "任务" },
+    "task": {
+      "label": "任务"
+    },
     "tasks": {
       "audio-classification": "音频分类",
       "automatic-speech-recognition": "自动语音识别",
@@ -132,9 +166,15 @@
       "zero-shot-classification": "零样本分类",
       "zero-shot-image-classification": "零样本图像分类"
     },
-    "temperature": { "label": "温度" },
-    "timeoutMs": { "label": "超时（毫秒）" },
-    "topK": { "label": "Top K" }
+    "temperature": {
+      "label": "温度"
+    },
+    "timeoutMs": {
+      "label": "超时（毫秒）"
+    },
+    "topK": {
+      "label": "Top K"
+    }
   },
   "aiClassify": {
     "apiFlavor": {
@@ -1128,188 +1168,6 @@
         "hint": "逗号分隔的文件路径或通配符。留空则暂存全部改动。",
         "label": "要暂存的路径",
         "placeholder": "src/index.ts, docs/*.md"
-      }
-    }
-  },
-  "github": {
-    "addLabel": "添加标签",
-    "closeIssue": {
-      "reason": {
-        "label": "关闭原因",
-        "options": {
-          "completed": "已完成",
-          "not_planned": "不再计划"
-        }
-      }
-    },
-    "comment": {
-      "body": {
-        "hint": "支持 '{{ }}' 表达式。",
-        "label": "评论正文"
-      }
-    },
-    "createRelease": {
-      "body": {
-        "hint": "支持 '{{ }}' 表达式和 Markdown。",
-        "label": "正文"
-      },
-      "draft": {
-        "label": "草稿"
-      },
-      "name": {
-        "label": "发布名称"
-      },
-      "prerelease": {
-        "label": "预发布版本"
-      },
-      "tag": {
-        "label": "标签",
-        "placeholder": "v1.0.0"
-      }
-    },
-    "generateChangelog": {
-      "currentVersion": {
-        "hint": "用于计算版本号增量的起始版本。默认 0.0.0。",
-        "label": "当前版本号"
-      },
-      "since": {
-        "label": "起点（标签或 SHA）",
-        "placeholder": "v1.0.0"
-      }
-    },
-    "issueNumber": {
-      "label": "Issue 编号"
-    },
-    "issuePrNumber": {
-      "label": "Issue / PR 编号"
-    },
-    "labelIssue": {
-      "add": {
-        "label": "添加的标签",
-        "placeholder": "cognia:claim"
-      },
-      "remove": {
-        "label": "移除的标签",
-        "placeholder": "wontfix"
-      }
-    },
-    "mergePr": {
-      "commitTitle": {
-        "label": "提交标题（可选）"
-      },
-      "mergeMethod": {
-        "label": "合并方式",
-        "options": {
-          "merge": "合并提交",
-          "rebase": "Rebase 后合并",
-          "squash": "Squash 后合并"
-        }
-      }
-    },
-    "openPr": {
-      "base": {
-        "hint": "合并目标分支。",
-        "label": "目标分支（base）",
-        "placeholder": "main"
-      },
-      "body": {
-        "hint": "支持 Markdown。",
-        "label": "正文"
-      },
-      "draft": {
-        "hint": "以草稿状态打开 PR。",
-        "label": "草稿"
-      },
-      "head": {
-        "hint": "包含改动的分支。",
-        "label": "源分支（head）",
-        "placeholder": "feat/x"
-      },
-      "title": {
-        "label": "标题"
-      }
-    },
-    "prNumber": {
-      "label": "PR 编号"
-    },
-    "pushTag": {
-      "sha": {
-        "hint": "推荐使用完整 40 位 SHA。",
-        "label": "提交 SHA"
-      },
-      "tag": {
-        "label": "标签名",
-        "placeholder": "v1.0.0"
-      }
-    },
-    "repoFullName": {
-      "hint": "格式：owner/name。支持 '{{ }}' 表达式。",
-      "label": "仓库",
-      "placeholder": "octocat/hello-world"
-    },
-    "reviewPr": {
-      "body": {
-        "hint": "支持 '{{ }}' 表达式。",
-        "label": "审查正文"
-      },
-      "event": {
-        "label": "审查结论",
-        "options": {
-          "approve": "批准",
-          "comment": "评论",
-          "requestChanges": "要求修改"
-        }
-      }
-    },
-    "reviewPrInline": {
-      "apiKey": {
-        "hint": "敏感信息。会写入工作流定义 — 推荐改用凭证引用。",
-        "label": "API Key"
-      },
-      "baseURL": {
-        "hint": "可选。用于自建或代理的提供方。",
-        "label": "Base URL",
-        "placeholder": "https://api.anthropic.com"
-      },
-      "focus": {
-        "hint": "可选的审查角度，例如「安全」或「性能」。支持 '{{ }}' 表达式。",
-        "label": "审查重点"
-      },
-      "maxFiles": {
-        "hint": "需要检查的改动文件数量（1-30）。默认 5。",
-        "label": "最多审查文件数"
-      },
-      "model": {
-        "label": "模型",
-        "placeholder": "claude-sonnet-4-6"
-      },
-      "provider": {
-        "hint": "必须匹配已配置的 provider id（例如 anthropic、openai）。",
-        "label": "LLM 提供方",
-        "placeholder": "anthropic"
-      }
-    },
-    "runIssueLoop": {
-      "branchTemplate": {
-        "hint": "`{n}` 会被替换为 issue 编号。",
-        "label": "分支模板"
-      },
-      "runtime": {
-        "hint": "内建模式使用 Claude Agent SDK。选择已配置的 External Agent 可运行同一交付链路，失败时不会回退。",
-        "label": "AI 运行时"
-      },
-      "worktreeMode": {
-        "label": "工作树后端",
-        "options": {
-          "e2b": "E2B 沙箱（需要 e2b-sandbox 插件）",
-          "local": "本地 git worktree"
-        }
-      }
-    },
-    "webhookTrigger": {
-      "events": {
-        "hint": "选择一个或多个。Rust 接收器会校验 x-hub-signature-256 头。",
-        "label": "监听的事件"
       }
     }
   },

@@ -106,7 +106,7 @@ pnpm mobile:sync:ios          # iOS（构建并同步，再用 mobile:open:ios �
 | 桌面   | Rust ≥ 1.84.1（Tauri 2）+ 平台 C/C++ 工具链（[前置要求](https://tauri.app/start/prerequisites/)） |
 | 移动端 | Xcode 26+（iOS）或 Android Studio Hedgehog+（Android）；iOS 需要 CocoaPods                        |
 
-可选：`cloudflared`（GitHub Delivery webhook 自动派生）、自托管 WebRTC 时的 TURN 凭据、
+可选：自托管 WebRTC 时的 TURN 凭据、
 构建 `ocr-tesseract` Cargo 特性时的 CMake/C++ 工具链。
 
 ## 开发

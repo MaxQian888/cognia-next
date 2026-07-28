@@ -80,5 +80,4 @@ lib/git/
   <Card title="ADR-0038" href="../adr/0038-source-control-panel" description="源代码管理面板的决策记录" />
   <Card title="集成终端" href="./integrated-terminal" description="应用内的另一处开发者接口面" />
   <Card title="沙箱" href="./sandbox" description="Agent 驱动的仓库操作被限制的地方" />
-  <Card title="GitHub 交付" href="../github-delivery" description="提交之后发生的事" />
 </Cards>

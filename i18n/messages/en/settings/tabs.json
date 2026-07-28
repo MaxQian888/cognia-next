@@ -25,7 +25,6 @@
   "fleet": "Agent Fleet",
   "gateway": "Inbound Gateway",
   "general": "General",
-  "githubDelivery": "GitHub Delivery",
   "goals": "Goals",
   "hooks": "Hooks",
   "logs": "Logs",

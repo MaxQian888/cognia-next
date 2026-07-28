@@ -124,60 +124,6 @@
         "label": "Git 暂存"
       }
     },
-    "github": {
-      "closeIssue": {
-        "description": "关闭 Issue，可选关闭原因（completed / not_planned）。",
-        "label": "关闭 Issue"
-      },
-      "closePr": {
-        "description": "关闭打开的 PR 而不合并。",
-        "label": "关闭 GitHub PR"
-      },
-      "commentIssue": {
-        "description": "在 Issue 上发布评论。",
-        "label": "在 Issue 上评论"
-      },
-      "commentPr": {
-        "description": "在 PR 上发布评论。",
-        "label": "在 PR 上评论"
-      },
-      "createRelease": {
-        "description": "创建 Release。草稿始终允许，发布的 Release 受策略约束。",
-        "label": "创建 Release"
-      },
-      "generateChangelog": {
-        "description": "基于 Conventional Commits 计算语义化版本号增量并生成 Markdown 发布说明。",
-        "label": "生成变更日志"
-      },
-      "labelIssue": {
-        "description": "在 Issue 或 PR 上添加或移除标签。",
-        "label": "为 Issue/PR 打标签"
-      },
-      "mergePr": {
-        "description": "合并 PR。按策略需要 CI 通过 + 人工批准。",
-        "label": "合并 GitHub PR"
-      },
-      "openPr": {
-        "description": "通过 GitHub Delivery 插件打开 PR（受策略约束）。",
-        "label": "打开 GitHub PR"
-      },
-      "pushTag": {
-        "description": "推送 git 标签到仓库。",
-        "label": "推送标签"
-      },
-      "reviewPr": {
-        "description": "在 PR 上提交审查意见（APPROVE / REQUEST_CHANGES / COMMENT）。",
-        "label": "审查 GitHub PR"
-      },
-      "reviewPrInline": {
-        "description": "用 LLM 为 PR 生成结构化审查（整体评语 + 行级行内评论）。",
-        "label": "AI 行内审查"
-      },
-      "runIssueLoop": {
-        "description": "端到端的 Issue → AI 工作树 → PR 闭环：克隆仓库、驱动 AI、打开 PR。",
-        "label": "Issue → PR 循环"
-      }
-    },
     "goal": {
       "analytics": {
         "description": "计算目标的完成度、状态、token 与时间线分析。",
@@ -708,12 +654,6 @@
       "event": {
         "description": "当 UIA 焦点 / 结构 / 属性事件匹配时触发。",
         "label": "UIA 事件触发"
-      }
-    },
-    "github": {
-      "webhook": {
-        "description": "当 GitHub 推送 Webhook（PR 打开、Issue 标签、推送等）时触发，会校验 x-hub-signature-256。",
-        "label": "GitHub 事件触发"
       }
     },
     "integration": {

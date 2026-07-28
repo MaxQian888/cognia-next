@@ -1084,12 +1084,6 @@ export const en: SiteCopy = {
             body: "The plan, the steps, and the approval checkpoints between them.",
             docsPath: "/docs/subsystems/unified-agent-execution",
           },
-          {
-            key: "github",
-            name: "Repository delivery",
-            body: "Proposing a branch and a pull request, once you have confirmed it.",
-            docsPath: "/docs/github-delivery",
-          },
         ],
       },
     },

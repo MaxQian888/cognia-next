@@ -1037,12 +1037,6 @@ export const zh: SiteCopy = {
             body: "计划、步骤，以及它们之间的审批检查点。",
             docsPath: "/docs/subsystems/unified-agent-execution",
           },
-          {
-            key: "github",
-            name: "仓库交付",
-            body: "在你确认之后，提出分支与 Pull Request。",
-            docsPath: "/docs/github-delivery",
-          },
         ],
       },
     },

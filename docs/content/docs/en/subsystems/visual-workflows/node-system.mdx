@@ -208,7 +208,7 @@ execute: async (ctx) => {
 | `action.mcp.invokeTool` | L1700 | Call an MCP tool. |
 | `action.plugin.invoke` | L1777 | Call a plugin-exposed action. |
 
-> The 13 `action.github.*` kinds are provided by the **github-delivery plugin** (`plugins/github-delivery/`), not `built-ins.ts`. The 12 desktop kinds + `trigger.desktop.event` live in `desktop.ts`; `action.system.terminal` lives in `terminal.ts`.
+> The 13 `action.github.*` kinds were provided by the github-delivery plugin and were **removed in 2026-07** along with it (ADR-0018). The 12 desktop kinds + `trigger.desktop.event` live in `desktop.ts`; `action.system.terminal` lives in `terminal.ts`.
 
 ### AI primitives (summary — full detail on the sibling page)
 

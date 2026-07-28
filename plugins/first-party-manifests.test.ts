@@ -141,7 +141,6 @@ const EXPECTED_WARNINGS: Record<string, readonly string[]> = {
   // the two reference plugins registered nothing in any runtime.
   "external-agent-adapter-example": [],
   "external-agent-preset-example": [],
-  "github-delivery": ["experimental:providers", "field_missing:tools", "field_missing:components"],
   ocr: ["field_missing:tools"],
   "playwright-mcp": ["field_missing:mcp-server-preset"],
   // Class 1: the panel is registered imperatively in `activate()`. It cannot

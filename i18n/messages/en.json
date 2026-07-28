@@ -4712,6 +4712,12 @@
       "title": "Failed to send",
       "unflushedEditorBuffers": "{count, plural, one {# open file could not be saved} other {# open files could not be saved}} before this turn, so the agent may read an out-of-date copy: {files}"
     },
+    "jump": {
+      "back": "Back to where you were",
+      "newMessages": "{count, plural, one {# new message} other {# new messages}}",
+      "notFound": "That message is no longer in this conversation.",
+      "toBottom": "Jump to latest"
+    },
     "list": {
       "clear": "Clear",
       "clearAction": "Delete messages",
@@ -4840,6 +4846,9 @@
       "branchTooltip": "Branch from here",
       "copyDone": "Copied!",
       "copyLabel": "Copy message",
+      "copyLinkDone": "Link copied!",
+      "copyLinkLabel": "Copy link to message",
+      "copyLinkTooltip": "Copy link to this message",
       "copyTooltip": "Copy message",
       "editLabel": "Edit and resend",
       "editTooltip": "Edit & resend",
@@ -5240,7 +5249,9 @@
       "replyCount": "{count} replies",
       "showAll": "Show all turns",
       "showBookmarked": "Show only bookmarked turns",
+      "starredReply": "Starred reply",
       "title": "Timeline",
+      "today": "Today",
       "yesterday": "Yesterday"
     },
     "toolApproval": {
@@ -11026,25 +11037,6 @@
       "title": "Agent Fleet",
       "waiting": "{count} waiting"
     },
-    "githubDelivery": {
-      "backAria": "Back to settings",
-      "intro": "Review the GitHub Delivery bot's default merge policy. Repos, credentials, audit log and usage live on the paired desktop.",
-      "manageOnDesktop": "GitHub Delivery is managed on the desktop. Connect repositories, set up App credentials, adjust policies and review the audit log there.",
-      "policy": {
-        "allowedAuthors": "Allowed authors",
-        "description": "The policy a repository inherits until you override it on the desktop.",
-        "maxDailyMerges": "Max merges per day",
-        "off": "Off",
-        "perDay": "{count} / day",
-        "protectedBranches": "Protected branches",
-        "requireGreenCi": "Require green CI",
-        "requireHumanApproval": "Require human approval",
-        "required": "Required",
-        "title": "Default policy"
-      },
-      "runtimeNote": "The delivery bot runs on the paired desktop. Audit decisions and rate-limit usage are visible there in real time.",
-      "title": "GitHub Delivery"
-    },
     "home": {
       "actions": {
         "agentTeams": "Agent teams",
@@ -11252,7 +11244,6 @@
         "reportTitle": "Report a problem"
       },
       "feedbackRow": "Feedback & diagnostics",
-      "githubDeliveryRow": "GitHub Delivery",
       "goalsRow": "Goals",
       "help": {
         "docsDescription": "Open the cognia docs site in the system browser.",
@@ -11440,6 +11431,8 @@
       "branchVariants": "Reply variants",
       "copy": "Copy text",
       "copyFailed": "Copy failed: {message}",
+      "copyLink": "Copy link to message",
+      "copyLinkSuccess": "Message link copied.",
       "copySuccess": "Copied to clipboard.",
       "delete": "Delete message",
       "deleteConfirm": "Delete",
@@ -17979,6 +17972,10 @@
     "ask": "Ask",
     "chooseLanguage": "Choose translation language",
     "copy": "Copy",
+    "errors": {
+      "generic": "That action could not be completed",
+      "piiBlocked": "Contains sensitive data — not saved to memory"
+    },
     "explain": "Explain",
     "languages": {
       "de": "German",
@@ -17993,6 +17990,9 @@
       "explain": "Please explain this selection.",
       "translate": "Please translate this selection into {language}."
     },
+    "remember": "Remember",
+    "speak": "Read aloud",
+    "stopSpeaking": "Stop reading",
     "translate": "Translate",
     "truncated": "Truncated",
     "truncatedHint": "The selection exceeded 20,000 characters and was truncated."
@@ -22377,7 +22377,6 @@
       "fleet": "Monitor and control coding agents launched anywhere on this machine (Claude Code, Codex, OpenCode), the Dynamic-Island overlay, and recent-session history.",
       "gateway": "Local OpenAI- and Anthropic-compatible endpoint that lets external tools (Claude Code, any OpenAI client) borrow your providers, routing, and credentials.",
       "general": "Default model, working directory, system prompt, permission mode and always-allowed tools.",
-      "githubDelivery": "AI-driven PR review, Issue → PR loops, and Release automation for your GitHub repos.",
       "goals": "Persistent chat goals (ADR-0019). Set an objective with /goal and the agent auto-continues until a judge confirms it's done, or budgets / timeouts kick in.",
       "hooks": "Lifecycle hooks for ~/.claude/settings.json (User / Project / Local). 21 events × matcher × command-or-webhook handlers.",
       "logs": "Log levels, transports (console / IndexedDB / native / remote / Langfuse / OpenTelemetry), retention, redaction and per-module sampling.",
@@ -22460,7 +22459,9 @@
         "permissionHint": "macOS requires Accessibility and Input Monitoring permission. Cognia does not request Screen Recording.",
         "saveDisabledApps": "Save app list",
         "title": "System text-selection toolbar",
-        "toggle": "Toggle system text-selection toolbar"
+        "toggle": "Toggle system text-selection toolbar",
+        "translateLanguage": "Default translation language",
+        "translateLanguageHint": "Used by the toolbar's Translate button and its ⌥⇧3 shortcut."
       },
       "subtitle": "Settings that only apply when running as the native desktop app.",
       "system": "System",
@@ -22562,9 +22563,15 @@
         "clearConfirm": "Clear log",
         "clearConfirmDesc": "This removes all {count} rows from the audit log. The history cannot be recovered.",
         "clearConfirmTitle": "Clear MCP audit log?",
+        "deniedOnly": "Denied only",
         "description": "Newest 50 calls. Capped at 5000 total — older rows are pruned automatically.",
+        "detailAria": "Toggle details for {tool}",
         "empty": "No calls yet.",
+        "filterToolPlaceholder": "Filter by tool…",
         "latency": "Latency",
+        "reason": "Reason",
+        "rowLimit": "Rows",
+        "rowLimitValue": "{count} rows",
         "scope": "Scope",
         "status": "Status",
         "statusDeny": "DENY",
@@ -22577,7 +22584,39 @@
       "badgeIdle": "idle",
       "badgeLive": "live",
       "badgeWeb": "web",
+      "description": "Expose this app's knowledge and runtime to external MCP clients.",
       "loading": "Loading…",
+      "nav": {
+        "groups": {
+          "accessGroup": "Access",
+          "contentGroup": "Content",
+          "serviceGroup": "Service"
+        },
+        "items": {
+          "audit": {
+            "description": "Every call the bridge handled",
+            "label": "Audit log"
+          },
+          "scopes": {
+            "description": "What external clients may call",
+            "label": "Permission scopes"
+          },
+          "server": {
+            "description": "Enable the bridge and manage its token",
+            "label": "Server & token"
+          },
+          "setup": {
+            "description": "Config snippets for MCP clients",
+            "label": "Client setup"
+          },
+          "wiki": {
+            "description": "Rebuild and lint schedules",
+            "label": "Wiki maintenance"
+          }
+        },
+        "mobileTrigger": "Panels",
+        "title": "External Bridge settings"
+      },
       "scopeDescriptions": {
         "agent:dispatch": "⚠ Lets external agents run your built-in/plugin subagents or characters headlessly (tool loop + model calls). Returned text is PII-redacted. Default OFF.",
         "agent:team": "⚠ Lets external agents start an Agent Team headlessly — a multi-agent orchestration they couldn't otherwise reach. Default OFF.",
@@ -22601,6 +22640,20 @@
       },
       "scopes": {
         "description": "Each scope is opt-in. Default install ships with only the public-code wiki scopes enabled.",
+        "grantedCount": "{granted}/{total} granted",
+        "groups": {
+          "agent": "Agents",
+          "inbound": "Inbound",
+          "inbox": "Inbox",
+          "mcp": "Computer use",
+          "memory": "Memory",
+          "plugin": "Plugins",
+          "rag": "Retrieval",
+          "runtime": "Runtime",
+          "wiki": "Wiki"
+        },
+        "plannedBadge": "Planned",
+        "plannedReason": "Deferred past Phase 1: user-repository access needs per-repository consent, which does not exist yet. The scope stays in the API so handlers keep compiling, but it cannot be granted.",
         "title": "Permission scopes",
         "toggleAria": "Toggle {scope}"
       },
@@ -22608,6 +22661,8 @@
         "bearerTokenLabel": "Bearer token (HTTP only)",
         "copyTokenAria": "Copy token",
         "hide": "Hide",
+        "httpPort": "HTTP port",
+        "httpPortHelp": "Port the HTTP transport listens on. Used in the setup snippets below.",
         "regenerateWarning": "⚠ Regenerating invalidates the old token immediately.",
         "rotateConfirmAction": "Rotate token",
         "rotateConfirmCancel": "Cancel",
@@ -22624,7 +22679,8 @@
         "toastTokenCopied": "Token copied to clipboard.",
         "toastTokenRegenerated": "New token generated. Old token is now invalid.",
         "toggleAriaLabel": "Enable MCP server",
-        "tokenNone": "(none)"
+        "tokenNone": "(none)",
+        "tokenRotatedAt": "Token last rotated {time}"
       },
       "setup": {
         "clientLabel": "Client",
@@ -22646,6 +22702,7 @@
           "goose": "Goose"
         }
       },
+      "title": "External Bridge",
       "wikiIndex": {
         "articleCount": "Articles",
         "description": "Index the Cognia codebase so external agents can query it via MCP.",
@@ -22852,17 +22909,25 @@
       "allowlistPlaceholder": "192.168.1.0/24",
       "anthropicSnippet": "Anthropic clients (Claude Code)",
       "authNote": "Use an API key as the credential — Authorization: Bearer '<key>' or x-api-key: '<key>'.",
+      "badgeRunning": "Running",
+      "badgeStopped": "Stopped",
       "bindHelp": "Loopback keeps the gateway to this machine. LAN lets other devices on your network reach it — you must widen the IP allowlist below for that to take effect.",
       "bindInterface": "Bind interface",
       "bindLan": "Local network (0.0.0.0)",
       "bindLoopback": "Loopback (127.0.0.1)",
+      "bindTimeBadge": "Needs restart",
       "cancel": "Cancel",
       "clearLog": "Clear log",
+      "colCost": "Cost",
+      "colError": "Error",
       "colKey": "Key",
       "colLatency": "Latency",
       "colModel": "Model",
       "colProvider": "Provider",
+      "colRemoteIp": "Client IP",
+      "colRoute": "Route",
       "colStatus": "Status",
+      "colStream": "Streaming",
       "colTime": "Time",
       "colTokens": "Tokens",
       "concurrencyHeading": "Upstream protection",
@@ -22875,11 +22940,14 @@
       "connectTimeoutHelp": "Bounds a hung upstream connection on every request, streaming included.",
       "cooldownFallback": "Rate-limit cooldown (s)",
       "cooldownFallbackHelp": "Park an account this long after a 429 with no Retry-After header, so failover stops re-picking it. 0 = honour upstream headers only.",
-      "cooldownsCoolingUntil": "Cooling until {time}",
+      "cooldownHeading": "Cooldowns",
+      "cooldownHelp": "How long a rate-limited or failing upstream account is skipped.",
       "cooldownsEmpty": "No upstream accounts are parked.",
       "cooldownsHeading": "Parked upstream accounts",
       "cooldownsHelp": "Accounts cooling (rate-limited) or permanently disabled (quota / auth). Cleared automatically as cooldowns lift.",
       "cooldownsPermanent": "Disabled",
+      "cooldownsRecovered": "recovered",
+      "cooldownsRecoversIn": "recovers in {seconds}s",
       "cooldownsRefresh": "Refresh",
       "copied": "Copied",
       "copy": "Copy",
@@ -22906,6 +22974,8 @@
       "fieldStripAllow": "Field-strip exceptions",
       "fieldStripAllowHelp": "Re-permit a stripped field for one provider, written provider:field.",
       "fieldStripAllowPlaceholder": "openai:service_tier",
+      "fieldStripHeading": "Outbound field stripping",
+      "fieldStripHelp": "Request fields removed before the body reaches an upstream.",
       "hide": "Hide",
       "hideRawModels": "List aliases only",
       "hideRawModelsHelp": "Hide raw provider model ids from /v1/models — advertise routing aliases only. Direct provider:model calls still work.",
@@ -22934,6 +23004,9 @@
       "keysHeading": "API keys",
       "keysHelp": "Issue one scoped key per external tool. Each can be limited to specific models, given an expiry and its own rate limit, and disabled or deleted independently.",
       "lanWarning": "LAN binding exposes the gateway to your local network. Keep the IP allowlist tight and every key scoped — only allow-listed IPs with a valid key get through.",
+      "listenerHeading": "Listener",
+      "listenerHelp": "Where the gateway binds and who may reach it.",
+      "liveBadge": "Applies immediately",
       "logCleared": "Log cleared",
       "logEmpty": "No requests yet.",
       "logFilterAll": "All",
@@ -22943,21 +23016,67 @@
       "logFilterOk": "Success",
       "logHeading": "Request log",
       "logHelp": "Every inbound request, kept across restarts.",
+      "logRowDetailAria": "Toggle details for request {id}",
       "maxConcurrentPerKey": "Max concurrent / gateway key",
       "maxConcurrentPerKeyHelp": "Simultaneous in-flight requests allowed per API key, shared across chat, embeddings and responses. 0 = unlimited. A streaming chat holds its slot until the stream ends.",
       "maxConcurrentPerUpstreamKey": "Max concurrent / upstream account",
       "maxConcurrentPerUpstreamKeyHelp": "Simultaneous upstream calls allowed per pooled account, shared across all endpoints. 0 = unlimited. A streaming chat holds its slot until the stream ends.",
       "maxRetries": "Max attempts",
       "maxRetriesHelp": "Cap on candidates tried per request. 0 = walk the whole fallback chain.",
+      "nav": {
+        "groups": {
+          "observabilityGroup": "Observability",
+          "routingGroup": "Routing & protection",
+          "serviceGroup": "Service"
+        },
+        "items": {
+          "exposure": {
+            "description": "What /v1/models advertises",
+            "label": "Model exposure"
+          },
+          "keys": {
+            "description": "Scoped credentials and quotas",
+            "label": "API keys"
+          },
+          "listener": {
+            "description": "Port, interface and allowlist",
+            "label": "Listener"
+          },
+          "logs": {
+            "description": "Recent calls, cost and errors",
+            "label": "Request log"
+          },
+          "overview": {
+            "description": "Run state, traffic and self-check",
+            "label": "Overview"
+          },
+          "reliability": {
+            "description": "Timeouts, retries and rate limit",
+            "label": "Reliability"
+          },
+          "tickets": {
+            "description": "Session-scoped frozen routes",
+            "label": "Route tickets"
+          },
+          "upstream": {
+            "description": "Concurrency, cooldowns and stripping",
+            "label": "Upstream protection"
+          }
+        },
+        "mobileTrigger": "Panels",
+        "title": "Gateway settings"
+      },
       "newKeyHeading": "Key created",
       "newKeyReveal": "Copy this key now — for your security it is shown only once.",
       "openaiSnippet": "OpenAI clients",
       "overloadCooldown": "Overload cooldown (s)",
       "overloadCooldownHelp": "Park an account this long after a 529 overloaded response.",
       "port": "Port",
+      "portHelp": "Port the listener binds to.",
       "quotaExceeded": "Quota spent",
       "quotaReset": "Quota usage reset",
       "rateLimit": "Global requests / minute",
+      "rateLimitHelp": "Requests per minute across all keys.",
       "reliabilityHeading": "Reliability & access",
       "reliabilityHelp": "Timeouts, failover retries, and who may connect.",
       "remove": "Remove",
@@ -22965,14 +23084,35 @@
       "requestTimeoutHelp": "Total cap for non-streaming requests. 0 disables it; streaming responses are never capped.",
       "requiresKey": "Create an API key before enabling the gateway.",
       "resetQuota": "Reset usage",
-      "restartHint": "Network changes (port, bind interface, allowlist, connect timeout, global rate limit) apply the next time you restart the listener.",
+      "restartListener": "Restart listener",
+      "restartRequired": "The running listener still uses the previous values. Restart it to apply these changes.",
+      "restarted": "Listener restarted",
       "retryStatusCodes": "Retry on statuses",
       "retryStatusCodesHelp": "Upstream HTTP statuses that fail over to the next provider instead of surfacing.",
       "retryStatusCodesPlaceholder": "429, 503",
       "reveal": "Reveal",
       "save": "Save",
       "saved": "Saved",
+      "selfCheckBillingWarning": "Each candidate receives a real request and is billed by that provider.",
+      "selfCheckHeading": "Upstream self-check",
+      "selfCheckHelp": "Resolve a model through the real routing path and fire one minimal request per candidate.",
+      "selfCheckModel": "Model or alias",
+      "selfCheckModelPlaceholder": "e.g. fast",
+      "selfCheckNeedsRunning": "Start the gateway to run a self-check.",
+      "selfCheckNoStatus": "no response",
+      "selfCheckRun": "Run check",
       "serverHeading": "Server",
+      "snapshotGeneratedAt": "Routing snapshot published {time}",
+      "snapshotNone": "No routing snapshot has been published yet.",
+      "statAliases": "Aliases",
+      "statCalls": "Requests served",
+      "statLastCall": "Last request",
+      "statNever": "Never",
+      "statProviders": "Providers",
+      "streamIdleTimeout": "Stream idle timeout (s)",
+      "streamIdleTimeoutHelp": "Abandon a streaming response after this long with no bytes from the upstream. 0 waits forever, which leaks a concurrency slot if the upstream never closes.",
+      "streamNo": "No",
+      "streamYes": "Yes",
       "strippedFields": "Stripped request fields",
       "strippedFieldsHelp": "Client fields removed from every upstream request (billing / privacy / behaviour toggles). Dotted paths reach nested leaves.",
       "strippedFieldsPlaceholder": "service_tier, store",
@@ -22980,6 +23120,25 @@
       "summaryErrors": "Errors",
       "summaryRequests": "Requests",
       "summaryTokens": "Tokens (in/out)",
+      "tickets": {
+        "activeHeading": "Active tickets",
+        "activeHelp": "Metadata only — ticket secrets are never stored or shown.",
+        "description": "Session-scoped frozen routes issued to agent subprocesses (ADR-0090).",
+        "disabledDescription": "Nothing mints tickets while this capability is off, so the list would stay empty. Turn it on above to start issuing them.",
+        "disabledTitle": "Route tickets are not enabled",
+        "enableHelp": "Stored locally for this install; off by default.",
+        "enableLabel": "Enable route tickets",
+        "experimentalBadge": "Experimental",
+        "noneActive": "No tickets have been issued yet.",
+        "refresh": "Refresh",
+        "revoke": "Revoke",
+        "revokeAria": "Revoke ticket {id}",
+        "revoked": "Ticket revoked",
+        "routingWarning": "This switch changes how agent runs are routed, not just what this page shows. Leave it off unless you are testing ADR-0090.",
+        "statusRevoked": "Revoked",
+        "ticketMeta": "Session {session} · {candidates} candidates · expires {expires}",
+        "title": "Route tickets"
+      },
       "title": "Inbound Gateway"
     },
     "general": {
@@ -23029,106 +23188,6 @@
       "selectWorkingDirectory": "Select working directory",
       "useSdkDefault": "Use SDK default",
       "workingDirectory": "Working directory"
-    },
-    "githubDelivery": {
-      "audit": {
-        "all": "All",
-        "allActions": "All actions",
-        "allRepos": "All repos",
-        "allowed": "Allowed",
-        "clear": "Clear",
-        "count": "{shown} of {total}",
-        "denied": "Denied",
-        "disabled": "Audit log requires the GitHub Delivery plugin to be enabled.",
-        "emptyFiltered": "No entries match the current filters.",
-        "emptyNone": "No audit entries yet. Allow / deny decisions are recorded automatically as workflows run.",
-        "loading": "Loading audit log…",
-        "run": "run: {id}"
-      },
-      "common": {
-        "pluginDisabled": "The GitHub Delivery plugin is not enabled."
-      },
-      "credentials": {
-        "appIdLabel": "App ID",
-        "appKeyAlertDesc": "Stored in IndexedDB (origin-isolated). On desktop builds it is mirrored to the OS keyring on first activation.",
-        "appKeyAlertTitle": "The private key never leaves your machine",
-        "appTitle": "GitHub App setup",
-        "back": "Back",
-        "errIdsNumeric": "App ID and Installation ID must be numbers.",
-        "errPatEmpty": "PAT cannot be empty.",
-        "errPkEmpty": "App private key (PEM) cannot be empty.",
-        "errRepoFormat": "Repo must be in `owner/name` format.",
-        "installLabel": "Installation ID",
-        "patAlertDesc": "Pick \"Only select repositories\" and specific permissions (issues: read/write, pull-requests: read/write, contents: read).",
-        "patAlertTitle": "Use a fine-scoped token",
-        "patTitle": "Personal Access Token (PAT)",
-        "pickerAppCta": "Set up App",
-        "pickerAppDesc": "Higher rate limits, granular installation scopes, audit trail per installation.",
-        "pickerAppTitle": "GitHub App (recommended)",
-        "pickerPatCta": "Set up PAT",
-        "pickerPatDesc": "Faster to set up. Tied to your account; use for personal repos and trial runs.",
-        "pickerPatTitle": "Personal Access Token (kickstart)",
-        "pkLabel": "Private key (PEM)",
-        "repoLabel": "Repository (owner/name)",
-        "save": "Save",
-        "savedToast": "Saved {repo}. It now appears in the Repos tab.",
-        "tokenLabel": "Token"
-      },
-      "description": "AI-driven PR review, Issue → PR loops, and Release automation for your GitHub repos.",
-      "policies": {
-        "allowedAuthors": "Allowed authors",
-        "defaultHint": "Every action the bot takes is checked against this policy. Per-repo overrides take precedence; per-node inspector overrides take final precedence.",
-        "defaultTitle": "Default policy",
-        "maxDailyMerges": "Max daily merges",
-        "off": "off",
-        "perDay": "{count} / day",
-        "protectedBranches": "Protected branches (regex)",
-        "quietHoursDesc": "Bot actions are suspended during quiet hours. None configured globally — set per repo if you want to mute weekend / nightly activity.",
-        "quietHoursTitle": "Quiet hours",
-        "requireGreenCi": "Require green CI",
-        "requireHumanApproval": "Require human approval",
-        "required": "required"
-      },
-      "repos": {
-        "addCta": "Add a repo",
-        "badgeApp": "App",
-        "badgePat": "PAT",
-        "disabledHint": "Install or enable the plugin from Settings → Plugins → Marketplace, then return here.",
-        "disabledTitle": "The GitHub Delivery plugin is not enabled.",
-        "loading": "Loading repos…",
-        "noEvents": "no events yet",
-        "noneHint": "Add a repo via the Setup Wizard (Credentials tab) to start receiving events.",
-        "noneTitle": "No repos configured yet.",
-        "polling": "polling",
-        "tunnel": {
-          "copied": "Copied",
-          "copyAria": "Copy public URL",
-          "localLabel": "Local webhook:",
-          "publicLabel": "Public:",
-          "start": "Start cloudflared tunnel",
-          "starting": "Starting…",
-          "stop": "Stop tunnel",
-          "unavailable": "Inbound webhooks are not available yet: nothing listens on the local port, so GitHub deliveries would fail. Repos are tracked by polling in the meantime.",
-          "webOnly": "Public tunnels require desktop mode (cloudflared binary on PATH)."
-        },
-        "webhook": "webhook",
-        "worktree": "worktree: {mode}"
-      },
-      "tabs": {
-        "audit": "Audit",
-        "credentials": "Credentials",
-        "policies": "Policies",
-        "repos": "Repos",
-        "usage": "Usage"
-      },
-      "title": "GitHub Delivery",
-      "usage": {
-        "addRepoHint": "Add a repo from the Credentials tab to start tracking API quota usage.",
-        "disabled": "API quota requires the GitHub Delivery plugin to be enabled.",
-        "loading": "Loading…",
-        "refresh": "Refresh",
-        "updated": "Updated {time}"
-      }
     },
     "groupAi": "AI Core",
     "groupData": "Data",
@@ -25196,7 +25255,6 @@
       "fleet": "Agent Fleet",
       "gateway": "Inbound Gateway",
       "general": "General",
-      "githubDelivery": "GitHub Delivery",
       "goals": "Goals",
       "hooks": "Hooks",
       "logs": "Logs",
@@ -30378,188 +30436,6 @@
           }
         }
       },
-      "github": {
-        "addLabel": "Add label",
-        "closeIssue": {
-          "reason": {
-            "label": "Close reason",
-            "options": {
-              "completed": "Completed",
-              "not_planned": "Not planned"
-            }
-          }
-        },
-        "comment": {
-          "body": {
-            "hint": "Supports '{{ }}' expressions.",
-            "label": "Comment body"
-          }
-        },
-        "createRelease": {
-          "body": {
-            "hint": "Supports '{{ }}' expressions and Markdown.",
-            "label": "Body"
-          },
-          "draft": {
-            "label": "Draft"
-          },
-          "name": {
-            "label": "Release name"
-          },
-          "prerelease": {
-            "label": "Prerelease"
-          },
-          "tag": {
-            "label": "Tag",
-            "placeholder": "v1.0.0"
-          }
-        },
-        "generateChangelog": {
-          "currentVersion": {
-            "hint": "Starting version for the bump calc. Defaults to 0.0.0.",
-            "label": "Current version"
-          },
-          "since": {
-            "label": "Since (tag or SHA)",
-            "placeholder": "v1.0.0"
-          }
-        },
-        "issueNumber": {
-          "label": "Issue number"
-        },
-        "issuePrNumber": {
-          "label": "Issue/PR number"
-        },
-        "labelIssue": {
-          "add": {
-            "label": "Labels to add",
-            "placeholder": "cognia:claim"
-          },
-          "remove": {
-            "label": "Labels to remove",
-            "placeholder": "wontfix"
-          }
-        },
-        "mergePr": {
-          "commitTitle": {
-            "label": "Commit title (optional)"
-          },
-          "mergeMethod": {
-            "label": "Merge method",
-            "options": {
-              "merge": "Merge commit",
-              "rebase": "Rebase and merge",
-              "squash": "Squash and merge"
-            }
-          }
-        },
-        "openPr": {
-          "base": {
-            "hint": "The branch to merge into.",
-            "label": "Base branch",
-            "placeholder": "main"
-          },
-          "body": {
-            "hint": "Markdown supported.",
-            "label": "Body"
-          },
-          "draft": {
-            "hint": "Open as draft PR.",
-            "label": "Draft"
-          },
-          "head": {
-            "hint": "The branch with your changes.",
-            "label": "Head branch",
-            "placeholder": "feat/x"
-          },
-          "title": {
-            "label": "Title"
-          }
-        },
-        "prNumber": {
-          "label": "PR number"
-        },
-        "pushTag": {
-          "sha": {
-            "hint": "Full 40-char SHA recommended.",
-            "label": "Commit SHA"
-          },
-          "tag": {
-            "label": "Tag name",
-            "placeholder": "v1.0.0"
-          }
-        },
-        "repoFullName": {
-          "hint": "Format: owner/name. Supports '{{ }}' expressions.",
-          "label": "Repository",
-          "placeholder": "octocat/hello-world"
-        },
-        "reviewPr": {
-          "body": {
-            "hint": "Supports '{{ }}' expressions.",
-            "label": "Review body"
-          },
-          "event": {
-            "label": "Review verdict",
-            "options": {
-              "approve": "Approve",
-              "comment": "Comment",
-              "requestChanges": "Request changes"
-            }
-          }
-        },
-        "reviewPrInline": {
-          "apiKey": {
-            "hint": "Secret. Stored in the workflow definition — consider a credential ref instead.",
-            "label": "API key"
-          },
-          "baseURL": {
-            "hint": "Optional. For self-hosted or proxied providers.",
-            "label": "Base URL",
-            "placeholder": "https://api.anthropic.com"
-          },
-          "focus": {
-            "hint": "Optional review angle, e.g. 'security' or 'performance'. Supports '{{ }}' expressions.",
-            "label": "Focus"
-          },
-          "maxFiles": {
-            "hint": "How many changed files to inspect (1–30). Default 5.",
-            "label": "Max files"
-          },
-          "model": {
-            "label": "Model",
-            "placeholder": "claude-sonnet-4-6"
-          },
-          "provider": {
-            "hint": "Must match a configured provider id (e.g. anthropic, openai).",
-            "label": "LLM provider",
-            "placeholder": "anthropic"
-          }
-        },
-        "runIssueLoop": {
-          "branchTemplate": {
-            "hint": "`{n}` is replaced by the issue number.",
-            "label": "Branch template"
-          },
-          "runtime": {
-            "hint": "Built-in uses Claude Agent SDK. Choose a configured External Agent to run the same delivery path without fallback.",
-            "label": "AI runtime"
-          },
-          "worktreeMode": {
-            "label": "Worktree backend",
-            "options": {
-              "e2b": "E2B sandbox (requires e2b-sandbox plugin)",
-              "local": "Local git worktree"
-            }
-          }
-        },
-        "webhookTrigger": {
-          "events": {
-            "hint": "Pick one or more. The Rust receiver verifies the x-hub-signature-256 header.",
-            "label": "Events to listen for"
-          }
-        }
-      },
       "goalAnalytics": {
         "limit": {
           "hint": "Maximum rows.",
@@ -32776,60 +32652,6 @@
             "label": "Git stage"
           }
         },
-        "github": {
-          "closeIssue": {
-            "description": "Closes an issue with optional reason (completed / not_planned).",
-            "label": "Close Issue"
-          },
-          "closePr": {
-            "description": "Closes an open pull request without merging.",
-            "label": "Close GitHub PR"
-          },
-          "commentIssue": {
-            "description": "Posts a comment on an issue.",
-            "label": "Comment on Issue"
-          },
-          "commentPr": {
-            "description": "Posts a comment on a pull request.",
-            "label": "Comment on PR"
-          },
-          "createRelease": {
-            "description": "Creates a Release. Drafts always allowed; published releases gated.",
-            "label": "Create Release"
-          },
-          "generateChangelog": {
-            "description": "Computes Conventional-Commit semver bump + Markdown release notes.",
-            "label": "Generate changelog"
-          },
-          "labelIssue": {
-            "description": "Adds or removes labels on an issue or pull request.",
-            "label": "Label Issue/PR"
-          },
-          "mergePr": {
-            "description": "Merges a pull request. Requires CI green + human approval per policy.",
-            "label": "Merge GitHub PR"
-          },
-          "openPr": {
-            "description": "Opens a pull request via the GitHub Delivery plugin (policy-gated).",
-            "label": "Open GitHub PR"
-          },
-          "pushTag": {
-            "description": "Pushes a git tag to the repo.",
-            "label": "Push tag"
-          },
-          "reviewPr": {
-            "description": "Submits a review (APPROVE / REQUEST_CHANGES / COMMENT) on a PR.",
-            "label": "Review GitHub PR"
-          },
-          "reviewPrInline": {
-            "description": "Uses an LLM to produce a structured review (overall body + line-anchored inline comments) for a PR.",
-            "label": "Inline review with AI"
-          },
-          "runIssueLoop": {
-            "description": "End-to-end Issue → AI worktree → PR loop. Clones, drives the AI, opens a PR.",
-            "label": "Issue → PR loop"
-          }
-        },
         "goal": {
           "analytics": {
             "description": "Compute goal completion, status, token, and timeline analytics.",
@@ -33360,12 +33182,6 @@
           "event": {
             "description": "Fire when a UIA focus / structure / property event matches.",
             "label": "On UIA event"
-          }
-        },
-        "github": {
-          "webhook": {
-            "description": "Fires when GitHub posts a webhook (PR opened, Issue labeled, push, …). Verifies x-hub-signature-256.",
-            "label": "On GitHub event"
           }
         },
         "goal": {

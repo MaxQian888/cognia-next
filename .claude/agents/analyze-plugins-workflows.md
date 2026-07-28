@@ -8,7 +8,7 @@ You analyze the plugin and workflow systems of cognia-next. Focus on:
 
 ## Scope
 
-- `plugins/` — 30+ first-party plugins: computer-use, OCR, github-delivery, clipboard-history, screenshot, playwright-mcp, stagehand-mcp, e2b-sandbox, prompt-templates, zhihu-content-pipeline, web-tools, workflow-ai, deep-research, ripgrep-tools, workspace-tools, etc.
+- `plugins/` — 30+ first-party plugins: computer-use, OCR, clipboard-history, screenshot, playwright-mcp, stagehand-mcp, e2b-sandbox, prompt-templates, zhihu-content-pipeline, web-tools, workflow-ai, deep-research, ripgrep-tools, workspace-tools, etc.
 - `plugin-sdk/` — Published plugin SDK (TypeScript + Python)
 - `lib/plugin/` — Plugin manager, Dexie tables, registries, WASM host
 - `lib/workflow/` — Workflow engine: graph model, execution runtime, triggers (cron, webhook, connector, chat, /goal)

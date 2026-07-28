@@ -112,8 +112,7 @@ pnpm mobile:sync:ios          # iOS (build + sync, then mobile:open:ios)
 | Desktop | Rust ≥ 1.84.1 (Tauri 2) + platform C/C++ toolchain ([prereqs](https://tauri.app/start/prerequisites/)) |
 | Mobile  | Xcode 26+ (iOS) or Android Studio Hedgehog+ (Android); CocoaPods for iOS                               |
 
-Optional: `cloudflared` (auto-spawned for the GitHub Delivery webhook), TURN credentials for
-self-hosted WebRTC, CMake/C++ for the `ocr-tesseract` Cargo feature.
+Optional: TURN credentials for self-hosted WebRTC, CMake/C++ for the `ocr-tesseract` Cargo feature.
 
 ## Development
 

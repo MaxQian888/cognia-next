@@ -208,7 +208,7 @@ execute: async (ctx) => {
 | `action.mcp.invokeTool` | L1700 | 调用 MCP 工具。 |
 | `action.plugin.invoke` | L1777 | 调用插件暴露的 action。 |
 
-> 13 个 `action.github.*` kind 由 **github-delivery 插件**（`plugins/github-delivery/`）提供，而非 `built-ins.ts`。12 个 desktop kind + `trigger.desktop.event` 位于 `desktop.ts`；`action.system.terminal` 位于 `terminal.ts`。
+> 13 个 `action.github.*` kind 曾由 github-delivery 插件提供，已于 2026-07 随该插件一并**移除**（ADR-0018）。12 个 desktop kind + `trigger.desktop.event` 位于 `desktop.ts`；`action.system.terminal` 位于 `terminal.ts`。
 
 ### AI 原语（摘要——完整细节见姊妹页）
 

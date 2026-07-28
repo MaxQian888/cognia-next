@@ -5,7 +5,16 @@ description: "把 AI 驱动的 PR 审阅、Issue → PR 闭环、Release 自动�
 
 # ADR 0018 — GitHub Delivery
 
-**Status:** Accepted
+**Status:** Accepted — **removed 2026-07-28.** The built-in delivery stack (the
+Settings section, the `/github-delivery` board, the thirteen `action.github.*`
+workflow kinds, `trigger.github.webhook`, and `plugins/github-delivery/`) was
+removed in favour of the Marketplace Integration runtime (ADR-0026). A
+one-major-version compatibility installer ships at
+`packages/plugin-sdk/contract/compat/`. The generic pieces survive:
+`lib/github/pr-observe/` feeds Agent Team's PR feedback loop, and
+`lib/github/workspace-backend-registry.ts` is the plugin-facing workspace
+backend seam. This record is retained for its decision history — nothing below
+describes shipping code.
 **Date:** 2026-05-12
 **Branch:** `feat/github-delivery`
 

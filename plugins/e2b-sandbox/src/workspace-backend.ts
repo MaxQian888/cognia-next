@@ -1,11 +1,14 @@
 /**
- * E2B-backed workspace backend for the GitHub Delivery Issue → PR loop.
+ * E2B-backed workspace backend for repository automation.
  *
- * The github-delivery plugin exposes `setE2BBackend(impl)` from
- * `lib/github/workspace`. When this plugin (`cognia-e2b-sandbox`) is enabled
- * we register a real implementation so any workflow that sets
- * `worktreeMode: "e2b"` runs the AI loop inside a fresh Firecracker microVM
- * instead of writing to the host filesystem.
+ * A repository Integration plugin may wire a real implementation through
+ * `setE2BBackend(impl)` from `lib/github/workspace`. When this plugin
+ * (`cognia-e2b-sandbox`) is enabled we register one, so any workflow that sets
+ * `worktreeMode: "e2b"` runs its AI loop inside a fresh Firecracker microVM
+ * instead of writing to the host filesystem. (The built-in GitHub Delivery
+ * stack that first drove this seam was removed in 2026-07 — see ADR-0018 — but
+ * the seam itself is the plugin-facing `provider.workspace-backend` contract
+ * and is unaffected.)
  *
  * Why a separate file in this plugin:
  *   • Keeps `@e2b/sdk` as a peer / optional dep — not every user wants the

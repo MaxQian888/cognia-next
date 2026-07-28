@@ -124,60 +124,6 @@
         "label": "Git stage"
       }
     },
-    "github": {
-      "closeIssue": {
-        "description": "Closes an issue with optional reason (completed / not_planned).",
-        "label": "Close Issue"
-      },
-      "closePr": {
-        "description": "Closes an open pull request without merging.",
-        "label": "Close GitHub PR"
-      },
-      "commentIssue": {
-        "description": "Posts a comment on an issue.",
-        "label": "Comment on Issue"
-      },
-      "commentPr": {
-        "description": "Posts a comment on a pull request.",
-        "label": "Comment on PR"
-      },
-      "createRelease": {
-        "description": "Creates a Release. Drafts always allowed; published releases gated.",
-        "label": "Create Release"
-      },
-      "generateChangelog": {
-        "description": "Computes Conventional-Commit semver bump + Markdown release notes.",
-        "label": "Generate changelog"
-      },
-      "labelIssue": {
-        "description": "Adds or removes labels on an issue or pull request.",
-        "label": "Label Issue/PR"
-      },
-      "mergePr": {
-        "description": "Merges a pull request. Requires CI green + human approval per policy.",
-        "label": "Merge GitHub PR"
-      },
-      "openPr": {
-        "description": "Opens a pull request via the GitHub Delivery plugin (policy-gated).",
-        "label": "Open GitHub PR"
-      },
-      "pushTag": {
-        "description": "Pushes a git tag to the repo.",
-        "label": "Push tag"
-      },
-      "reviewPr": {
-        "description": "Submits a review (APPROVE / REQUEST_CHANGES / COMMENT) on a PR.",
-        "label": "Review GitHub PR"
-      },
-      "reviewPrInline": {
-        "description": "Uses an LLM to produce a structured review (overall body + line-anchored inline comments) for a PR.",
-        "label": "Inline review with AI"
-      },
-      "runIssueLoop": {
-        "description": "End-to-end Issue → AI worktree → PR loop. Clones, drives the AI, opens a PR.",
-        "label": "Issue → PR loop"
-      }
-    },
     "goal": {
       "analytics": {
         "description": "Compute goal completion, status, token, and timeline analytics.",
@@ -708,12 +654,6 @@
       "event": {
         "description": "Fire when a UIA focus / structure / property event matches.",
         "label": "On UIA event"
-      }
-    },
-    "github": {
-      "webhook": {
-        "description": "Fires when GitHub posts a webhook (PR opened, Issue labeled, push, …). Verifies x-hub-signature-256.",
-        "label": "On GitHub event"
       }
     },
     "integration": {
