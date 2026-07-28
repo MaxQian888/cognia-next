@@ -504,14 +504,17 @@ async fn run_serve(
         app_lib::companion_api::browser_gateway::install_workspace_runtime_control_from_env()
             .map_err(|error| format!("remote browser: {error}"))?;
     eprintln!("[cognia-server] remote browser enabled: {remote_browser}");
-    install_headless_services(Some(HeadlessServices::new_with_exec(
-        sidecar_host,
-        api_keys,
-        Arc::clone(&shared.event_bus),
-        SpawnPolicy::from_env(&data_dir),
-        exec,
-        plugin_storage_dir(&data_dir),
-    )));
+    install_headless_services(Some(
+        HeadlessServices::new_with_exec(
+            sidecar_host,
+            api_keys,
+            Arc::clone(&shared.event_bus),
+            SpawnPolicy::from_env(&data_dir),
+            exec,
+            plugin_storage_dir(&data_dir),
+        )
+        .map_err(|error| format!("headless services: {error}"))?,
+    ));
 
     // Audit trail for the RCE-grade external-agent arms (ADR-0059 R11) —
     // append-only JSONL beside the SQLite store.

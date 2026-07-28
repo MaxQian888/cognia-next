@@ -6355,6 +6355,7 @@ mod tests {
                 ),
                 tmp.path().join("plugins"),
             )
+            .expect("headless services for the spawn-policy test")
         };
         let host = super::super::dispatch_host::DispatchHost::Headless(Arc::clone(&services));
 

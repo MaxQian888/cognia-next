@@ -176,7 +176,7 @@ impl HeadlessServices {
         event_bus: Arc<EventBus>,
         spawn_policy: crate::external_agent::presets::SpawnPolicy,
         plugin_install_dir: std::path::PathBuf,
-    ) -> Arc<Self> {
+    ) -> Result<Arc<Self>, String> {
         Self::new_with_exec(
             sidecar_host,
             api_keys,
@@ -198,18 +198,18 @@ impl HeadlessServices {
         spawn_policy: crate::external_agent::presets::SpawnPolicy,
         exec: Arc<dyn crate::external_agent::exec_backend::ExecBackend>,
         plugin_install_dir: std::path::PathBuf,
-    ) -> Arc<Self> {
+    ) -> Result<Arc<Self>, String> {
         let data_dir = plugin_install_dir
             .parent()
             .unwrap_or(plugin_install_dir.as_path())
             .to_path_buf();
         let workflow_dir = data_dir.join("cognia");
-        std::fs::create_dir_all(&workflow_dir).unwrap_or_else(|error| {
-            panic!(
+        std::fs::create_dir_all(&workflow_dir).map_err(|error| {
+            format!(
                 "create headless workflow directory {}: {error}",
                 workflow_dir.display()
             )
-        });
+        })?;
         let workflow_emitter = Arc::new(HeadlessWorkflowEmitter(Arc::clone(&event_bus)));
         let workflow_state_emitter: Arc<dyn crate::workflow::TriggerEmitter> =
             workflow_emitter.clone();
@@ -218,11 +218,12 @@ impl HeadlessServices {
                 crate::workflow::default_mirror_path(&data_dir),
                 workflow_state_emitter,
             )
-            .unwrap_or_else(|error| panic!("open headless workflow state: {error}")),
+            .map_err(|error| format!("open headless workflow state: {error}"))?,
         );
         if !cfg!(test) {
-            let runtime = tokio::runtime::Handle::try_current()
-                .expect("headless workflow runtime requires an active Tokio runtime");
+            let runtime = tokio::runtime::Handle::try_current().map_err(|error| {
+                format!("headless workflow runtime requires an active Tokio runtime: {error}")
+            })?;
             runtime.spawn(workflow.cron.clone().run_loop());
             let webhook = workflow.webhook.clone();
             runtime.spawn(async move {
@@ -282,11 +283,15 @@ impl HeadlessServices {
                         "open provider profile store at {}: {error}; using in-memory store",
                         profiles_path.display()
                     );
-                    crate::provider_profiles::SqliteProfileStore::in_memory()
-                        .expect("in-memory profile store")
+                    // An in-memory SQLite that will not open means the process
+                    // is out of memory or the driver is broken; reporting that
+                    // beats aborting from inside a degradation path.
+                    crate::provider_profiles::SqliteProfileStore::in_memory().map_err(|error| {
+                        format!("open in-memory provider profile store: {error}")
+                    })?
                 }
             };
-        Arc::new(Self {
+        Ok(Arc::new(Self {
             sidecar: SidecarState::new(),
             sidecar_host,
             api_keys,
@@ -306,7 +311,7 @@ impl HeadlessServices {
             connectors: ConnectorsState::new(),
             workflow,
             profiles,
-        })
+        }))
     }
 
     /// Return the process-owned MCP automation plane, creating the native
@@ -371,6 +376,10 @@ impl HeadlessServices {
                 .join(format!("cognia-headless-test-{}", std::process::id()))
                 .join("plugins"),
         )
+        // Absorbed here so the ~20 test call sites stay a plain `Arc<Self>`:
+        // a construction failure under a temp dir is a broken test env, not a
+        // condition any of them is written to handle.
+        .expect("headless test stub")
     }
 }
 
@@ -392,6 +401,67 @@ pub fn headless_services() -> Option<Arc<HeadlessServices>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A sidecar host that never resolves its script — enough to construct the
+    /// services without spawning anything.
+    fn stub_sidecar_host(event_bus: Arc<EventBus>, api_keys: ApiKeyState) -> Arc<dyn SidecarHost> {
+        Arc::new(crate::claude::host::HeadlessSidecarHost::new(
+            std::path::PathBuf::from("cognia-headless-test-missing.mjs"),
+            event_bus,
+            api_keys,
+        ))
+    }
+
+    fn construct_under(
+        plugin_install_dir: std::path::PathBuf,
+    ) -> Result<Arc<HeadlessServices>, String> {
+        let event_bus = EventBus::new();
+        let api_keys = ApiKeyState::new();
+        HeadlessServices::new(
+            stub_sidecar_host(Arc::clone(&event_bus), api_keys.clone()),
+            api_keys,
+            event_bus,
+            crate::external_agent::presets::SpawnPolicy::new(
+                std::env::temp_dir().join("cognia-headless-ctor-test-ws"),
+                false,
+            ),
+            plugin_install_dir,
+        )
+    }
+
+    #[tokio::test]
+    async fn construction_reports_an_unusable_data_dir_instead_of_aborting() {
+        // The data dir is the plugin dir's PARENT, so pointing the plugin dir
+        // under a regular file makes `create_dir_all` fail. This used to
+        // `panic!` straight out of `cognia-server`'s boot path, taking the
+        // process down instead of printing which directory was at fault.
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let blocker = tmp.path().join("blocker");
+        std::fs::write(&blocker, b"not a directory").expect("write blocker");
+
+        // `expect_err` would need `Arc<HeadlessServices>: Debug`, which it is
+        // not — match instead of deriving Debug on a struct full of runtimes.
+        let error = match construct_under(blocker.join("data").join("plugins")) {
+            Ok(_) => panic!("an unusable data dir must not construct successfully"),
+            Err(error) => error,
+        };
+
+        assert!(
+            error.starts_with("create headless workflow directory "),
+            "the message must name the subsystem and the path so \
+             `headless services: {{error}}` reads usefully: {error}"
+        );
+    }
+
+    #[tokio::test]
+    async fn construction_succeeds_under_a_healthy_data_dir() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let services = construct_under(tmp.path().join("data").join("plugins"))
+            .expect("a healthy data dir must construct");
+
+        assert!(tmp.path().join("data").join("cognia").is_dir());
+        assert!(!services.mcp_server.status().running);
+    }
 
     #[tokio::test]
     async fn install_and_clear_round_trip() {
