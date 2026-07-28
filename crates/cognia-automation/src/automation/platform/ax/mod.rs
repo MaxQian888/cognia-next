@@ -308,7 +308,7 @@ impl AutomationBackend for AxBackend {
         if element
             .subrole()
             .ok()
-            .is_some_and(|subrole| subrole.to_string() == "AXSecureTextField")
+            .is_some_and(|subrole| subrole == "AXSecureTextField")
         {
             return Ok(None);
         }

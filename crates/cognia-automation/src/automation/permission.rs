@@ -592,7 +592,9 @@ mod tests {
             ..AutomationSettings::default()
         };
         assert_eq!(s.consent_timeout_ms(), MAX_CONSENT_TIMEOUT_MS);
-        assert!(MAX_CONSENT_TIMEOUT_MS < 120_000);
+        const {
+            assert!(MAX_CONSENT_TIMEOUT_MS < 120_000);
+        }
     }
 
     #[test]

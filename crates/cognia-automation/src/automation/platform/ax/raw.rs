@@ -157,7 +157,7 @@ pub fn has_visible_windows(app: &AXUIElement) -> bool {
 pub fn focused_element_is_secure_text_field(app: &AXUIElement) -> bool {
     focused_ui_element(app)
         .and_then(|element| element.subrole().ok())
-        .is_some_and(|subrole| subrole.to_string() == "AXSecureTextField")
+        .is_some_and(|subrole| subrole == "AXSecureTextField")
 }
 
 pub fn selected_text(element: &AXUIElement) -> Option<String> {
