@@ -1,44 +1,41 @@
 import type { Meta, StoryObj } from "@storybook/nextjs"
 
-import { OutboundSaturationBanner } from "./outbound-saturation-banner"
-import { seedDb } from "@/lib/storybook/seed-db"
-import { makeAuditEntry } from "@/lib/storybook/fixtures/inbox"
+import { OutboundSaturationNotice } from "./outbound-saturation-banner"
 
-// Appears when a single adapter accumulates >= 100 `outbound.queue_capped`
-// audit rows within the last 24h. Seed enough rows to cross the threshold;
-// renders nothing below it.
+// A pure presenter. `useOutboundSaturation` counts `outbound.queue_capped`
+// audit rows per adapter over 24h and only reports those at or above the
+// 100-row threshold; below it the list arrives empty and nothing renders.
 const meta = {
-  title: "Inbox/OutboundSaturationBanner",
-  component: OutboundSaturationBanner,
+  title: "Inbox/OutboundSaturationNotice",
+  component: OutboundSaturationNotice,
+  args: { onDismiss: () => {} },
   parameters: { layout: "fullscreen" },
-} satisfies Meta<typeof OutboundSaturationBanner>
+} satisfies Meta<typeof OutboundSaturationNotice>
 
 export default meta
 type Story = StoryObj<typeof meta>
 
-const cappedRows = (adapterId: string, n: number) =>
-  Array.from({ length: n }, (_, i) =>
-    makeAuditEntry({ adapterId, at: Date.now() - i * 1_000, kind: "outbound.queue_capped" })
-  )
-
 export const Saturated: Story = {
-  beforeEach: async () => {
-    await seedDb(async (db) => {
-      await db.connectorAudit.bulkPut(cappedRows("slack-acme", 120))
-    })
+  args: {
+    adapters: [{ adapterId: "slack-acme", cappedCount: 120, lastAt: Date.now() }],
   },
 }
 
-// Below the 100-row threshold → renders nothing.
-export const BelowThreshold: Story = {
-  beforeEach: async () => {
-    await seedDb(async (db) => {
-      await db.connectorAudit.bulkPut(cappedRows("slack-acme", 10))
-    })
+export const MultipleAdapters: Story = {
+  args: {
+    adapters: [
+      { adapterId: "slack-acme", cappedCount: 340, lastAt: Date.now() },
+      { adapterId: "telegram-ops", cappedCount: 105, lastAt: Date.now() - 60_000 },
+    ],
   },
-  render: () => (
+}
+
+// Below the 100-row threshold the hook reports nothing → renders nothing.
+export const BelowThreshold: Story = {
+  args: { adapters: [] },
+  render: (args) => (
     <div className="rounded border border-dashed px-3 py-2 text-xs text-muted-foreground">
-      renders nothing below threshold → <OutboundSaturationBanner />
+      renders nothing below threshold → <OutboundSaturationNotice {...args} />
     </div>
   ),
 }

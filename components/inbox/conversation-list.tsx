@@ -22,11 +22,11 @@ import { useTranslations } from "next-intl"
 import { useLiveQuery } from "dexie-react-hooks"
 import Dexie from "dexie"
 import { motion, useReducedMotion } from "motion/react"
+import { ChevronRightIcon, XIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { SidebarTrigger } from "@/components/ui/sidebar"
-import { Skeleton } from "@/components/ui/skeleton"
-import { Toggle } from "@/components/ui/toggle"
+import { cn } from "@/lib/utils"
 import { getDb } from "@/lib/db/schema"
 import { useProjectStore } from "@/stores/project/project-store"
 import { extractPlainText } from "@/lib/inbox/extract-plain-text"
@@ -34,8 +34,13 @@ import { STAGGER_CONTAINER, STAGGER_CHILD } from "@/lib/ui/motion"
 import { usePendingDraftCounts } from "@/hooks/connectors/use-pending-drafts"
 import { ConversationSearchInput } from "./search/conversation-search-input"
 import { ConversationRow, type ConversationRowItem } from "./conversation-row"
+import {
+  ConversationListFilterMenu,
+  type ConversationFilterChip,
+} from "./conversation-list-filter-menu"
+import { StateCard } from "./state/state-card"
 
-type FilterChip = "unread" | "pinned" | "pending" | "snoozed"
+type FilterChip = ConversationFilterChip
 
 interface ConversationListProps {
   adapterId?: string
@@ -170,12 +175,75 @@ export function ConversationList({
     return { pinned, unread, read, archived, resolved }
   }, [enriched, searchQuery, activeChips])
 
+  const toggleChip = (chip: FilterChip) => {
+    setActiveChips((prev) => {
+      const next = new Set(prev)
+      if (next.has(chip)) next.delete(chip)
+      else next.add(chip)
+      return next
+    })
+  }
+
+  // One 48px row — matching `conversation-header.tsx`'s `h-9` seam plus the
+  // rail — then a removable-pill strip only while filters are on. This
+  // replaces a stacked micro-heading + search + four permanent Toggle chips
+  // (~110px of chrome before the first conversation).
+  const header = (
+    <>
+      <div className="flex h-12 shrink-0 items-center gap-1.5 border-b px-2 md:px-3">
+        <SidebarTrigger
+          className="-ms-1 size-9 shrink-0 md:hidden"
+          aria-label={t("openSidebar")}
+          data-testid="conversation-list-open-sidebar"
+        />
+        <ConversationSearchInput
+          value={searchQuery}
+          onDebouncedChange={setSearchQuery}
+          className="min-w-0 flex-1"
+        />
+        <ConversationListFilterMenu
+          active={activeChips}
+          onToggle={toggleChip}
+          onClear={() => setActiveChips(new Set())}
+        />
+      </div>
+      {activeChips.size > 0 && (
+        <div
+          className="flex shrink-0 flex-wrap items-center gap-1 border-b px-3 py-1.5"
+          role="group"
+          aria-label={t("filter.aria")}
+          data-testid="conversation-filter-chips"
+        >
+          {[...activeChips].map((chip) => (
+            <Button
+              key={chip}
+              type="button"
+              variant="secondary"
+              size="sm"
+              className="h-6 gap-1 rounded-full px-2 text-[11px]"
+              onClick={() => toggleChip(chip)}
+              aria-label={t("filter.remove", { label: t(`filter.${chip}`) })}
+              data-testid={`conversation-filter-chip-${chip}`}
+            >
+              {t(`filter.${chip}`)}
+              <XIcon className="size-3" aria-hidden />
+            </Button>
+          ))}
+        </div>
+      )}
+    </>
+  )
+
+  // The header renders during loading too. It used to sit below this early
+  // return, so search + filters popped in and shoved the list down on every
+  // Inbox open and every project switch.
   if (!enriched || !buckets) {
     return (
-      <div className="flex flex-col gap-1 p-3" data-testid="conversation-list-loading">
-        {Array.from({ length: 6 }).map((_, idx) => (
-          <Skeleton key={idx} className="h-12 w-full rounded-md" />
-        ))}
+      <div className="@container/conversation-list flex h-full min-h-0 flex-col">
+        {header}
+        <div className="min-h-0 flex-1" data-testid="conversation-list-loading">
+          <StateCard.Loading rows={6} />
+        </div>
       </div>
     )
   }
@@ -204,94 +272,23 @@ export function ConversationList({
         : { primary: t("empty"), secondary: null, reset: null }
       : null
 
-  const toggleChip = (chip: FilterChip) => {
-    setActiveChips((prev) => {
-      const next = new Set(prev)
-      if (next.has(chip)) next.delete(chip)
-      else next.add(chip)
-      return next
-    })
-  }
-
   const handleSelect = (ck: string) => {
     router.push(`/inbox/c?key=${encodeURIComponent(ck)}`)
   }
 
   return (
-    <div className="flex flex-col h-full">
-      <div className="shrink-0 flex flex-col gap-2 border-b px-3 py-2">
-        <div className="flex items-center gap-1">
-          <SidebarTrigger
-            className="-ml-1 size-9 md:hidden"
-            aria-label={t("openSidebar")}
-            data-testid="conversation-list-open-sidebar"
-          />
-          <h3 className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
-            {t("header")}
-          </h3>
-        </div>
-        <ConversationSearchInput value={searchQuery} onDebouncedChange={setSearchQuery} />
-        <div
-          className="flex flex-wrap items-center gap-1"
-          role="group"
-          aria-label={t("filter.aria")}
-          data-testid="conversation-filter-chips"
-        >
-          <Toggle
-            size="sm"
-            pressed={activeChips.has("unread")}
-            onPressedChange={() => toggleChip("unread")}
-            aria-label={t("filter.tooltip.unread")}
-            data-testid="conversation-filter-unread"
-            className="h-6 px-2 text-xs data-[state=on]:bg-primary/15"
-          >
-            {t("filter.unread")}
-          </Toggle>
-          <Toggle
-            size="sm"
-            pressed={activeChips.has("pinned")}
-            onPressedChange={() => toggleChip("pinned")}
-            aria-label={t("filter.tooltip.pinned")}
-            data-testid="conversation-filter-pinned"
-            className="h-6 px-2 text-xs data-[state=on]:bg-primary/15"
-          >
-            {t("filter.pinned")}
-          </Toggle>
-          <Toggle
-            size="sm"
-            pressed={activeChips.has("pending")}
-            onPressedChange={() => toggleChip("pending")}
-            aria-label={t("filter.tooltip.pending")}
-            data-testid="conversation-filter-pending"
-            className="h-6 px-2 text-xs data-[state=on]:bg-primary/15"
-          >
-            {t("filter.pending")}
-          </Toggle>
-          <Toggle
-            size="sm"
-            pressed={activeChips.has("snoozed")}
-            onPressedChange={() => toggleChip("snoozed")}
-            aria-label={t("filter.tooltip.snoozed")}
-            data-testid="conversation-filter-snoozed"
-            className="h-6 px-2 text-xs data-[state=on]:bg-primary/15"
-          >
-            {t("filter.snoozed")}
-          </Toggle>
-        </div>
-      </div>
+    <div className="@container/conversation-list flex h-full min-h-0 flex-col">
+      {header}
 
       <ScrollArea className="flex-1">
         {emptyState ? (
-          <div className="px-3 py-4 text-center" data-testid="conversation-list-empty">
-            <p className="text-xs text-muted-foreground">{emptyState.primary}</p>
-            {emptyState.secondary && (
-              <p className="mt-1 text-[11px] text-muted-foreground/80">{emptyState.secondary}</p>
-            )}
+          <div className="px-3 py-4" data-testid="conversation-list-empty">
+            <StateCard.Empty title={emptyState.primary} description={emptyState.secondary ?? ""} />
             {emptyState.reset && (
               <Button
                 variant="link"
                 size="sm"
-                className="mt-2 h-6 px-1 text-xs"
+                className="mt-2 h-6 w-full px-1 text-xs"
                 onClick={emptyState.reset}
                 data-testid="conversation-filter-reset"
               >
@@ -305,6 +302,7 @@ export function ConversationList({
             initial={reduce ? false : "initial"}
             animate="animate"
             variants={STAGGER_CONTAINER}
+            aria-label={t("header")}
             data-testid="conversation-list"
           >
             {visibleRows.map((item) => {
@@ -322,34 +320,46 @@ export function ConversationList({
             })}
           </motion.ul>
         )}
+
+        {/* Hidden buckets live INSIDE the scroller, on one shared seam. As two
+            pinned footers they cost ~82px of permanent chrome and read as two
+            identical mystery buttons; the disclosure chevron makes them
+            collapsed sections instead. */}
+        {(resolved.length > 0 || archived.length > 0) && (
+          <div className="mt-1 flex flex-wrap items-center gap-1 border-t px-2 py-1.5">
+            {resolved.length > 0 && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-7 gap-1 px-2 text-xs font-normal text-muted-foreground"
+                onClick={() => setShowResolved((v) => !v)}
+                data-testid="conversation-list-toggle-resolved"
+              >
+                <ChevronRightIcon
+                  className={cn("size-3 transition-transform", showResolved && "rotate-90")}
+                  aria-hidden
+                />
+                {showResolved ? t("hideResolved") : t("showResolved", { count: resolved.length })}
+              </Button>
+            )}
+            {archived.length > 0 && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-7 gap-1 px-2 text-xs font-normal text-muted-foreground"
+                onClick={() => setShowArchived((v) => !v)}
+                data-testid="conversation-list-toggle-archived"
+              >
+                <ChevronRightIcon
+                  className={cn("size-3 transition-transform", showArchived && "rotate-90")}
+                  aria-hidden
+                />
+                {showArchived ? t("hideArchived") : t("showArchived", { count: archived.length })}
+              </Button>
+            )}
+          </div>
+        )}
       </ScrollArea>
-
-      {resolved.length > 0 && (
-        <div className="shrink-0 border-t px-3 py-2">
-          <Button
-            variant="ghost"
-            size="sm"
-            className="w-full text-xs"
-            onClick={() => setShowResolved((v) => !v)}
-            data-testid="conversation-list-toggle-resolved"
-          >
-            {showResolved ? t("hideResolved") : t("showResolved", { count: resolved.length })}
-          </Button>
-        </div>
-      )}
-
-      {archived.length > 0 && (
-        <div className="shrink-0 border-t px-3 py-2">
-          <Button
-            variant="ghost"
-            size="sm"
-            className="w-full text-xs"
-            onClick={() => setShowArchived((v) => !v)}
-          >
-            {showArchived ? t("hideArchived") : t("showArchived", { count: archived.length })}
-          </Button>
-        </div>
-      )}
     </div>
   )
 }

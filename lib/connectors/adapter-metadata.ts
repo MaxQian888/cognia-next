@@ -35,7 +35,6 @@ export interface ConnectorMeta {
  * The `status` field reflects what's actually shipped in adapter-registry:
  *   stable — native adapter-registry platforms that can be configured and
  *            started from Settings.
- *   beta   — github (delivery plugin; inbox-only no outbound).
  *   planned — email / kook / line / mattermost (PlatformKind union reserves
  *             them; no native adapter factory branch yet).
  */
@@ -45,7 +44,6 @@ export const CONNECTOR_METADATA: readonly ConnectorMeta[] = [
   { type: "slack", iconName: "Hash", status: "stable", oauth: true, richMessages: true },
   { type: "lark", iconName: "MessagesSquare", status: "stable", oauth: true, richMessages: true },
   { type: "onebot", iconName: "Bot", status: "stable", oauth: false, richMessages: false },
-  { type: "github", iconName: "Github", status: "beta", oauth: true, richMessages: false },
   { type: "email", iconName: "Mail", status: "planned", oauth: false, richMessages: false },
   {
     // Configured with an AppKey/AppSecret pair (keyring), not an OAuth flow.

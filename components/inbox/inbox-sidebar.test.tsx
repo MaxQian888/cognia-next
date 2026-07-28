@@ -65,30 +65,11 @@ jest.mock("next/link", () => ({
   ),
 }))
 
-jest.mock("@/components/ui/sidebar", () => ({
-  Sidebar: ({ children }: { children: React.ReactNode }) => (
-    <div data-testid="sidebar">{children}</div>
-  ),
-  SidebarContent: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-  SidebarHeader: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-  SidebarGroup: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-  SidebarGroupLabel: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-  SidebarMenu: ({ children }: { children: React.ReactNode }) => <ul>{children}</ul>,
-  SidebarMenuButton: ({
-    children,
-    onClick,
-    ...rest
-  }: {
-    children: React.ReactNode
-    onClick?: () => void
-    [k: string]: unknown
-  }) => (
-    <button onClick={onClick} {...rest}>
-      {children}
-    </button>
-  ),
-  SidebarMenuItem: ({ children }: { children: React.ReactNode }) => <li>{children}</li>,
-}))
+// The shared manual mock, not a local factory: `AdapterSection` now uses
+// `SidebarMenuAction` / `SidebarMenuSub` / `SidebarMenuSubItem` /
+// `SidebarMenuSubButton` / `SidebarMenuBadge`, and an inline factory has to be
+// extended every time the component reaches for another primitive.
+jest.mock("@/components/ui/sidebar")
 
 // Tooltip primitives are mocked as passthroughs — the real Radix tooltip
 // requires a portal + provider that adds complexity without value in unit
@@ -230,16 +211,23 @@ describe("InboxSidebar", () => {
     expect(mockPush).toHaveBeenCalledWith("/inbox/adapter?adapterId=a1")
   })
 
-  it("expand toggle is rendered as a shadcn Button (ghost icon)", () => {
+  // The toggle is `SidebarMenuAction` now rather than a hand-rolled 36px ghost
+  // Button — the rail can be as narrow as ~123px at
+  // `INBOX_LAYOUT_BOUNDS.sidebarMin`. (The shared sidebar mock strips
+  // `data-slot`/variant props, so this pins the contract that survives it:
+  // an accessible, labelled disclosure button.)
+  it("expand toggle is a labelled disclosure control", () => {
     mockQueryResult = [makeAdapter("a1", "Bot Alpha")]
 
     render(<InboxSidebar view="by-adapter" />)
     const toggle = screen.getByTestId("adapter-section-toggle-a1")
-    expect(toggle).toHaveAttribute("data-slot", "button")
-    expect(toggle).toHaveAttribute("data-variant", "ghost")
-    expect(toggle).toHaveAttribute("data-size", "icon")
+    expect(toggle.tagName).toBe("BUTTON")
+    expect(toggle).toHaveAttribute("aria-expanded", "false")
     // Translated aria-label is interpolated with the adapter name (en.json mock).
     expect(toggle).toHaveAccessibleName(/Bot Alpha/i)
+
+    fireEvent.click(toggle)
+    expect(screen.getByTestId("adapter-section-toggle-a1")).toHaveAttribute("aria-expanded", "true")
   })
 
   it("nested recent-conversation links use responsive touch-target sizing", () => {
@@ -256,10 +244,12 @@ describe("InboxSidebar", () => {
     render(<InboxSidebar view="by-adapter" />)
     fireEvent.click(screen.getByTestId("adapter-section-toggle-a1"))
 
-    const link = screen.getByTestId("adapter-recent-a1-s1")
-    // 44 px on mobile, compact 24 px on md+.
-    expect(link).toHaveClass("min-h-11")
-    expect(link).toHaveClass("md:min-h-0")
-    expect(link).toHaveClass("md:py-1")
+    // The link is the `asChild` target of `SidebarMenuSubButton`, so the
+    // sizing classes land on its parent button.
+    const sizedNode = screen.getByTestId("adapter-recent-a1-s1").closest(".min-h-11")
+    // 44px on mobile; md+ takes the primitive's own compact 28px.
+    expect(sizedNode).not.toBeNull()
+    expect(sizedNode).toHaveClass("md:h-7")
+    expect(sizedNode).toHaveClass("md:min-h-0")
   })
 })

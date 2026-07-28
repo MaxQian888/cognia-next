@@ -24,9 +24,9 @@ describe("lib/connectors/adapter-metadata", () => {
     expect(t?.iconName).toBe("Send")
   })
 
-  it("github is exposed as beta (PR delivery plugin, no outbound)", () => {
-    const gh = getConnectorMeta("github")
-    expect(gh?.status).toBe("beta")
+  it("does not model Marketplace integrations as Connector platforms", () => {
+    expect(getConnectorMeta("github")).toBeUndefined()
+    expect(ALL_PLATFORM_KINDS).not.toContain("github")
   })
 
   it("native adapter registry platforms are exposed as stable", () => {

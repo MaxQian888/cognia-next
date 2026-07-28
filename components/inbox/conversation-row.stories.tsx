@@ -57,3 +57,30 @@ export const WithDraftsAndComputerUse: Story = {
 export const NoPreview: Story = {
   args: { item: makeItem({ lastMessagePreview: undefined, lastMessageAt: undefined }) },
 }
+
+/**
+ * The three states side by side. `bg-muted` (active) and `bg-muted/60` (hover)
+ * are near-identical, so selection now carries an accent rail, and unread
+ * carries type weight rather than only the pill.
+ */
+export const SelectionAndUnreadContrast: Story = {
+  render: (args) => (
+    <div className="w-80 divide-y rounded-md border">
+      <ConversationRow {...args} item={makeItem()} isActive={false} />
+      <ConversationRow {...args} item={makeItem({ unreadCount: 3 })} isActive={false} />
+      <ConversationRow {...args} item={makeItem()} isActive />
+    </div>
+  ),
+}
+
+/**
+ * At the list pane's minimum width the timestamp drops out via
+ * `@container/conversation-row`, leaving the title its full measure.
+ */
+export const NarrowRail: Story = {
+  render: (args) => (
+    <div className="w-48 rounded-md border">
+      <ConversationRow {...args} item={makeItem({ unreadCount: 2 })} isActive={false} />
+    </div>
+  ),
+}

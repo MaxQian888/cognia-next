@@ -1,0 +1,64 @@
+{
+  "accounts": {
+    "add": "添加账号",
+    "approvedOrigin": "已授权的 self-hosted HTTPS origin（可选）",
+    "authStrategy": "认证方式",
+    "credentialHandle": "凭据句柄",
+    "integration": "Integration",
+    "label": "账号名称",
+    "providerId": "认证提供方 ID",
+    "remoteAccountId": "远端账号 ID",
+    "selectAuthStrategy": "选择认证方式",
+    "selectIntegration": "选择 Integration",
+    "title": "账号"
+  },
+  "approvals": {
+    "approve": "批准",
+    "cancel": "取消",
+    "empty": "暂无 Action 任务。",
+    "title": "审批与任务"
+  },
+  "audit": {
+    "empty": "暂无 Integration 审计记录。",
+    "title": "审计"
+  },
+  "description": "统一管理 Marketplace 账号、资源级事件订阅、审批、健康状态和审计，且不向插件暴露凭据。",
+  "disable": "停用",
+  "emptyPlugins": "请先安装支持 Integration 的 Marketplace 插件。",
+  "enable": "启用",
+  "health": {
+    "degraded": "异常",
+    "healthy": "健康",
+    "revoked": "已撤销",
+    "unknown": "未知"
+  },
+  "installed": "已安装的 Integration",
+  "remove": "移除",
+  "risk": {
+    "destructive": "破坏性",
+    "read": "读取",
+    "write": "写入"
+  },
+  "status": {
+    "awaiting_approval": "等待审批",
+    "cancelled": "已取消",
+    "deadlettered": "已进入死信",
+    "failed": "失败",
+    "queued": "排队中",
+    "retry_wait": "等待重试",
+    "running": "执行中",
+    "succeeded": "成功"
+  },
+  "subscriptions": {
+    "account": "账号",
+    "add": "添加订阅",
+    "allResources": "全部资源",
+    "eventTypes": "事件类型（逗号分隔）",
+    "ingressSecret": "Webhook 密钥（启用 ingress 时必填）",
+    "resourceId": "资源 ID（可选）",
+    "resourceKind": "资源类型（可选）",
+    "selectAccount": "选择账号",
+    "title": "订阅"
+  },
+  "title": "Integrations"
+}

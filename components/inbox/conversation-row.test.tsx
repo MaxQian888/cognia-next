@@ -128,4 +128,52 @@ describe("ConversationRow", () => {
     render(<ConversationRow item={makeItem()} isActive onSelect={() => {}} />)
     expect(screen.getByTestId("conversation-row-slack:a1:C1")).toHaveClass("bg-muted")
   })
+
+  // `bg-muted` (active) and `bg-muted/60` (hover) are near-identical, so the
+  // fill alone could not say which row was selected.
+  it("marks the active row with an accent rail and aria-current", () => {
+    render(<ConversationRow item={makeItem()} isActive onSelect={() => {}} />)
+    expect(screen.getByTestId("conversation-row-slack:a1:C1")).toHaveClass("before:bg-primary")
+    expect(screen.getByTestId("conversation-row-button-slack:a1:C1")).toHaveAttribute(
+      "aria-current",
+      "true"
+    )
+  })
+
+  // Hovering an already-selected row used to *lighten* it, because
+  // `hover:bg-muted/60` sat on top of the active `bg-muted`.
+  it("drops the hover fill on the active row", () => {
+    const { rerender } = render(
+      <ConversationRow item={makeItem()} isActive={false} onSelect={() => {}} />
+    )
+    expect(screen.getByTestId("conversation-row-slack:a1:C1")).toHaveClass("hover:bg-muted/60")
+
+    rerender(<ConversationRow item={makeItem()} isActive onSelect={() => {}} />)
+    expect(screen.getByTestId("conversation-row-slack:a1:C1")).not.toHaveClass("hover:bg-muted/60")
+  })
+
+  it("leaves a read row unmarked and aria-current-free", () => {
+    render(<ConversationRow item={makeItem()} isActive={false} onSelect={() => {}} />)
+    expect(screen.getByTestId("conversation-row-slack:a1:C1")).not.toHaveClass("before:bg-primary")
+    expect(screen.getByTestId("conversation-row-button-slack:a1:C1")).not.toHaveAttribute(
+      "aria-current"
+    )
+  })
+
+  // Unread has to read at a glance from typography, not only from the pill.
+  it("weights the title and preview of an unread row", () => {
+    render(
+      <ConversationRow item={makeItem({ unreadCount: 3 })} isActive={false} onSelect={() => {}} />
+    )
+    expect(screen.getByText("Product team")).toHaveClass("font-semibold")
+    expect(screen.getByText("Hello there")).toHaveClass("text-foreground/80")
+  })
+
+  it("keeps a read row at the resting weight", () => {
+    render(
+      <ConversationRow item={makeItem({ unreadCount: 0 })} isActive={false} onSelect={() => {}} />
+    )
+    expect(screen.getByText("Product team")).toHaveClass("font-medium")
+    expect(screen.getByText("Hello there")).toHaveClass("text-muted-foreground")
+  })
 })

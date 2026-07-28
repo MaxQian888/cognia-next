@@ -17,10 +17,7 @@ import { getDb } from "@/lib/db/schema"
 import type { ChatSession } from "@cognia/agent-config-types"
 import { InboxShell } from "@/components/inbox/inbox-shell"
 import { ConversationHeader } from "@/components/inbox/conversation-header"
-import { InboundRecoveryPanel } from "@/components/inbox/inbound-recovery-panel"
 import { PageLoading } from "@/components/ui/loading-states"
-import { DraftBanner } from "@/components/inbox/draft-banner"
-import { ConversationActivityLog } from "@/components/inbox/conversation-activity-log"
 import { ChatPane } from "@/components/chat/chat-view"
 import { ArtifactWorkspaceDock } from "@/components/artifacts/artifact-workspace-dock"
 import { useClaudeChat, useSessions, useTeamChat } from "@/hooks/chat"
@@ -117,7 +114,11 @@ function ConversationDetail({ conversationKey }: { conversationKey: string }) {
 
   return (
     <InboxShell view="conversation" adapterId={adapterId} conversationKey={conversationKey}>
-      <div className="flex flex-col h-full" data-testid="conversation-detail">
+      {/* `min-h-0` lets the dock below shrink instead of overflowing the pane;
+          `min-w-0` keeps a wide message from widening the whole column.
+          Notices are no longer mounted here — `InboxShell` owns the single
+          `InboxNoticeArea` for every Inbox route. */}
+      <div className="flex h-full min-h-0 min-w-0 flex-col" data-testid="conversation-detail">
         <ConversationHeader
           conversationKey={conversationKey}
           sessionId={session.id}
@@ -127,9 +128,6 @@ function ConversationDetail({ conversationKey }: { conversationKey: string }) {
           policy={defaultPrivateChatPolicy()}
           characterId={session.characterId}
         />
-        <InboundRecoveryPanel conversationKey={conversationKey} />
-        <DraftBanner conversationKey={conversationKey} />
-        <ConversationActivityLog conversationKey={conversationKey} />
         <ArtifactWorkspaceDock>
           <ChatPane
             showHeader={false}

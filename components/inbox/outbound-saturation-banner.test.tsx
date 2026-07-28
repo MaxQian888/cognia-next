@@ -6,21 +6,6 @@ import { render, screen, fireEvent } from "@testing-library/react"
 import { NextIntlClientProvider } from "next-intl"
 import enMessages from "@/i18n/messages/en.json"
 
-let mockRecent:
-  | Array<{
-      adapterId: string
-      kind: string
-      at: number
-      fields?: Record<string, unknown>
-    }>
-  | undefined = []
-
-jest.mock("dexie-react-hooks", () => ({
-  useLiveQuery: jest.fn().mockImplementation(() => mockRecent),
-}))
-
-jest.mock("@/lib/db/schema", () => ({ getDb: jest.fn() }))
-
 jest.mock("next/link", () => {
   const Link = ({
     href,
@@ -38,77 +23,54 @@ jest.mock("next/link", () => {
   return { __esModule: true, default: Link }
 })
 
-import { OutboundSaturationBanner } from "./outbound-saturation-banner"
+import { OutboundSaturationNotice } from "./outbound-saturation-banner"
+import type { SaturatedAdapter } from "@/hooks/connectors/use-outbound-saturation"
 
-function wrap(ui: React.ReactElement) {
+// The audit query, the 100-row threshold and the per-set dismiss live in
+// `useOutboundSaturation` and are pinned by its own suite. This component is a
+// pure presenter, so every case here is driven by props.
+function wrap(adapters: SaturatedAdapter[], onDismiss = jest.fn()) {
   return render(
     <NextIntlClientProvider locale="en" messages={enMessages as unknown as Record<string, unknown>}>
-      {ui}
+      <OutboundSaturationNotice adapters={adapters} onDismiss={onDismiss} />
     </NextIntlClientProvider>
   )
 }
 
-function capRow(adapterId: string, jobId: string, ageMs = 60_000, at = Date.now()) {
-  return {
-    adapterId,
-    kind: "outbound.queue_capped",
-    at,
-    fields: { jobId, ageMs },
-  }
+function saturated(adapterId: string, cappedCount = 120, lastAt = 1_700_000_000_000) {
+  return { adapterId, cappedCount, lastAt } satisfies SaturatedAdapter
 }
 
-beforeEach(() => {
-  if (typeof window !== "undefined") {
-    window.sessionStorage.clear()
-  }
-  mockRecent = []
-})
-
-describe("OutboundSaturationBanner", () => {
-  it("renders nothing when no queue_capped rows are present", () => {
-    mockRecent = []
-    const { container } = wrap(<OutboundSaturationBanner />)
+describe("OutboundSaturationNotice", () => {
+  it("renders nothing when no adapter is saturated", () => {
+    const { container } = wrap([])
     expect(container.querySelector("[data-testid='outbound-saturation-banner']")).toBeNull()
   })
 
-  it("renders nothing below the 100-row threshold", () => {
-    // 50 capped rows for a single adapter — still under threshold.
-    mockRecent = Array.from({ length: 50 }, (_, i) => capRow("tg-1", `job-${i}`))
-    const { container } = wrap(<OutboundSaturationBanner />)
-    expect(container.querySelector("[data-testid='outbound-saturation-banner']")).toBeNull()
-  })
-
-  it("surfaces an adapter once it crosses the 100-row threshold", () => {
-    mockRecent = Array.from({ length: 120 }, (_, i) => capRow("tg-1", `job-${i}`))
-    wrap(<OutboundSaturationBanner />)
+  it("surfaces a saturated adapter with its capped count", () => {
+    wrap([saturated("tg-1", 120)])
     expect(screen.getByTestId("outbound-saturation-banner")).toBeInTheDocument()
-    expect(screen.getByTestId("outbound-saturation-row-tg-1")).toBeInTheDocument()
+    expect(screen.getByTestId("outbound-saturation-row-tg-1")).toHaveTextContent("120")
   })
 
-  it("groups multiple adapters, ordered by lastAt desc", () => {
-    const now = Date.now()
-    mockRecent = [
-      // tg-1 — 110 rows, oldest lastAt
-      ...Array.from({ length: 110 }, (_, i) => capRow("tg-1", `tg-${i}`, 1000, now - 1_000_000)),
-      // dc-1 — 105 rows, newer lastAt
-      ...Array.from({ length: 105 }, (_, i) => capRow("dc-1", `dc-${i}`, 1000, now)),
-    ]
-    wrap(<OutboundSaturationBanner />)
-    expect(screen.getByTestId("outbound-saturation-row-tg-1")).toBeInTheDocument()
-    expect(screen.getByTestId("outbound-saturation-row-dc-1")).toBeInTheDocument()
+  it("renders one row per adapter in the order given", () => {
+    wrap([saturated("dc-1", 105), saturated("tg-1", 110)])
+    const rows = screen.getAllByTestId(/^outbound-saturation-row-/)
+    expect(rows.map((r) => r.getAttribute("data-testid"))).toEqual([
+      "outbound-saturation-row-dc-1",
+      "outbound-saturation-row-tg-1",
+    ])
   })
 
-  it("dismiss button hides the banner for the current failing set", () => {
-    mockRecent = Array.from({ length: 200 }, (_, i) => capRow("tg-1", `job-${i}`))
-    wrap(<OutboundSaturationBanner />)
-    expect(screen.getByTestId("outbound-saturation-banner")).toBeInTheDocument()
+  it("hands the dismiss control straight to the caller", () => {
+    const onDismiss = jest.fn()
+    wrap([saturated("tg-1")], onDismiss)
     fireEvent.click(screen.getByTestId("outbound-saturation-dismiss"))
-    expect(screen.queryByTestId("outbound-saturation-banner")).not.toBeInTheDocument()
+    expect(onDismiss).toHaveBeenCalledTimes(1)
   })
 
   it("CTA link points at the outbound settings tab", () => {
-    mockRecent = Array.from({ length: 150 }, (_, i) => capRow("tg-1", `job-${i}`))
-    wrap(<OutboundSaturationBanner />)
+    wrap([saturated("tg-1")])
     const link = screen.getByTestId("outbound-saturation-view").closest("a")
     expect(link?.getAttribute("href")).toBe("/settings/connections?tab=outbound")
   })

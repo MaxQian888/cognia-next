@@ -12,7 +12,7 @@
  *   • An ETA when the runtime can compute one (rate bucket refill time,
  *     breaker cooldown remainder).
  *   • A "Reconnect" affordance (Tauri-only; mirrors the per-row reconnect
- *     in `ConnectionLossBanner`) that re-queues the adapter lifecycle.
+ *     in `ConnectionLossNotice`) that re-queues the adapter lifecycle.
  *   • A "Open full health" link to Settings → Connections → Adapter
  *     health for the deep view.
  *

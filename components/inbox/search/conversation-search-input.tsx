@@ -15,6 +15,7 @@ import { useEffect, useId, useState } from "react"
 // `react-hooks/set-state-in-effect`.
 import { useTranslations } from "next-intl"
 import { SearchIcon, XIcon } from "lucide-react"
+import { Input } from "@/components/ui/input"
 import { cn } from "@/lib/utils"
 
 export interface ConversationSearchInputProps {
@@ -62,11 +63,17 @@ export function ConversationSearchInput({
 
   return (
     <div className={cn("relative", className)}>
+      {/* Logical `start`/`end`, not `left`/`right`: the icon and clear button
+          have to swap sides under RTL, like the rest of this subsystem
+          (`border-e`, `-end-1`). */}
       <SearchIcon
-        className="pointer-events-none absolute left-2 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground"
+        className="pointer-events-none absolute start-2 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground"
         aria-hidden
       />
-      <input
+      {/* The shared `Input` rather than a hand-rolled one — this and the
+          provider rail's search box are the same control and were shipping two
+          different focus rings (`focus:ring-1` here vs `focus-visible:ring-[3px]`). */}
+      <Input
         id={inputId}
         type="search"
         value={text}
@@ -80,11 +87,7 @@ export function ConversationSearchInput({
         placeholder={t("placeholder")}
         aria-label={t("aria")}
         data-testid="conversation-search-input"
-        className={cn(
-          "h-8 w-full rounded-md border bg-background pl-7 pr-7 text-xs",
-          "placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring",
-          "[&::-webkit-search-cancel-button]:hidden"
-        )}
+        className="h-8 ps-7 pe-7 text-xs md:text-xs [&::-webkit-search-cancel-button]:hidden"
       />
       {text.length > 0 && (
         <button
@@ -92,7 +95,7 @@ export function ConversationSearchInput({
           onClick={clear}
           aria-label={t("clear")}
           data-testid="conversation-search-clear"
-          className="absolute right-1.5 top-1/2 inline-flex size-5 -translate-y-1/2 items-center justify-center rounded-sm text-muted-foreground hover:text-foreground hover:bg-muted"
+          className="absolute end-1.5 top-1/2 inline-flex size-5 -translate-y-1/2 items-center justify-center rounded-sm text-muted-foreground hover:bg-muted hover:text-foreground"
         >
           <XIcon className="size-3" aria-hidden />
         </button>

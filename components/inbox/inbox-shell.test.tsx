@@ -42,6 +42,17 @@ jest.mock("dexie-react-hooks", () => ({
 }))
 
 jest.mock("@/lib/db/schema", () => ({ getDb: jest.fn() }))
+// The sidebar header's view-mode toggles are tooltip-wrapped and always
+// render now; `app/layout.tsx` supplies the provider in the real app.
+jest.mock("@/components/ui/tooltip")
+// The notice area owns six live queries against a stubbed `getDb()`. Its own
+// contract is covered by `notices/notice-area.test.tsx`; here we only care
+// that the shell mounts exactly one and forwards the conversation key.
+jest.mock("./notices/notice-area", () => ({
+  InboxNoticeArea: ({ conversationKey }: { conversationKey?: string }) => (
+    <div data-testid="inbox-notice-area-stub" data-conversation-key={conversationKey ?? ""} />
+  ),
+}))
 
 // Drive the breakpoint per test. `useIsMobile` is retained for any child that
 // still consumes it.
@@ -133,6 +144,33 @@ import { InboxShell } from "./inbox-shell"
 describe("InboxShell", () => {
   beforeEach(() => {
     mockBreakpoint.mockReturnValue("desktop")
+  })
+
+  // The five notice strips used to mount from two different places — two here,
+  // three from the `/inbox/c` route. Consolidating them means the shell is the
+  // sole mount site, on every branch.
+  describe("notice area", () => {
+    it.each(["desktop", "tablet", "mobile"])("mounts exactly one on %s", (bp) => {
+      mockBreakpoint.mockReturnValue(bp)
+      render(<InboxShell view="all" />)
+      expect(screen.getAllByTestId("inbox-notice-area-stub")).toHaveLength(1)
+    })
+
+    it("forwards the conversation key so conversation-scoped notices can mount", () => {
+      render(<InboxShell view="conversation" conversationKey="lark:a1:oc_x" />)
+      expect(screen.getByTestId("inbox-notice-area-stub")).toHaveAttribute(
+        "data-conversation-key",
+        "lark:a1:oc_x"
+      )
+    })
+
+    it("passes no conversation key on the list routes", () => {
+      render(<InboxShell view="all" />)
+      expect(screen.getByTestId("inbox-notice-area-stub")).toHaveAttribute(
+        "data-conversation-key",
+        ""
+      )
+    })
   })
 
   describe("desktop", () => {

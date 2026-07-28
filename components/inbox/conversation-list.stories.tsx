@@ -39,6 +39,42 @@ export const Empty: Story = {
   },
 }
 
+/**
+ * The pane can be dragged down to ~123px (`INBOX_LAYOUT_BOUNDS.listMin`), well
+ * below anything `md:`/`lg:` can see. Renders the same data at that width so
+ * the `@container/conversation-list` collapses — filter label, row timestamp —
+ * are reviewable.
+ */
+export const NarrowRail: Story = {
+  decorators: [
+    (Story) => (
+      <div className="flex h-[640px] w-48 flex-col border-r">
+        <Story />
+      </div>
+    ),
+  ],
+  beforeEach: async () => {
+    await seedDb(async (db) => {
+      await db.sessions.bulkPut([
+        makeInboxSession({
+          id: "s1",
+          title: "Acme Corp · #support",
+          platform: "slack",
+          conversationKey: "slack:adapter-1:C1",
+        }),
+      ])
+      await db.messages.bulkPut([
+        makeInboxMessage({
+          id: "m1",
+          sessionId: "s1",
+          parts: [{ type: "text", text: "My order hasn't arrived yet." }],
+          createdAt: Date.now() - 8 * 60 * 1000,
+        }),
+      ])
+    })
+  },
+}
+
 export const WithConversations: Story = {
   beforeEach: async () => {
     await seedDb(async (db) => {

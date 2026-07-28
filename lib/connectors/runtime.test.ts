@@ -110,11 +110,15 @@ jest.mock("@/lib/connectors/im-rate/registry", () => ({
   evaluateImRate: (...args: unknown[]) => mockEvaluateImRate(...(args as [])),
 }))
 
-const mockWaitForExecutionRunPresentationFreeze = jest.fn(async () => true)
+const mockWaitForExecutionRunPresentationFreeze = jest.fn(
+  async (_runId: string, _timeoutMs?: number) => true
+)
 jest.mock("./run-presentation/runner", () => ({
   __esModule: true,
   waitForExecutionRunPresentationFreeze: (...args: unknown[]) =>
-    mockWaitForExecutionRunPresentationFreeze(...args),
+    mockWaitForExecutionRunPresentationFreeze(
+      ...(args as Parameters<typeof mockWaitForExecutionRunPresentationFreeze>)
+    ),
 }))
 
 // Spy on the agent-trace root-span close while keeping the rest of the emitter

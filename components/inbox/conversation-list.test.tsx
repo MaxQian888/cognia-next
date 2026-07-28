@@ -65,6 +65,11 @@ jest.mock("./unread-pill", () => ({
 }))
 
 jest.mock("@/components/ui/scroll-area")
+// The four filter chips live in a DropdownMenu now (they were permanently
+// visible Toggles). The shared manual mock renders menu content
+// unconditionally and fires `onCheckedChange` on click, so the chip test ids
+// stay reachable.
+jest.mock("@/components/ui/dropdown-menu")
 
 // SidebarTrigger requires a SidebarProvider ancestor that isn't mounted in
 // these unit tests. Stub it to a plain button so the trigger surface can still

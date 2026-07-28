@@ -10,6 +10,11 @@
  * `usePendingDraftCounts()` derives a `conversationKey → count` map so list
  * rows and the sidebar entry can show a pending-draft badge without each row
  * opening its own subscriber.
+ *
+ * `usePendingDraftsForConversation()` narrows to one conversation. It filters
+ * the shared subscription rather than opening a second live query — the draft
+ * banner used to run its own duplicate `connectorDrafts` scan right next to
+ * these.
  */
 
 import { useMemo } from "react"
@@ -35,4 +40,19 @@ export function usePendingDraftCounts(): Map<string, number> {
     }
     return map
   }, [drafts])
+}
+
+/**
+ * Pending drafts for one conversation, newest-first. Returns an empty array
+ * for an absent `conversationKey` so callers on the non-conversation Inbox
+ * routes can mount unconditionally.
+ */
+export function usePendingDraftsForConversation(
+  conversationKey: string | undefined
+): ConnectorDraftRow[] {
+  const drafts = usePendingDrafts()
+  return useMemo(
+    () => (conversationKey ? drafts.filter((d) => d.conversationKey === conversationKey) : []),
+    [drafts, conversationKey]
+  )
 }

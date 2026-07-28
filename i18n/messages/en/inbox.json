@@ -158,6 +158,10 @@
       "unknown": "Unknown"
     },
     "degradedTitle": "Adapter is not running",
+    "groupHealth": "Health",
+    "groupRouting": "Routing",
+    "groupStatus": "Status",
+    "groupTools": "Tools",
     "healthBadge": {
       "aria": "Adapter health: {state}",
       "breakerOpen": "Circuit open",
@@ -177,6 +181,8 @@
     "lastInboundMinutes": "Last message {minutes}min ago",
     "lastInboundTooltip": "Newest inbound message at {time}",
     "modeSwitchDesktopOnly": "Mode switching requires the desktop app",
+    "more": "More",
+    "moreAttention": "More — needs attention",
     "openContact": "Contact profile",
     "openOverrides": "Conversation settings",
     "openOverridesAria": "Open per-conversation settings",
@@ -197,16 +203,13 @@
     "filter": {
       "all": "All",
       "aria": "Filter conversations",
+      "badgeAria": "{count, plural, =1 {1 filter active} other {# filters active}}",
+      "button": "Filter",
+      "clear": "Clear filters",
       "pending": "Pending",
       "pinned": "Pinned",
+      "remove": "Remove {label} filter",
       "snoozed": "Snoozed",
-      "tooltip": {
-        "all": "Show all conversations",
-        "pending": "Show only pending conversations",
-        "pinned": "Show only pinned conversations",
-        "snoozed": "Show only snoozed conversations",
-        "unread": "Show only unread conversations"
-      },
       "unread": "Unread"
     },
     "header": "Conversations",
@@ -513,5 +516,16 @@
     "fallback": {
       "delivery_unverified": "Fallback to mention-each because delivery is unverified"
     }
+  },
+  "notices": {
+    "collapse": "Hide notices",
+    "expand": "Show notices",
+    "region": "Inbox notices",
+    "severity": {
+      "info": "Information",
+      "warning": "Warning",
+      "danger": "Error"
+    },
+    "summary": "{count, plural, =1 {1 notice} other {# notices}}"
   }
 }

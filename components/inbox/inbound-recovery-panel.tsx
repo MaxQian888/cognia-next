@@ -1,36 +1,34 @@
 "use client"
 
+/**
+ * Durable inbound jobs for this conversation that stalled mid-flight and need
+ * an operator decision.
+ *
+ * Presentation only — `useInboundRecoveryJobs` owns the query and
+ * `InboxNoticeArea` decides whether to mount it.
+ */
+
 import { useState } from "react"
 import { useTranslations } from "next-intl"
-import { useLiveQuery } from "dexie-react-hooks"
-import { AlertTriangleIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { getDb } from "@/lib/db/schema"
 import {
   continueConnectorInboundJobSafely,
   dismissConnectorInboundJobRecovery,
   retryConnectorInboundJobFromStart,
 } from "@/lib/db/connector-inbound-jobs"
 import { getBus } from "@/lib/connectors/bus"
+import type { ConnectorInboundJobRow } from "@/lib/db/connector-types"
+import { NoticeItem } from "./notices/notice-item"
 
-interface InboundRecoveryPanelProps {
-  conversationKey: string
+export interface InboundRecoveryNoticeProps {
+  jobs: ConnectorInboundJobRow[]
 }
 
-export function InboundRecoveryPanel({ conversationKey }: InboundRecoveryPanelProps) {
+export function InboundRecoveryNotice({ jobs }: InboundRecoveryNoticeProps) {
   const t = useTranslations("inbox.inboundRecovery")
   const [workingId, setWorkingId] = useState<string>()
-  const jobs = useLiveQuery(
-    () =>
-      getDb()
-        .connectorInboundJobs.where("conversationKey")
-        .equals(conversationKey)
-        .filter((job) => job.status === "recovery_required")
-        .toArray(),
-    [conversationKey]
-  )
 
-  if (!jobs?.length) return null
+  if (jobs.length === 0) return null
 
   const resolve = async (id: string, action: "continue" | "retry" | "dismiss"): Promise<void> => {
     if (action === "retry" && !window.confirm(t("retryWarning"))) return
@@ -49,19 +47,11 @@ export function InboundRecoveryPanel({ conversationKey }: InboundRecoveryPanelPr
   }
 
   return (
-    <section
-      className="border-b border-amber-500/30 bg-amber-500/10 px-4 py-3"
-      data-testid="inbound-recovery-panel"
-      aria-label={t("title")}
-    >
-      <div className="mb-2 flex items-center gap-2 text-sm font-medium">
-        <AlertTriangleIcon className="size-4 text-amber-600" />
-        {t("title")}
-      </div>
-      <p className="mb-2 text-xs text-muted-foreground">{t("description")}</p>
-      <div className="space-y-2">
+    <NoticeItem severity="warning" title={t("title")} data-testid="inbound-recovery-panel">
+      <p className="mt-0.5 text-muted-foreground">{t("description")}</p>
+      <div className="mt-1 space-y-1">
         {jobs.map((job) => (
-          <div key={job.id} className="flex flex-wrap items-center gap-2 text-xs">
+          <div key={job.id} className="flex flex-wrap items-center gap-2">
             <span className="min-w-0 flex-1 truncate">
               {t("message", {
                 id: job.sourceMessageId,
@@ -71,6 +61,7 @@ export function InboundRecoveryPanel({ conversationKey }: InboundRecoveryPanelPr
             <Button
               size="sm"
               variant="outline"
+              className="h-6 px-2 text-[11px]"
               disabled={workingId === job.id}
               onClick={() => void resolve(job.id, "continue")}
             >
@@ -79,6 +70,7 @@ export function InboundRecoveryPanel({ conversationKey }: InboundRecoveryPanelPr
             <Button
               size="sm"
               variant="destructive"
+              className="h-6 px-2 text-[11px]"
               disabled={workingId === job.id}
               onClick={() => void resolve(job.id, "retry")}
             >
@@ -87,6 +79,7 @@ export function InboundRecoveryPanel({ conversationKey }: InboundRecoveryPanelPr
             <Button
               size="sm"
               variant="ghost"
+              className="h-6 px-2 text-[11px]"
               disabled={workingId === job.id}
               onClick={() => void resolve(job.id, "dismiss")}
             >
@@ -95,6 +88,6 @@ export function InboundRecoveryPanel({ conversationKey }: InboundRecoveryPanelPr
           </div>
         ))}
       </div>
-    </section>
+    </NoticeItem>
   )
 }

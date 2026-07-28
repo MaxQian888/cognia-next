@@ -37,7 +37,6 @@ const PLATFORM_CONFIG: Record<BuiltInPlatformKind, PlatformConfig> = {
   kook: { label: "KK", colorClass: "text-violet-500" },
   line: { label: "LN", colorClass: "text-green-400" },
   mattermost: { label: "MM", colorClass: "text-blue-700" },
-  github: { label: "GH", colorClass: "text-slate-700" },
 }
 
 interface PlatformBadgeProps {

@@ -158,6 +158,10 @@
       "unknown": "未知"
     },
     "degradedTitle": "适配器未运行",
+    "groupHealth": "健康",
+    "groupRouting": "路由",
+    "groupStatus": "状态",
+    "groupTools": "工具",
     "healthBadge": {
       "aria": "适配器健康状态：{state}",
       "breakerOpen": "熔断器已打开",
@@ -177,6 +181,8 @@
     "lastInboundMinutes": "{minutes} 分钟前收到消息",
     "lastInboundTooltip": "最近一条入站消息：{time}",
     "modeSwitchDesktopOnly": "切换模式需要桌面端",
+    "more": "更多",
+    "moreAttention": "更多 — 有待处理项",
     "openContact": "联系人资料",
     "openOverrides": "会话设置",
     "openOverridesAria": "打开该会话的覆盖设置",
@@ -197,16 +203,13 @@
     "filter": {
       "all": "全部",
       "aria": "筛选会话",
+      "badgeAria": "{count, plural, other {已启用 # 个筛选}}",
+      "button": "筛选",
+      "clear": "清除筛选",
       "pending": "待处理",
       "pinned": "已置顶",
+      "remove": "移除{label}筛选",
       "snoozed": "已暂停",
-      "tooltip": {
-        "all": "显示全部会话",
-        "pending": "仅显示待处理会话",
-        "pinned": "仅显示已置顶会话",
-        "snoozed": "仅显示已暂停会话",
-        "unread": "仅显示未读会话"
-      },
       "unread": "未读"
     },
     "header": "会话",
@@ -513,5 +516,16 @@
     "fallback": {
       "delivery_unverified": "因投递未验证，回退到逐条 @ 模式"
     }
+  },
+  "notices": {
+    "collapse": "收起通知",
+    "expand": "展开通知",
+    "region": "收件箱通知",
+    "severity": {
+      "info": "提示",
+      "warning": "警告",
+      "danger": "错误"
+    },
+    "summary": "{count, plural, other {# 条通知}}"
   }
 }

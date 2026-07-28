@@ -1,25 +1,24 @@
 "use client"
 
 /**
- * Conversation activity log — a collapsible strip in the Inbox detail pane that
- * lists system events (edits, deletes, member changes, read receipts, deferrals,
- * help/welcome cards, IM goal start/block, Computer-Use toggles) for the open
- * conversation. Reads `connectorAudit` via `useConversationActivity`; renders
- * nothing when there's no activity, so quiet conversations stay uncluttered.
+ * Conversation activity log — the system-event timeline (edits, deletes, member
+ * changes, read receipts, deferrals, help/welcome cards, IM goal start/block,
+ * Computer-Use toggles) for the open conversation, interleaved with the CRM
+ * assignment trail.
+ *
+ * Presentation only: `InboxNoticeArea` owns the queries and the disclosure, so
+ * this no longer carries its own toggle.
  *
  * Deliberately a *separate* surface from the shared `<ChatPane />` message list
  * (which owns the actual messages) to keep that component untouched.
  */
 
-import { useState } from "react"
 import { useFormatter, useNow, useTranslations } from "next-intl"
-import { motion, AnimatePresence, useReducedMotion } from "motion/react"
-import { ActivityIcon, ChevronDownIcon, ChevronRightIcon } from "lucide-react"
-import { Button } from "@/components/ui/button"
-import { useConversationActivity } from "@/hooks/connectors/use-conversation-activity"
-import { useConversationAssignmentEvents } from "@/hooks/connectors/use-conversation-assignment-events"
-import type { AuditKind } from "@/types/connectors/audit"
+import { ActivityIcon } from "lucide-react"
+import type { AuditEntry, AuditKind } from "@/types/connectors/audit"
 import type { AssignmentEventKind } from "@/lib/db/crm-types"
+import type { ConversationAssignmentEventRow } from "@/lib/db/crm-types"
+import { NoticeItem } from "./notices/notice-item"
 
 /** Maps each surfaced audit kind to its dot-free i18n key under `inbox.activity.kind`. */
 const KIND_LABEL_KEY: Partial<Record<AuditKind, string>> = {
@@ -80,14 +79,18 @@ interface ActivityRow {
   at: number
 }
 
-export function ConversationActivityLog({ conversationKey }: { conversationKey: string }) {
+export interface ConversationActivityNoticeProps {
+  auditEntries: AuditEntry[]
+  assignmentEvents: ConversationAssignmentEventRow[]
+}
+
+export function ConversationActivityNotice({
+  auditEntries,
+  assignmentEvents,
+}: ConversationActivityNoticeProps) {
   const t = useTranslations("inbox.activity")
   const format = useFormatter()
   const now = useNow()
-  const reduce = useReducedMotion()
-  const [open, setOpen] = useState(false)
-  const auditEntries = useConversationActivity(conversationKey)
-  const assignmentEvents = useConversationAssignmentEvents(conversationKey)
 
   // Interleave connector-audit rows and the CRM assignment trail into one
   // newest-first timeline. Both carry an `at` epoch so they sort cleanly.
@@ -108,51 +111,37 @@ export function ConversationActivityLog({ conversationKey }: { conversationKey: 
   if (entries.length === 0) return null
 
   return (
-    <div className="shrink-0 border-b" data-testid="conversation-activity-log">
-      <Button
-        variant="ghost"
-        size="sm"
-        className="w-full justify-start gap-1.5 rounded-none px-3 py-1.5 text-xs text-muted-foreground"
-        onClick={() => setOpen((v) => !v)}
-        aria-expanded={open}
-        aria-label={t("toggle")}
-        data-testid="activity-log-toggle"
-      >
-        {open ? <ChevronDownIcon className="size-3" /> : <ChevronRightIcon className="size-3" />}
-        <ActivityIcon className="size-3" />
-        <span>{t("title")}</span>
-        <span className="ml-1 text-[10px]">{t("count", { count: entries.length })}</span>
-      </Button>
-      <AnimatePresence initial={false}>
-        {open && (
-          <motion.ul
-            initial={reduce ? false : { height: 0, opacity: 0 }}
-            animate={{ height: "auto", opacity: 1 }}
-            exit={reduce ? undefined : { height: 0, opacity: 0 }}
-            className="overflow-hidden px-3 pb-2"
-            data-testid="activity-log-list"
+    <NoticeItem
+      severity="info"
+      icon={<ActivityIcon className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" aria-hidden />}
+      data-testid="conversation-activity-log"
+      title={
+        <span className="flex items-center gap-1.5 font-normal text-muted-foreground">
+          {t("title")}
+          <span className="text-[10px]">{t("count", { count: entries.length })}</span>
+        </span>
+      }
+    >
+      <ul className="mt-0.5" data-testid="activity-log-list">
+        {entries.map((entry) => (
+          <li
+            key={entry.id}
+            className="flex items-center gap-2 py-0.5"
+            data-testid={`activity-row-${entry.id}`}
           >
-            {entries.map((entry) => (
-              <li
-                key={entry.id}
-                className="flex items-center gap-2 py-0.5 text-xs"
-                data-testid={`activity-row-${entry.id}`}
-              >
-                <span className="size-1.5 shrink-0 rounded-full bg-muted-foreground/50" />
-                <span className="flex-1 truncate">
-                  {entry.label}
-                  {entry.reason ? (
-                    <span className="text-muted-foreground"> · {entry.reason}</span>
-                  ) : null}
-                </span>
-                <span className="whitespace-nowrap text-[10px] text-muted-foreground">
-                  {format.relativeTime(new Date(entry.at), now)}
-                </span>
-              </li>
-            ))}
-          </motion.ul>
-        )}
-      </AnimatePresence>
-    </div>
+            <span className="size-1.5 shrink-0 rounded-full bg-muted-foreground/50" />
+            <span className="min-w-0 flex-1 truncate">
+              {entry.label}
+              {entry.reason ? (
+                <span className="text-muted-foreground"> · {entry.reason}</span>
+              ) : null}
+            </span>
+            <span className="whitespace-nowrap text-[10px] text-muted-foreground">
+              {format.relativeTime(new Date(entry.at), now)}
+            </span>
+          </li>
+        ))}
+      </ul>
+    </NoticeItem>
   )
 }

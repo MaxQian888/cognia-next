@@ -22,12 +22,6 @@ export const ALL_PLATFORM_KINDS = [
   "kook",
   "line",
   "mattermost",
-  // Plugin-contributed: GitHub Delivery routes PR / Issue events to the
-  // unified Inbox so review_requested / assigned events land alongside
-  // platform messages. The github-delivery plugin owns the adapter and the
-  // build/send/health surfaces are no-ops (use action.github.* workflow
-  // nodes for outbound).
-  "github",
 ] as const
 
 export type BuiltInPlatformKind = (typeof ALL_PLATFORM_KINDS)[number]

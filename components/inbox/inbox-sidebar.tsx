@@ -20,10 +20,11 @@ import { useTranslations } from "next-intl"
 import { useLiveQuery } from "dexie-react-hooks"
 import {
   CircleIcon,
-  ChevronDownIcon,
   ChevronRightIcon,
   InboxIcon,
   FileTextIcon,
+  LayersIcon,
+  PlugIcon,
 } from "lucide-react"
 import {
   Sidebar,
@@ -31,28 +32,43 @@ import {
   SidebarGroup,
   SidebarGroupLabel,
   SidebarMenu,
+  SidebarMenuAction,
+  SidebarMenuBadge,
   SidebarMenuButton,
   SidebarMenuItem,
+  SidebarMenuSub,
+  SidebarMenuSubButton,
+  SidebarMenuSubItem,
   SidebarHeader,
 } from "@/components/ui/sidebar"
-import { Button } from "@/components/ui/button"
-import { Badge } from "@/components/ui/badge"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { usePendingDrafts } from "@/hooks/connectors/use-pending-drafts"
-import { Empty, EmptyHeader, EmptyMedia, EmptyTitle, EmptyDescription } from "@/components/ui/empty"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
 import { getDb } from "@/lib/db/schema"
 import type { AdapterInstanceRow } from "@/lib/db/connector-types"
 import type { ChatSession } from "@cognia/agent-config-types"
-import { useState } from "react"
+import { useState, type ReactNode } from "react"
 import { PluginExtensionSlot } from "@/components/plugins/plugin-extension-slot"
+import { StateCard } from "./state/state-card"
 
 const RECENT_LIMIT = 8
 
 export type InboxViewMode = "by-adapter" | "by-platform" | "unified"
 
 const ALL_VIEW_MODES: InboxViewMode[] = ["by-adapter", "by-platform", "unified"]
+
+/**
+ * Icons carry the view mode instead of text. At `INBOX_LAYOUT_BOUNDS.sidebarMin`
+ * (12%) the rail is ~123px on a 1024px window, which left each of the three
+ * labels ~34px — truncated to unreadable stubs. The labels survive as
+ * `aria-label` + tooltip.
+ */
+const VIEW_MODE_ICON: Record<InboxViewMode, ReactNode> = {
+  "by-adapter": <PlugIcon className="size-3.5" aria-hidden />,
+  "by-platform": <LayersIcon className="size-3.5" aria-hidden />,
+  unified: <InboxIcon className="size-3.5" aria-hidden />,
+}
 
 interface InboxSidebarProps {
   view: string
@@ -107,8 +123,13 @@ export function InboxSidebarContent({
 
   return (
     <>
-      <SidebarHeader className="px-3 py-2 space-y-2">
-        <h2 className="text-sm font-semibold">{t("title")}</h2>
+      {/* One 48px row with a `border-b`, so the rail shares the seam the list
+          and detail panes already have — this header used to stack a title, a
+          full-width 3-up ToggleGroup and the drafts link with no seam at all. */}
+      <SidebarHeader className="@container/inbox-rail h-12 shrink-0 flex-row items-center gap-1 border-b px-2 py-0 md:px-3">
+        <h2 className="me-auto hidden truncate text-sm font-semibold @[13rem]/inbox-rail:block">
+          {t("title")}
+        </h2>
         <ToggleGroup
           type="single"
           value={currentViewMode}
@@ -119,54 +140,59 @@ export function InboxSidebarContent({
           variant="outline"
           size="sm"
           aria-label={t("viewModeAria")}
-          className="w-full"
+          className="ms-auto shrink-0"
         >
           {ALL_VIEW_MODES.map((mode) => (
-            <ToggleGroupItem
-              key={mode}
-              value={mode}
-              aria-label={t(`viewModes.${mode}`)}
-              data-testid={`view-chip-${mode}`}
-              className="flex-1 h-7 text-xs"
-            >
-              {t(`viewModes.${mode}`)}
-            </ToggleGroupItem>
+            <Tooltip key={mode}>
+              <TooltipTrigger asChild>
+                <ToggleGroupItem
+                  value={mode}
+                  aria-label={t(`viewModes.${mode}`)}
+                  data-testid={`view-chip-${mode}`}
+                  className="size-7 px-0"
+                >
+                  {VIEW_MODE_ICON[mode]}
+                </ToggleGroupItem>
+              </TooltipTrigger>
+              <TooltipContent side="bottom">{t(`viewModes.${mode}`)}</TooltipContent>
+            </Tooltip>
           ))}
         </ToggleGroup>
-        <Link
-          href="/inbox/drafts"
-          className="flex items-center gap-2 rounded-md px-2 py-1.5 text-xs font-medium text-muted-foreground hover:bg-accent hover:text-foreground"
-          data-testid="inbox-drafts-link"
-        >
-          <FileTextIcon className="size-3.5 shrink-0" />
-          <span className="flex-1">{tDraft("sidebarLabel")}</span>
-          {draftCount > 0 && (
-            <Badge
-              variant="warning"
-              className="h-4 px-1 text-[10px] leading-none"
-              data-testid="inbox-drafts-count"
-            >
-              {draftCount}
-            </Badge>
-          )}
-        </Link>
       </SidebarHeader>
 
       <SidebarContent>
+        {/* Drafts is a destination, not view state, so it belongs in the nav
+            rather than the header (Gmail's placement). Using the sidebar
+            primitives also gets it the same hover / active / height / type as
+            the adapter rows, which its bespoke class string never matched. */}
+        <SidebarGroup className="pb-0">
+          <SidebarMenu>
+            <SidebarMenuItem>
+              <SidebarMenuButton asChild data-testid="inbox-drafts-link">
+                <Link href="/inbox/drafts">
+                  <FileTextIcon />
+                  <span>{tDraft("sidebarLabel")}</span>
+                </Link>
+              </SidebarMenuButton>
+              {draftCount > 0 && (
+                <SidebarMenuBadge data-testid="inbox-drafts-count">{draftCount}</SidebarMenuBadge>
+              )}
+            </SidebarMenuItem>
+          </SidebarMenu>
+        </SidebarGroup>
+
         <SidebarGroup>
           <SidebarGroupLabel>{t("adapters")}</SidebarGroupLabel>
           <SidebarMenu>
             {!adapterInstances || adapterInstances.length === 0 ? (
               <SidebarMenuItem>
-                <Empty className="border-0 p-4">
-                  <EmptyHeader>
-                    <EmptyMedia variant="icon">
-                      <InboxIcon />
-                    </EmptyMedia>
-                    <EmptyTitle>{t("noAdaptersTitle")}</EmptyTitle>
-                    <EmptyDescription>{t("noAdapters")}</EmptyDescription>
-                  </EmptyHeader>
-                </Empty>
+                {/* `StateCard` was built to unify the Inbox's empty/loading
+                    treatments; this was one of the three it names. */}
+                <StateCard.Empty
+                  title={t("noAdaptersTitle")}
+                  description={t("noAdapters")}
+                  className="mx-2 my-3"
+                />
               </SidebarMenuItem>
             ) : (
               adapterInstances.map((adapter) => (
@@ -224,69 +250,67 @@ function AdapterSection({
   }
 
   return (
+    // The primitives `components/ui/sidebar.tsx` already ships, instead of the
+    // hand-rolled equivalents: the old `<div className="flex items-center">`
+    // wrapper defeated `SidebarMenuItem`'s `group/menu-item relative` design,
+    // and a 36px chevron Button stole width from a rail that bottoms out at
+    // ~123px. `SidebarMenuAction` is `w-5` but carries `after:-inset-2
+    // md:after:hidden`, so the touch target stays 36px on a phone.
     <SidebarMenuItem>
-      <div className="flex items-center">
-        <SidebarMenuButton
-          onClick={() => router.push(`/inbox/adapter?adapterId=${encodeURIComponent(adapter.id)}`)}
-          isActive={isActive}
-          className="flex items-center gap-2 flex-1"
-          data-testid={`adapter-section-${adapter.id}`}
-        >
-          {/* Status dot */}
-          <CircleIcon
-            className={cn(
-              "h-2 w-2 fill-current shrink-0",
-              adapter.enabled ? "text-emerald-500" : "text-muted-foreground"
-            )}
-          />
-          <span className="flex-1 truncate">{adapter.displayName}</span>
-        </SidebarMenuButton>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon"
-              onClick={toggleExpanded}
-              aria-expanded={expanded}
-              aria-label={t("toggleAdapter", { name: adapter.displayName })}
-              className="h-9 w-9 shrink-0 text-muted-foreground hover:text-foreground md:h-7 md:w-7"
-              data-testid={`adapter-section-toggle-${adapter.id}`}
-            >
-              {expanded ? (
-                <ChevronDownIcon className="h-3 w-3" />
-              ) : (
-                <ChevronRightIcon className="h-3 w-3" />
-              )}
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent side="right">{t("expandTooltip")}</TooltipContent>
-        </Tooltip>
-      </div>
+      <SidebarMenuButton
+        onClick={() => router.push(`/inbox/adapter?adapterId=${encodeURIComponent(adapter.id)}`)}
+        isActive={isActive}
+        className="pe-8"
+        data-testid={`adapter-section-${adapter.id}`}
+      >
+        {/* Status dot */}
+        <CircleIcon
+          className={cn(
+            "size-2 shrink-0 fill-current",
+            adapter.enabled ? "text-emerald-500" : "text-muted-foreground"
+          )}
+        />
+        <span className="truncate">{adapter.displayName}</span>
+      </SidebarMenuButton>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <SidebarMenuAction
+            onClick={toggleExpanded}
+            aria-expanded={expanded}
+            aria-label={t("toggleAdapter", { name: adapter.displayName })}
+            data-testid={`adapter-section-toggle-${adapter.id}`}
+          >
+            {/* One rotating chevron rather than two icons. */}
+            <ChevronRightIcon className={cn("transition-transform", expanded && "rotate-90")} />
+          </SidebarMenuAction>
+        </TooltipTrigger>
+        <TooltipContent side="right">{t("expandTooltip")}</TooltipContent>
+      </Tooltip>
       {expanded && (
-        <ul
-          className="ml-6 mt-1 mb-1 space-y-0.5"
-          data-testid={`adapter-section-recent-${adapter.id}`}
-        >
+        // `SidebarMenuSub` brings the `border-l` indent guide that a bare
+        // `ml-6` never drew.
+        <SidebarMenuSub data-testid={`adapter-section-recent-${adapter.id}`}>
           {!recentSessions || recentSessions.length === 0 ? (
             <li className="px-2 py-1 text-[11px] text-muted-foreground">{t("recentEmpty")}</li>
           ) : (
             recentSessions.map((session) => {
               const ck = session.platformBinding!.conversationKey
               return (
-                <li key={session.id}>
-                  <Link
-                    href={`/inbox/c?key=${encodeURIComponent(ck)}`}
-                    className="flex min-h-11 items-center rounded px-2 py-2.5 text-xs text-muted-foreground hover:bg-accent hover:text-foreground md:min-h-0 md:py-1"
-                    data-testid={`adapter-recent-${adapter.id}-${session.id}`}
-                  >
-                    <span className="truncate">{session.title || ck}</span>
-                  </Link>
-                </li>
+                <SidebarMenuSubItem key={session.id}>
+                  {/* Touch target stays 44px; md+ takes the primitive's 28px. */}
+                  <SidebarMenuSubButton asChild size="sm" className="min-h-11 md:h-7 md:min-h-0">
+                    <Link
+                      href={`/inbox/c?key=${encodeURIComponent(ck)}`}
+                      data-testid={`adapter-recent-${adapter.id}-${session.id}`}
+                    >
+                      <span className="truncate">{session.title || ck}</span>
+                    </Link>
+                  </SidebarMenuSubButton>
+                </SidebarMenuSubItem>
               )
             })
           )}
-        </ul>
+        </SidebarMenuSub>
       )}
     </SidebarMenuItem>
   )

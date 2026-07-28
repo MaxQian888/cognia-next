@@ -143,6 +143,7 @@ function imSafeSnapshot(snapshot: RunProjectionSnapshot): RunProjectionSnapshot 
     activeSteps: snapshot.activeSteps.map(safeStep),
     recentSteps: snapshot.recentSteps.map(safeStep),
     pendingSteps: snapshot.pendingSteps.map(safeStep),
+    pendingStepCount: snapshot.pendingStepCount,
     activities: safeActivities,
     activityCount: snapshot.activityCount ?? safeActivities.length,
     omittedActivityCount: snapshot.omittedActivityCount ?? 0,
@@ -517,7 +518,7 @@ async function projectLatest(bindingId: string): Promise<void> {
     } catch (error) {
       console.error(`[run-presentation] projection failed for binding=${bindingId}`, error)
     } finally {
-      if (projecting.get(bindingId) === projection) projecting.delete(bindingId)
+      projecting.delete(bindingId)
     }
   })()
   projecting.set(bindingId, projection)

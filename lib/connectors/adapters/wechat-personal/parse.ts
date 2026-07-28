@@ -28,7 +28,7 @@ export interface WechatPersonalConversationRef extends ConversationReference {
 
 /**
  * cyrb53 — tiny 53-bit non-cryptographic hash (same construction the
- * github-delivery event-normalizer inlines). Used to fingerprint message
+ * webhook event normalizers inline). Used to fingerprint message
  * content for the derived messageId: a gateway redelivery of the same
  * message hashes identically (so the bus dedup ledger drops it), while a
  * context_token that ever carried different content stays distinguishable.

@@ -40,6 +40,12 @@ jest.mock("@/lib/db/conversation-overrides", () => ({
 }))
 
 jest.mock("@/components/ui/dropdown-menu")
+// Everything that is not identity / mode lives behind the header's `⋯`
+// popover now. The shared manual mock renders `PopoverContent`
+// unconditionally, so these tests keep reaching the controls directly.
+// (The chrome-budget assertion needs the opposite and lives in
+// `conversation-header.budget.test.tsx`.)
+jest.mock("@/components/ui/popover")
 
 jest.mock("@/components/ui/tooltip")
 

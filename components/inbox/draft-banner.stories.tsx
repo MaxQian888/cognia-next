@@ -1,36 +1,40 @@
 import type { Meta, StoryObj } from "@storybook/nextjs"
 
-import { DraftBanner } from "./draft-banner"
-import { seedDb } from "@/lib/storybook/seed-db"
+import { DraftNotice } from "./draft-banner"
 import { makeConnectorDraft } from "@/lib/storybook/fixtures/inbox"
 
 const CONVERSATION_KEY = "story:conversation"
 
-// `DraftBanner` subscribes to pending `connectorDrafts` for its conversationKey
-// via `useLiveQuery`, and renders `null` when none exist. Seed the DB so the
-// banner appears; the EmptyState story seeds nothing to show the null branch.
+// A pure presenter handed the one pending draft to surface — `InboxNoticeArea`
+// owns the `connectorDrafts` query and mounts this only when a draft exists.
+// The Sheet holding `DraftEditor` stays here, so Review opens the editor.
 const meta = {
-  title: "Inbox/DraftBanner",
-  component: DraftBanner,
+  title: "Inbox/DraftNotice",
+  component: DraftNotice,
   args: { conversationKey: CONVERSATION_KEY },
   parameters: { layout: "fullscreen" },
-} satisfies Meta<typeof DraftBanner>
+} satisfies Meta<typeof DraftNotice>
 
 export default meta
 type Story = StoryObj<typeof meta>
 
 export const Pending: Story = {
-  beforeEach: async () => {
-    await seedDb(async (db) => {
-      await db.connectorDrafts.bulkPut([
-        makeConnectorDraft({ conversationKey: CONVERSATION_KEY, status: "pending" }),
-      ])
-    })
+  args: {
+    draft: makeConnectorDraft({ conversationKey: CONVERSATION_KEY, status: "pending" }),
   },
 }
 
-export const NoDraft: Story = {
-  beforeEach: async () => {
-    await seedDb(async () => {})
+export const LongDraft: Story = {
+  args: {
+    draft: makeConnectorDraft({
+      conversationKey: CONVERSATION_KEY,
+      status: "pending",
+      segments: [
+        {
+          type: "text",
+          text: "Thanks for flagging this — I've pulled the deploy logs for the window you mentioned and there is a matching 502 burst. Sending the full trace over shortly.",
+        },
+      ],
+    }),
   },
 }
