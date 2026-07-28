@@ -12,6 +12,8 @@ import type {
   PluginType,
 } from "@/types/plugin"
 import { icons as lucideIcons } from "lucide-react"
+
+import { toLucideIconName } from "@/lib/icons/lucide-icon-name"
 import { checkResilienceBudget, resolveResilienceConfig } from "@/lib/plugin/resilience/config"
 import { loggers } from "./logger"
 import {
@@ -856,22 +858,40 @@ const NATIVE_LUCIDE_ICON_PATHS = [
   "integrations[].icon",
 ] as const
 
+/** True when the name is a key `lucide-react` actually exports. */
+function isExportedLucideIcon(name: string): boolean {
+  return Object.prototype.hasOwnProperty.call(lucideIcons, name)
+}
+
 function validateNativeLucideIcons(
   manifest: PluginManifest,
-  pushError: (field: string, code: string, message: string, hint?: string) => void
+  pushError: (field: string, code: string, message: string, hint?: string) => void,
+  pushWarning: (field: string, code: string, message: string, hint?: string) => void
 ): void {
   for (const path of NATIVE_LUCIDE_ICON_PATHS) {
     for (const { field, value } of collectCatalogPathValues(
       manifest as unknown as Record<string, unknown>,
       path.split(".")
     )) {
-      if (typeof value !== "string" || !Object.prototype.hasOwnProperty.call(lucideIcons, value)) {
-        pushError(
+      if (typeof value === "string" && isExportedLucideIcon(value)) continue
+      // The kebab-case spelling was the published contract until the
+      // `PLUGIN_CONTEXT_PANEL_ICONS` allowlist was retired, so an already
+      // installed plugin using it is following the documentation it was
+      // written against. Accept it with a warning that names the replacement
+      // rather than refusing to load.
+      if (typeof value === "string" && isExportedLucideIcon(toLucideIconName(value))) {
+        pushWarning(
           field,
-          "manifest.icon.invalid",
-          `"${field}" must name an exported lucide-react icon`
+          "manifest.icon.legacy_kebab_case",
+          `"${field}" uses the retired kebab-case icon name "${value}"; rename it to "${toLucideIconName(value)}"`
         )
+        continue
       }
+      pushError(
+        field,
+        "manifest.icon.invalid",
+        `"${field}" must name an exported lucide-react icon`
+      )
     }
   }
 }
@@ -1801,7 +1821,7 @@ export function validatePluginManifest(
   validateDeclarativeTrayItems(m as unknown as PluginManifest, pushError)
   validateIntegrations(m as unknown as PluginManifest, pushError)
   validateWorkflowKindAliases(m as unknown as PluginManifest, pushError)
-  validateNativeLucideIcons(m as unknown as PluginManifest, pushError)
+  validateNativeLucideIcons(m as unknown as PluginManifest, pushError, pushWarning)
   validateLazyFactoryArray(
     m.workspaceBackends,
     { field: "workspaceBackends" },
@@ -2009,12 +2029,21 @@ export function validatePluginManifest(
         if (typeof entry.labelKey !== "string" || entry.labelKey.length === 0) {
           push("error", "labelKey.missing", `contextPanels entry requires a "labelKey" string`)
         }
-        if (
-          entry.icon !== undefined &&
-          (typeof entry.icon !== "string" ||
-            !Object.prototype.hasOwnProperty.call(lucideIcons, entry.icon))
-        ) {
-          push("error", "icon.invalid", `contextPanels "icon" is not a valid lucide icon name`)
+        if (entry.icon !== undefined && !isExportedLucideIcon(String(entry.icon))) {
+          // `PLUGIN_CONTEXT_PANEL_ICONS` published exactly these in kebab-case,
+          // so this is the surface most likely to be holding the old spelling.
+          if (
+            typeof entry.icon === "string" &&
+            isExportedLucideIcon(toLucideIconName(entry.icon))
+          ) {
+            push(
+              "warning",
+              "icon.legacy_kebab_case",
+              `contextPanels "icon" uses the retired kebab-case name "${entry.icon}"; rename it to "${toLucideIconName(entry.icon)}"`
+            )
+          } else {
+            push("error", "icon.invalid", `contextPanels "icon" is not a valid lucide icon name`)
+          }
         }
         if (
           entry.preferredMode !== undefined &&

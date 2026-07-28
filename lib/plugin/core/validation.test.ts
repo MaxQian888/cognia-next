@@ -424,6 +424,54 @@ describe("Plugin Validation", () => {
       }
     )
 
+    it.each([
+      [
+        "file-text",
+        "FileText",
+        "legacy kebab-case",
+        "manifest.contextPanels.icon.legacy_kebab_case",
+        "warning",
+      ],
+      ["PanelRight", undefined, "current PascalCase", undefined, undefined],
+      ["not-an-icon", undefined, "unknown", "manifest.contextPanels.icon.invalid", "error"],
+    ] as const)(
+      "handles a %s context-panel icon (%s)",
+      (icon, _replacement, _label, expectedCode, expectedSeverity) => {
+        // `PLUGIN_CONTEXT_PANEL_ICONS` was this surface's published contract and
+        // it was kebab-case, so this is where an installed third-party plugin is
+        // most likely to be holding the old spelling.
+        const manifest = createValidManifest()
+        manifest.capabilities = ["context-panel"] as PluginManifest["capabilities"]
+        manifest.permissions = ["extension:ui", "canvas:read"]
+        ;(manifest as unknown as Record<string, unknown>).contextPanels = [
+          {
+            id: "outline",
+            label: "Outline",
+            labelKey: "panels.outline",
+            entry: "panel.js",
+            export: "OutlinePanel",
+            resourceKinds: ["canvas-document"],
+            activity: "canvas",
+            icon,
+          },
+        ]
+
+        const diagnostics =
+          validatePluginManifest(manifest, { governanceMode: "warn" }).diagnostics ?? []
+        const iconDiagnostics = diagnostics.filter((d) => d.code.includes("icon"))
+
+        if (expectedCode === undefined) {
+          expect(iconDiagnostics).toEqual([])
+          return
+        }
+        expect(iconDiagnostics).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({ code: expectedCode, severity: expectedSeverity }),
+          ])
+        )
+      }
+    )
+
     it.each(
       Object.entries(CONTEXT_RESOURCE_READ_PERMISSIONS) as Array<[ContextResourceKind, string]>
     )("accepts a context panel targeting the %s resource kind", (kind, readPermission) => {
@@ -2247,6 +2295,28 @@ describe("Plugin Validation", () => {
             field: "commands[0].icon",
             code: "manifest.icon.invalid",
             severity: "error",
+          }),
+        ])
+      )
+    })
+
+    it("still installs a plugin pinned to the retired kebab-case icon spelling", () => {
+      // `PLUGIN_CONTEXT_PANEL_ICONS` published these names, so a third-party
+      // plugin using one was following the documentation it was written
+      // against. Warn and name the replacement rather than refusing to load.
+      const manifest = createValidManifest()
+      manifest.commands = [{ id: "run", name: "Run", icon: "file-text" as never }]
+
+      const result = validatePluginManifest(manifest)
+
+      expect(result.valid).toBe(true)
+      expect(result.diagnostics).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            field: "commands[0].icon",
+            code: "manifest.icon.legacy_kebab_case",
+            severity: "warning",
+            message: expect.stringContaining("FileText"),
           }),
         ])
       )
