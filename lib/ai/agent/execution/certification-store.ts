@@ -10,8 +10,6 @@
 // The filesystem is injected so the same port serves the Tauri fs surface,
 // plain node fs (headless), and tests.
 
-import { createPublicKey, verify as edVerify } from "node:crypto"
-
 import type { CompatibilityManifest } from "@cognia/agent-config-types/compatibility-manifest"
 import {
   manifestSigningPayload,
@@ -46,6 +44,18 @@ export interface CapabilityHealthEntry {
  * `issuer: "cognia-ci"` and this key.
  */
 export const COGNIA_RELEASE_PUBKEY_PEM = process.env.NEXT_PUBLIC_COGNIA_CERT_PUBKEY ?? ""
+
+function decodeBase64(value: string): Uint8Array<ArrayBuffer> {
+  return Uint8Array.from(atob(value), (character) => character.charCodeAt(0))
+}
+
+function decodePublicKeyPem(publicKeyPem: string): Uint8Array<ArrayBuffer> {
+  const encoded = publicKeyPem
+    .replace("-----BEGIN PUBLIC KEY-----", "")
+    .replace("-----END PUBLIC KEY-----", "")
+    .replace(/\s/g, "")
+  return decodeBase64(encoded)
+}
 
 export class CertificationStore {
   constructor(
@@ -82,15 +92,21 @@ export class CertificationStore {
    * Verify the manifest's Ed25519 signature against a PEM public key.
    * Unsigned manifests never verify.
    */
-  verifySignature(manifest: CompatibilityManifest, publicKeyPem: string): boolean {
+  async verifySignature(manifest: CompatibilityManifest, publicKeyPem: string): Promise<boolean> {
     if (!manifest.signature || !publicKeyPem) return false
     try {
-      const key = createPublicKey(publicKeyPem)
-      return edVerify(
-        null,
-        Buffer.from(manifestSigningPayload(manifest), "utf8"),
+      const key = await globalThis.crypto.subtle.importKey(
+        "spki",
+        decodePublicKeyPem(publicKeyPem),
+        { name: "Ed25519" },
+        false,
+        ["verify"]
+      )
+      return globalThis.crypto.subtle.verify(
+        "Ed25519",
         key,
-        Buffer.from(manifest.signature, "base64")
+        decodeBase64(manifest.signature),
+        new TextEncoder().encode(manifestSigningPayload(manifest))
       )
     } catch {
       return false

@@ -76,7 +76,7 @@ describe("CertificationStore", () => {
     expect(await store.readManifest("missing")).toBeNull()
   })
 
-  it("verifies Ed25519 signatures and rejects wrong keys / tampered payloads / unsigned", () => {
+  it("verifies Ed25519 signatures and rejects wrong keys / tampered payloads / unsigned", async () => {
     const { publicKey, privateKey } = generateKeyPairSync("ed25519")
     const { publicKey: wrongKey } = generateKeyPairSync("ed25519")
     const store = new CertificationStore(memFs(), ROOT)
@@ -91,11 +91,11 @@ describe("CertificationStore", () => {
     const pem = publicKey.export({ type: "spki", format: "pem" }).toString()
     const wrongPem = wrongKey.export({ type: "spki", format: "pem" }).toString()
 
-    expect(store.verifySignature(signed, pem)).toBe(true)
-    expect(store.verifySignature(signed, wrongPem)).toBe(false)
-    expect(store.verifySignature(unsigned, pem)).toBe(false)
+    await expect(store.verifySignature(signed, pem)).resolves.toBe(true)
+    await expect(store.verifySignature(signed, wrongPem)).resolves.toBe(false)
+    await expect(store.verifySignature(unsigned, pem)).resolves.toBe(false)
     const tampered = { ...signed, evidence: "native" as const }
-    expect(store.verifySignature(tampered, pem)).toBe(false)
+    await expect(store.verifySignature(tampered, pem)).resolves.toBe(false)
   })
 
   it("CAS-activates bundles, records the previous, and rolls back", async () => {
