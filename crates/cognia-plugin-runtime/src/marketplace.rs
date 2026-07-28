@@ -237,8 +237,8 @@ pub fn recover_update_transactions_for_state(state: &PluginRuntimeState) -> Upda
             ));
             continue;
         }
-        let plugin_metadata = match plugin_entry.metadata() {
-            Ok(metadata) if metadata.is_dir() && !metadata.file_type().is_symlink() => metadata,
+        match plugin_entry.metadata() {
+            Ok(metadata) if metadata.is_dir() && !metadata.file_type().is_symlink() => {}
             Ok(_) => {
                 report.failures.push(format!(
                     "update transaction plugin path is not a directory: {plugin_id}"
@@ -251,8 +251,7 @@ pub fn recover_update_transactions_for_state(state: &PluginRuntimeState) -> Upda
                 ));
                 continue;
             }
-        };
-        drop(plugin_metadata);
+        }
         let transaction_entries = match fs::read_dir(plugin_entry.path()) {
             Ok(entries) => entries,
             Err(error) => {
@@ -839,7 +838,7 @@ async fn download_verified_archive(
     public_key_hex: Option<String>,
     require_signature: Option<bool>,
 ) -> Result<(Vec<u8>, DownloadIntegrity)> {
-    crate::validate_plugin_id_path_component(&plugin_id)?;
+    crate::validate_plugin_id_path_component(plugin_id)?;
     if download_url.trim().is_empty() {
         return Err(PluginError::Internal(
             "plugin_download_version: downloadUrl is required".into(),
