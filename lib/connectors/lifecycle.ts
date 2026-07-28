@@ -77,7 +77,9 @@ export function listRunningAdapters(): AdapterRuntimeEntry[] {
  * brain: plugin transports must stop to avoid double-dial, then recover when
  * local ownership returns.
  */
-export function suspendRunningAdaptersByOwner(owner: NonNullable<AdapterRuntimeEntry["owner"]>): void {
+export function suspendRunningAdaptersByOwner(
+  owner: NonNullable<AdapterRuntimeEntry["owner"]>
+): void {
   for (const [adapterId, entry] of entries) {
     if (entry.owner !== owner) continue
     entries.delete(adapterId)

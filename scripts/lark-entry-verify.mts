@@ -103,16 +103,14 @@ setConnectorCommandInvoker(async <T,>(name: string, args?: Record<string, unknow
 
 const { probeBotIdentity } = await import("../lib/connectors/adapters/lark/whoami")
 const { getDb } = await import("../lib/db/schema")
-const { seedLarkChatSurfaces, listBotChats } = await import(
-  "../lib/connectors/adapters/lark/chat-seed"
-)
+const { seedLarkChatSurfaces, listBotChats } =
+  await import("../lib/connectors/adapters/lark/chat-seed")
 const { reconcileChatTabSurface } = await import("../lib/connectors/adapters/lark/chat-tabs")
 const { reconcileGroupMenuSurface } = await import("../lib/connectors/adapters/lark/group-menu")
 const { removeChatSurface } = await import("../lib/connectors/adapters/lark/surface-removal")
 const { getChatSurface, listChatSurfaces } = await import("../lib/db/lark-chat-surfaces")
-const { registerFeishuTenant, approveFeishuBind, listFeishuPrincipals } = await import(
-  "../lib/connectors/principal/admin"
-)
+const { registerFeishuTenant, approveFeishuBind, listFeishuPrincipals } =
+  await import("../lib/connectors/principal/admin")
 const { createBindRequest } = await import("../lib/db/feishu-principals")
 const { resolveConnectorPrincipal } = await import("../lib/connectors/principal/resolve")
 const { larkMenuManifest } = await import("../lib/connectors/commands/registry")
@@ -225,8 +223,7 @@ record(
 )
 
 // Group-only, because `menu_tree` refuses p2p by design.
-const chatId =
-  process.env.LARK_TEST_CHAT_ID ?? chats.find((c) => c.chat_mode !== "p2p")?.chat_id
+const chatId = process.env.LARK_TEST_CHAT_ID ?? chats.find((c) => c.chat_mode !== "p2p")?.chat_id
 
 if (!chatId) {
   record("chat surface reconcile", "SKIP", "no group chat reachable — set LARK_TEST_CHAT_ID")

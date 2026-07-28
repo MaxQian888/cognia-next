@@ -175,15 +175,13 @@ const mockSuspendRunningByOwner = jest.fn((owner: "adapter-instance" | "plugin")
     void entry.adapter.stop().catch(() => undefined)
   }
 })
-const mockResumeSuspendedByOwner = jest.fn(
-  async (owner: "adapter-instance" | "plugin") => {
-    for (const [id, entry] of Array.from(suspendedLifecycleRegistry.entries())) {
-      if (entry.owner !== owner) continue
-      suspendedLifecycleRegistry.delete(id)
-      await entry.restart()
-    }
+const mockResumeSuspendedByOwner = jest.fn(async (owner: "adapter-instance" | "plugin") => {
+  for (const [id, entry] of Array.from(suspendedLifecycleRegistry.entries())) {
+    if (entry.owner !== owner) continue
+    suspendedLifecycleRegistry.delete(id)
+    await entry.restart()
   }
-)
+})
 jest.mock("@/lib/connectors/lifecycle", () => ({
   registerRunningAdapter: (...args: [string, unknown]) => mockRegisterRunning(...args),
   unregisterRunningAdapter: (...args: [string]) => mockUnregisterRunning(...args),
