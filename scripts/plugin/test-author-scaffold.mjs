@@ -88,7 +88,7 @@ try {
     assert.ok(existsSync(join(pluginDir, declaration)), `scaffold must vendor ${declaration}`)
   }
 
-  run("pnpm", ["install", "--prefer-offline"], pluginDir)
+  run("pnpm", ["install", "--no-frozen-lockfile", "--prefer-offline"], pluginDir)
   run("pnpm", ["exec", "tsc", "--noEmit"], pluginDir)
   run("pnpm", ["exec", "jest", "--runInBand"], pluginDir)
   run("pnpm", ["build"], pluginDir)
