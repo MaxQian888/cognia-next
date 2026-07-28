@@ -43,6 +43,15 @@ jest.mock("@/lib/accounts/password-client", () => ({
   verifyPassword: mockVerifyPassword,
 }))
 
+// Default OFF, so every suite below exercises the production gate. The dev
+// relaxation gets its own describe block; the env logic behind the flag is
+// covered by lib/accounts/dev-auto-unlock.test.ts.
+const mockIsDevAutoUnlockEnabled = jest.fn<boolean, []>()
+
+jest.mock("@/lib/accounts/dev-auto-unlock", () => ({
+  isDevAutoUnlockEnabled: () => mockIsDevAutoUnlockEnabled(),
+}))
+
 const mockLegacyDatabaseExists = jest.fn<Promise<boolean>, []>()
 const mockMigrateLegacyDatabaseToAccount = jest.fn<Promise<unknown>, [unknown]>()
 
@@ -106,6 +115,7 @@ beforeEach(() => {
   jest.clearAllMocks()
   window.localStorage.clear()
   window.sessionStorage.clear()
+  mockIsDevAutoUnlockEnabled.mockReturnValue(false)
   mockListAccounts.mockResolvedValue([])
   mockGetState.mockResolvedValue({ activeAccountId: null })
   mockCreatePasswordVerifier.mockImplementation(async (password) => verifier(password))
@@ -602,98 +612,91 @@ describe("account store switching, locking, and lifecycle", () => {
   })
 })
 
-describe("account store dev unlock persistence", () => {
-  // jest runs with NODE_ENV !== "production", so the sessionStorage-backed dev
-  // unlock is active here. A fresh store sharing the same window.sessionStorage
-  // simulates a page reload.
-  it("restores the unlocked account across a reload in dev builds", async () => {
+describe("account store dev auto-unlock", () => {
+  beforeEach(() => {
+    mockIsDevAutoUnlockEnabled.mockReturnValue(true)
+  })
+
+  it("unlocks the active account at boot without a password", async () => {
     const alpha = account("acct_alpha", "Alpha")
     mockListAccounts.mockResolvedValue([alpha])
     mockGetState.mockResolvedValue({ activeAccountId: "acct_alpha" })
-    const first = makeStore()
-    await first.getState().load()
-    await first.getState().unlockAccount("acct_alpha", "secret")
+    const store = makeStore()
 
-    mockActivateAccountDatabase.mockClear()
-    mockActivateAccountLocalState.mockClear()
-    const reloaded = makeStore()
-    await reloaded.getState().load()
+    await store.getState().load()
 
-    expect(reloaded.getState().unlockedAccountId).toBe("acct_alpha")
-    expect(reloaded.getState().locked).toBe(false)
-    expect(reloaded.getState().accountRevision).toBe(1)
+    expect(store.getState().unlockedAccountId).toBe("acct_alpha")
+    expect(store.getState().locked).toBe(false)
+    expect(store.getState().accountRevision).toBe(1)
     expect(mockActivateAccountDatabase).toHaveBeenCalledWith("acct_alpha")
     expect(mockActivateAccountLocalState).toHaveBeenCalledWith("acct_alpha")
+    expect(mockVerifyPassword).not.toHaveBeenCalled()
   })
 
-  it("does not restore when the active account differs from the remembered one", async () => {
-    const alpha = account("acct_alpha", "Alpha")
-    const beta = account("acct_beta", "Beta")
-    mockListAccounts.mockResolvedValue([alpha, beta])
-    mockGetState.mockResolvedValue({ activeAccountId: "acct_alpha" })
-    const first = makeStore()
-    await first.getState().load()
-    await first.getState().unlockAccount("acct_alpha", "secret")
-
-    mockGetState.mockResolvedValue({ activeAccountId: "acct_beta" })
-    mockActivateAccountDatabase.mockClear()
-    const reloaded = makeStore()
-    await reloaded.getState().load()
-
-    expect(reloaded.getState().unlockedAccountId).toBeNull()
-    expect(reloaded.getState().locked).toBe(true)
-    expect(mockActivateAccountDatabase).not.toHaveBeenCalled()
-  })
-
-  it("does not restore when the remembered active account no longer exists", async () => {
+  it("keeps the registry pointer untouched when it already names the active account", async () => {
     const alpha = account("acct_alpha", "Alpha")
     mockListAccounts.mockResolvedValue([alpha])
     mockGetState.mockResolvedValue({ activeAccountId: "acct_alpha" })
-    const first = makeStore()
-    await first.getState().load()
-    await first.getState().unlockAccount("acct_alpha", "secret")
+    const store = makeStore()
 
-    mockListAccounts.mockResolvedValue([])
-    mockActivateAccountDatabase.mockClear()
-    const reloaded = makeStore()
-    await reloaded.getState().load()
+    await store.getState().load()
 
-    expect(reloaded.getState().unlockedAccountId).toBeNull()
-    expect(mockActivateAccountDatabase).not.toHaveBeenCalled()
+    expect(mockSetActiveAccountId).not.toHaveBeenCalled()
   })
 
-  it("re-locks after lock() clears the remembered dev unlock", async () => {
-    const alpha = account("acct_alpha", "Alpha")
-    mockListAccounts.mockResolvedValue([alpha])
-    mockGetState.mockResolvedValue({ activeAccountId: "acct_alpha" })
-    const first = makeStore()
-    await first.getState().load()
-    await first.getState().unlockAccount("acct_alpha", "secret")
-    first.getState().lock()
-
-    const reloaded = makeStore()
-    await reloaded.getState().load()
-
-    expect(reloaded.getState().unlockedAccountId).toBeNull()
-    expect(reloaded.getState().locked).toBe(true)
-  })
-
-  it("clears the remembered dev unlock when the active account is deleted", async () => {
+  it("falls back to the first account and repoints the registry when no pointer is set", async () => {
     const alpha = account("acct_alpha", "Alpha")
     const beta = account("acct_beta", "Beta")
     mockListAccounts.mockResolvedValue([alpha, beta])
-    mockGetState.mockResolvedValue({ activeAccountId: "acct_alpha" })
-    const first = makeStore()
-    await first.getState().load()
-    await first.getState().unlockAccount("acct_alpha", "secret")
-    await first.getState().deleteAccount("acct_alpha", { replacementAccountId: "acct_beta" })
+    mockGetState.mockResolvedValue({ activeAccountId: null })
+    const store = makeStore()
 
+    await store.getState().load()
+
+    expect(store.getState().activeAccountId).toBe("acct_alpha")
+    expect(store.getState().unlockedAccountId).toBe("acct_alpha")
+    expect(store.getState().locked).toBe(false)
+    expect(mockSetActiveAccountId).toHaveBeenCalledWith("acct_alpha")
+    expect(mockActivateAccountDatabase).toHaveBeenCalledWith("acct_alpha")
+  })
+
+  it("falls back when the registry points at an account that no longer exists", async () => {
+    const beta = account("acct_beta", "Beta")
     mockListAccounts.mockResolvedValue([beta])
-    mockGetState.mockResolvedValue({ activeAccountId: "acct_beta" })
-    const reloaded = makeStore()
-    await reloaded.getState().load()
+    mockGetState.mockResolvedValue({ activeAccountId: "acct_deleted" })
+    const store = makeStore()
 
-    expect(reloaded.getState().unlockedAccountId).toBeNull()
-    expect(reloaded.getState().locked).toBe(true)
+    await store.getState().load()
+
+    expect(store.getState().activeAccountId).toBe("acct_beta")
+    expect(store.getState().unlockedAccountId).toBe("acct_beta")
+    expect(mockSetActiveAccountId).toHaveBeenCalledWith("acct_beta")
+  })
+
+  it("never invents an account, so the first-run form still runs on an empty registry", async () => {
+    mockListAccounts.mockResolvedValue([])
+    mockGetState.mockResolvedValue({ activeAccountId: null })
+    const store = makeStore()
+
+    await store.getState().load()
+
+    expect(store.getState().accounts).toEqual([])
+    expect(store.getState().unlockedAccountId).toBeNull()
+    expect(mockCreateRegistryAccount).not.toHaveBeenCalled()
+    expect(mockActivateAccountDatabase).not.toHaveBeenCalled()
+  })
+
+  it("still honours an explicit lock() so the gate stays reachable in dev", async () => {
+    const alpha = account("acct_alpha", "Alpha")
+    mockListAccounts.mockResolvedValue([alpha])
+    mockGetState.mockResolvedValue({ activeAccountId: "acct_alpha" })
+    const store = makeStore()
+    await store.getState().load()
+
+    store.getState().lock()
+
+    expect(store.getState().unlockedAccountId).toBeNull()
+    expect(store.getState().locked).toBe(true)
+    expect(mockClearAccountDatabaseSelection).toHaveBeenCalled()
   })
 })

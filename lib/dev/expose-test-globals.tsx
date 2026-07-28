@@ -197,17 +197,12 @@ export function ExposeTestGlobals(): null {
         await db.teams.clear().catch(() => undefined)
         await db.skills.clear().catch(() => undefined)
         await db.connectorDrafts.clear().catch(() => undefined)
-        // Preserve the dev-unlock marker across the storage wipe: the app is
-        // gated behind AccountGate, and E2E seeds an unlocked account whose
-        // unlock lives in sessionStorage. Clearing it would re-lock the gate on
-        // the next navigation (e.g. assertLatestRunStatus's goto), blanking the
-        // app. The account registry DB itself is a separate DB untouched here.
-        const devUnlock = window.sessionStorage.getItem("cognia-dev-unlocked-account")
+        // Safe to wipe wholesale: the unlocked-account state the gate reads is
+        // never stored here. Dev builds re-derive it from the account registry
+        // (a separate DB, untouched by this reset) on every load — see
+        // `lib/accounts/dev-auto-unlock.ts`.
         window.localStorage.clear()
         window.sessionStorage.clear()
-        if (devUnlock) {
-          window.sessionStorage.setItem("cognia-dev-unlocked-account", devUnlock)
-        }
         // Mock base URLs survive a reset by design — specs configure them
         // once via __cogniaSetMockBaseUrls and expect them to stick.
       }

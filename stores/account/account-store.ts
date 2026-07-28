@@ -8,11 +8,7 @@ import {
   migrateLegacyDatabaseToAccount,
 } from "@/lib/accounts/legacy-migration"
 import { createPasswordVerifier, verifyPassword } from "@/lib/accounts/password-client"
-import {
-  forgetDevUnlock,
-  readDevUnlock,
-  rememberDevUnlock,
-} from "@/lib/accounts/dev-unlock-session"
+import { isDevAutoUnlockEnabled } from "@/lib/accounts/dev-auto-unlock"
 import { activateAccountDatabase, clearAccountDatabaseSelection } from "@/lib/db/schema"
 import {
   activateArtifactAccountStorage,
@@ -132,7 +128,6 @@ export function createAccountStore(
         error: null,
         accountRevision: state.accountRevision + 1,
       }))
-      rememberDevUnlock(accountId)
     }
 
     return {
@@ -146,28 +141,34 @@ export function createAccountStore(
             dependencies.registry.listAccounts(),
             dependencies.registry.getState(),
           ])
-          const activeAccountId = registryState.activeAccountId
-          // Dev-only: restore the unlocked account across a reload so
-          // `pnpm tauri dev` doesn't re-prompt for the password on every
-          // refresh. Production builds disable this and stay locked.
-          const restoredAccountId = resolveDevUnlockTarget(accounts, activeAccountId)
-          if (restoredAccountId) {
-            activateAccountDatabase(restoredAccountId)
-            await dependencies.activateAccountLocalState(restoredAccountId)
-          } else {
-            // Drop any stale remembered unlock that no longer matches the
-            // active account, so it can't auto-unlock a later session.
-            forgetDevUnlock()
+          // Dev-only: unlock the active account without a password so
+          // `pnpm dev` / `pnpm tauri dev` never stop at the gate. Production
+          // builds resolve null here and stay locked until the user unlocks.
+          const autoUnlockedAccountId = resolveDevAutoUnlockTarget(
+            accounts,
+            registryState.activeAccountId
+          )
+          const activeAccountId = autoUnlockedAccountId ?? registryState.activeAccountId
+          if (autoUnlockedAccountId) {
+            // The resolver can fall back to an account the registry never
+            // marked active; persist that pick so the next boot agrees.
+            if (autoUnlockedAccountId !== registryState.activeAccountId) {
+              await dependencies.registry.setActiveAccountId(autoUnlockedAccountId)
+            }
+            activateAccountDatabase(autoUnlockedAccountId)
+            await dependencies.activateAccountLocalState(autoUnlockedAccountId)
           }
           set((state) => ({
             accounts,
             activeAccountId,
-            unlockedAccountId: restoredAccountId,
+            unlockedAccountId: autoUnlockedAccountId,
             loaded: true,
             loading: false,
-            locked: computeLocked(accounts, activeAccountId, restoredAccountId),
+            locked: computeLocked(accounts, activeAccountId, autoUnlockedAccountId),
             error: null,
-            accountRevision: restoredAccountId ? state.accountRevision + 1 : state.accountRevision,
+            accountRevision: autoUnlockedAccountId
+              ? state.accountRevision + 1
+              : state.accountRevision,
           }))
         } catch (error) {
           throw setFailure(error)
@@ -215,7 +216,6 @@ export function createAccountStore(
           if (shouldActivate) {
             activateAccountDatabase(account.id)
             await dependencies.activateAccountLocalState(account.id)
-            rememberDevUnlock(account.id)
           }
 
           return account
@@ -327,7 +327,6 @@ export function createAccountStore(
         set({ error: null })
         try {
           const wasActive = get().activeAccountId === accountId
-          const wasUnlocked = get().unlockedAccountId === accountId
           const replacementAccountId = options.replacementAccountId
           await dependencies.registry.deleteAccount(accountId, { replacementAccountId })
           await dependencies.dropAccountDatabase(accountId)
@@ -354,9 +353,6 @@ export function createAccountStore(
             clearAccountDatabaseSelection()
             dependencies.clearAccountLocalState()
           }
-          if (wasActive || wasUnlocked) {
-            forgetDevUnlock()
-          }
         } catch (error) {
           throw setFailure(error)
         }
@@ -365,7 +361,6 @@ export function createAccountStore(
       lock: () => {
         clearAccountDatabaseSelection()
         dependencies.clearAccountLocalState()
-        forgetDevUnlock()
         set((state) => ({
           unlockedAccountId: null,
           locked: computeLocked(state.accounts, state.activeAccountId, null),
@@ -421,20 +416,23 @@ function computeLocked(
 }
 
 /**
- * Resolve which account (if any) a dev-mode reload should auto-unlock. Only the
- * currently-active account may be restored, and only when it still exists, so a
- * stale remembered id can never silently unlock the wrong account. Returns null
- * in production (the persistence layer is disabled there).
+ * Resolve which account (if any) a dev build should unlock at boot without a
+ * password. Prefers the registry's active account and falls back to the first
+ * registered one when that pointer is missing or dangling, so the gate can
+ * never appear in dev while any account exists. Never creates an account: with
+ * an empty registry the first-run form still runs, because the chosen id scopes
+ * the Dexie database. Returns null in production and whenever
+ * `NEXT_PUBLIC_ACCOUNT_GATE=1` forces the real gate.
  */
-function resolveDevUnlockTarget(
+function resolveDevAutoUnlockTarget(
   accounts: LocalAccountRecord[],
   activeAccountId: string | null
 ): string | null {
-  if (!activeAccountId) return null
-  const remembered = readDevUnlock()
-  if (!remembered || remembered !== activeAccountId) return null
-  if (!accounts.some((account) => account.id === activeAccountId)) return null
-  return activeAccountId
+  if (!isDevAutoUnlockEnabled()) return null
+  if (activeAccountId && accounts.some((account) => account.id === activeAccountId)) {
+    return activeAccountId
+  }
+  return accounts[0]?.id ?? null
 }
 
 function upsertAccount(

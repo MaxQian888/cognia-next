@@ -88,10 +88,7 @@ mod tests {
 
     #[test]
     fn service_name_includes_namespace() {
-        assert_eq!(
-            service_name("github-delivery"),
-            "com.cognia.github-delivery/v1"
-        );
+        assert_eq!(service_name("demo-delivery"), "com.cognia.demo-delivery/v1");
         assert_eq!(service_name("plugin:p"), "com.cognia.plugin:p/v1");
     }
 
