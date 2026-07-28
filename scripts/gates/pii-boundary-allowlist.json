@@ -56,7 +56,12 @@
       "@ai-sdk/cohere",
       "@ai-sdk/google",
       "@ai-sdk/mistral",
-      "@ai-sdk/openai"
+      "@ai-sdk/openai",
+      "@ai-sdk/alibaba",
+      "@ai-sdk/xai",
+      "@ai-sdk/togetherai",
+      "@ai-sdk/fireworks",
+      "@ai-sdk/deepinfra"
     ],
     "reason": "Constructs provider clients; it does not assemble derived payloads.",
     "protection": "Payload gates live at higher-level feature boundaries."
