@@ -2032,6 +2032,7 @@
         "running": "运行中",
         "toggleDetails": "展开 / 折叠 {name} 的详情"
       },
+      "unreadDivider": "{count} 条新消息",
       "virtualTag": "虚拟"
     },
     "clearSearch": "清除搜索",
@@ -2125,6 +2126,7 @@
       "unavailableDesc": "项目编辑器需要桌面应用或已配对的设备才能访问项目文件。",
       "unavailableTitle": "编辑器不可用"
     },
+    "gatesPending": "{count} 项待批",
     "listDescription": "多智能体团队：规划、分工并并行执行。",
     "listEmpty": "暂无团队。从模板快速创建，或从零开始搭建。",
     "listTitle": "智能体团队",
@@ -2192,6 +2194,7 @@
       "startTeamUltracode": "以 Ultracode 运行",
       "status": "状态",
       "stopTeam": "取消团队",
+      "tasksProgress": "任务完成",
       "teammates": "成员",
       "tokenInput": "输入",
       "tokenOutput": "输出",
@@ -2307,6 +2310,14 @@
           "notify": "仅通知",
           "pause_for_review": "暂停以待审核",
           "reduce_concurrency": "并发降到 1"
+        },
+        "nudges": {
+          "busySignalHint": "若成员在该窗口内有工具活动则跳过 —— 说明它在干活，不是卡住了。",
+          "busySignalWindowMs": "忙信号窗口（毫秒）",
+          "description": "当某个成员回合因模型限流失败时，运行时会等冷却结束再发一次「继续」提示，而不是直接中止整波任务。",
+          "enabled": "启用限流提示",
+          "heading": "限流提示（nudges）",
+          "maxPerMemberPerHour": "每人每小时提示上限"
         },
         "progressLedger": {
           "allowAutonomousConsensus": "停滞时允许自主发起共识",
@@ -2522,6 +2533,10 @@
           "illegal-transition": "不允许从当前列移动到该列。",
           "runtime-owned": "团队正在执行此任务——暂停运行后才能移动。",
           "task-not-found": "任务已不存在。"
+        },
+        "empty": {
+          "description": "先加第一个任务；团队开始认领后，看板会自己填满。",
+          "title": "这块看板还没有任务"
         },
         "emptyColumn": "暂无任务",
         "filterAssignee": "负责人",
@@ -2800,7 +2815,13 @@
       "reject": "拒绝",
       "rejectAll": "全部拒绝",
       "removeSelectionAria": "移除选区 {title}",
+      "selectionChipCommentLabel": "{title} · 批注",
+      "selectionChipExternalAppLabel": "{app}",
+      "selectionChipExternalLabel": "{app} · {title}",
+      "selectionChipExternalTruncatedLabel": "{app} · {title} · 已截断",
+      "selectionChipFileLabel": "{path} · 整个文件",
       "selectionChipLabel": "{title} · 第 {start}-{end} 行",
+      "selectionChipWebLabel": "{title} · 网页",
       "selectionChipWholeLabel": "{title} · 整份产物",
       "selectionCommentPlaceholder": "这里希望怎么改？",
       "staleBanner": "此提案生成后 Artifact 已变化，请重新比对或丢弃。",
@@ -3267,6 +3288,7 @@
       "cancelSelect": "取消选择",
       "find": "查找",
       "forward": "前进",
+      "more": "更多浏览器操作",
       "openExternal": "在外部浏览器打开",
       "reload": "刷新",
       "screenshot": "截图发送到对话",
@@ -4455,6 +4477,8 @@
       }
     },
     "concurrent": {
+      "artifactsOpen": "该对话有 {count} 个产物",
+      "artifactsPendingReview": "该对话有 {count} 个产物，{pending} 个待审阅",
       "awaitingApproval": "等待审批",
       "closeTab": "关闭 {title}",
       "errored": "错误",
@@ -4550,7 +4574,16 @@
       "briefMode": "简短输出",
       "cancel": "取消",
       "compactAria": "压缩",
+      "compactFailure": "上下文压缩失败：{error}",
+      "compactFocusAria": "按重点压缩",
+      "compactFocusDescription": "告诉提供商在压缩后的上下文中应保留哪些内容。",
+      "compactFocusInputAria": "压缩重点说明",
+      "compactFocusPlaceholder": "例如：保留 API 决策和尚未解决的风险",
+      "compactFocusTitle": "按重点压缩",
+      "compactFocusTooltip": "使用提供商支持的重点说明压缩上下文",
+      "compactProgress": "正在压缩…",
       "compactStarted": "已开始压缩上下文",
+      "compactSuccess": "上下文压缩已完成",
       "compactTooltip": "在智能体侧压缩会话上下文",
       "cwdFallbackHint": "未设置时使用: {path}",
       "cwdReset": "重置",
@@ -4610,6 +4643,14 @@
         "searchAriaLabel": "搜索预设",
         "searchPlaceholder": "搜索预设…"
       },
+      "providerUndoAria": "提供商撤销",
+      "providerUndoConfirm": "继续执行提供商撤销",
+      "providerUndoFailure": "提供商撤销失败：{error}",
+      "providerUndoProgress": "正在撤销…",
+      "providerUndoSuccess": "提供商撤销已完成",
+      "providerUndoTooltip": "运行提供商声明的 /undo 命令",
+      "providerUndoWarningDescription": "提供商可能会还原对话状态和文件更改。这是提供商原生撤销，并非恢复压缩前上下文。系统会针对当前外部智能体配置记住此确认。",
+      "providerUndoWarningTitle": "提供商撤销可能会更改文件",
       "save": "保存",
       "sheet": {
         "sections": {
@@ -5385,6 +5426,8 @@
       "resolve": "解决",
       "resolved": "已解决",
       "save": "保存",
+      "sendToChat": "交给 AI",
+      "sendToChatAria": "把 {author} 的评论加入下一条消息",
       "showResolved": "显示已解决",
       "stale": "锚点已过期",
       "toggleReaction": "切换 {emoji} 表情回应",
@@ -5395,16 +5438,23 @@
       "artifactTitle": "产物属性",
       "artifactType": "类型",
       "canvasTitle": "文档属性",
+      "createdAt": "创建时间",
       "documentType": "类型",
       "goToSource": "跳转到来源消息",
       "language": "语言",
+      "messageCount": "消息数",
+      "model": "模型",
       "notRun": "未运行",
+      "provider": "提供方",
       "revision": "修订",
       "runtimeStatus": "运行时",
       "saveState": "保存状态",
+      "sessionId": "会话 ID",
+      "sessionTitle": "会话",
       "unknown": "未知",
       "updatedAt": "更新时间",
-      "version": "版本"
+      "version": "版本",
+      "workingDir": "工作目录"
     },
     "mobileDescription": "当前资源的 AI、评论、检查、审阅与预览工具。",
     "mobileTitle": "上下文工作台",
@@ -5585,6 +5635,42 @@
     "usedTimes": "使用 {count} 次"
   },
   "desktop": {
+    "barCustomize": {
+      "dragHint": "拖拽调整顺序",
+      "hidden": "已隐藏",
+      "hiddenEmpty": "没有隐藏项。",
+      "hideItem": "从栏中移除",
+      "inBar": "栏内显示",
+      "inBarEmpty": "栏内没有任何项目——全部已隐藏。",
+      "items": {
+        "accountStatus": "账户",
+        "accountTop": "账户",
+        "appIcon": "应用图标",
+        "attention": "待处理事项",
+        "branch": "Git 分支",
+        "commandCenter": "命令中心",
+        "connectivity": "连接状态",
+        "jobs": "运行中的任务",
+        "layoutControls": "视图菜单",
+        "navArrows": "前进 / 后退",
+        "notifications": "通知",
+        "perf": "性能监视",
+        "quickActions": "快捷开关",
+        "runStatus": "运行状态",
+        "search": "搜索与标题",
+        "sync": "同步状态",
+        "usage": "用量与额度",
+        "workspace": "工作区"
+      },
+      "restoreDefaults": "恢复默认",
+      "showItem": "加回栏中",
+      "zoneHint": "项目只能在所属区域（起始、居中、末端）内移动，因为窗口控制和拖拽区域是固定的。",
+      "zones": {
+        "center": "居中",
+        "end": "末端",
+        "start": "起始"
+      }
+    },
     "channelList": {
       "bucketOlder": "更早",
       "bucketPrev30": "过去 30 天",
@@ -5622,7 +5708,16 @@
       "emptySearch": "没有与「{query}」匹配的会话。",
       "emptyTeam": "还没有会话，从上方开启一个吧。",
       "folderActions": "文件夹操作",
-      "groupByDate": "按日期分组",
+      "groupBy": {
+        "label": "分组方式",
+        "options": {
+          "agent": "角色",
+          "date": "日期",
+          "none": "不分组",
+          "team": "私信 / 团队",
+          "workspace": "工作区"
+        }
+      },
       "groupOther": "其它",
       "newChat": "新建聊天",
       "newConversation": "新建会话",
@@ -5640,6 +5735,8 @@
       "showPreview": "显示消息预览",
       "showUnreadBadges": "显示未读角标",
       "teamFallback": "团队",
+      "ungroupedAgent": "未绑定角色",
+      "ungroupedWorkspace": "未归属工作区",
       "viewActive": "显示活跃会话",
       "viewArchived": "显示已归档会话"
     },
@@ -6076,6 +6173,23 @@
       "desktopOnlyTitle": "请在 Tauri 中运行",
       "emptyTitle": "Cognia"
     },
+    "shellLayout": {
+      "customizeStatusBar": "自定义状态栏…",
+      "customizeTitleBar": "自定义布局…",
+      "description": {
+        "dialog": "选择侧边栏、顶部栏和底部栏显示哪些内容，以及它们的顺序。",
+        "section": "选择侧边栏、顶部栏和底部栏显示哪些内容，以及它们的顺序。修改立即生效，并会同步到你的其他设备。",
+        "sidebar": "把最常用的项目固定到导航栏，其余的会收进「更多」菜单。拖拽可调整顺序，也可以隐藏从不使用的项目。",
+        "status": "底部栏承载环境状态。隐藏的分段会被卸载而不只是不可见，因此隐藏性能监视也会同时停止采样。",
+        "title": "顶部栏承载导航、搜索和窗口控制。隐藏的项目会被完全移除——窗口按钮和应用菜单始终保留。"
+      },
+      "tab": {
+        "sidebar": "侧边栏",
+        "status": "底部栏",
+        "title": "顶部栏"
+      },
+      "title": "界面布局"
+    },
     "shellLayoutNotice": {
       "description": "面板开关、主题、缩放和语言已移到标题栏的「视图」菜单，桌宠、OCR、剪贴板按钮也在那里。按 ⌘B 可显示或隐藏会话列表。",
       "title": "布局已简化"
@@ -6114,22 +6228,14 @@
       "layout": {
         "appearanceGroup": "外观",
         "customize": "自定义布局",
-        "itemAccount": "账户",
-        "itemConnectivity": "连接状态",
-        "itemPerf": "性能监视",
-        "itemQuickActions": "快捷开关",
-        "itemSync": "同步状态",
-        "itemUsage": "用量与额度",
-        "itemWorkspace": "工作区",
+        "customizeBars": "自定义布局…",
         "localeEn": "English",
         "localeZh": "简体中文",
         "openBrowser": "打开浏览器面板",
-        "statusBarGroup": "状态栏",
         "themeDark": "深色",
         "themeLight": "浅色",
         "themeSystem": "跟随系统",
         "title": "自定义布局",
-        "titleBarGroup": "标题栏",
         "toggleGuildRail": "切换工会侧栏",
         "toggleRightSidebar": "切换右侧栏",
         "toggleSidebar": "切换侧栏",
@@ -6154,6 +6260,396 @@
       "separator": " — ",
       "workspace": "工作区",
       "workspaceUntitled": "未命名工作区"
+    }
+  },
+  "diagnostics": {
+    "action": {
+      "copyInstallCommand": "复制安装命令",
+      "copyReport": "复制报告",
+      "dismiss": "忽略",
+      "exportCrashLog": "导出崩溃日志",
+      "jumpToNode": "跳转到节点",
+      "locateBinary": "指定可执行文件",
+      "openExternal": "查看文档",
+      "openSettings": "打开设置",
+      "reauth": "重新登录",
+      "reconnectAdapter": "重新连接",
+      "reconnectExternalAgent": "重连智能体",
+      "reloadApp": "重新加载",
+      "reportIssue": "反馈问题",
+      "resetBoundary": "重试",
+      "restartSidecar": "重启后端",
+      "retry": "重试",
+      "retryFallbackProvider": "换一个服务商重试",
+      "retryWhenOnline": "恢复联网后重试",
+      "shortenInput": "缩短输入内容",
+      "switchToBuiltin": "改用内置智能体",
+      "viewLogs": "查看日志",
+      "waitAndRetry": "{seconds} 秒后重试"
+    },
+    "code": {
+      "aborted": {
+        "hint": "你停止了这次运行——准备好后可再次发送。",
+        "label": "已停止"
+      },
+      "agentConfigurationMissing": {
+        "hint": "该智能体尚未配置启动命令或接口地址——请在设置中完成配置。",
+        "label": "智能体未配置"
+      },
+      "agentDisabled": {
+        "hint": "该外部智能体已被禁用——请在设置中启用，或改用内置智能体。",
+        "label": "智能体已禁用"
+      },
+      "agentNotFound": {
+        "hint": "此会话绑定的外部智能体已不存在——请另选一个。",
+        "label": "未找到智能体"
+      },
+      "agentUnavailable": {
+        "hint": "外部智能体没有响应——请重新连接，或回退到内置智能体。",
+        "label": "智能体不可用"
+      },
+      "brokenPipe": {
+        "hint": "连接意外关闭——请重试该请求。",
+        "label": "管道中断"
+      },
+      "budgetExhausted": {
+        "hint": "本次运行已用尽 token 预算——请在设置中提高上限以继续。",
+        "label": "预算已用尽"
+      },
+      "capabilityUnsatisfied": {
+        "hint": "所选运行时不支持本回合需要的能力——请求未发出。",
+        "label": "能力不可用"
+      },
+      "chunkLoad": {
+        "hint": "Cognia 有新版本可用——请重新加载以获取最新文件。",
+        "label": "应用版本过旧"
+      },
+      "connectionRefused": {
+        "hint": "服务器未接受连接——请确认它正在运行且端口正确。",
+        "label": "连接被拒绝"
+      },
+      "connectionReset": {
+        "hint": "连接在请求过程中断开——请重试；若持续出现，请检查网络或服务器。",
+        "label": "连接被重置"
+      },
+      "contentPolicy": {
+        "hint": "服务商的安全过滤拦截了本次请求——原样重试无效，请调整措辞。",
+        "label": "被内容策略拦截"
+      },
+      "contextWindowExceeded": {
+        "hint": "对话长度超出该模型的上下文窗口——请压缩会话、缩短输入，或换用上下文更大的模型。",
+        "label": "超出上下文窗口"
+      },
+      "dbUnavailable": {
+        "hint": "Cognia 无法打开本地数据库——请重新加载；若仍失败，请导出崩溃日志。",
+        "label": "数据库不可用"
+      },
+      "dbUpgradeBlocked": {
+        "hint": "另一个窗口或标签页仍占用着旧版本数据库——请关闭它，然后重新加载。",
+        "label": "数据库升级被阻塞"
+      },
+      "deadlineExceeded": {
+        "hint": "操作超出了截止时间——请重试，或调高上限。",
+        "label": "超出截止时间"
+      },
+      "degradedFallback": {
+        "hint": "本回合走的是回退路径，而非你配置的运行时。",
+        "label": "以降级模式运行"
+      },
+      "desktopOnlyFeature": {
+        "hint": "该功能需要桌面端应用——浏览器中不可用。",
+        "label": "仅桌面端可用"
+      },
+      "dispatchFailed": {
+        "hint": "请求无法调度——请重试；并检查智能体或服务商配置。",
+        "label": "调度失败"
+      },
+      "dispatchRejectedCycle": {
+        "hint": "子智能体试图回调已经调用过它的一方——请在子智能体配置中打断该环路。",
+        "label": "子智能体循环被拒绝"
+      },
+      "dispatchRejectedDepth": {
+        "hint": "子智能体嵌套超过了配置上限——请压平调用链或提高上限。",
+        "label": "达到嵌套上限"
+      },
+      "dispatchRejectedPolicy": {
+        "hint": "当前智能体模式不允许此次调度——请调整该模式的权限。",
+        "label": "被策略拦截"
+      },
+      "dnsFailure": {
+        "hint": "无法解析主机名——请检查 URL 以及你的网络 / DNS。",
+        "label": "DNS 解析失败"
+      },
+      "documentedOnly": {
+        "hint": "Cognia 无法直接驱动该智能体——请按其官方流程使用，或改用内置智能体。",
+        "label": "仅提供文档"
+      },
+      "eventChannelLost": {
+        "hint": "Cognia 已收不到桌面后端的更新，部分界面会像卡住一样——请重新加载以恢复连接。",
+        "label": "实时更新已断开"
+      },
+      "executionFailed": {
+        "hint": "外部智能体在执行本回合时失败——请重试，或改用内置智能体运行。",
+        "label": "智能体运行失败"
+      },
+      "extensionUnknown": {
+        "hint": "Cognia 尚未确定该智能体是否支持此操作——请重新连接以探测。",
+        "label": "支持情况未知"
+      },
+      "extensionUnsupported": {
+        "hint": "该智能体未实现此操作——请新建会话，而不是恢复原会话。",
+        "label": "该智能体不支持"
+      },
+      "externalAgentNotSelected": {
+        "hint": "本会话尚未选择外部智能体——请选择一个，或切回内置智能体。",
+        "label": "未选择智能体"
+      },
+      "fallbackToBuiltin": {
+        "hint": "外部智能体无法承接本回合，已改由内置智能体运行。",
+        "label": "已由内置智能体运行"
+      },
+      "fetchFailed": {
+        "hint": "请求无法发送——请检查网络连接和接口 URL。",
+        "label": "网络请求失败"
+      },
+      "forbidden": {
+        "hint": "你的账户无权访问该资源或模型。",
+        "label": "无权限"
+      },
+      "frozenModelBinding": {
+        "hint": "本会话已锁定可用模型集合，所请求的模型不在其中。",
+        "label": "此处不允许该模型"
+      },
+      "healthCheckFailed": {
+        "hint": "智能体已启动但健康检查未通过——请查看其日志后重新连接。",
+        "label": "健康检查失败"
+      },
+      "healthProbeFailed": {
+        "hint": "Cognia 无法连上已配对的设备——请确认两端处于同一网络。",
+        "label": "设备不可达"
+      },
+      "hostUnavailable": {
+        "hint": "应当执行本回合的远程主机不可达——请重试，或检查其配置。",
+        "label": "远程主机不可用"
+      },
+      "initializationFailed": {
+        "hint": "智能体进程已启动但始终未完成握手——请检查其启动命令和参数。",
+        "label": "智能体启动失败"
+      },
+      "interrupted": {
+        "hint": "运行在完成前被打断——再次发送即可继续。",
+        "label": "已中断"
+      },
+      "invalidRequest": {
+        "hint": "请求格式有误——请检查参数和模型名称。",
+        "label": "请求无效"
+      },
+      "modelOverloaded": {
+        "hint": "服务方当前过载——请稍后重试。",
+        "label": "模型过载"
+      },
+      "modelRequired": {
+        "hint": "发送前请为该服务商选择一个模型。",
+        "label": "未设置模型"
+      },
+      "networkUnreachable": {
+        "hint": "无法访问该主机——请检查网络连接以及代理或 VPN。",
+        "label": "网络不可达"
+      },
+      "noSessionOpen": {
+        "hint": "当前没有可发送的会话——请新建一个。",
+        "label": "没有打开的会话"
+      },
+      "notFound": {
+        "hint": "该资源或接口不存在——请检查 URL 或 id。",
+        "label": "未找到"
+      },
+      "offline": {
+        "hint": "你当前似乎处于离线状态——恢复联网后 Cognia 会自动重试。",
+        "label": "离线"
+      },
+      "payloadTooLarge": {
+        "hint": "请求超出大小限制——请缩减输入内容。",
+        "label": "请求过大"
+      },
+      "permissionDenied": {
+        "hint": "智能体拒绝了一项未获授权的操作——请调整其权限模式。",
+        "label": "权限被拒绝"
+      },
+      "pluginToolMissing": {
+        "hint": "请求的工具不可用——请启用提供该工具的插件。",
+        "label": "工具不可用"
+      },
+      "prerequisiteMissing": {
+        "hint": "该智能体所需的命令未安装，或不在 PATH 中——请安装它，或让 Cognia 指向已有的可执行文件。",
+        "label": "缺少前置依赖"
+      },
+      "promptBlockedByPlugin": {
+        "hint": "有插件在消息发出前将其拦截——请检查该插件的设置。",
+        "label": "被插件拦截"
+      },
+      "protocolUnsupported": {
+        "hint": "Cognia 与该智能体没有共同的协议——请将其切换为 ACP 并重新保存配置。",
+        "label": "协议不支持"
+      },
+      "providerMisconfigured": {
+        "hint": "该服务商需要进一步配置——请在设置中设置协议和凭据。",
+        "label": "服务商配置不完整"
+      },
+      "proxyApplyFailed": {
+        "hint": "Cognia 未能应用你的代理设置，出站请求可能正在绕过代理。",
+        "label": "代理未生效"
+      },
+      "quotaExceeded": {
+        "hint": "你的套餐配额已用完——请检查账单或用量限制。",
+        "label": "配额已用尽"
+      },
+      "rateLimited": {
+        "hint": "你触发了速率限制——请稍候再试。",
+        "label": "触发限流"
+      },
+      "renderCrash": {
+        "hint": "部分界面崩溃了——请重试；若反复出现，请把报告发给我们。",
+        "label": "应用程序错误"
+      },
+      "routingNoCandidates": {
+        "hint": "路由链中没有服务商可以处理该请求——请检查服务商与模型映射配置。",
+        "label": "没有可用服务商"
+      },
+      "seedFailed": {
+        "hint": "Cognia 未能写入内置技能和角色——部分默认内容会缺失。",
+        "label": "内置内容缺失"
+      },
+      "serverError": {
+        "hint": "服务器处理请求失败——请稍后重试。",
+        "label": "服务器错误"
+      },
+      "serviceUnavailable": {
+        "hint": "服务暂时不可用——请稍后重试。",
+        "label": "服务不可用"
+      },
+      "sessionResolutionFailed": {
+        "hint": "智能体无法恢复这段会话——请新建一个会话。",
+        "label": "会话无法恢复"
+      },
+      "sessionTimeout": {
+        "hint": "模型未在规定时间内响应——请重试，或检查 sidecar 与连接。",
+        "label": "会话超时"
+      },
+      "settingsLoadFailed": {
+        "hint": "Cognia 无法读取你已保存的设置，当前以默认配置运行——数据仍然保存着，只是你的配置全都没有生效。",
+        "label": "设置未加载"
+      },
+      "settingsSaveFailed": {
+        "hint": "该修改没有保存成功——请重试；若持续失败，请查看日志。",
+        "label": "设置未保存"
+      },
+      "sidecarExited": {
+        "hint": "Claude sidecar 在运行中退出——请重试；若反复出现，请重启应用。",
+        "label": "后端已停止"
+      },
+      "sidecarUnreachable": {
+        "hint": "本地智能体后端未在运行——请重启后端后再发送消息。",
+        "label": "后端未运行"
+      },
+      "strictFailure": {
+        "hint": "外部智能体失败，且本会话为严格模式，因此没有在别处重试。",
+        "label": "智能体失败（严格模式）"
+      },
+      "supervisorMissing": {
+        "hint": "该团队配置为使用主管，但尚未指定——请在团队设置中选择一位。",
+        "label": "未配置主管"
+      },
+      "supervisorNotMember": {
+        "hint": "配置的主管已不在该团队中——请另选一位。",
+        "label": "主管不在团队中"
+      },
+      "teamMissing": {
+        "hint": "这段会话所属的团队已被删除——请另选团队，或新建会话。",
+        "label": "团队已不存在"
+      },
+      "teamSessionMissing": {
+        "hint": "找不到这段团队会话——它可能已被删除。",
+        "label": "未找到团队会话"
+      },
+      "timeout": {
+        "hint": "请求耗时过长——请重试，或调高超时时间。",
+        "label": "请求超时"
+      },
+      "transportBlocked": {
+        "hint": "运行外部智能体需要桌面端应用——在浏览器中请使用内置智能体。",
+        "label": "需要桌面端应用"
+      },
+      "unauthorized": {
+        "hint": "身份验证失败——请在设置中检查 API 密钥或令牌。",
+        "label": "未授权"
+      },
+      "unknown": {
+        "hint": "发生了 Cognia 无法识别的错误——下方详情有助于我们定位问题。",
+        "label": "意外错误"
+      }
+    },
+    "detail": {
+      "copied": "已复制",
+      "copy": "复制详情",
+      "member": "{name}：{message}",
+      "showParsed": "显示摘要",
+      "showRaw": "显示原始错误"
+    },
+    "recoveryHint": {
+      "adjustPermissionMode": "调整智能体的权限模式，或批准它请求的操作。",
+      "checkCommandAndArgs": "检查智能体的启动命令和参数。",
+      "checkDiagnosticsAndRetry": "查看运行诊断，然后缩小请求范围后重试。",
+      "completeSetupThenRetry": "完成该智能体的配置，然后重试连接。",
+      "createNewSession": "当恢复和分叉不可用时，请新建一个会话。",
+      "inspectHealthEndpoint": "检查智能体的健康检查接口和日志。",
+      "reconnectAndRetry": "重新连接后再试。",
+      "resaveConfiguration": "重新保存该智能体的配置。",
+      "resumeWithSessionIdOrAllowNew": "用已有的 session id 恢复，或允许创建新会话。",
+      "retryAfterReconnect": "重新连接后重试。",
+      "selectLocalSurface": "选择一个可本地执行的入口以直接连接。",
+      "switchToAcp": "将该智能体的协议切换为 ACP。",
+      "useDesktopRuntime": "请以桌面端应用运行 Cognia——stdio 传输需要它。",
+      "useOfficialWorkflow": "请使用该产品自身的官方流程。",
+      "useSupportedOperations": "请仅使用该端点支持的操作。"
+    },
+    "severity": {
+      "error": "错误",
+      "fatal": "严重",
+      "info": "提示",
+      "warning": "警告"
+    },
+    "source": {
+      "agentTeam": "智能体团队",
+      "boundary": "界面",
+      "chat": "聊天",
+      "connector": "连接器",
+      "execution": "智能体运行时",
+      "externalAgent": "外部智能体",
+      "inbox": "收件箱",
+      "plugin": "插件",
+      "provider": "服务商",
+      "scheduler": "定时任务",
+      "settings": "设置",
+      "storage": "本地存储",
+      "tauri": "桌面后端",
+      "unknown": "Cognia",
+      "workflow": "工作流"
+    },
+    "surface": {
+      "cascade": "{count} 个问题",
+      "dbUpgradeBlocked": {
+        "body": "Cognia 需要升级本地数据库，但另一个窗口或浏览器标签页仍打开着旧版本。请关闭其他窗口后重新加载。",
+        "reload": "重新加载",
+        "title": "数据库升级被阻塞"
+      },
+      "settingsLoadFailed": {
+        "body": "Cognia 无法读取你已保存的设置，当前正以默认配置运行。你的服务商、API 密钥和偏好仍然保存着，只是没有被加载。请先重试，再修改任何设置。",
+        "detailsLabel": "技术详情",
+        "retry": "重试",
+        "retrying": "正在重试…",
+        "title": "正在以默认设置运行"
+      }
     }
   },
   "discover": {
@@ -7316,6 +7812,10 @@
         "refresh": "刷新状态",
         "title": "OpenCode 服务器"
       },
+      "opencodeV2PresetDescription": "连接到已在运行且兼容的 OpenCode V2 本地服务。Cognia 不会启动或停止该服务。",
+      "opencodeV2PresetName": "OpenCode V2 本地服务（预览版）",
+      "opencodeV2PresetSetupHint": "Beta 预览版。请自行运行 `opencode2 service start` 启动兼容服务。",
+      "opencodeV2Protocol": "OpenCode V2（预览版）",
       "passBareFlag": "附加 --bare",
       "passBareFlagHint": "跳过磁盘自动发现（CLAUDE.md、hooks、插件、MCP）。会在启动时追加到 args 末尾。",
       "passDebugFlag": "附加 --debug",
@@ -7327,6 +7827,9 @@
       "permissionPlan": "计划模式（不执行）",
       "presetGalleryEmpty": "暂无可用预设。",
       "protocol": "协议",
+      "providerUndoWarningReset": "恢复警告",
+      "providerUndoWarningSetting": "提供商撤销警告",
+      "providerUndoWarningSettingDescription": "已针对当前智能体确认首次使用警告。",
       "quickConnect": "连接 {name}",
       "quickDisconnect": "断开 {name}",
       "quickStartDescription": "选择一个预设即可基于合理的默认值创建外部代理，之后可继续自定义。",
@@ -8108,6 +8611,10 @@
         "unknown": "未知"
       },
       "degradedTitle": "适配器未运行",
+      "groupHealth": "健康",
+      "groupRouting": "路由",
+      "groupStatus": "状态",
+      "groupTools": "工具",
       "healthBadge": {
         "aria": "适配器健康状态：{state}",
         "breakerOpen": "熔断器已打开",
@@ -8127,6 +8634,8 @@
       "lastInboundMinutes": "{minutes} 分钟前收到消息",
       "lastInboundTooltip": "最近一条入站消息：{time}",
       "modeSwitchDesktopOnly": "切换模式需要桌面端",
+      "more": "更多",
+      "moreAttention": "更多 — 有待处理项",
       "openContact": "联系人资料",
       "openOverrides": "会话设置",
       "openOverridesAria": "打开该会话的覆盖设置",
@@ -8147,16 +8656,13 @@
       "filter": {
         "all": "全部",
         "aria": "筛选会话",
+        "badgeAria": "{count, plural, other {已启用 # 个筛选}}",
+        "button": "筛选",
+        "clear": "清除筛选",
         "pending": "待处理",
         "pinned": "已置顶",
+        "remove": "移除{label}筛选",
         "snoozed": "已暂停",
-        "tooltip": {
-          "all": "显示全部会话",
-          "pending": "仅显示待处理会话",
-          "pinned": "仅显示已置顶会话",
-          "snoozed": "仅显示已暂停会话",
-          "unread": "仅显示未读会话"
-        },
         "unread": "未读"
       },
       "header": "会话",
@@ -8341,6 +8847,17 @@
         "manual": "手动"
       }
     },
+    "notices": {
+      "collapse": "收起通知",
+      "expand": "展开通知",
+      "region": "收件箱通知",
+      "severity": {
+        "danger": "错误",
+        "info": "提示",
+        "warning": "警告"
+      },
+      "summary": "{count, plural, other {# 条通知}}"
+    },
     "outboundSource": {
       "draftApproved": "草稿已批准",
       "manual": "手动",
@@ -8464,6 +8981,70 @@
     "unreadPill": {
       "aria": "{count} 条未读"
     }
+  },
+  "integrations": {
+    "accounts": {
+      "add": "添加账号",
+      "approvedOrigin": "已授权的 self-hosted HTTPS origin（可选）",
+      "authStrategy": "认证方式",
+      "credentialHandle": "凭据句柄",
+      "integration": "Integration",
+      "label": "账号名称",
+      "providerId": "认证提供方 ID",
+      "remoteAccountId": "远端账号 ID",
+      "selectAuthStrategy": "选择认证方式",
+      "selectIntegration": "选择 Integration",
+      "title": "账号"
+    },
+    "approvals": {
+      "approve": "批准",
+      "cancel": "取消",
+      "empty": "暂无 Action 任务。",
+      "title": "审批与任务"
+    },
+    "audit": {
+      "empty": "暂无 Integration 审计记录。",
+      "title": "审计"
+    },
+    "description": "统一管理 Marketplace 账号、资源级事件订阅、审批、健康状态和审计，且不向插件暴露凭据。",
+    "disable": "停用",
+    "emptyPlugins": "请先安装支持 Integration 的 Marketplace 插件。",
+    "enable": "启用",
+    "health": {
+      "degraded": "异常",
+      "healthy": "健康",
+      "revoked": "已撤销",
+      "unknown": "未知"
+    },
+    "installed": "已安装的 Integration",
+    "remove": "移除",
+    "risk": {
+      "destructive": "破坏性",
+      "read": "读取",
+      "write": "写入"
+    },
+    "status": {
+      "awaiting_approval": "等待审批",
+      "cancelled": "已取消",
+      "deadlettered": "已进入死信",
+      "failed": "失败",
+      "queued": "排队中",
+      "retry_wait": "等待重试",
+      "running": "执行中",
+      "succeeded": "成功"
+    },
+    "subscriptions": {
+      "account": "账号",
+      "add": "添加订阅",
+      "allResources": "全部资源",
+      "eventTypes": "事件类型（逗号分隔）",
+      "ingressSecret": "Webhook 密钥（启用 ingress 时必填）",
+      "resourceId": "资源 ID（可选）",
+      "resourceKind": "资源类型（可选）",
+      "selectAccount": "选择账号",
+      "title": "订阅"
+    },
+    "title": "Integrations"
   },
   "larkEntry": {
     "errors": {
@@ -10343,8 +10924,15 @@
       "sidebarCompactHelp": "收紧行间距以容纳更多会话。",
       "sidebarContentSearch": "搜索消息内容",
       "sidebarContentSearchHelp": "不仅匹配标题，也匹配消息正文内容（速度较慢）。",
-      "sidebarGroupByDate": "按日期分组",
-      "sidebarGroupByDateHelp": "将会话分组为今天 / 昨天 / 更早等时间段。",
+      "sidebarGroupBy": "会话分组方式",
+      "sidebarGroupByHelp": "按工作区分组会列出所有工作区的会话；其他模式只显示当前工作区。",
+      "sidebarGroupByOptions": {
+        "agent": "角色",
+        "date": "日期",
+        "none": "不分组",
+        "team": "私信 / 团队",
+        "workspace": "工作区"
+      },
       "sidebarPreview": "消息预览",
       "sidebarPreviewHelp": "在每个会话下方显示一行最新消息预览。",
       "sidebarSection": "会话列表",
@@ -14414,6 +15002,16 @@
       "local": "本地",
       "marketplace": "市场"
     },
+    "surface": {
+      "description": "{error}",
+      "diagnostic": {
+        "compactHint": "失败的紧凑型贡献已被移除，不会影响周围界面。",
+        "message": "插件表面“{surfaceId}”在渲染时崩溃：{error}",
+        "retryHint": "请重试该表面。若再次失败，请检查插件组件和诊断信息。"
+      },
+      "retry": "重试",
+      "title": "{pluginName} 无法渲染"
+    },
     "tabs": {
       "analytics": "使用统计",
       "browse": "市场",
@@ -17377,6 +17975,28 @@
     "title": "使用统计",
     "totalSearches": "总搜索数"
   },
+  "selectionToolbar": {
+    "ask": "提问",
+    "chooseLanguage": "选择翻译语言",
+    "copy": "复制",
+    "explain": "解释",
+    "languages": {
+      "de": "德语",
+      "en": "英语",
+      "es": "西班牙语",
+      "fr": "法语",
+      "ja": "日语",
+      "ko": "韩语",
+      "zh-CN": "简体中文"
+    },
+    "prompts": {
+      "explain": "请解释这段内容。",
+      "translate": "请将这段内容翻译成{language}。"
+    },
+    "translate": "翻译",
+    "truncated": "已截断",
+    "truncatedHint": "选区超过 20,000 个字符，已截断。"
+  },
   "sessionImport": {
     "back": "返回",
     "cancel": "取消",
@@ -19365,6 +19985,15 @@
       }
     },
     "close": "关闭",
+    "common": {
+      "unsavedBar": {
+        "discard": "放弃",
+        "save": "保存",
+        "saved": "已保存",
+        "saving": "保存中…",
+        "unsavedCount": "{count, plural, other {# 项未保存}}"
+      }
+    },
     "compaction": {
       "algorithm": {
         "description": "触发压缩时，如何压缩较早的对话轮次。",
@@ -21096,10 +21725,17 @@
           "label": "使用紧凑会话行"
         },
         "description": "调整聊天侧边栏列出和搜索会话的方式。",
-        "groupByDate": {
-          "description": "将会话分组为今天 / 昨天 / 更早等时间段。",
-          "heading": "按日期分组",
-          "label": "按日期分组会话"
+        "groupBy": {
+          "description": "选择会话列表的主分组维度。按工作区分组会列出所有工作区的会话；其他模式只显示当前工作区。",
+          "heading": "会话分组方式",
+          "label": "会话分组",
+          "options": {
+            "agent": "角色",
+            "date": "日期",
+            "none": "不分组",
+            "team": "私信 / 团队",
+            "workspace": "工作区"
+          }
         },
         "preview": {
           "description": "在每个会话下方显示一行最新消息预览。",
@@ -21763,8 +22399,8 @@
       "scheduledTasks": "配置定时调度、代理创建权限与资源上限",
       "search": "联网搜索 provider（Tavily、Brave、Bing、Google、Perplexity、Exa…）、默认参数、缓存、安全与来源验证。",
       "security": "敏感操作的生物识别守卫与隐私控制",
+      "shellLayout": "调整或隐藏侧边栏、顶部栏和底部栏中的项目。",
       "shortcuts": "在一个页面查看并重新绑定所有键盘快捷键——全局系统热键、应用内快捷键、编辑器键位——并检测冲突。",
-      "sidebar": "固定、排序或隐藏左侧导航栏的项目。",
       "skills": "拼接到系统提示词的可复用指令片段。",
       "slashCommands": "内置、自定义、插件贡献的斜杠命令统一浏览,可搜索并将命令复制到聊天输入框。",
       "sourceControl": "AI 提交信息生成及其他 Git 面板偏好。",
@@ -21815,6 +22451,17 @@
       "revealDataDir": "打开数据目录",
       "revealFailed": "无法打开数据目录：{error}",
       "schedulerBackgroundHint": "定时任务（聊天、智能体、脚本）仅在 Cognia 运行时执行。开启“登录时启动”并将关闭按钮设为“最小化到托盘”，即可让它们在后台持续触发。",
+      "selectionToolbar": {
+        "description": "在受支持的 macOS 和 Windows 应用中划词后显示紧凑工具栏。",
+        "disabledApps": "禁用的应用",
+        "disabledAppsHint": "每行输入一个应用名称。候选文本和窗口标题仅保存在内存中。",
+        "disabledAppsPlaceholder": "1Password\nAuthy",
+        "enableFailed": "无法启用划词工具栏",
+        "permissionHint": "macOS 需要辅助功能和输入监控权限；Cognia 不申请屏幕录制权限。",
+        "saveDisabledApps": "保存应用列表",
+        "title": "系统划词工具栏",
+        "toggle": "切换系统划词工具栏"
+      },
       "subtitle": "仅在原生桌面 App 运行时生效的设置。",
       "system": "系统",
       "tauriDocs": "Tauri 文档",
@@ -22751,6 +23398,38 @@
         "heading": "允许云端向量化",
         "label": "允许云端向量化"
       },
+      "danger": {
+        "backupFirst": "先备份",
+        "clear": "清除记忆",
+        "clearFailed": "无法清除记忆",
+        "cleared": "已清除 {count} 条记忆",
+        "collapse": "收起",
+        "confirm": {
+          "cancel": "取消",
+          "confirm": "清除记忆",
+          "descriptions": {
+            "all": "永久删除所有已存记忆，包括已失效记录。",
+            "character": "永久删除按人格作用域保存的记忆。",
+            "global": "永久删除所有工作区和人格都可使用的全局记忆。",
+            "invalidated": "永久删除已经失效的记忆。",
+            "workspace": "永久删除按工作区作用域保存的记忆。"
+          },
+          "title": "清除所选记忆？"
+        },
+        "description": "清除记忆后无法恢复。请先备份仍可能需要的内容。",
+        "expand": "展开",
+        "scope": {
+          "label": "要清除的记忆",
+          "options": {
+            "all": "全部",
+            "character": "人格记忆",
+            "global": "全局记忆",
+            "invalidated": "已失效记忆",
+            "workspace": "工作区记忆"
+          }
+        },
+        "title": "危险区域"
+      },
       "description": "助手跨会话记住关于你的内容。",
       "enabled": {
         "description": "召回关于你的耐久事实，并注入到后续对话中。",
@@ -22775,9 +23454,99 @@
         "heading": "从对话学习",
         "label": "从对话学习"
       },
+      "learning": {
+        "autoExtract": {
+          "description": "在符合条件的对话轮次后抽取耐久事实。",
+          "label": "自动抽取"
+        },
+        "externalContext": {
+          "description": "不从使用了网页、MCP、屏幕或连接器上下文的轮次中学习。",
+          "label": "阻止外部上下文学习"
+        },
+        "gates": {
+          "learningOff": "请先开启从对话学习，再编辑这些控制项。",
+          "memoryOff": "请先开启长期记忆，再编辑学习控制项。"
+        },
+        "learnFromChats": {
+          "description": "在后台从符合条件的对话中学习耐久事实。",
+          "label": "从对话学习"
+        },
+        "scope": {
+          "description": "选择新学到的记忆可以在哪些范围使用。",
+          "label": "默认记忆作用域",
+          "options": {
+            "character": "当前人格",
+            "global": "全局",
+            "workspace": "当前工作区"
+          }
+        }
+      },
       "manage": "管理记忆",
       "maxIdle": {
         "label": "未使用后遗忘天数（0 为永不）"
+      },
+      "nav": {
+        "items": {
+          "learning": {
+            "description": "控制 Cognia 学习什么以及保存到哪里。",
+            "label": "学习"
+          },
+          "maintenance": {
+            "description": "检查保留策略、冲突和清理操作。",
+            "label": "维护"
+          },
+          "overview": {
+            "description": "查看语料健康度、覆盖率和检索模式。",
+            "label": "概览"
+          },
+          "privacy": {
+            "description": "管理向量化隐私和破坏性操作。",
+            "label": "隐私"
+          },
+          "retrieval": {
+            "description": "调整召回质量、限制并预览结果。",
+            "label": "检索"
+          }
+        },
+        "title": "记忆设置"
+      },
+      "overview": {
+        "byScope": {
+          "title": "按作用域统计"
+        },
+        "coverage": {
+          "hint": "混合召回只能搜索已经生成向量的记忆。",
+          "readout": "{percent}% · {active} 条中已有 {embedded} 条向量",
+          "title": "向量覆盖率"
+        },
+        "manage": "打开记忆管理",
+        "stats": {
+          "active": "活跃",
+          "conflicts": "冲突"
+        }
+      },
+      "preview": {
+        "budget": {
+          "basis": "根据 {lines} 条候选、每条约 {avg} Token 估算。",
+          "readout": "{used} / {limit} Token",
+          "title": "召回预算"
+        },
+        "dryRun": {
+          "cloudNotice": "此预览可能会把查询发送给已配置的云端向量服务商。",
+          "degraded": "语义检索不可用，本次预览已改用关键词匹配。",
+          "empty": "没有匹配此查询的记忆。",
+          "floorLowered": "请重新运行预览，以包含低于上次相关度阈值的结果。",
+          "floorRaised": "低于新相关度阈值的结果已划除。",
+          "inputLabel": "召回预览查询",
+          "placeholder": "输入一个记忆应该能够回答的问题…",
+          "run": "预览召回",
+          "summary": "显示 {count} 条 · {used}/{limit} Token · 隐去 {withheld} 条 · 程序性 {procedural} 条",
+          "title": "试运行召回"
+        },
+        "errors": {
+          "failed": "召回预览失败。",
+          "unavailable": "当前配置下无法使用记忆检索。"
+        }
       },
       "queryExpansion": {
         "description": "召回记忆时用同义词扩展加宽关键词检索。",
@@ -22786,6 +23555,55 @@
       },
       "relevanceFloor": {
         "label": "最低召回相关度"
+      },
+      "retrieval": {
+        "gates": {
+          "memoryOff": "请先开启长期记忆，再编辑检索控制项。",
+          "recallOff": "请先开启记忆召回，再编辑这些控制项。"
+        },
+        "halfLife": {
+          "description": "较旧的记忆会在召回时逐渐降低权重。",
+          "label": "新近度半衰期（天）"
+        },
+        "hybrid": {
+          "description": "结合语义向量检索与关键词匹配。",
+          "label": "混合检索"
+        },
+        "queryExpansion": {
+          "description": "使用相关词扩展关键词查询。",
+          "label": "查询扩展"
+        },
+        "relevanceFloor": {
+          "description": "排除相关度分数低于此值的记忆。",
+          "label": "最低相关度"
+        },
+        "tokenBudget": {
+          "description": "每轮最多可注入的记忆 Token 数。",
+          "label": "召回 Token 预算"
+        },
+        "topK": {
+          "description": "每轮最多考虑的记忆数量。",
+          "label": "每轮记忆数"
+        },
+        "useMemory": {
+          "description": "在后续对话中召回符合条件的已存记忆。",
+          "label": "使用记忆"
+        }
+      },
+      "retrievalMode": {
+        "actions": {
+          "allowCloud": "允许云端向量化",
+          "configureEmbedding": "配置向量模型",
+          "enableHybrid": "开启混合检索"
+        },
+        "degradedTitle": "当前仅使用关键词召回",
+        "hybrid": "已通过 {provider} 启用混合检索。",
+        "reasons": {
+          "cloud_blocked": "已配置的 {provider} 向量模型位于云端，但尚未允许云端向量化。",
+          "hybrid_disabled": "混合检索已关闭。",
+          "no_backend": "尚未配置向量模型和向量检索后端。",
+          "store_unsupported": "已配置的向量存储不支持向量检索。"
+        }
       },
       "scope": {
         "character": "按人格",
@@ -23263,6 +24081,7 @@
         "badgeUpdates": "{count} 可更新",
         "hint": "在工作台中管理、安装、配置并治理插件。",
         "manageGovernance": "管理治理",
+        "openIntegrations": "进入 Integrations",
         "openWorkspace": "进入插件工作台"
       },
       "title": "插件"
@@ -23795,6 +24614,7 @@
       "reservedWarning": "可能与系统的 {feature} 快捷键冲突",
       "resetItem": "恢复默认",
       "save": "保存",
+      "selectionCaptureClipboard": "捕获已复制的选区",
       "title": "全局快捷键",
       "unified": {
         "description": "在一个页面查看并重新绑定所有快捷键。点击录制后按下你想要的键位组合。",
@@ -24103,40 +24923,42 @@
         "description": "后台子代理生命周期与派发权限。",
         "maxAttempts": "最大自动恢复次数",
         "maxAttemptsHint": "每条运行血缘链的自动恢复次数上限（防止崩溃循环）。",
-        "save": "保存",
-        "saved": "后台任务设置已保存。",
         "surfaceAsks": "上浮子代理权限请求",
         "surfaceAsksHint": "开启（默认）：被派发子代理的权限请求会显示在本聊天中。关闭：自动拒绝。",
         "title": "后台任务与权限"
       },
-      "description": "由父代理派生的子代理模板与实时运行状态。模板会持久化保存,运行时数据为内存级,重启后清空。",
+      "description": "由父代理派生的子代理模板与实时运行状态。模板会持久化保存，运行时数据为内存级，重启后清空。",
+      "discardBody": "该面板有未保存的修改，现在离开会丢弃它们。",
+      "discardLeave": "放弃并离开",
+      "discardStay": "继续编辑",
+      "discardTitle": "放弃未保存的修改？",
       "import": {
         "applyButton": "导入 {count} 个",
         "applying": "应用中…",
-        "description": "从外部工具读取子代理配置，并转换为 Cognia 模板或角色。",
+        "description": "从外部工具读取子代理配置，并转换为 cognia 的模板或角色。",
         "errors": {
           "pickFailed": "无法读取所选文件。"
         },
-        "noDrafts": "未从所选文件中解析出子代理。",
+        "noDrafts": "没有从所选文件中解析出任何代理。",
         "pickFiles": "选择文件",
         "pickFolder": "选择文件夹",
         "sources": {
           "auto": "自动识别",
-          "claude-code": "Claude Code (.claude/agents/*.md)",
-          "cline": "Cline (.clinerules/*.md)",
-          "codex-cli": "Codex CLI (~/.codex/agents/*.md)",
-          "cursor": "Cursor (.cursor/rules/*.mdc)",
+          "claude-code": "Claude Code（.claude/agents/*.md）",
+          "cline": "Cline（.clinerules/*.md）",
+          "codex-cli": "Codex CLI（~/.codex/agents/*.md）",
+          "cursor": "Cursor（.cursor/rules/*.mdc）",
           "generic-md": "通用 markdown + frontmatter"
         },
         "step1Title": "选择来源",
         "step2Title": "选择文件",
-        "step3Title": "预览并导入",
+        "step3Title": "确认并导入",
         "strategy": {
-          "duplicate": "保留两份（自动重命名）",
-          "overwrite": "覆盖已存在条目",
-          "skip": "跳过同名条目"
+          "duplicate": "两者都保留（副本改名）",
+          "overwrite": "覆盖已有",
+          "skip": "跳过重复项"
         },
-        "strategyLabel": "重名时如何处理",
+        "strategyLabel": "当名称已存在时",
         "summary": "已导入 {imported}，跳过 {skipped}，覆盖 {overwritten}，失败 {failed}。",
         "target": {
           "character": "角色",
@@ -24145,127 +24967,207 @@
         "targetLabel": "导入为",
         "tauriPickFilesHint": "选择单个代理定义文件。",
         "tauriPickFolderHint": "选择包含代理文件的目录。",
-        "tauriPickHint": "从本机选择一个或多个子代理文件。",
+        "tauriPickHint": "从文件系统中选择一个或多个代理文件。",
         "title": "导入子代理",
         "trigger": "导入",
         "warningsHeader": "{count} 个文件解析失败",
         "webPickFormats": "支持 .md / .markdown / .mdc / .yaml / .yml。",
-        "webPickHint": "拖入文件或点击浏览。"
+        "webPickHint": "拖放文件到此处，或点击浏览。"
+      },
+      "nav": {
+        "clearSearch": "清除搜索",
+        "emptyFiltered": "没有子代理符合当前筛选条件。",
+        "filterAll": "全部",
+        "groups": {
+          "builtinGroup": "内置",
+          "pluginGroup": "来自插件",
+          "policyGroup": "策略",
+          "runtimeGroup": "运行情况",
+          "userGroup": "我的"
+        },
+        "items": {
+          "background": {
+            "description": "自动恢复与派发权限",
+            "label": "后台任务"
+          },
+          "nesting": {
+            "description": "深度、预算与重试上限",
+            "label": "嵌套派发"
+          },
+          "runtime": {
+            "description": "正在运行的任务及其记录",
+            "label": "正在运行"
+          }
+        },
+        "mobileTrigger": "子代理",
+        "searchPlaceholder": "搜索子代理…",
+        "title": "子代理"
       },
       "nesting": {
-        "description": "允许聊天代理派发可再派发更深层子代理的子代理，并提供受控深度、预算以及循环/超时守卫。",
-        "dispatchMaxRetries": "瞬时失败重试",
-        "dispatchMaxRetriesHint": "瞬时派发失败（限流、超时、网络、sidecar 重启）的重试次数。0 = 禁用。默认 1。",
+        "description": "允许聊天代理派发子代理，并让子代理继续派发下一层，同时受深度、预算、环路与超时的约束。",
+        "dispatchMaxRetries": "瞬时失败重试次数",
+        "dispatchMaxRetriesHint": "针对瞬时派发失败（限流、超时、网络、sidecar 重启）的重试次数。0 表示禁用，默认 1。",
         "enabled": "启用嵌套派发",
-        "enabledHint": "默认关闭——代理保持标准的单层 Task 工具。",
+        "enabledHint": "默认关闭——代理仍使用标准的单层 Task 工具。",
         "maxDepth": "最大嵌套深度",
-        "maxDepthHint": "子代理在聊天之下可嵌套的层数（1–5）。",
-        "save": "保存",
-        "saved": "嵌套派发设置已保存。",
+        "maxDepthHint": "子代理最多可以在聊天之下嵌套几层（1–5）。",
         "timeout": "子树超时（秒）",
-        "timeoutHint": "每个派发子树的实际时间上限。0 = 不限。",
+        "timeoutHint": "每棵派发子树的墙钟时间上限。0 表示不限制。",
         "title": "嵌套子代理",
         "tokenBudget": "子树 token 预算",
-        "tokenBudgetHint": "当一个子树消耗达到该 token 数后停止更深派发。0 = 不限。"
+        "tokenBudgetHint": "当一棵子树消耗超过该 token 数后停止向下派发。0 表示不限制。"
+      },
+      "pluginSection": {
+        "descriptionLabel": "描述",
+        "disabledBadge": "已停用",
+        "disallowedToolsLabel": "禁用的工具",
+        "externalPresetLabel": "外部运行时",
+        "hiddenBadge": "已隐藏",
+        "mcpLabel": "MCP 服务",
+        "missingBody": "声明该子代理的插件已不再注册。",
+        "missingTitle": "子代理不可用",
+        "promptLabel": "系统提示词",
+        "readOnlyBody": "该子代理以插件清单为准，请到插件中修改，而不是在这里。",
+        "readOnlyTitle": "由插件提供",
+        "runtimeId": "派发 id",
+        "toolsLabel": "允许的工具"
       },
       "runtime": {
-        "allLogs": "全部日志 ({count})",
+        "allLogs": "全部日志（{count}）",
+        "backgrounded": "后台",
         "callout": {
-          "body": "由 Agent 团队或对话派发的子代理会在执行时显示在此。列表存于内存，应用重启后清空。前往 Agent 团队启动队员任务即可看到列表填充。",
-          "cta": "打开 Agent 团队",
-          "title": "实时注册表，运行时填充"
+          "body": "由 Agent Team 或聊天会话派生的子代理在运行时会出现在这里。该列表存在内存中，应用重启即清空。到 Agent Teams 里启动一个队友任务就能看到。",
+          "cta": "打开 Agent Teams",
+          "title": "实时注册表，运行期间才有内容"
         },
-        "description": "当前正在执行的子代理及其最近一次活动。orchestrator 触发事件时实时更新。",
-        "duration": "{ms}ms",
-        "emptyBody": "由活跃会话派发的子代理会显示在这里。运行时数据存于内存,重启后清空。",
-        "emptyTitle": "当前没有运行中的子代理。",
-        "parent": "父代理：{id}",
-        "title": "运行时",
-        "toolsCount": "{count, plural, other {# 个工具}}",
-        "toolsRunCount": "{n, plural, other {已运行 # 个工具}}"
-      },
-      "tabs": {
-        "runtime": "运行时",
-        "templates": "模板"
+        "cancelAria": "取消运行 {name}",
+        "cancelRequested": "正在取消「{name}」…",
+        "cancelUnreachable": "该运行不在本窗口执行——可能已经结束，也可能是由 SDK 自带的 Task 工具启动的，那条路径不注册中止句柄。",
+        "clearFinished": "清理已结束（{count}）",
+        "depthBadge": "第 {depth} 层",
+        "description": "正在执行的子代理及其最近活动，随编排器发出的事件实时更新。",
+        "emptyBody": "由活跃聊天派生的子代理会出现在这里。运行时数据存在内存中，应用重启后清空。",
+        "emptyTitle": "当前没有子代理在运行。",
+        "removeAria": "从列表中移除运行 {name}",
+        "title": "正在运行",
+        "tokensSuffix": "tokens",
+        "toolsRunCount": "{n, plural, other {已调用 # 次工具}}"
       },
       "templates": {
-        "addedToast": "已添加 \"{name}\"。",
         "builtIn": "内置",
-        "builtInReadOnly": "内置模板只读 — 请先复制",
         "categories": {
           "analysis": "分析",
           "coding": "编码",
           "general": "通用",
-          "research": "调研",
+          "research": "研究",
           "writing": "写作"
         },
         "configTitle": "高级配置",
-        "create": "创建",
-        "deleteAria": "删除模板 {name}",
-        "description": "内置与用户自建的子代理模板。内置模板只读 — 先复制再编辑。",
+        "copyName": "{name}（副本）",
+        "description": "内置与用户创建的子代理模板。内置模板只读——复制一份即可得到可编辑的副本。",
+        "disabledBadge": "已停用",
+        "dispatchOnlyBody": "钉住 provider 或外部运行时会让该子代理脱离父级运行时，因此它不会出现在普通聊天中，只能经嵌套派发触达。",
+        "dispatchOnlyTitle": "仅可经嵌套派发触达",
         "duplicate": "复制",
-        "duplicateAria": "复制模板 {name}",
-        "duplicatedToast": "已复制为 \"{name}\"。",
-        "edit": "编辑",
-        "editAria": "编辑模板 {name}",
+        "duplicatedToast": "已复制为「{name}」。",
         "editorAddVariable": "添加变量",
         "editorAllowNesting": "允许嵌套",
         "editorAllowNestingHint": "允许该子代理派发自己的子代理（不超过深度上限）。",
-        "editorCategory": "类别",
+        "editorCategory": "分类",
         "editorDescription": "描述",
         "editorExternalRuntime": "外部运行时",
-        "editorExternalRuntimeHint": "让该子代理在外部 CLI 代理（Claude Code、Codex 等）上运行，而非内置引擎。仅桌面端可用；外部代理使用其自身的模型与鉴权。",
+        "editorExternalRuntimeHint": "让该子代理在外部 CLI 代理（Claude Code、Codex 等）上运行，而非内置引擎。仅桌面端；外部代理使用它自己的模型与鉴权。",
         "editorIcon": "图标",
         "editorIconPlaceholder": "Search",
         "editorMaxNestingDepth": "最大嵌套深度",
         "editorMaxSteps": "最大步数",
-        "editorModel": "模型",
         "editorModelClear": "清除",
-        "editorModelPlaceholder": "例如：claude-sonnet-4-5",
         "editorName": "名称",
-        "editorNamePlaceholder": "网络调研",
+        "editorNamePlaceholder": "网页研究",
         "editorPriority": "优先级",
-        "editorProvider": "提供商",
-        "editorProviderModel": "提供商 / 模型",
-        "editorProviderModelHint": "让此子代理运行在指定的提供商 + 模型上（可跨提供商）。留空则继承会话的设置。",
-        "editorProviderPlaceholder": "例如：anthropic",
+        "editorProviderModel": "Provider / 模型",
+        "editorProviderModelHint": "让该子代理在指定的 provider + 模型上运行（可跨 provider）。留空则继承会话的设置。",
         "editorRemoveVariable": "移除变量",
-        "editorSystemPrompt": "系统提示",
-        "editorSystemPromptPlaceholder": "自定义系统提示词...",
+        "editorSystemPrompt": "系统提示词",
+        "editorSystemPromptPlaceholder": "自定义系统提示词覆盖…",
         "editorTaskTemplate": "任务模板",
-        "editorTaskTemplatePlaceholder": "调研以下主题：'{{topic}}'",
+        "editorTaskTemplatePlaceholder": "研究以下主题：'{{topic}}'",
         "editorTemperature": "温度",
-        "editorTimeout": "超时时间",
-        "editorTimeoutUnit": "毫秒",
+        "editorTimeout": "超时（毫秒）",
         "editorVariableDefaultValue": "默认值",
         "editorVariableDescription": "描述",
-        "editorVariableDescriptionPlaceholder": "此变量代表什么",
+        "editorVariableDescriptionPlaceholder": "该变量代表什么",
         "editorVariableName": "名称",
         "editorVariableNamePlaceholder": "topic",
         "editorVariableRequired": "必填",
         "editorVariables": "变量",
+        "enabledHint": "关闭后，该子代理将被排除在派发、发现和所有选择器之外。",
+        "enabledLabel": "启用",
         "externalRuntimeNone": "内置（Cognia）",
-        "filterAll": "全部",
-        "nameRequired": "请填写模板名称。",
+        "forkOnlyBody": "内置模板是起点，不是可运行的子代理——解析器会跳过它们。复制一份即可得到可编辑、可派发的副本。",
+        "forkOnlyTitle": "只读起点",
+        "hiddenBadge": "已隐藏",
+        "hiddenHint": "仍可被派发，但不出现在选择器和 @ 提及补全中。",
+        "hiddenLabel": "从选择器中隐藏",
+        "mcpHint": "转发到该子代理会话的 MCP 服务。选择继承则沿用父级的配置。",
+        "mcpLabel": "MCP 服务",
+        "missingBody": "它可能已在其他窗口中被删除。",
+        "missingTitle": "找不到该模板",
+        "nameRequired": "模板名称不能为空。",
         "newTemplate": "新建模板",
-        "noResults": "没有匹配的模板。",
-        "noUserTemplates": "还没有用户创建的模板。",
-        "noUserTemplatesDescription": "新建模板或复制内置模板即可开始。",
-        "pluginSection": {
-          "description": "通过插件 manifest 声明的子代理。源数据由插件维护，这里只读。",
-          "title": "插件贡献的子代理"
+        "promptShadowedBody": "系统提示词的优先级高于任务模板，因此下面的任务模板——以及为它声明的变量——都不会被使用。到「高级配置」中清空系统提示词即可恢复。",
+        "promptShadowedTitle": "任务模板当前未被使用",
+        "railBlockedBody": "该子代理需要嵌套派发通道，而它当前是关闭的。开启嵌套派发（或让会话处于 plan 模式）才能触达它。",
+        "railBlockedTitle": "当前无法触达",
+        "reach": {
+          "direct": "聊天中可用",
+          "disabled": "已停用",
+          "dispatch-only": "仅嵌套派发",
+          "fork-only": "复制后可用"
         },
-        "removeBody": "\"{name}\" 将被删除。",
-        "removeTitle": "删除模板?",
-        "removedToast": "已删除 \"{name}\"。",
-        "save": "保存",
-        "searchPlaceholder": "搜索模板...",
+        "removeBody": "「{name}」将被移除。",
+        "removeTitle": "移除该模板？",
+        "removedToast": "已移除「{name}」。",
         "title": "模板",
-        "updatedToast": "已更新 \"{name}\"。",
-        "variableCount": "{count} 个变量",
-        "variableIndex": "变量 {index}"
+        "toolsHint": "「继承」让该子代理拥有父级的工具；「自定义清单」精确授予所列工具；「全部禁用」则一个都不给。",
+        "toolsLabel": "工具权限",
+        "variableIndex": "变量 {index}",
+        "varsUndeclared": "使用了但未声明：{names}",
+        "varsUnused": "已声明但从未使用：{names}"
       },
-      "title": "子代理"
+      "title": "子代理",
+      "toolCatalog": {
+        "cancel": "取消",
+        "confirm": "应用",
+        "description": "选择该子代理可以调用的工具。这里的 id 就是模型看到的带命名空间形式。",
+        "empty": "没有匹配的工具。",
+        "groups": {
+          "builtin": "内置",
+          "mcp": "MCP 服务",
+          "native-anthropic": "原生",
+          "plugin": "插件",
+          "unknown": "已授予但当前不可用"
+        },
+        "loading": "正在加载工具…",
+        "searchPlaceholder": "搜索工具…",
+        "selectedCount": "{count, plural, =0 {未选择} other {已选 # 个工具}}",
+        "title": "选择工具",
+        "unknownHint": "此前已授予，但其来源当前不可用。除非你主动清除，否则会保留。"
+      },
+      "toolScope": {
+        "modeHints": {
+          "custom": "仅限下方列出的工具。",
+          "inherit": "沿用派发方代理所拥有的工具。",
+          "none": "完全不给工具——该子代理只能推理和回复。"
+        },
+        "modes": {
+          "custom": "自定义清单",
+          "inherit": "继承",
+          "none": "全部禁用"
+        },
+        "pickFromCatalog": "从目录选择",
+        "removeTool": "移除 {tool}"
+      }
     },
     "tabs": {
       "a2ui": "A2UI",
@@ -24316,8 +25218,8 @@
       "scheduledTasks": "定时任务",
       "search": "联网搜索",
       "security": "安全与隐私",
+      "shellLayout": "界面布局",
       "shortcuts": "键盘快捷键",
-      "sidebar": "侧边栏",
       "skills": "技能",
       "slashCommands": "斜杠命令",
       "sourceControl": "源代码管理",
@@ -25886,6 +26788,7 @@
       "select": "选择根目录",
       "switchRoot": "切换仓库根目录"
     },
+    "sendDiffToChat": "加入对话",
     "sequencer": {
       "abort": "中止",
       "cherryPick": "拣选此提交",
@@ -29878,6 +30781,38 @@
           "placeholder": "https://api.example.com/v1/things"
         }
       },
+      "integrationEventTrigger": {
+        "accountId": {
+          "hint": "仅接收指定已连接账号的事件。",
+          "label": "账号（可选）",
+          "placeholder": "account_..."
+        },
+        "eventTypes": {
+          "hint": "以逗号分隔的规范化事件类型；留空匹配全部事件。",
+          "label": "事件类型（可选）",
+          "placeholder": "pull_request.opened, issue.updated"
+        },
+        "integrationId": {
+          "hint": "仅接收插件中指定 Integration 定义的事件。",
+          "label": "Integration（可选）",
+          "placeholder": "delivery"
+        },
+        "pluginId": {
+          "hint": "仅接收指定已安装 Marketplace 插件的事件。",
+          "label": "插件（可选）",
+          "placeholder": "example-delivery"
+        },
+        "resourceId": {
+          "hint": "仅接收指定仓库、工作区、团队或其他资源的事件。",
+          "label": "资源 ID（可选）",
+          "placeholder": "owner/project"
+        },
+        "resourceKind": {
+          "hint": "仅接收指定规范化资源类型的事件。",
+          "label": "资源类型（可选）",
+          "placeholder": "repository"
+        }
+      },
       "join": {
         "aggregate": {
           "hint": "把汇聚的分支输出一步归约。",
@@ -32437,6 +33372,12 @@
           "completed": {
             "description": "当 /goal 达到终态（完成、停止、预算/轮次/超时）时触发。",
             "label": "目标完成时"
+          }
+        },
+        "integration": {
+          "event": {
+            "description": "当已安装的 Marketplace Integration 发布规范化事件时触发。",
+            "label": "Integration 事件触发"
           }
         },
         "manual": {

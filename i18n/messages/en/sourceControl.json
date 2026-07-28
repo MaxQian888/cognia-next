@@ -252,6 +252,7 @@
     "select": "Select root",
     "switchRoot": "Switch repository root"
   },
+  "sendDiffToChat": "Add to chat",
   "sequencer": {
     "abort": "Abort",
     "cherryPick": "Cherry-pick this commit",

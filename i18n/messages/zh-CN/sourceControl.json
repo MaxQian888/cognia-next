@@ -252,6 +252,7 @@
     "select": "选择根目录",
     "switchRoot": "切换仓库根目录"
   },
+  "sendDiffToChat": "加入对话",
   "sequencer": {
     "abort": "中止",
     "cherryPick": "拣选此提交",
