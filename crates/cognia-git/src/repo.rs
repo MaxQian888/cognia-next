@@ -301,7 +301,7 @@ mod tests {
         .await
         .unwrap();
 
-        let mut config = git2::Config::open(&global_config).unwrap();
+        let config = git2::Config::open(&global_config).unwrap();
         assert_eq!(config.get_string("user.name").unwrap(), "Global Developer");
         assert_eq!(
             config.get_string("user.email").unwrap(),
