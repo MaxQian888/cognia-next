@@ -1,0 +1,22 @@
+{
+  "ask": "提问",
+  "chooseLanguage": "选择翻译语言",
+  "copy": "复制",
+  "explain": "解释",
+  "languages": {
+    "de": "德语",
+    "en": "英语",
+    "es": "西班牙语",
+    "fr": "法语",
+    "ja": "日语",
+    "ko": "韩语",
+    "zh-CN": "简体中文"
+  },
+  "prompts": {
+    "explain": "请解释这段内容。",
+    "translate": "请将这段内容翻译成{language}。"
+  },
+  "translate": "翻译",
+  "truncated": "已截断",
+  "truncatedHint": "选区超过 20,000 个字符，已截断。"
+}

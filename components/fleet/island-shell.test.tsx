@@ -479,23 +479,39 @@ describe("IslandShell", () => {
   })
 
   describe("notch inset (top safe area)", () => {
-    it("pads the card below the notch when island_resize returns an inset", async () => {
+    it("hugs the display's top edge and pads only its content below the notch", async () => {
       resizeMock.mockReturnValue(Promise.resolve({ topInset: 37, fullscreen: false }))
       streamState.snapshot = { generatedAt: 1, sessions: [session()] }
       render(<IslandShell />)
-      // Flush the resize promise the layout effect chained applyInset onto.
+      // Flush the resize promise the layout effect chained applyGeometry onto.
       await act(async () => {})
-      expect(screen.getByTestId("island-clip").style.marginTop).toBe("37px")
+      // The clip container never offsets the card: the card's body must reach
+      // the true top edge so it merges with the camera housing.
+      expect(screen.getByTestId("island-clip").style.marginTop).toBe("")
+      const shell = screen.getByTestId("island-shell")
+      expect(shell.style.paddingTop).toBe("37px")
+      // Card box = content (pill) + the notch strip it covers.
+      expect(shell.style.height).toBe(`${ISLAND_PILL_HEIGHT + 37}px`)
+      // Flush against the screen edge → no floating-card rounding up there.
+      // (jsdom serializes a zero length without its unit.)
+      expect(shell.style.borderTopLeftRadius).toMatch(/^0(px)?$/)
+      expect(shell.style.borderTopRightRadius).toMatch(/^0(px)?$/)
       expect(screen.getByTestId("island-hover-zone").style.minHeight).toBe(
         `${ISLAND_PILL_HEIGHT + 37}px`
       )
+      // Rust is still told the CONTENT size — it grows the window by the inset.
+      expect(resizeMock).toHaveBeenLastCalledWith(ISLAND_COLLAPSED_WIDTH, ISLAND_PILL_HEIGHT)
     })
 
-    it("keeps a zero margin on displays without a notch", async () => {
+    it("keeps the full pill rounding and no padding on displays without a notch", async () => {
       resizeMock.mockReturnValue(Promise.resolve({ topInset: 0, fullscreen: false }))
       render(<IslandShell />)
       await act(async () => {})
-      expect(screen.getByTestId("island-clip").style.marginTop).toBe("0px")
+      const shell = screen.getByTestId("island-shell")
+      expect(shell.style.paddingTop).toBe("0px")
+      expect(shell.style.height).toBe(`${ISLAND_PILL_HEIGHT}px`)
+      expect(shell.style.borderTopLeftRadius).toBe("")
+      expect(shell.style.borderTopRightRadius).toBe("")
       expect(screen.getByTestId("island-hover-zone").style.minHeight).toBe(
         `${ISLAND_PILL_HEIGHT}px`
       )
@@ -505,7 +521,55 @@ describe("IslandShell", () => {
       resizeMock.mockReturnValue(Promise.resolve(undefined))
       render(<IslandShell />)
       await act(async () => {})
-      expect(screen.getByTestId("island-clip").style.marginTop).toBe("0px")
+      expect(screen.getByTestId("island-shell").style.paddingTop).toBe("0px")
+    })
+
+    it("tucks to a bare peek sliver at the top edge, notch strip included", async () => {
+      jest.useFakeTimers()
+      try {
+        resizeMock.mockReturnValue(Promise.resolve({ topInset: 37, fullscreen: false }))
+        render(<IslandShell />)
+        await act(async () => {})
+        act(() => {
+          jest.advanceTimersByTime(ISLAND_TUCK_DELAY_MS)
+        })
+        const shell = screen.getByTestId("island-shell")
+        expect(shell.getAttribute("data-tucked")).toBe("true")
+        // The whole card — notch strip and all — slides up, so the leftover
+        // sliver is PEEK px, not PEEK + a notch-height black band.
+        expect(shell.style.transform).toBe(
+          `translateY(${ISLAND_PEEK_HEIGHT - (ISLAND_PILL_HEIGHT + 37)}px)`
+        )
+      } finally {
+        jest.useRealTimers()
+      }
+    })
+
+    it("fills the notch strip opaque so the menu bar can't show through", async () => {
+      resizeMock.mockReturnValue(Promise.resolve({ topInset: 37, fullscreen: false }))
+      render(<IslandShell />)
+      await act(async () => {})
+      const fill = screen.getByTestId("island-notch-fill")
+      expect(fill.style.height).toBe("37px")
+      expect(fill.className).toContain("bg-black")
+    })
+
+    it("paints no notch strip on a display that has none", async () => {
+      resizeMock.mockReturnValue(Promise.resolve({ topInset: 0, fullscreen: false }))
+      render(<IslandShell />)
+      await act(async () => {})
+      expect(screen.queryByTestId("island-notch-fill")).toBeNull()
+    })
+
+    it("offsets the attention ring below the notch", async () => {
+      resizeMock.mockReturnValue(Promise.resolve({ topInset: 37, fullscreen: false }))
+      streamState.snapshot = {
+        generatedAt: 1,
+        sessions: [session({ status: "waiting-input" })],
+      }
+      render(<IslandShell />)
+      await act(async () => {})
+      expect(screen.getByTestId("island-attention-ring").style.top).toBe("37px")
     })
 
     it("re-pads when Rust pushes fleet://island-geometry (monitor change)", async () => {
@@ -524,11 +588,12 @@ describe("IslandShell", () => {
       const handler = handlers.get("fleet://island-geometry")
 
       act(() => handler?.({ payload: { topInset: 21 } }))
-      expect(screen.getByTestId("island-clip").style.marginTop).toBe("21px")
+      expect(screen.getByTestId("island-shell").style.paddingTop).toBe("21px")
 
-      // Monitor without a notch → back to zero.
+      // Monitor without a notch → back to zero, full rounding restored.
       act(() => handler?.({ payload: { topInset: 0 } }))
-      expect(screen.getByTestId("island-clip").style.marginTop).toBe("0px")
+      expect(screen.getByTestId("island-shell").style.paddingTop).toBe("0px")
+      expect(screen.getByTestId("island-shell").style.borderTopLeftRadius).toBe("")
 
       unmount()
       expect(unlisten).toHaveBeenCalled()

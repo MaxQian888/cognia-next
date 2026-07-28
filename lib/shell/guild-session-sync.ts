@@ -64,12 +64,26 @@ export function planGuildReconcile(args: {
   guild: SelectedGuild
   guildWins: boolean
   activeSession: ChatSession | null
+  /**
+   * True while the active session id has not been resolved to a row yet.
+   *
+   * Every rule below reads `activeSession === null` as "no conversation is
+   * open". That only holds once the id has actually been looked up: a
+   * conversation that was just created — new chat, branch, fork — is the active
+   * one for a full render before the session list emits its row, and treating
+   * that window as "no conversation is open" redirected the user straight back
+   * to the previous conversation.
+   */
+  activeSessionPending?: boolean
   sessions: readonly ChatSession[]
 }): GuildReconcileAction {
-  const { guild, guildWins, activeSession, sessions } = args
+  const { guild, guildWins, activeSession, activeSessionPending, sessions } = args
 
   // Canvas / plugin-view guilds render their own panes — never touch sessions.
   if (guild.kind !== "dm" && guild.kind !== "team") return { type: "none" }
+
+  // Unknown active session: wait for the lookup rather than guess.
+  if (activeSessionPending) return { type: "none" }
 
   const belongs = activeSession ? sessionMatchesGuild(activeSession, guild) : false
   if (belongs) return { type: "none" }

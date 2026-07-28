@@ -43,6 +43,7 @@ jest.mock("@/hooks/data", () => ({
 
 let selectedGuild: SelectedGuild = { kind: "dm" }
 let sidebarCollapsed = false
+const setGroupCollapsed = jest.fn()
 jest.mock("@/stores/ui", () => ({
   useUIStore: <T,>(selector: (s: Record<string, unknown>) => T): T =>
     selector({
@@ -51,6 +52,8 @@ jest.mock("@/stores/ui", () => ({
       setChannelListView: () => {},
       collapsedFolderIds: [],
       setCollapsedFolders: () => {},
+      groupCollapseOverrides: {},
+      setGroupCollapsed,
       sidebarWidth: 256,
       setSidebarWidth: () => {},
       sidebarCollapsed,
@@ -88,6 +91,8 @@ jest.mock("@/hooks/ui", () => {
 })
 
 import { ChannelList } from "./channel-list"
+import { useProjectStore } from "@/stores/project/project-store"
+import type { Project } from "@/types"
 
 const characters: Character[] = [
   { id: "c-1", name: "Alice", createdAt: 0, updatedAt: 0 } as unknown as Character,
@@ -137,6 +142,7 @@ beforeEach(() => {
   isNarrow = false
   sidebarCollapsed = false
   conversationSidebar = null
+  setGroupCollapsed.mockReset()
   saveSettings.mockReset()
   saveSettings.mockResolvedValue(undefined)
   searchSessionsByContent.mockReset()
@@ -144,6 +150,9 @@ beforeEach(() => {
 })
 
 test("DM guild renders only direct sessions, grouped into date buckets", () => {
+  // The rail's DM/Team split is the `"team"` grouping mode; the default
+  // (`"workspace"`) deliberately stops filtering by guild.
+  conversationSidebar = { groupBy: "team" }
   // queries: characters, sessionStates (none), team (none)
   callQueue.push(characters, [], undefined)
   render(
@@ -401,11 +410,6 @@ test.each([
     expected: { showPreview: true },
   },
   {
-    label: "groupByDate",
-    initial: { groupByDate: true },
-    expected: { groupByDate: false },
-  },
-  {
     label: "showUnreadBadges",
     initial: { showUnreadBadges: true },
     expected: { showUnreadBadges: false },
@@ -469,7 +473,7 @@ test("rapid display-option changes merge against the latest optimistic settings"
 })
 
 test("an intermediate store write cannot roll back later optimistic display changes", async () => {
-  conversationSidebar = { density: "comfortable", showPreview: false, groupByDate: true }
+  conversationSidebar = { density: "comfortable", showPreview: false, groupBy: "date" }
   let resolveFirst!: () => void
   let resolveSecond!: () => void
   saveSettings
@@ -507,18 +511,18 @@ test("an intermediate store write cannot roll back later optimistic display chan
   await user.click(await screen.findByRole("menuitemcheckbox", { name: "showPreview" }))
 
   // Simulate save A reaching the store while save B is still pending.
-  conversationSidebar = { density: "compact", showPreview: false, groupByDate: true }
+  conversationSidebar = { density: "compact", showPreview: false, groupBy: "date" }
   callQueue.push(characters, [], undefined)
   rerender(renderList())
   await user.click(screen.getByRole("button", { name: "displayOptions" }))
-  await user.click(await screen.findByRole("menuitemcheckbox", { name: "groupByDate" }))
+  await user.click(await screen.findByRole("menuitemradio", { name: "groupBy.options.none" }))
 
   resolveFirst()
   await waitFor(() => expect(saveSettings.mock.calls.length).toBeGreaterThanOrEqual(2))
   resolveSecond()
   await waitFor(() => expect(saveSettings.mock.calls.length).toBeGreaterThanOrEqual(3))
   expect(saveSettings).toHaveBeenLastCalledWith({
-    conversationSidebar: { density: "compact", showPreview: true, groupByDate: false },
+    conversationSidebar: { density: "compact", showPreview: true, groupBy: "none" },
   })
 })
 
@@ -555,6 +559,7 @@ test("a failed display-option save does not block the next queued change", async
 })
 
 test("Team guild renders only that team's sessions", () => {
+  conversationSidebar = { groupBy: "team" }
   selectedGuild = { kind: "team", teamId: "t-1" }
   callQueue.push(characters, [], team)
   render(
@@ -571,6 +576,95 @@ test("Team guild renders only that team's sessions", () => {
   expect(screen.getByText("Squad")).toBeInTheDocument()
   expect(screen.getByText("Squad meeting")).toBeInTheDocument()
   expect(screen.queryByText("Hi Alice")).toBeNull()
+})
+
+describe("workspace grouping (the default axis)", () => {
+  // Only `id` and `name` are read by the grouping path.
+  const projects = [
+    { id: "w1", name: "Alpha" },
+    { id: "w2", name: "Beta" },
+  ] as unknown as Project[]
+
+  const workspaceSessions = [
+    baseSession("here", { projectId: "w1", title: "Here" }),
+    baseSession("there", { projectId: "w2", title: "There" }),
+    baseSession("nowhere", { title: "Nowhere" }),
+  ]
+
+  beforeEach(() => {
+    useProjectStore.setState({ projects, activeProjectId: "w1", loaded: true })
+  })
+
+  afterEach(() => {
+    useProjectStore.setState({ projects: [], activeProjectId: null, loaded: false })
+  })
+
+  it("shows the active workspace expanded and the others folded", () => {
+    callQueue.push(characters, [], undefined)
+    render(
+      <ChannelList
+        sessions={workspaceSessions}
+        activeSessionId={null}
+        onSelect={jest.fn()}
+        onNewDirect={jest.fn()}
+        onNewTeamConversation={jest.fn()}
+        onDelete={jest.fn()}
+        onRename={jest.fn()}
+      />
+    )
+    // Headers for both workspaces plus the ungrouped bucket.
+    expect(screen.getByRole("button", { name: "Alpha" })).toHaveAttribute("aria-expanded", "true")
+    expect(screen.getByRole("button", { name: "Beta" })).toHaveAttribute("aria-expanded", "false")
+    expect(screen.getByRole("button", { name: "ungroupedWorkspace" })).toBeInTheDocument()
+    // Only the expanded sections render rows.
+    expect(screen.getByText("Here")).toBeInTheDocument()
+    expect(screen.queryByText("There")).toBeNull()
+    expect(screen.getByText("Nowhere")).toBeInTheDocument()
+  })
+
+  it("toggling a workspace header records an explicit collapse choice", async () => {
+    callQueue.push(characters, [], undefined)
+    const user = userEvent.setup()
+    render(
+      <ChannelList
+        sessions={workspaceSessions}
+        activeSessionId={null}
+        onSelect={jest.fn()}
+        onNewDirect={jest.fn()}
+        onNewTeamConversation={jest.fn()}
+        onDelete={jest.fn()}
+        onRename={jest.fn()}
+      />
+    )
+    await user.click(screen.getByRole("button", { name: "Beta" }))
+    expect(setGroupCollapsed).toHaveBeenCalledWith("workspace:w2", false)
+    await user.click(screen.getByRole("button", { name: "Alpha" }))
+    expect(setGroupCollapsed).toHaveBeenCalledWith("workspace:w1", true)
+  })
+
+  it("labels an agent group by its character and the leftovers generically", () => {
+    conversationSidebar = { groupBy: "agent" }
+    callQueue.push(characters, [], undefined)
+    render(
+      <ChannelList
+        sessions={[
+          baseSession("bound", { characterId: "c-1", title: "Bound" }),
+          baseSession("loose", { title: "Loose" }),
+        ]}
+        activeSessionId={null}
+        onSelect={jest.fn()}
+        onNewDirect={jest.fn()}
+        onNewTeamConversation={jest.fn()}
+        onDelete={jest.fn()}
+        onRename={jest.fn()}
+      />
+    )
+    expect(screen.getByRole("button", { name: "Alice" })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "ungroupedAgent" })).toBeInTheDocument()
+    // Agent groups have no auto-collapse rule — both render their rows.
+    expect(screen.getByText("Bound")).toBeInTheDocument()
+    expect(screen.getByText("Loose")).toBeInTheDocument()
+  })
 })
 
 test("Empty DM bucket shows the DM empty state", () => {

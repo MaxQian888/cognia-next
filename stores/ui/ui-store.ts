@@ -40,10 +40,22 @@ export type SelectedGuild =
 export type MemberStatus = "idle" | "thinking" | "errored"
 
 /**
- * Individually-toggleable desktop chrome segments added to the title/status
- * bars. Each maps to a self-contained sub-component that returns `null` when
- * its flag is off. Surfaced as checkboxes in the title bar's "Customize
- * Layout" dropdown.
+ * **Legacy.** The individually-toggleable title/status-bar segments, from
+ * before either bar was orderable. Both bars now persist a full
+ * `{ order, hidden }` layout on `AppSettings.titleBarLayout` /
+ * `.statusBarLayout` (see `@/types/shell/bars`), edited from the same place as
+ * the nav rail (`/settings?section=sidebar`).
+ *
+ * This map is kept for exactly one reason: it is the only record of what an
+ * existing install had turned off, and it lives in localStorage rather than in
+ * settings, so it cannot be folded in by a settings migration.
+ * `components/shell/use-bar-layout.ts` reads it once — when settings hold no
+ * layout for a bar yet — via `migrateLegacyBarItems`, and the first write
+ * through that hook supersedes it permanently. Nothing else may read it, and
+ * there is deliberately no setter: the customizer writes settings, not this.
+ *
+ * The ids are identical to the corresponding ids in the new catalogs, which is
+ * what makes that migration an identity mapping.
  */
 export type BarItemId =
   | "connectivity"
@@ -56,22 +68,17 @@ export type BarItemId =
   | "accountTop"
 
 /**
- * Default visibility per segment.
+ * Legacy default visibility per segment — the state a pre-customization
+ * install carries when it has never touched a toggle. Mirrors the
+ * `defaultHidden` flags in `@/types/shell/bars`, so migrating a fresh install
+ * is a no-op that lands exactly on the shipped bar layouts.
  *
- * `perf` starts **off** because mounting its component begins native CPU/mem
- * sampling — it is strictly opt-in.
- *
- * `accountTop` is off because `accountStatus` is on: the account button used to
- * render in the title bar AND the status bar at once, the same control twice on
- * one screen. The status bar keeps it (it sits with the other ambient status),
- * and the title bar reclaims the space.
- *
+ * `perf` is **off** because mounting its component begins native CPU/mem
+ * sampling — it is strictly opt-in. `accountTop` is off because
+ * `accountStatus` is on: the account button used to render in the title bar
+ * AND the status bar at once, the same control twice on one screen.
  * `quickActions` (pet / OCR / clipboard) is off because none of the three is
- * touched per conversation — they are one-off launches that belong in the Views
- * menu, not in permanent 32px chrome.
- *
- * Everything else defaults on (and each still self-hides when its data source
- * is absent).
+ * touched per conversation.
  */
 export const DEFAULT_BAR_ITEMS: Record<BarItemId, boolean> = {
   connectivity: true,
@@ -144,6 +151,17 @@ interface UIState {
   setCollapsedFolders: (ids: string[]) => void
 
   /**
+   * Explicit collapse choices for the ChannelList's grouping sections
+   * (`workspace:<id>` / `agent:<id>`, keyed by `conversationSectionKey`).
+   *
+   * A map rather than the id array folders use, because a group's default is
+   * not uniform: every workspace except the active one starts collapsed, so
+   * "the user expanded this one" has to be representable. Absent key = default.
+   */
+  groupCollapseOverrides: Record<string, boolean>
+  setGroupCollapsed: (key: string, collapsed: boolean) => void
+
+  /**
    * Desktop left guild rail (feature switcher) collapse. Persisted across
    * reloads. Driven by the View menu and exposed for plugins that need to
    * reserve the leftmost column on demand.
@@ -163,12 +181,13 @@ interface UIState {
   setStatusBarCollapsed: (collapsed: boolean) => void
 
   /**
-   * Per-segment visibility for the optional title/status-bar chrome items.
-   * Persisted so the user's chosen segments stick across reloads. Read via
-   * {@link useBarItemVisible} so a missing key falls back to its default.
+   * **Legacy, read-only.** Pre-customization per-segment visibility for the
+   * title/status bars — see {@link DEFAULT_BAR_ITEMS}. Its sole consumer is
+   * `components/shell/use-bar-layout.ts`, which folds it into the
+   * settings-backed `BarLayout` the first time a bar resolves without one.
+   * There is deliberately no setter: the customizer writes settings, not this.
    */
   barItems: Record<BarItemId, boolean>
-  toggleBarItem: (id: BarItemId) => void
 
   /**
    * True for exactly one boot: the one where the v3 migration reset this
@@ -297,6 +316,14 @@ export const useUIStore = create<UIState>()(
         })),
       setCollapsedFolders: (ids) => set({ collapsedFolderIds: ids }),
 
+      groupCollapseOverrides: {},
+      setGroupCollapsed: (key, collapsed) =>
+        set((s) =>
+          s.groupCollapseOverrides[key] === collapsed
+            ? s
+            : { groupCollapseOverrides: { ...s.groupCollapseOverrides, [key]: collapsed } }
+        ),
+
       guildRailCollapsed: false,
       toggleGuildRail: () => set((s) => ({ guildRailCollapsed: !s.guildRailCollapsed })),
       setGuildRailCollapsed: (collapsed) => set({ guildRailCollapsed: collapsed }),
@@ -309,13 +336,6 @@ export const useUIStore = create<UIState>()(
       acknowledgeChromeLayout: () => set({ chromeLayoutMigrated: false }),
 
       barItems: { ...DEFAULT_BAR_ITEMS },
-      toggleBarItem: (id) =>
-        set((s) => ({
-          barItems: {
-            ...s.barItems,
-            [id]: !(s.barItems[id] ?? DEFAULT_BAR_ITEMS[id]),
-          },
-        })),
 
       findOpen: false,
       openFind: () => set({ findOpen: true }),
@@ -434,6 +454,7 @@ export const useUIStore = create<UIState>()(
         sidebarWidth: s.sidebarWidth,
         channelListView: s.channelListView,
         collapsedFolderIds: s.collapsedFolderIds,
+        groupCollapseOverrides: s.groupCollapseOverrides,
         guildRailCollapsed: s.guildRailCollapsed,
         statusBarCollapsed: s.statusBarCollapsed,
         barItems: s.barItems,
@@ -441,15 +462,6 @@ export const useUIStore = create<UIState>()(
     }
   )
 )
-
-/**
- * Read a single title/status-bar segment's visibility, falling back to its
- * built-in default when the persisted map predates the segment. Prefer this
- * over reading `barItems[id]` directly so a segment never renders `undefined`.
- */
-export function useBarItemVisible(id: BarItemId): boolean {
-  return useUIStore((s) => s.barItems[id] ?? DEFAULT_BAR_ITEMS[id])
-}
 
 /** Selector helper: read the live status of a team member. */
 export function useMemberStatus(teamSessionId: string | null, characterId: string): MemberStatus {

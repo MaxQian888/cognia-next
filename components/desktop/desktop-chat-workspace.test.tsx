@@ -96,25 +96,31 @@ let navCounter = 0
 let selectedGuildEpoch = 0
 let activeSessionEpoch = 0
 jest.mock("@/hooks/chat", () => ({
-  useSessions: () => ({
-    sessions: sessionsRef.current,
-    activeSessionId,
-    select,
-    create,
-    remove,
-    rename,
-    bulkRemove,
-    bulkSetPinned,
-    archive,
-    unarchive,
-    bulkArchive,
-    bulkUnarchive,
-    folders: [],
-    createFolder,
-    renameFolder,
-    deleteFolder,
-    assignToFolder,
-  }),
+  useSessions: () => {
+    const activeSession =
+      sessionsRef.current.find((session) => session.id === activeSessionId) ?? null
+    return {
+      sessions: sessionsRef.current,
+      activeSessionId,
+      activeSession,
+      activeSessionState: activeSession ? "present" : "absent",
+      select,
+      create,
+      remove,
+      rename,
+      bulkRemove,
+      bulkSetPinned,
+      archive,
+      unarchive,
+      bulkArchive,
+      bulkUnarchive,
+      folders: [],
+      createFolder,
+      renameFolder,
+      deleteFolder,
+      assignToFolder,
+    }
+  },
   useClaudeChat: () => directChatMock,
   useTeamChat: () => teamChatMock,
 }))
@@ -265,6 +271,7 @@ jest.mock("@/components/chat/tool-approval-dialog", () => ({
 }))
 
 import { DesktopChatWorkspace } from "./desktop-chat-workspace"
+import { useProjectStore } from "@/stores/project/project-store"
 
 beforeEach(() => {
   logInfo.mockReset()
@@ -298,6 +305,9 @@ beforeEach(() => {
   channelListPropsLog.length = 0
   paneGroupPropsLog.length = 0
   closeSessionStoreMock.mockClear()
+  // The workspace-switch tests below write the real project store; reset it so
+  // an `activeProjectId` never leaks into the guild-reconcile suites.
+  useProjectStore.setState({ projects: [], activeProjectId: null, loaded: false })
   for (const m of Object.values(directChatMock)) m.mockClear()
   for (const m of Object.values(teamChatMock)) m.mockClear()
 })
@@ -338,6 +348,58 @@ test("switching to a team session adjusts the guild filter via guildFromSession"
     "switch-to-session",
     expect.objectContaining({ sessionId: "s-2" })
   )
+})
+
+test("selecting a conversation from another workspace switches the workspace first", async () => {
+  // Everything downstream of the chat pane — artifacts, terminals, the
+  // workspace panel — resolves against `activeProjectId`. Selecting without
+  // following the conversation into its workspace leaves all of them pointed at
+  // the one the user just left.
+  useProjectStore.setState({ activeProjectId: "project-a", loaded: false })
+  sessionsRef.current = [
+    {
+      id: "s-2",
+      title: "elsewhere",
+      kind: "direct",
+      projectId: "project-b",
+      createdAt: 0,
+      updatedAt: 0,
+    } as unknown as ChatSession,
+  ]
+  render(<DesktopChatWorkspace />)
+  await act(async () => {
+    screen.getByTestId("channel-select-stub").click()
+  })
+
+  expect(useProjectStore.getState().activeProjectId).toBe("project-b")
+  expect(select).toHaveBeenCalledWith("s-2")
+  expect(logInfo).toHaveBeenCalledWith(
+    "switch-to-session crosses workspace",
+    expect.objectContaining({ sessionId: "s-2", projectId: "project-b" })
+  )
+})
+
+test("selecting a conversation in the current workspace leaves the workspace alone", async () => {
+  const setActiveProject = jest.spyOn(useProjectStore.getState(), "setActiveProject")
+  useProjectStore.setState({ activeProjectId: "project-a", loaded: false })
+  sessionsRef.current = [
+    {
+      id: "s-2",
+      title: "here",
+      kind: "direct",
+      projectId: "project-a",
+      createdAt: 0,
+      updatedAt: 0,
+    } as unknown as ChatSession,
+  ]
+  render(<DesktopChatWorkspace />)
+  await act(async () => {
+    screen.getByTestId("channel-select-stub").click()
+  })
+
+  expect(setActiveProject).not.toHaveBeenCalled()
+  expect(useProjectStore.getState().activeProjectId).toBe("project-a")
+  setActiveProject.mockRestore()
 })
 
 test("clicking a team (guild chosen most recently) resumes its latest conversation", async () => {

@@ -25,10 +25,15 @@
  *
  * Notch handling: the window is anchored to the TRUE top edge of the display
  * (Space-independent — see `island_window.rs`) and spans the camera-housing
- * strip so slam-to-top hover always lands on it; the card itself is padded
- * below the display's top safe-area inset (returned by `island_resize`,
- * pushed via `fleet://island-geometry` on monitor changes) and its tuck slide
- * is clipped at the notch line.
+ * strip so slam-to-top hover always lands on it. The card's black body runs all
+ * the way up to that top edge, so on a notched display it reads as one shape
+ * with the camera housing (a real Dynamic Island) instead of a pill hanging a
+ * notch-height below the screen edge; only its CONTENT is padded below the top
+ * safe-area inset (returned by `island_resize`, pushed via
+ * `fleet://island-geometry` on monitor changes) so nothing is ever hidden
+ * behind the housing. The top corners square off while that inset is non-zero —
+ * a rounded corner flush with the screen edge reads as a floating card, which
+ * is exactly the look the notch merge is meant to replace.
  */
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react"
@@ -306,7 +311,10 @@ export function IslandShell() {
       : expanded
         ? Math.max(ISLAND_PILL_HEIGHT, measured)
         : ISLAND_PILL_HEIGHT
-    if (card) card.style.height = `${height}px`
+    // `height` is the CONTENT height Rust is told about (it grows the window by
+    // the inset itself). The card also covers the notch strip above that
+    // content, so its own box is taller by exactly the inset.
+    if (card) card.style.height = `${height + topInset}px`
 
     const prev = lastSizeRef.current
     const growW = Math.max(width, prev.w)
@@ -374,14 +382,12 @@ export function IslandShell() {
       onMouseLeave={() => setHovering(false)}
     >
       {/*
-       * Clip container: starts at the notch line (marginTop = inset; the
-       * window itself spans the notch strip so slam-to-top hover works) and
-       * clips the tucked card's upward slide — without it the tucked card
-       * would paint over the menu-bar strip beside the camera housing. On
-       * inset-0 displays the clip edge coincides with the window edge, which
-       * is what already clipped the slide before.
+       * Clip container: starts at the window's top edge — which IS the display's
+       * top edge — and clips the tucked card's upward slide, so a tuck leaves
+       * exactly `ISLAND_PEEK_HEIGHT` visible at the very top instead of a
+       * notch-height black band hanging beside the camera housing.
        */}
-      <div data-testid="island-clip" className="overflow-hidden" style={{ marginTop: topInset }}>
+      <div data-testid="island-clip" className="overflow-hidden">
         <div
           ref={cardRef}
           data-testid="island-shell"
@@ -394,14 +400,42 @@ export function IslandShell() {
           className="relative mx-auto select-none overflow-hidden rounded-2xl border border-white/10 bg-black/85 text-white shadow-2xl backdrop-blur-xl transition-[transform,width,height] duration-300 ease-[cubic-bezier(0.32,0.72,0,1)] will-change-transform motion-reduce:transition-none"
           style={{
             width,
-            // Seed the pill height so the first painted frame isn't zero-height
-            // (the layout effect takes over immediately after).
-            height: ISLAND_PILL_HEIGHT,
+            // Seed the pill height (plus the notch strip the card covers) so the
+            // first painted frame isn't zero-height — the layout effect takes
+            // over immediately after.
+            height: ISLAND_PILL_HEIGHT + topInset,
+            // Only the CONTENT clears the camera housing; the body behind it
+            // runs to the top edge so the card and the housing read as one
+            // shape.
+            paddingTop: topInset,
+            // A rounded corner sitting flush against the screen edge looks like
+            // a floating card, which defeats the merge — square the top two
+            // while there is a notch to merge with. Inline so it beats the
+            // `rounded-2xl` class regardless of utility ordering.
+            borderTopLeftRadius: topInset > 0 ? 0 : undefined,
+            borderTopRightRadius: topInset > 0 ? 0 : undefined,
             transform: tucked
-              ? `translateY(${ISLAND_PEEK_HEIGHT - ISLAND_PILL_HEIGHT}px)`
+              ? `translateY(${ISLAND_PEEK_HEIGHT - (ISLAND_PILL_HEIGHT + topInset)}px)`
               : "translateY(0px)",
           }}
         >
+          {/*
+           * Notch strip fill. The card's glass surface is `bg-black/85`, which
+           * beside the camera housing means the menu bar's clock and status
+           * icons show through at 15% — and leaves a seam where our surface
+           * meets the housing's true black. This band paints that strip opaque
+           * so the card and the housing read as one shape. Sized exactly to the
+           * inset, so it is only ever the region level with the housing.
+           */}
+          {topInset > 0 ? (
+            <div
+              aria-hidden
+              data-testid="island-notch-fill"
+              className="absolute inset-x-0 top-0 bg-black"
+              style={{ height: topInset }}
+            />
+          ) : null}
+
           <div ref={contentRef} data-testid="island-content">
             <button
               type="button"
@@ -494,13 +528,17 @@ export function IslandShell() {
            * Attention ring: a breathing amber inset ring while any session
            * needs the user. A pointer-events-none overlay so it never blocks
            * the pill/list; painted last so it sits above the content edges.
-           * Suppressed while tucked (the card is a bare sliver then).
+           * Suppressed while tucked (the card is a bare sliver then). Offset
+           * below the notch so it rings the content the user must act on —
+           * ringing the housing strip too would draw a glowing bar across the
+           * menu bar.
            */}
           {waiting > 0 && !tucked ? (
             <span
               aria-hidden
               data-testid="island-attention-ring"
               data-severity={severity}
+              style={{ top: topInset }}
               className={cn(
                 "pointer-events-none absolute inset-0 rounded-2xl",
                 severity === "permission"

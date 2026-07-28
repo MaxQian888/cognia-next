@@ -16,8 +16,15 @@ import {
 import { __resetContextKeysForTesting } from "@/lib/plugin/context-keys/context-key-store"
 import type { TreeDataProvider } from "@/types/plugin/plugin-view"
 
+// Echoes the key so host strings assert as stable text, but carries a real
+// `has`/lookup pair for one plugin key so the `titleKey`-before-literal
+// precedence can be exercised. Inlined in the factory — jest hoists this above
+// the imports, so a reference to an outer `const` would hit the TDZ.
 jest.mock("next-intl", () => ({
-  useTranslations: () => (key: string) => key,
+  useTranslations: () =>
+    Object.assign((key: string) => (key === "plugin.p.views.files" ? "Localized Files" : key), {
+      has: (key: string) => key === "plugin.p.views.files",
+    }),
 }))
 
 afterEach(() => {
@@ -37,6 +44,9 @@ describe("PluginViewContainerPanel", () => {
     expect(
       screen.getByText("My Explorer").closest("[data-plugin-view-container='p:explorer']")
     ).not.toBeNull()
+    expect(
+      document.querySelector("[data-plugin-surface='view-container:explorer']")
+    ).toHaveAttribute("data-plugin-root", "p")
   })
 
   it("resolves a lucide icon name supplied by the container", () => {
@@ -52,7 +62,7 @@ describe("PluginViewContainerPanel", () => {
   it("falls back to the puzzle glyph for an unknown icon name", () => {
     act(() => {
       registerViewContainer(
-        { id: "x", title: "X", icon: "NotARealLucideIconName" },
+        { id: "x", title: "X", icon: "NotARealLucideIconName" as never },
         { pluginId: "p" }
       )
     })
@@ -193,6 +203,80 @@ describe("PluginViewContainerPanel", () => {
     const { container } = render(<PluginViewContainerPanel containerId="p:explorer" />)
     expect(container.querySelector("[data-plugin-webview='p:win']")).toBeNull()
     expect(screen.getByText("empty")).toBeInTheDocument()
+  })
+
+  // Regression: the header used to be gated on the bare `title`, so a manifest
+  // that localizes its section title and ships no literal rendered headerless.
+  it("resolves a view's titleKey even when the manifest ships no literal title", async () => {
+    const provider: TreeDataProvider = { getChildren: () => [{ id: "n", label: "Node" }] }
+    act(() => {
+      registerViewContainer({ id: "explorer", title: "Explorer" }, { pluginId: "p" })
+      registerView({
+        kind: "tree",
+        pluginId: "p",
+        viewId: "files",
+        containerId: "p:explorer",
+        titleKey: "views.files",
+        provider,
+      })
+    })
+    render(<PluginViewContainerPanel containerId="p:explorer" />)
+    // Settle the provider's async first load before asserting on the section.
+    expect(await screen.findByText("Node")).toBeInTheDocument()
+    expect(screen.getByText("Localized Files")).toBeInTheDocument()
+  })
+
+  it("resolves a webview's titleKey even when the manifest ships no literal title", () => {
+    act(() => {
+      registerViewContainer({ id: "explorer", title: "Explorer" }, { pluginId: "p" })
+      registerWebview({
+        pluginId: "p",
+        viewId: "files",
+        containerId: "p:explorer",
+        surface: "panel",
+        titleKey: "views.files",
+        srcDoc: "<h1>WV</h1>",
+      })
+    })
+    render(<PluginViewContainerPanel containerId="p:explorer" />)
+    expect(screen.getByText("Localized Files")).toBeInTheDocument()
+  })
+
+  it("renders no section header when the entry declares neither a key nor a title", async () => {
+    const provider: TreeDataProvider = { getChildren: () => [{ id: "n", label: "Node" }] }
+    act(() => {
+      registerViewContainer({ id: "explorer", title: "Explorer" }, { pluginId: "p" })
+      registerView({
+        kind: "tree",
+        pluginId: "p",
+        viewId: "files",
+        containerId: "p:explorer",
+        provider,
+      })
+    })
+    const { container } = render(<PluginViewContainerPanel containerId="p:explorer" />)
+    expect(await screen.findByText("Node")).toBeInTheDocument()
+    expect(container.querySelector("[data-plugin-view='p:files'] h3")).toBeNull()
+  })
+
+  // An unresolvable key must not paint the raw `plugin.<id>.<key>` path.
+  it("falls back to the literal title when the key is absent from the bundle", async () => {
+    const provider: TreeDataProvider = { getChildren: () => [{ id: "n", label: "Node" }] }
+    act(() => {
+      registerViewContainer({ id: "explorer", title: "Explorer" }, { pluginId: "p" })
+      registerView({
+        kind: "tree",
+        pluginId: "p",
+        viewId: "other",
+        containerId: "p:explorer",
+        title: "Literal Files",
+        titleKey: "views.absent",
+        provider,
+      })
+    })
+    render(<PluginViewContainerPanel containerId="p:explorer" />)
+    expect(await screen.findByText("Node")).toBeInTheDocument()
+    expect(screen.getByText("Literal Files")).toBeInTheDocument()
   })
 
   it("re-renders when the container is unregistered (becomes unavailable)", () => {

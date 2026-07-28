@@ -15,7 +15,14 @@
  * stays render-stable (same pattern as `TitleBarSearchPill`).
  */
 
-import { LayoutDashboardIcon, MinusIcon, PlusIcon, RotateCcwIcon } from "lucide-react"
+import * as React from "react"
+import {
+  LayoutDashboardIcon,
+  MinusIcon,
+  PlusIcon,
+  RotateCcwIcon,
+  SlidersHorizontalIcon,
+} from "lucide-react"
 import { useTranslations } from "next-intl"
 import { useTheme } from "next-themes"
 
@@ -44,28 +51,13 @@ import { loggers } from "@cognia/logging"
 import { useArtifactDockLayoutStore } from "@/stores/artifact/artifact-dock-layout-store"
 import { useSettingsStore } from "@/stores/settings"
 import { useTerminalStore } from "@/stores/terminal/terminal-store"
-import { useUIStore, type BarItemId } from "@/stores/ui/ui-store"
+import { useUIStore } from "@/stores/ui/ui-store"
+import { ShellLayoutDialog } from "@/components/shell/shell-layout-dialog"
 
 const log = loggers.ui
 
 /** Theme choices, in cycle order. Labels resolve under `desktop.titleBar.layout.theme*`. */
 const THEMES = ["light", "dark", "system"] as const
-
-/** Optional bar segments grouped by which bar they live in. Label keys resolve
- *  under `desktop.titleBar.layout.*`. Rendered as checkboxes in the Customize
- *  Layout dropdown so the user can hide any segment they don't want. */
-const STATUS_BAR_ITEMS: { id: BarItemId; labelKey: string }[] = [
-  { id: "connectivity", labelKey: "itemConnectivity" },
-  { id: "sync", labelKey: "itemSync" },
-  { id: "perf", labelKey: "itemPerf" },
-  { id: "accountStatus", labelKey: "itemAccount" },
-  { id: "usage", labelKey: "itemUsage" },
-]
-const TITLE_BAR_ITEMS: { id: BarItemId; labelKey: string }[] = [
-  { id: "accountTop", labelKey: "itemAccount" },
-  { id: "workspace", labelKey: "itemWorkspace" },
-  { id: "quickActions", labelKey: "itemQuickActions" },
-]
 
 // Mirror of the title bar's popover perf override (kept local to avoid an
 // import cycle with title-bar.tsx): kill the enter/exit keyframes that repaint
@@ -82,8 +74,7 @@ export function TitleBarLayoutControls({ className }: { className?: string }) {
   const guildRailCollapsed = useUIStore((s) => s.guildRailCollapsed)
   const statusBarCollapsed = useUIStore((s) => s.statusBarCollapsed)
   const toggleSidebar = useUIStore((s) => s.toggleSidebar)
-  const barItems = useUIStore((s) => s.barItems)
-  const toggleBarItem = useUIStore((s) => s.toggleBarItem)
+  const [customizeOpen, setCustomizeOpen] = React.useState(false)
   const rightSidebarCollapsed = useArtifactDockLayoutStore((s) => s.dockCollapsed)
   const toggleRightSidebar = useArtifactDockLayoutStore((s) => s.toggleDock)
   const openBrowser = useArtifactDockLayoutStore((s) => s.openBrowser)
@@ -199,30 +190,18 @@ export function TitleBarLayoutControls({ className }: { className?: string }) {
           </DropdownMenuItem>
 
           <DropdownMenuSeparator />
-          <DropdownMenuLabel>{t("statusBarGroup")}</DropdownMenuLabel>
-          {STATUS_BAR_ITEMS.map(({ id, labelKey }) => (
-            <DropdownMenuCheckboxItem
-              key={id}
-              checked={barItems[id]}
-              onCheckedChange={() => toggleBarItem(id)}
-              data-testid={`title-bar-item-${id}`}
-            >
-              {t(labelKey)}
-            </DropdownMenuCheckboxItem>
-          ))}
-
-          <DropdownMenuSeparator />
-          <DropdownMenuLabel>{t("titleBarGroup")}</DropdownMenuLabel>
-          {TITLE_BAR_ITEMS.map(({ id, labelKey }) => (
-            <DropdownMenuCheckboxItem
-              key={id}
-              checked={barItems[id]}
-              onCheckedChange={() => toggleBarItem(id)}
-              data-testid={`title-bar-item-${id}`}
-            >
-              {t(labelKey)}
-            </DropdownMenuCheckboxItem>
-          ))}
+          {/* The eight per-segment checkboxes that used to sit here are gone.
+              They could only toggle visibility, they duplicated the nav rail's
+              own customizer in a different dialect, and a menu is the wrong
+              place to drag things into an order. One item opens the editor that
+              owns all three surfaces — rail, top bar, bottom bar. */}
+          <DropdownMenuItem
+            onSelect={() => setCustomizeOpen(true)}
+            data-testid="views-customize-bars"
+          >
+            <SlidersHorizontalIcon className="size-4" aria-hidden />
+            {t("customizeBars")}
+          </DropdownMenuItem>
 
           {/* Relocated from the status bar, where theme / zoom / locale held
               three permanent slots between them. */}
@@ -295,6 +274,10 @@ export function TitleBarLayoutControls({ className }: { className?: string }) {
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
+
+      {/* Opens on the top-bar tab because that is the surface this trigger
+          lives on; the rail and bottom bar are one tab away. */}
+      <ShellLayoutDialog open={customizeOpen} onOpenChange={setCustomizeOpen} surface="title" />
     </div>
   )
 }

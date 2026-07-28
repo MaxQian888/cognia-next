@@ -43,13 +43,12 @@ import {
   PawPrintIcon,
   MessagesSquareIcon,
   BellIcon,
-  PanelLeftIcon,
+  PanelsTopLeftIcon,
   CompassIcon,
   BrainIcon,
   GitBranchIcon,
   BracesIcon,
   BoxIcon,
-  GitPullRequestArrowIcon,
   CircleUserIcon,
   ClipboardCheckIcon,
   KeyboardIcon,
@@ -99,7 +98,6 @@ export type SettingsSectionId =
   | "a2ui"
   | "plugins"
   | "connections"
-  | "github-delivery"
   | "data"
   | "workflows"
   | "scheduled-tasks"
@@ -335,14 +333,6 @@ export const SETTINGS_NAV: NavItem[] = [
     icon: LinkIcon,
     desktopOnly: true,
   },
-  {
-    id: "github-delivery",
-    labelKey: "githubDelivery",
-    descriptionKey: "githubDelivery",
-    group: "extensions",
-    icon: GitPullRequestArrowIcon,
-  },
-
   // === Interface ===
   {
     id: "appearance",
@@ -352,11 +342,13 @@ export const SETTINGS_NAV: NavItem[] = [
     icon: PaletteIcon,
   },
   {
+    // Id kept as `sidebar` so `/settings?section=sidebar` deep links survive;
+    // the section now covers the nav rail plus both window bars.
     id: "sidebar",
-    labelKey: "sidebar",
-    descriptionKey: "sidebar",
+    labelKey: "shellLayout",
+    descriptionKey: "shellLayout",
     group: "interface",
-    icon: PanelLeftIcon,
+    icon: PanelsTopLeftIcon,
     desktopOnly: true,
   },
   {
@@ -838,12 +830,23 @@ export const SETTINGS_SEARCH_KEYWORDS: Partial<Record<SettingsSectionId, string[
     "hide",
     "more",
     "overflow",
+    "title bar",
+    "top bar",
+    "status bar",
+    "bottom bar",
+    "layout",
+    "chrome",
     "侧边栏",
     "导航",
     "固定",
     "自定义",
     "排序",
     "隐藏",
+    "顶部栏",
+    "标题栏",
+    "底部栏",
+    "状态栏",
+    "布局",
   ],
   discover: [
     "discover",
@@ -1452,23 +1455,6 @@ export const SETTINGS_SEARCH_KEYWORDS: Partial<Record<SettingsSectionId, string[
     "生物识别",
     "指纹",
     "面容",
-  ],
-  "github-delivery": [
-    "github",
-    "github delivery",
-    "pr review",
-    "pull request",
-    "issue",
-    "release",
-    "webhook",
-    "cloudflared",
-    "automation",
-    "repos",
-    "投递",
-    "评审",
-    "拉取请求",
-    "发布",
-    "仓库",
   ],
 }
 

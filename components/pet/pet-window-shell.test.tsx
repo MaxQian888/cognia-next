@@ -11,16 +11,23 @@ jest.mock("next/navigation", () => ({
 import { isPetWindowRoute, PetWindowShell } from "./pet-window-shell"
 
 describe("isPetWindowRoute", () => {
-  it("matches the pet overlay, popup and fleet island routes exactly", () => {
+  it("matches the pet, island and selection-toolbar routes exactly", () => {
     expect(isPetWindowRoute("/pet-overlay")).toBe(true)
     expect(isPetWindowRoute("/pet-popup")).toBe(true)
     expect(isPetWindowRoute("/island")).toBe(true)
+    expect(isPetWindowRoute("/selection-toolbar")).toBe(true)
   })
 
   it("matches trailing-slash / nested forms (static export serves both)", () => {
     expect(isPetWindowRoute("/pet-overlay/")).toBe(true)
     expect(isPetWindowRoute("/pet-popup/")).toBe(true)
     expect(isPetWindowRoute("/island/")).toBe(true)
+    expect(isPetWindowRoute("/selection-toolbar/")).toBe(true)
+  })
+
+  it("matches the .html form served directly from the static export", () => {
+    expect(isPetWindowRoute("/selection-toolbar.html")).toBe(true)
+    expect(isPetWindowRoute("/island.html")).toBe(true)
   })
 
   it("rejects every other route, including look-alike prefixes", () => {
@@ -62,6 +69,13 @@ describe("PetWindowShell", () => {
 
   it("renders only the minimal pet shell on the fleet island route (no AccountGate)", () => {
     mockPathname = "/island"
+    render(tree)
+    expect(screen.getByTestId("pet-shell")).toBeInTheDocument()
+    expect(screen.queryByTestId("app-runtime")).not.toBeInTheDocument()
+  })
+
+  it("renders only the minimal shell on the selection toolbar route", () => {
+    mockPathname = "/selection-toolbar"
     render(tree)
     expect(screen.getByTestId("pet-shell")).toBeInTheDocument()
     expect(screen.queryByTestId("app-runtime")).not.toBeInTheDocument()

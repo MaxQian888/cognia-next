@@ -22,10 +22,9 @@ import {
   subscribeContextKeys,
   evaluateContextWhen,
 } from "@/lib/plugin/context-keys/context-key-store"
-import { PluginTreeViewHost } from "@/components/plugins/plugin-tree-view-host"
-import { PluginCustomViewHost } from "@/components/plugins/plugin-custom-view-host"
-import { PluginWebviewHost } from "@/components/plugins/plugin-webview-host"
-import { PluginExtensionBoundary } from "@/components/plugins/plugin-extension-slot"
+import { PluginViewHost } from "@/components/plugins/plugin-view-host"
+import { PluginSurface } from "@/components/plugins/plugin-surface"
+import { resolveOptionalPluginLabel, resolvePluginLabel } from "@/lib/plugin/i18n/plugin-label"
 
 /**
  * Render a plugin-supplied lucide icon name (or the puzzle fallback). Module-
@@ -40,6 +39,21 @@ export function ResolvedRailIcon({ name, className }: { name?: string; className
   return <Resolved className={className} />
 }
 
+/**
+ * Section heading for one view/webview inside the container body.
+ *
+ * Takes the *resolved* title rather than the raw entry: the section is optional
+ * and the decision to render it has to be made after `titleKey` has had its
+ * turn, otherwise a manifest that ships only a key (`{ titleKey, title:
+ * undefined }`) is silently headerless.
+ */
+function SectionTitle({ title }: { title?: string }) {
+  if (!title) return null
+  return (
+    <h3 className="px-3 py-1.5 text-xs font-medium uppercase text-muted-foreground">{title}</h3>
+  )
+}
+
 interface Props {
   /** Namespaced container id (`<pluginId>:<localId>`). */
   containerId: string
@@ -47,6 +61,7 @@ interface Props {
 
 export function PluginViewContainerPanel({ containerId }: Props) {
   const t = useTranslations("plugins.viewContainers")
+  const pluginT = useTranslations()
   const containers = useSyncExternalStore(
     subscribeViewContainers,
     getViewContainerSnapshot,
@@ -80,74 +95,76 @@ export function PluginViewContainerPanel({ containerId }: Props) {
     (w) => w.containerId === containerId && w.surface === "panel" && evaluateContextWhen(w.when)
   )
   const isEmpty = views.length === 0 && webviews.length === 0
+  const containerTitle = resolvePluginLabel(
+    pluginT as never,
+    entry.pluginId,
+    entry.def.titleKey,
+    entry.def.title
+  )
 
   return (
-    <div className="flex h-full flex-col outline-none" data-plugin-view-container={containerId}>
-      {!entry.def.hideHeader && (
-        <div className="flex h-12 shrink-0 items-center gap-2 border-b px-3">
-          <ResolvedRailIcon name={entry.def.icon} className="size-4 text-muted-foreground" />
-          <span className="truncate text-sm font-medium">{entry.def.title}</span>
-        </div>
-      )}
-      {isEmpty ? (
-        <div className="flex flex-1 items-center justify-center p-6 text-center">
-          <p className="text-xs text-muted-foreground">{t("empty")}</p>
-        </div>
-      ) : (
-        <div
-          className="flex flex-1 flex-col overflow-y-auto"
-          data-plugin-view-container-body={containerId}
-        >
-          {views.map((v) => (
-            <section
-              key={`${v.pluginId}:${v.viewId}`}
-              data-plugin-view={`${v.pluginId}:${v.viewId}`}
-              // Tree views are hug-height lists; custom React panels are full-
-              // bleed and rely on a definite-height parent (their inner
-              // `h-full`/`flex-1` chain collapses otherwise). Give the latter the
-              // same fill treatment as the webview branch below.
-              className={v.kind === "tree" ? undefined : "flex min-h-0 flex-1 flex-col"}
-            >
-              {v.title && (
-                <h3 className="px-3 py-1.5 text-xs font-medium uppercase text-muted-foreground">
-                  {v.title}
-                </h3>
-              )}
-              <PluginExtensionBoundary pluginId={v.pluginId} extensionId={v.viewId}>
-                {v.kind === "tree" ? (
-                  <PluginTreeViewHost provider={v.provider} pluginId={v.pluginId} />
-                ) : (
-                  <PluginCustomViewHost
-                    component={v.component}
-                    pluginId={v.pluginId}
-                    viewId={v.viewId}
-                  />
-                )}
-              </PluginExtensionBoundary>
-            </section>
-          ))}
-          {webviews.map((w) => (
-            <section
-              key={`${w.pluginId}:${w.viewId}`}
-              className="flex min-h-48 flex-1 flex-col"
-              data-plugin-webview-section={`${w.pluginId}:${w.viewId}`}
-            >
-              {w.title && (
-                <h3 className="px-3 py-1.5 text-xs font-medium uppercase text-muted-foreground">
-                  {w.title}
-                </h3>
-              )}
-              <PluginExtensionBoundary pluginId={w.pluginId} extensionId={w.viewId}>
-                <PluginWebviewHost
-                  fullId={`${w.pluginId}:${w.viewId}`}
-                  srcDoc={w.srcDoc}
-                  title={w.title}
+    <PluginSurface
+      pluginId={entry.pluginId}
+      surfaceId={`view-container:${entry.def.id}`}
+      formFactor="panel"
+    >
+      <div className="flex h-full flex-col outline-none" data-plugin-view-container={containerId}>
+        {!entry.def.hideHeader && (
+          <div className="flex h-12 shrink-0 items-center gap-2 border-b px-3">
+            <ResolvedRailIcon name={entry.def.icon} className="size-4 text-muted-foreground" />
+            <span className="truncate text-sm font-medium">{containerTitle}</span>
+          </div>
+        )}
+        {isEmpty ? (
+          <div className="flex flex-1 items-center justify-center p-6 text-center">
+            <p className="text-xs text-muted-foreground">{t("empty")}</p>
+          </div>
+        ) : (
+          <div
+            className="flex flex-1 flex-col overflow-y-auto"
+            data-plugin-view-container-body={containerId}
+          >
+            {views.map((v) => (
+              <section
+                key={`${v.pluginId}:${v.viewId}`}
+                data-plugin-view={`${v.pluginId}:${v.viewId}`}
+                // Tree views are hug-height lists; custom React panels are full-
+                // bleed and rely on a definite-height parent (their inner
+                // `h-full`/`flex-1` chain collapses otherwise). Give the latter the
+                // same fill treatment as the webview branch below.
+                className={v.kind === "tree" ? undefined : "flex min-h-0 flex-1 flex-col"}
+              >
+                <SectionTitle
+                  title={resolveOptionalPluginLabel(
+                    pluginT as never,
+                    v.pluginId,
+                    v.titleKey,
+                    v.title
+                  )}
                 />
-              </PluginExtensionBoundary>
-            </section>
-          ))}
-        </div>
-      )}
-    </div>
+                <PluginViewHost entry={v} />
+              </section>
+            ))}
+            {webviews.map((w) => (
+              <section
+                key={`${w.pluginId}:${w.viewId}`}
+                className="flex min-h-48 flex-1 flex-col"
+                data-plugin-webview-section={`${w.pluginId}:${w.viewId}`}
+              >
+                <SectionTitle
+                  title={resolveOptionalPluginLabel(
+                    pluginT as never,
+                    w.pluginId,
+                    w.titleKey,
+                    w.title
+                  )}
+                />
+                <PluginViewHost entry={w} />
+              </section>
+            ))}
+          </div>
+        )}
+      </div>
+    </PluginSurface>
   )
 }

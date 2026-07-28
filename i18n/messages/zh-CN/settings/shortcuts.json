@@ -53,6 +53,7 @@
   "reservedWarning": "可能与系统的 {feature} 快捷键冲突",
   "resetItem": "恢复默认",
   "save": "保存",
+  "selectionCaptureClipboard": "捕获已复制的选区",
   "title": "全局快捷键",
   "unified": {
     "description": "在一个页面查看并重新绑定所有快捷键。点击录制后按下你想要的键位组合。",

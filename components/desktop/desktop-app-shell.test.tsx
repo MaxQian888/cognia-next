@@ -247,6 +247,8 @@ describe("isShellBypassRoute", () => {
     expect(isShellBypassRoute("/pet-overlay")).toBe(true)
     expect(isShellBypassRoute("/island")).toBe(true)
     expect(isShellBypassRoute("/pet-popup")).toBe(true)
+    expect(isShellBypassRoute("/selection-toolbar")).toBe(true)
+    expect(isShellBypassRoute("/selection-toolbar.html")).toBe(true)
   })
 
   test("matches nested bypass route", () => {

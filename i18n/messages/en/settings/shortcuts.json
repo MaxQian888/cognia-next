@@ -53,6 +53,7 @@
   "reservedWarning": "May conflict with the system {feature} shortcut",
   "resetItem": "Reset to default",
   "save": "Save",
+  "selectionCaptureClipboard": "Capture copied selection",
   "title": "Global shortcuts",
   "unified": {
     "description": "View and rebind every shortcut in one place. Recording captures the next key combo you press.",

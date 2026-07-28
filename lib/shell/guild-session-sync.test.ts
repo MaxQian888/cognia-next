@@ -82,6 +82,30 @@ describe("planGuildReconcile", () => {
     ).toEqual({ type: "none" })
   })
 
+  it("waits while the active session id has not been resolved to a row", () => {
+    // A conversation that was just created / branched / forked is already the
+    // active one before the session list carries its row. Redirecting here is
+    // what bounced the user back to the previous conversation.
+    expect(
+      planGuildReconcile({
+        guild: dm,
+        guildWins: true,
+        activeSession: null,
+        activeSessionPending: true,
+        sessions: [session({ id: "previous", kind: "direct", updatedAt: 9 })],
+      })
+    ).toEqual({ type: "none" })
+    expect(
+      planGuildReconcile({
+        guild: teamA,
+        guildWins: false,
+        activeSession: null,
+        activeSessionPending: true,
+        sessions: [session({ id: "previous", kind: "team", teamId: "A", updatedAt: 9 })],
+      })
+    ).toEqual({ type: "none" })
+  })
+
   it("does nothing when the active session already belongs to the guild", () => {
     const active = session({ id: "a", kind: "team", teamId: "A" })
     expect(

@@ -1,4 +1,40 @@
 {
+  "barCustomize": {
+    "dragHint": "拖拽调整顺序",
+    "hidden": "已隐藏",
+    "hiddenEmpty": "没有隐藏项。",
+    "hideItem": "从栏中移除",
+    "inBar": "栏内显示",
+    "inBarEmpty": "栏内没有任何项目——全部已隐藏。",
+    "items": {
+      "accountStatus": "账户",
+      "accountTop": "账户",
+      "appIcon": "应用图标",
+      "attention": "待处理事项",
+      "branch": "Git 分支",
+      "commandCenter": "命令中心",
+      "connectivity": "连接状态",
+      "jobs": "运行中的任务",
+      "layoutControls": "视图菜单",
+      "navArrows": "前进 / 后退",
+      "notifications": "通知",
+      "perf": "性能监视",
+      "quickActions": "快捷开关",
+      "runStatus": "运行状态",
+      "search": "搜索与标题",
+      "sync": "同步状态",
+      "usage": "用量与额度",
+      "workspace": "工作区"
+    },
+    "restoreDefaults": "恢复默认",
+    "showItem": "加回栏中",
+    "zoneHint": "项目只能在所属区域（起始、居中、末端）内移动，因为窗口控制和拖拽区域是固定的。",
+    "zones": {
+      "center": "居中",
+      "end": "末端",
+      "start": "起始"
+    }
+  },
   "channelList": {
     "bucketOlder": "更早",
     "bucketPrev30": "过去 30 天",
@@ -36,7 +72,16 @@
     "emptySearch": "没有与「{query}」匹配的会话。",
     "emptyTeam": "还没有会话，从上方开启一个吧。",
     "folderActions": "文件夹操作",
-    "groupByDate": "按日期分组",
+    "groupBy": {
+      "label": "分组方式",
+      "options": {
+        "agent": "角色",
+        "date": "日期",
+        "none": "不分组",
+        "team": "私信 / 团队",
+        "workspace": "工作区"
+      }
+    },
     "groupOther": "其它",
     "newChat": "新建聊天",
     "newConversation": "新建会话",
@@ -54,6 +99,8 @@
     "showPreview": "显示消息预览",
     "showUnreadBadges": "显示未读角标",
     "teamFallback": "团队",
+    "ungroupedAgent": "未绑定角色",
+    "ungroupedWorkspace": "未归属工作区",
     "viewActive": "显示活跃会话",
     "viewArchived": "显示已归档会话"
   },
@@ -463,9 +510,9 @@
     "actionsMenu": "会话操作",
     "archive": "归档",
     "branchedFrom": "分支会话——打开父会话",
+    "cancel": "取消",
     "cogniaAgentChecking": "正在检查 Cognia 代理…",
     "cogniaAgentNotInstalled": "未安装 Cognia 代理 CLI",
-    "cancel": "取消",
     "delete": "删除",
     "deleteConfirmAction": "删除会话",
     "deleteConfirmBody": "将永久删除此会话及其全部消息，且无法撤销。",
@@ -490,9 +537,26 @@
     "desktopOnlyTitle": "请在 Tauri 中运行",
     "emptyTitle": "Cognia"
   },
+  "shellLayout": {
+    "customizeStatusBar": "自定义状态栏…",
+    "customizeTitleBar": "自定义布局…",
+    "description": {
+      "dialog": "选择侧边栏、顶部栏和底部栏显示哪些内容，以及它们的顺序。",
+      "section": "选择侧边栏、顶部栏和底部栏显示哪些内容，以及它们的顺序。修改立即生效，并会同步到你的其他设备。",
+      "sidebar": "把最常用的项目固定到导航栏，其余的会收进「更多」菜单。拖拽可调整顺序，也可以隐藏从不使用的项目。",
+      "status": "底部栏承载环境状态。隐藏的分段会被卸载而不只是不可见，因此隐藏性能监视也会同时停止采样。",
+      "title": "顶部栏承载导航、搜索和窗口控制。隐藏的项目会被完全移除——窗口按钮和应用菜单始终保留。"
+    },
+    "tab": {
+      "sidebar": "侧边栏",
+      "status": "底部栏",
+      "title": "顶部栏"
+    },
+    "title": "界面布局"
+  },
   "shellLayoutNotice": {
-    "title": "布局已简化",
-    "description": "面板开关、主题、缩放和语言已移到标题栏的「视图」菜单，桌宠、OCR、剪贴板按钮也在那里。按 ⌘B 可显示或隐藏会话列表。"
+    "description": "面板开关、主题、缩放和语言已移到标题栏的「视图」菜单，桌宠、OCR、剪贴板按钮也在那里。按 ⌘B 可显示或隐藏会话列表。",
+    "title": "布局已简化"
   },
   "statusBar": {
     "awaitingApproval": "等待批准",
@@ -528,22 +592,14 @@
     "layout": {
       "appearanceGroup": "外观",
       "customize": "自定义布局",
-      "itemAccount": "账户",
-      "itemConnectivity": "连接状态",
-      "itemPerf": "性能监视",
-      "itemQuickActions": "快捷开关",
-      "itemSync": "同步状态",
-      "itemUsage": "用量与额度",
-      "itemWorkspace": "工作区",
+      "customizeBars": "自定义布局…",
       "localeEn": "English",
       "localeZh": "简体中文",
       "openBrowser": "打开浏览器面板",
-      "statusBarGroup": "状态栏",
       "themeDark": "深色",
       "themeLight": "浅色",
       "themeSystem": "跟随系统",
       "title": "自定义布局",
-      "titleBarGroup": "标题栏",
       "toggleGuildRail": "切换工会侧栏",
       "toggleRightSidebar": "切换右侧栏",
       "toggleSidebar": "切换侧栏",

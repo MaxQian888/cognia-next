@@ -32,12 +32,19 @@
 import { usePathname } from "next/navigation"
 
 /** Routes served inside the secondary overlay windows (pet + fleet island). */
-const PET_WINDOW_ROUTE_PREFIXES = ["/pet-overlay", "/pet-popup", "/island"] as const
+const PET_WINDOW_ROUTE_PREFIXES = [
+  "/pet-overlay",
+  "/pet-popup",
+  "/island",
+  "/selection-toolbar",
+] as const
 
 /** True when the pathname belongs to a secondary overlay window route. */
 export function isPetWindowRoute(pathname: string | null | undefined): boolean {
   if (!pathname) return false
-  return PET_WINDOW_ROUTE_PREFIXES.some((p) => pathname === p || pathname.startsWith(p + "/"))
+  return PET_WINDOW_ROUTE_PREFIXES.some(
+    (p) => pathname === p || pathname === `${p}.html` || pathname.startsWith(p + "/")
+  )
 }
 
 export function PetWindowShell({

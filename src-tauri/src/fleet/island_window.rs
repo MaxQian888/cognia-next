@@ -22,10 +22,12 @@
 //! menu bar (`pet_window::island_panel_level`) so it draws over it instead of
 //! behind it, and the notch / camera housing is handled separately: the
 //! window spans the notch strip (so slamming the cursor to the top still
-//! lands hover on it) while the renderer pads its card below
-//! `NSScreen.safeAreaInsets.top`, pushed to it via the `island_resize` return
-//! value and the `fleet://island-geometry` event. On Windows/Linux the work
-//! area is the correct taskbar-aware anchor and the inset is always 0.
+//! lands hover on it) while the renderer pads its card's CONTENT — not the
+//! card itself, whose body runs to the top edge so it reads as one shape with
+//! the housing — below `NSScreen.safeAreaInsets.top`, pushed to it via the
+//! `island_resize` return value and the `fleet://island-geometry` event. On
+//! Windows/Linux the work area is the correct taskbar-aware anchor and the
+//! inset is always 0.
 //!
 //! Live window ops can't run under `tauri::test::mock_app()` on this
 //! project's toolchains (same constraint documented in `pet_window/mod.rs`),
@@ -251,8 +253,8 @@ impl IslandAnchor {
 /// Top-center placement against the anchor rect. `anchor` is `(x, y, w)` and
 /// `win_w` the window width, all physical pixels. The window's y always hugs
 /// the anchor top — on macOS the notch offset lives INSIDE the window (the
-/// renderer pads the card below it) so the transparent strip above the card
-/// still catches slam-to-top hover. Pure for unit tests.
+/// renderer pads the card's content below it) so the strip level with the
+/// camera housing still catches slam-to-top hover. Pure for unit tests.
 fn resolve_island_position(anchor: (f64, f64, f64), win_w: f64) -> (f64, f64) {
     let (anchor_x, anchor_y, anchor_w) = anchor;
     let x = (anchor_x + (anchor_w - win_w) / 2.0).max(anchor_x);
@@ -585,8 +587,9 @@ pub(crate) fn open_island_window_inner<R: Runtime>(
     .resizable(false)
     .shadow(false)
     .visible(false)
-    // The window includes the notch strip; the renderer pads its card below
-    // the inset (it learns the value from `island_resize`'s return).
+    // The window includes the notch strip; the renderer pads its card's
+    // content below the inset (it learns the value from `island_resize`'s
+    // return) while the card's body covers the strip itself.
     .inner_size(opts.width, opts.height + anchor.top_inset_logical())
     .build()
     .map_err(|e| e.to_string())?;

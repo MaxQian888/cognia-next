@@ -1,0 +1,9 @@
+{
+  "unsavedBar": {
+    "discard": "Discard",
+    "save": "Save",
+    "saved": "Saved",
+    "saving": "Saving…",
+    "unsavedCount": "{count, plural, one {# unsaved change} other {# unsaved changes}}"
+  }
+}

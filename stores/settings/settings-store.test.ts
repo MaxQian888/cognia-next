@@ -36,6 +36,17 @@ jest.mock("@/lib/tauri", () => ({
   isTauri: jest.fn(),
 }))
 
+const dispatchDiagnosticMock = jest.fn()
+jest.mock("@/lib/diagnostics/bus", () => ({
+  dispatchDiagnostic: (...args: unknown[]) => dispatchDiagnosticMock(...args),
+}))
+
+const applyProxyToRustMock = jest.fn()
+jest.mock("@/stores/network-proxy", () => ({
+  applyProxyToRust: (...args: unknown[]) => applyProxyToRustMock(...args),
+  maybeAutoDetectProxy: jest.fn(),
+}))
+
 jest.mock("@/lib/tts/keyring", () => ({
   setProviderKey: jest.fn(),
   clearProviderKey: jest.fn(),
@@ -92,12 +103,21 @@ const baseSettings = (overrides: Partial<AppSettings> = {}): AppSettings => ({
   ...overrides,
 })
 
-const RESET = { settings: null, loaded: false, providerKeys: {}, providerKeysLoaded: false }
+const RESET = {
+  settings: null,
+  loaded: false,
+  loadFailed: false,
+  loadError: null,
+  providerKeys: {},
+  providerKeysLoaded: false,
+}
 
 beforeEach(() => {
   jest.clearAllMocks()
   jest.spyOn(console, "warn").mockImplementation(() => {})
   jest.spyOn(console, "error").mockImplementation(() => {})
+  dispatchDiagnosticMock.mockClear()
+  applyProxyToRustMock.mockReset().mockResolvedValue(undefined)
   useSettingsStore.setState(RESET)
 })
 
@@ -170,6 +190,27 @@ describe("load", () => {
       },
       canvasCodeSandboxEnabled: true,
     })
+  })
+
+  it("flags the defaults fallback so the session isn't silently degraded", async () => {
+    dbSettings.getSettings.mockRejectedValue(new Error("db down"))
+    await act(async () => {
+      await useSettingsStore.getState().load()
+    })
+    const s = useSettingsStore.getState()
+    expect(s.loadFailed).toBe(true)
+    expect(s.loadError).toBe("db down")
+  })
+
+  it("clears the failure flags on a successful load", async () => {
+    useSettingsStore.setState({ loadFailed: true, loadError: "stale" })
+    dbSettings.getSettings.mockResolvedValue(baseSettings())
+    await act(async () => {
+      await useSettingsStore.getState().load()
+    })
+    const s = useSettingsStore.getState()
+    expect(s.loadFailed).toBe(false)
+    expect(s.loadError).toBeNull()
   })
 
   it("does not push apiKey down to Tauri when not in Tauri", async () => {
@@ -296,6 +337,62 @@ describe("load", () => {
 })
 
 // ---- save ----
+
+describe("silent side-effect failures", () => {
+  it("reports a proxy that never reached the Rust side", async () => {
+    // Outgoing requests are now bypassing a proxy the user configured — a
+    // privacy consequence that used to be a lone console.warn.
+    dbSettings.saveSettings.mockResolvedValue(baseSettings())
+    applyProxyToRustMock.mockRejectedValue(new Error("rust down"))
+    await act(async () => {
+      await useSettingsStore.getState().save({ networkProxy: { mode: "manual" } as never })
+    })
+    expect(dispatchDiagnosticMock).toHaveBeenCalledWith(
+      expect.objectContaining({ code: "proxyApplyFailed", source: "settings" })
+    )
+  })
+
+  it("stays quiet when the proxy applied cleanly", async () => {
+    dbSettings.saveSettings.mockResolvedValue(baseSettings())
+    await act(async () => {
+      await useSettingsStore.getState().save({ networkProxy: { mode: "manual" } as never })
+    })
+    expect(applyProxyToRustMock).toHaveBeenCalled()
+    expect(dispatchDiagnosticMock).not.toHaveBeenCalled()
+  })
+})
+
+describe("retryLoad", () => {
+  it("re-reads settings even though load() already ran", async () => {
+    dbSettings.getSettings.mockRejectedValueOnce(new Error("db down"))
+    await act(async () => {
+      await useSettingsStore.getState().load()
+    })
+    expect(useSettingsStore.getState().loadFailed).toBe(true)
+
+    dbSettings.getSettings.mockResolvedValue(baseSettings({ apiKey: "sk-recovered" }))
+    await act(async () => {
+      await useSettingsStore.getState().retryLoad()
+    })
+
+    const s = useSettingsStore.getState()
+    expect(s.loadFailed).toBe(false)
+    expect(s.loadError).toBeNull()
+    expect(s.settings?.apiKey).toBe("sk-recovered")
+  })
+
+  it("re-flags the failure when the retry also throws", async () => {
+    dbSettings.getSettings.mockRejectedValue(new Error("still down"))
+    await act(async () => {
+      await useSettingsStore.getState().load()
+      await useSettingsStore.getState().retryLoad()
+    })
+    const s = useSettingsStore.getState()
+    expect(s.loadFailed).toBe(true)
+    expect(s.loadError).toBe("still down")
+    expect(s.loaded).toBe(true)
+  })
+})
 
 describe("save", () => {
   it("delegates to saveSettings and writes the result back", async () => {

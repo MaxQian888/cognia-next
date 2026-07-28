@@ -27,6 +27,7 @@ describe("ShortcutsSection", () => {
     expect(screen.getByText("Show / hide window")).toBeInTheDocument()
     expect(screen.getByText("Open log panel")).toBeInTheDocument()
     expect(screen.getByText("Automation kill switch")).toBeInTheDocument()
+    expect(screen.getByText("Capture copied selection")).toBeInTheDocument()
   })
 
   it("Record swaps the row's controls into capture mode", () => {

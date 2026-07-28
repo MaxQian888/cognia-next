@@ -87,6 +87,8 @@ import { listCharacters } from "@/lib/db/characters"
 import { getTeam } from "@/lib/db/teams"
 import type { PlanResumeMode } from "@/components/agent/plan/plan-approval-card"
 import { guildFromSession } from "@/lib/claude/guild"
+import { resolveConversationGroupBy } from "@/lib/chat/conversation-grouping"
+import { useProjectStore } from "@/stores/project/project-store"
 import { loggers } from "@cognia/logging"
 import type { Character, SendContent, Team } from "@cognia/agent-config-types"
 import { decodeSubSession } from "@/lib/claude/team-session-id"
@@ -98,8 +100,11 @@ export function AppShellMobile() {
   const t = useTranslations("desktop.shell")
   const tShell = useTranslations("mobile.shell")
   const router = useRouter()
+  const sidebarGroupBy = resolveConversationGroupBy(
+    useSettingsStore((s) => s.settings?.conversationSidebar)
+  )
   const { sessions, activeSessionId, select, create, remove, rename, archive, unarchive, folders } =
-    useSessions()
+    useSessions({ crossWorkspace: sidebarGroupBy === "workspace" })
   const directChat = useClaudeChat()
   const teamChat = useTeamChat()
 
@@ -295,8 +300,14 @@ export function AppShellMobile() {
   const handleCreateTeam = () => openSettings("teams")
 
   const handleSwitchToSession = (id: string) => {
-    select(id)
     const target = sessions.find((s) => s.id === id)
+    // Follow the conversation into its workspace before focusing it — see the
+    // desktop counterpart in `desktop-chat-workspace.tsx`.
+    if (target?.projectId) {
+      const { activeProjectId, setActiveProject } = useProjectStore.getState()
+      if (target.projectId !== activeProjectId) setActiveProject(target.projectId)
+    }
+    select(id)
     if (!target) return
     setSelectedGuild(guildFromSession(target))
     setNavOpen(false)

@@ -1,7 +1,7 @@
 /**
  * @jest-environment jsdom
  */
-import { render, screen, waitFor } from "@testing-library/react"
+import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { CHROME_BUDGET, countControls } from "@/lib/ui/chrome-budget"
 
 const logInfo = jest.fn()
@@ -129,20 +129,25 @@ jest.mock("@/stores/chat/chat-store", () => ({
 
 const toggleSidebar = jest.fn()
 const uiRef = { sidebarCollapsed: false }
-const barItemsRef: Record<string, boolean> = {
-  connectivity: true,
-  sync: true,
-  perf: false,
-  accountStatus: true,
-  usage: true,
-  workspace: true,
-  quickActions: true,
-  accountTop: true,
-}
 jest.mock("@/stores/ui/ui-store", () => ({
   useUIStore: (selector: (s: unknown) => unknown) =>
     selector({ toggleSidebar, sidebarCollapsed: uiRef.sidebarCollapsed }),
-  useBarItemVisible: (id: string) => barItemsRef[id],
+}))
+
+// Segment visibility now comes from the settings-backed layout that
+// `useBarLayout` resolves (the resolution itself is covered by
+// `components/shell/use-bar-layout.test.ts`). This suite drives the real hook
+// through the two inputs it reads: the platform, and `settings.statusBarLayout`.
+let mockPlatform: "tauri" | "web" = "tauri"
+jest.mock("@/hooks/use-platform", () => ({ usePlatform: () => mockPlatform }))
+
+const barHidden = new Set<string>(["perf"])
+let barOrder: string[] | null = null
+
+// The dialog opened from the bar's context menu has its own suite.
+jest.mock("@/components/shell/shell-layout-dialog", () => ({
+  ShellLayoutDialog: ({ open }: { open: boolean }) =>
+    open ? <div data-testid="shell-layout-dialog" /> : null,
 }))
 
 const settingsRef = {
@@ -151,14 +156,23 @@ const settingsRef = {
 }
 const setLanguage = jest.fn().mockResolvedValue(undefined)
 const saveSettings = jest.fn().mockResolvedValue(undefined)
+const settingsState = () => ({
+  settings: {
+    webviewZoom: settingsRef.webviewZoom,
+    statusBarLayout: {
+      order: barOrder ?? [...STATUS_BAR_ITEMS.map((m) => m.id)],
+      hidden: [...barHidden],
+    },
+  },
+  language: settingsRef.language,
+  setLanguage,
+  save: saveSettings,
+})
 jest.mock("@/stores/settings", () => ({
-  useSettingsStore: (selector: (s: unknown) => unknown) =>
-    selector({
-      settings: { webviewZoom: settingsRef.webviewZoom },
-      language: settingsRef.language,
-      setLanguage,
-      save: saveSettings,
-    }),
+  useSettingsStore: (selector: (s: unknown) => unknown) => selector(settingsState()),
+}))
+jest.mock("@/stores/settings/settings-store", () => ({
+  useSettingsStore: (selector: (s: unknown) => unknown) => selector(settingsState()),
 }))
 
 const setTheme = jest.fn()
@@ -173,6 +187,7 @@ jest.mock("next/navigation", () => ({
 }))
 
 import { StatusBar } from "./status-bar"
+import { STATUS_BAR_ITEMS } from "@/types/shell/bars"
 
 beforeEach(() => {
   logInfo.mockReset()
@@ -190,11 +205,10 @@ beforeEach(() => {
   chatRef.errorMessage = null
   chatRef.permissionMode = "default"
   uiRef.sidebarCollapsed = false
-  barItemsRef.connectivity = true
-  barItemsRef.sync = true
-  barItemsRef.perf = false
-  barItemsRef.accountStatus = true
-  barItemsRef.usage = true
+  mockPlatform = "tauri"
+  barHidden.clear()
+  barHidden.add("perf")
+  barOrder = null
   settingsRef.webviewZoom = 1.0
   settingsRef.language = "en"
   themeRef.value = "system"
@@ -235,29 +249,51 @@ test("renders all top-level segments", () => {
   expect(screen.queryByTestId("status-perf")).toBeNull()
 })
 
-test("gates optional segments on their bar-item flags", () => {
-  barItemsRef.connectivity = false
-  barItemsRef.sync = false
-  barItemsRef.usage = false
-  barItemsRef.accountStatus = false
-  barItemsRef.perf = true
+test("mounts exactly the segments the stored layout leaves visible", () => {
+  barHidden.clear()
+  for (const id of ["connectivity", "sync", "usage", "accountStatus"]) barHidden.add(id)
   render(<StatusBar />)
   expect(screen.queryByTestId("status-connectivity")).toBeNull()
   expect(screen.queryByTestId("status-sync")).toBeNull()
   expect(screen.queryByTestId("status-usage")).toBeNull()
   expect(screen.queryByTestId("account-bar-button")).toBeNull()
-  // Perf flag on + desktop → mounted.
+  // `perf` is no longer hidden → mounted, which is also what starts its native
+  // sampling. Hidden means unmounted here, not merely invisible.
   expect(screen.getByTestId("status-perf")).toBeInTheDocument()
 })
 
+test("renders the segments in the user's stored order", () => {
+  barHidden.clear()
+  barOrder = ["runStatus", "connectivity", "branch"]
+  const { container } = render(<StatusBar />)
+  const rendered = Array.from(container.querySelectorAll("[data-testid]"))
+    .map((el) => el.getAttribute("data-testid"))
+    .filter((id) => id && id !== "status-bar")
+  // `runStatus` is an end-zone segment, so it cannot outrank the start zone —
+  // but it does lead its own zone, and the start zone keeps the stored order.
+  expect(rendered.indexOf("status-connectivity")).toBeLessThan(rendered.indexOf("status-branch"))
+  expect(rendered.indexOf("status-branch")).toBeLessThan(rendered.indexOf("status-status"))
+})
+
 test("does not mount desktop-only segments in web mode", () => {
+  mockPlatform = "web"
   isTauriMock.mockReturnValue(false)
+  barHidden.clear()
   render(<StatusBar />)
-  // Connectivity is meaningful on web; sync/perf/usage are desktop-only.
+  // Connectivity is meaningful on web; sync/perf/usage are desktop-only, so the
+  // platform filter drops them from the catalog before the layout is applied.
   expect(screen.getByTestId("status-connectivity")).toBeInTheDocument()
   expect(screen.queryByTestId("status-sync")).toBeNull()
   expect(screen.queryByTestId("status-usage")).toBeNull()
   expect(screen.queryByTestId("status-perf")).toBeNull()
+})
+
+test("offers a right-click route into the customizer", async () => {
+  render(<StatusBar />)
+  expect(screen.queryByTestId("shell-layout-dialog")).toBeNull()
+  fireEvent.contextMenu(screen.getByTestId("status-bar"))
+  fireEvent.click(await screen.findByTestId("status-bar-customize"))
+  expect(await screen.findByTestId("shell-layout-dialog")).toBeInTheDocument()
 })
 
 // Dedupe: `sidebarCollapsed` had four entry points on one screen and the

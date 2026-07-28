@@ -7,6 +7,7 @@ import {
   isMainAppWindow,
   isSecondaryOverlayRole,
   PET_POPUP_WINDOW_LABEL,
+  SELECTION_TOOLBAR_WINDOW_LABEL,
   PET_WINDOW_LABEL,
 } from "./window-role"
 
@@ -76,18 +77,25 @@ describe("getPetWindowRole", () => {
     expect(getPetWindowRole(() => ISLAND_WINDOW_LABEL)).toBe("island")
   })
 
+  it("returns 'selection-toolbar' for the selection overlay label", () => {
+    setTauri(true)
+    expect(getPetWindowRole(() => SELECTION_TOOLBAR_WINDOW_LABEL)).toBe("selection-toolbar")
+  })
+
   it("exposes the canonical pet window labels", () => {
     expect(PET_WINDOW_LABEL).toBe("pet")
     expect(PET_POPUP_WINDOW_LABEL).toBe("pet-popup")
     expect(ISLAND_WINDOW_LABEL).toBe("island")
+    expect(SELECTION_TOOLBAR_WINDOW_LABEL).toBe("selection-toolbar")
   })
 })
 
 describe("isSecondaryOverlayRole", () => {
-  it("covers the three overlay windows and nothing else", () => {
+  it("covers every secondary overlay window and nothing else", () => {
     expect(isSecondaryOverlayRole("overlay")).toBe(true)
     expect(isSecondaryOverlayRole("popup")).toBe(true)
     expect(isSecondaryOverlayRole("island")).toBe(true)
+    expect(isSecondaryOverlayRole("selection-toolbar")).toBe(true)
     expect(isSecondaryOverlayRole("main")).toBe(false)
     expect(isSecondaryOverlayRole("web")).toBe(false)
   })
@@ -120,5 +128,10 @@ describe("isMainAppWindow", () => {
   it("is false for the fleet island window", () => {
     setTauri(true)
     expect(isMainAppWindow(() => ISLAND_WINDOW_LABEL)).toBe(false)
+  })
+
+  it("is false for the system selection toolbar window", () => {
+    setTauri(true)
+    expect(isMainAppWindow(() => SELECTION_TOOLBAR_WINDOW_LABEL)).toBe(false)
   })
 })

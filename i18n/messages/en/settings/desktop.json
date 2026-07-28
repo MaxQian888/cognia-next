@@ -36,6 +36,17 @@
   "revealDataDir": "Reveal data directory",
   "revealFailed": "Could not open data directory: {error}",
   "schedulerBackgroundHint": "Scheduled tasks (chat, agent, scripts) only run while Cognia is running. Enable launch-at-login and set the close button to “Minimize to tray” so they keep firing in the background.",
+  "selectionToolbar": {
+    "description": "Show a compact toolbar after selecting text in supported macOS and Windows apps.",
+    "disabledApps": "Disabled applications",
+    "disabledAppsHint": "Enter one application name per line. Candidate text and window titles stay in memory only.",
+    "disabledAppsPlaceholder": "1Password\nAuthy",
+    "enableFailed": "Could not enable the selection toolbar",
+    "permissionHint": "macOS requires Accessibility and Input Monitoring permission. Cognia does not request Screen Recording.",
+    "saveDisabledApps": "Save app list",
+    "title": "System text-selection toolbar",
+    "toggle": "Toggle system text-selection toolbar"
+  },
   "subtitle": "Settings that only apply when running as the native desktop app.",
   "system": "System",
   "tauriDocs": "Tauri docs",

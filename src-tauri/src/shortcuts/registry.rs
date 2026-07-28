@@ -185,6 +185,9 @@ impl ShortcutRegistry {
                 state.consent.clear_session_grants();
                 let _ = app.emit("automation:kill-switch", serde_json::Value::Null);
             }
+            "selection.captureClipboard" => {
+                crate::selection_toolbar::spawn_clipboard_capture(app);
+            }
             _ => {}
         }
 
@@ -413,7 +416,7 @@ fn part_from_code(code: Code) -> String {
     .to_string()
 }
 
-/// Seed the three built-in shortcut ids on startup. The renderer overrides
+/// Seed the built-in shortcut ids on startup. The renderer overrides
 /// any of them via `shortcut_bind` later; this just guarantees the OS-level
 /// hot-keys are registered before the renderer has a chance to hydrate.
 pub fn seed_builtins<R: Runtime>(app: &AppHandle<R>, registry: &ShortcutRegistry) {
@@ -421,6 +424,7 @@ pub fn seed_builtins<R: Runtime>(app: &AppHandle<R>, registry: &ShortcutRegistry
         ("tray.show", "ctrl+shift+space"),
         ("tray.open-logs", "ctrl+shift+l"),
         ("tray.automation-kill", "ctrl+alt+k"),
+        ("selection.captureClipboard", "alt+shift+c"),
     ] {
         if let Err(e) = registry.bind(app, id, chord) {
             log::warn!("failed to seed built-in shortcut {id}={chord}: {e}");

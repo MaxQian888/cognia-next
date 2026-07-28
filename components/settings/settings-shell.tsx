@@ -49,8 +49,8 @@ const AppearanceSection = dynamic(() => import("./appearance").then((m) => m.App
   ssr: false,
   loading: () => <SectionLoading />,
 })
-const SidebarSection = dynamic(
-  () => import("./sidebar/sidebar-section").then((m) => m.SidebarSection),
+const ShellLayoutSection = dynamic(
+  () => import("./sidebar/shell-layout-section").then((m) => m.ShellLayoutSection),
   { ssr: false, loading: () => <SectionLoading /> }
 )
 const DiscoverSection = dynamic(
@@ -261,11 +261,6 @@ const SecuritySection = dynamic(
   () => import("./security/security-section").then((m) => m.SecuritySection),
   { ssr: false, loading: () => <SectionLoading /> }
 )
-const GithubDeliverySection = dynamic(
-  () => import("./github-delivery/github-delivery-section").then((m) => m.GithubDeliverySection),
-  { ssr: false, loading: () => <SectionLoading /> }
-)
-
 interface Props {
   /** Renders an actions menu (e.g., Reset/Export/Import) in the header. */
   actions?: React.ReactNode
@@ -300,6 +295,7 @@ const FILL_HEIGHT_SECTIONS = new Set<SettingsSectionId>([
   "search",
   "appearance",
   "subscription",
+  "subagents",
 ])
 
 function isSection(value: string | null): value is SettingsSectionId {
@@ -502,7 +498,7 @@ function SectionContent({ section, onClose }: { section: SettingsSectionId; onCl
     case "appearance":
       return <AppearanceSection />
     case "sidebar":
-      return <SidebarSection />
+      return <ShellLayoutSection />
     case "discover":
       return <DiscoverSection />
     case "terminal":
@@ -541,8 +537,6 @@ function SectionContent({ section, onClose }: { section: SettingsSectionId; onCl
       return <PluginsSection onClose={onClose} />
     case "connections":
       return <ConnectionsSection />
-    case "github-delivery":
-      return <GithubDeliverySection />
     case "data":
       return <DataSection />
     case "workflows":

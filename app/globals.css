@@ -374,7 +374,9 @@ html[data-pro-ide-active] [data-slot="resizable-handle"] {
   html[data-pet-overlay],
   html[data-pet-overlay] body,
   html[data-island-overlay],
-  html[data-island-overlay] body {
+  html[data-island-overlay] body,
+  html[data-selection-toolbar],
+  html[data-selection-toolbar] body {
     background: transparent !important;
   }
 
@@ -386,7 +388,8 @@ html[data-pro-ide-active] [data-slot="resizable-handle"] {
      — zeroing `background` alone can't reach that backdrop. `normal` removes the
      forced scheme backdrop; `!important` beats next-themes' inline style. */
   html[data-pet-overlay],
-  html[data-island-overlay] {
+  html[data-island-overlay],
+  html[data-selection-toolbar] {
     color-scheme: normal !important;
   }
 
@@ -398,6 +401,11 @@ html[data-pro-ide-active] [data-slot="resizable-handle"] {
      never scroll. */
   html[data-island-overlay],
   html[data-island-overlay] body {
+    overflow: hidden !important;
+  }
+
+  html[data-selection-toolbar],
+  html[data-selection-toolbar] body {
     overflow: hidden !important;
   }
 

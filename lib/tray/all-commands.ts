@@ -12,7 +12,7 @@
 import { listSlashCommands } from "@/lib/slash-commands/registry"
 import { getCommands, getCommand } from "@/lib/plugin/commands/registry"
 import { evaluateContextWhen } from "@/lib/plugin/context-keys/context-key-store"
-import { listTrayItems } from "./registry"
+import { listTrayItems, trayItemCommandId } from "./registry"
 import type { TrayActionPayload, TrayMenuItem, TrayMenuSubmenu } from "./types"
 
 /**
@@ -73,10 +73,14 @@ export function buildAllCommandsSubmenu(): TrayMenuSubmenu {
   for (const item of listTrayItems()) {
     const bucket = bucketOf(item.category, "plugins")
     buckets.get(bucket)!.push(
-      action(`tray-item:${item.id}`, item.label, {
-        kind: "command",
-        commandId: item.id,
-      })
+      action(
+        `tray-item:${item.id}`,
+        item.labelKey ? `plugin.${item.pluginId}.${item.labelKey}` : item.label,
+        {
+          kind: "command",
+          commandId: trayItemCommandId(item.id),
+        }
+      )
     )
   }
 

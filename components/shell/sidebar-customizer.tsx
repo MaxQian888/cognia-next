@@ -3,9 +3,10 @@
 /**
  * Reusable editor for the desktop left-rail (`GuildRail`) layout. Renders the
  * shared three-bucket editor (`CustomizerLists`) — Pinned (drag-reorderable),
- * More (overflow), Hidden — wired to `useSidebarLayout`. Shared by the
- * standalone customize dialog (`sidebar-customize-dialog.tsx`) and the Settings
- * section (`components/settings/sidebar/sidebar-section.tsx`).
+ * More (overflow), Hidden — wired to `useSidebarLayout`. Mounted on the
+ * "Sidebar" tab of `shell-layout-customizer.tsx`, which the standalone dialog
+ * (`shell-layout-dialog.tsx`) and the Settings section
+ * (`components/settings/sidebar/shell-layout-section.tsx`) both host.
  *
  * The dnd/row plumbing lives in `components/shell/customizer-list.tsx` so the
  * discover category customizer can reuse it verbatim.

@@ -149,6 +149,7 @@ describe("CHROME_BUDGET", () => {
       "chatHeader",
       "composerToolbar",
       "guildRail",
+      "inboxConversationHeader",
       "statusBar",
       "titleBar",
     ])

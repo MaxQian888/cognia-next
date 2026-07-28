@@ -28,16 +28,8 @@ jest.mock("next/navigation", () => ({
   useSearchParams: () => new URLSearchParams(),
 }))
 
-jest.mock("@cognia/logging", () => ({
-  loggers: {
-    ui: {
-      info: (...args: unknown[]) => logInfo(...args),
-      warn: jest.fn(),
-      error: jest.fn(),
-    },
-  },
-  // Pulled in transitively by the plugin extension slot → extension-api → core/logger.
-  createLogger: () => ({
+jest.mock("@cognia/logging", () => {
+  const stub = {
     trace: jest.fn(),
     debug: jest.fn(),
     info: jest.fn(),
@@ -50,8 +42,22 @@ jest.mock("@cognia/logging", () => ({
     withContext: function () {
       return this
     },
-  }),
-}))
+  }
+  return {
+    // A Proxy rather than a literal: the rail's customize dialog reaches
+    // `use-bar-layout` → `stores/ui/ui-store` → `lib/plugin`, which transitively
+    // touches namespaces beyond `ui` (agent, connectors, …). Enumerating them
+    // here would just be a list to keep re-growing.
+    loggers: new Proxy(
+      { ui: { ...stub, info: (...args: unknown[]) => logInfo(...args) } },
+      {
+        get: (target: Record<string, unknown>, prop: string) => target[prop] ?? stub,
+      }
+    ),
+    // Pulled in transitively by the plugin extension slot → extension-api → core/logger.
+    createLogger: () => stub,
+  }
+})
 
 jest.mock("@/components/plugins/plugin-extension-slot", () => ({
   PluginExtensionSlot: () => null,
@@ -190,7 +196,7 @@ test("opening Customize from the More popover mounts the customizer dialog", asy
   render(withTooltipProvider(<GuildRail onCreateTeam={jest.fn()} onOpenSettings={jest.fn()} />))
   await user.click(screen.getByTestId("guild-more"))
   await user.click(screen.getByTestId("guild-more-customize"))
-  expect(screen.getByTestId("sidebar-customize-dialog")).toBeInTheDocument()
+  expect(screen.getByTestId("shell-layout-dialog")).toBeInTheDocument()
   expect(screen.getByTestId("sidebar-customizer")).toBeInTheDocument()
 })
 
@@ -217,7 +223,7 @@ test("right-click context menu can open the full customizer", () => {
   render(withTooltipProvider(<GuildRail onCreateTeam={jest.fn()} onOpenSettings={jest.fn()} />))
   fireEvent.contextMenu(screen.getByLabelText("workflows"))
   fireEvent.click(screen.getByText("customize.title"))
-  expect(screen.getByTestId("sidebar-customize-dialog")).toBeInTheDocument()
+  expect(screen.getByTestId("shell-layout-dialog")).toBeInTheDocument()
 })
 
 test("the More button reflects the active state when on an overflow route", () => {

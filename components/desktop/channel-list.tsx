@@ -8,6 +8,8 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuLabel,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
@@ -47,6 +49,7 @@ import {
   type ChannelListView,
 } from "@/stores/ui"
 import { useSettingsStore } from "@/stores/settings"
+import { useProjectStore } from "@/stores/project/project-store"
 import { PerfBoundary } from "@/lib/perf"
 import { resolveConversationDrop } from "@/lib/chat/conversation-dnd"
 import {
@@ -62,16 +65,22 @@ import {
 import { SortableContext, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable"
 import { CSS } from "@dnd-kit/utilities"
 import type {
+  ConversationGroupBy,
   ConversationSidebarSettings,
   ConversationSidebarDensity,
   ConversationSearchScope,
 } from "@cognia/agent-config-types"
-import { conversationSectionKey } from "@/lib/chat/conversation-list-model"
+import { conversationSectionKey, UNGROUPED_ID } from "@/lib/chat/conversation-list-model"
 import type { DateBucket } from "@/lib/chat/conversation-list-model"
+import {
+  CONVERSATION_GROUP_BY_OPTIONS,
+  resolveConversationGroupBy,
+} from "@/lib/chat/conversation-grouping"
 import type { Character, ChatSession, SessionFolder, Team } from "@cognia/agent-config-types"
 import { filterExposedSessions } from "@/lib/chat/session-exposure"
 import {
   ArchiveIcon,
+  BotIcon,
   ChevronDownIcon,
   ChevronRightIcon,
   FolderIcon,
@@ -349,7 +358,7 @@ function ChannelListBody({
   const saveSettings = useSettingsStore((s) => s.save)
   const density: ConversationSidebarDensity = sidebarSettings?.density ?? "comfortable"
   const showPreview = sidebarSettings?.showPreview ?? false
-  const groupByDate = sidebarSettings?.groupByDate ?? true
+  const groupBy = resolveConversationGroupBy(sidebarSettings)
   const showUnreadBadges = sidebarSettings?.showUnreadBadges ?? true
   const searchScope: ConversationSearchScope = sidebarSettings?.searchScope ?? "title"
   const sidebarSettingsRef = useRef(sidebarSettings)
@@ -416,20 +425,27 @@ function ChannelListBody({
     undefined
   )
 
-  // Filter the session list by selected guild. (Phase D) Sessions with
-  // `kind === "workflow-editor"` are scoped to the workflow editor's chat
-  // tab and never surface in the main channel list — they appear ONLY
-  // inside the editor itself. `kind === "subagent"` sessions (ADR-0062) are
-  // hidden imported-subagent inner transcripts, reachable only by drilling in
-  // from a parent turn's SubagentPart — never in the list, search, or a bucket.
+  // Filter the session list by selected guild — but only under `groupBy: "team"`.
+  //
+  // The rail's Direct-messages / Team buttons are one way to organize the list,
+  // and grouping is now the general form of that idea: picking any other axis
+  // means the rail no longer decides what the list contains, so a team
+  // conversation shows up inside its workspace / date / agent section like any
+  // other. (Phase D) Sessions with `kind === "workflow-editor"` are scoped to
+  // the workflow editor's chat tab and never surface in the main channel list —
+  // they appear ONLY inside the editor itself. `kind === "subagent"` sessions
+  // (ADR-0062) are hidden imported-subagent inner transcripts, reachable only by
+  // drilling in from a parent turn's SubagentPart — never in the list, search,
+  // or a bucket.
   const filtered = useMemo(() => {
     const visible = filterExposedSessions(sessions, "main-list")
+    if (groupBy !== "team") return visible
     if (chatGuild.kind === "team") {
       return visible.filter((s) => s.kind === "team" && s.teamId === chatGuild.teamId)
     }
     // DM bucket: anything that isn't a team session.
     return visible.filter((s) => s.kind !== "team")
-  }, [sessions, chatGuild])
+  }, [sessions, chatGuild, groupBy])
 
   // Search box: keep the field value immediate but debounce the value fed
   // to the grouping model so typing doesn't re-bucket on every keystroke.
@@ -520,15 +536,34 @@ function ChannelListBody({
   // Folders only group the active view (archived chats stay in date buckets).
   const modelFolders = view === "archived" ? undefined : folders
 
+  // Group axes the model can't resolve on its own — it stays pure, so the
+  // display names come from here.
+  const projects = useProjectStore((s) => s.projects)
+  const activeProjectId = useProjectStore((s) => s.activeProjectId)
+  const workspaceGroups = useMemo(
+    () => projects.map((p) => ({ id: p.id, name: p.name })),
+    [projects]
+  )
+  const agentGroups = useMemo(
+    () => (characters ?? []).map((c) => ({ id: c.id, name: c.name })),
+    [characters]
+  )
+  const groupCollapseOverrides = useUIStore((s) => s.groupCollapseOverrides)
+  const setGroupCollapsed = useUIStore((s) => s.setGroupCollapsed)
+
   // Grouping/filtering/search now live in the shared headless model
-  // (pinned → folders → date buckets, or a flat result list while searching).
+  // (pinned → folders → the chosen axis, or a flat result list while searching).
   const { sections, total, filteredCount, orderedIds } = useConversationListModel({
     sessions: filtered,
     folders: modelFolders,
     query,
     view,
     collapsedFolderIds,
-    groupByDate,
+    groupBy,
+    workspaces: workspaceGroups,
+    agents: agentGroups,
+    activeWorkspaceId: activeProjectId,
+    groupCollapseOverrides,
     contentMatchIds: searchScope === "titleAndContent" ? contentMatchIds : undefined,
   })
 
@@ -744,7 +779,7 @@ function ChannelListBody({
           view={view}
           density={density}
           showPreview={showPreview}
-          groupByDate={groupByDate}
+          groupBy={groupBy}
           showUnreadBadges={showUnreadBadges}
           searchScope={searchScope}
           onUpdateDisplay={saveSidebarSettings}
@@ -850,6 +885,7 @@ function ChannelListBody({
                 onUnarchive={onUnarchive}
                 onAssignToFolder={onAssignToFolder}
                 onToggleFolder={toggleFolderCollapsed}
+                onToggleGroup={setGroupCollapsed}
                 onRenameFolder={onRenameFolder}
                 onDeleteFolder={onDeleteFolder}
                 onJumpToParent={handleJumpToParent}
@@ -868,7 +904,7 @@ function Header({
   view,
   density,
   showPreview,
-  groupByDate,
+  groupBy,
   showUnreadBadges,
   searchScope,
   onUpdateDisplay,
@@ -882,7 +918,7 @@ function Header({
   view: "active" | "archived"
   density: ConversationSidebarDensity
   showPreview: boolean
-  groupByDate: boolean
+  groupBy: ConversationGroupBy
   showUnreadBadges: boolean
   searchScope: ConversationSearchScope
   onUpdateDisplay: (patch: Partial<ConversationSidebarSettings>) => void
@@ -955,12 +991,21 @@ function Header({
             >
               {t("showPreview")}
             </DropdownMenuCheckboxItem>
-            <DropdownMenuCheckboxItem
-              checked={groupByDate}
-              onCheckedChange={(checked) => onUpdateDisplay({ groupByDate: Boolean(checked) })}
+            <DropdownMenuSeparator />
+            <DropdownMenuLabel className="text-xs font-normal text-muted-foreground">
+              {t("groupBy.label")}
+            </DropdownMenuLabel>
+            <DropdownMenuRadioGroup
+              value={groupBy}
+              onValueChange={(value) => onUpdateDisplay({ groupBy: value as ConversationGroupBy })}
             >
-              {t("groupByDate")}
-            </DropdownMenuCheckboxItem>
+              {CONVERSATION_GROUP_BY_OPTIONS.map((option) => (
+                <DropdownMenuRadioItem key={option} value={option}>
+                  {t(`groupBy.options.${option}`)}
+                </DropdownMenuRadioItem>
+              ))}
+            </DropdownMenuRadioGroup>
+            <DropdownMenuSeparator />
             <DropdownMenuCheckboxItem
               checked={showUnreadBadges}
               onCheckedChange={(checked) => onUpdateDisplay({ showUnreadBadges: Boolean(checked) })}
@@ -1029,6 +1074,7 @@ function ConversationSections({
   onUnarchive,
   onAssignToFolder,
   onToggleFolder,
+  onToggleGroup,
   onRenameFolder,
   onDeleteFolder,
   onJumpToParent,
@@ -1051,6 +1097,7 @@ function ConversationSections({
   onUnarchive?: (id: string) => void | Promise<void>
   onAssignToFolder?: (sessionId: string, folderId: string | null) => void | Promise<void>
   onToggleFolder: (id: string) => void
+  onToggleGroup: (key: string, collapsed: boolean) => void
   onRenameFolder?: (id: string, name: string) => void | Promise<void>
   onDeleteFolder?: (id: string) => void | Promise<void>
   onJumpToParent?: (parentSessionId: string) => void
@@ -1095,6 +1142,25 @@ function ConversationSections({
                 onToggle={() => onToggleFolder(folder.id)}
                 onRename={onRenameFolder}
                 onDelete={onDeleteFolder}
+                renderRow={renderRow}
+              />
+            )
+          }
+
+          if (section.kind === "group") {
+            const key = conversationSectionKey(section)
+            return (
+              <GroupSection
+                key={key}
+                axis={section.axis}
+                name={
+                  section.group.id === UNGROUPED_ID
+                    ? t(section.axis === "workspace" ? "ungroupedWorkspace" : "ungroupedAgent")
+                    : section.group.name
+                }
+                collapsed={section.collapsed}
+                sessions={section.sessions}
+                onToggle={() => onToggleGroup(key, !section.collapsed)}
                 renderRow={renderRow}
               />
             )
@@ -1150,6 +1216,56 @@ function SortableSessionRow(props: ComponentProps<typeof SessionRow>) {
       dragStyle={style}
       dragging={isDragging}
     />
+  )
+}
+
+/**
+ * A workspace / agent group. Deliberately not a drop target: dragging a
+ * conversation into another workspace would have to re-scope every row it owns
+ * (artifacts, terminals, memories), which is a move operation, not a reorder.
+ */
+function GroupSection({
+  axis,
+  name,
+  collapsed,
+  sessions,
+  onToggle,
+  renderRow,
+}: {
+  axis: "workspace" | "agent"
+  name: string
+  collapsed: boolean
+  sessions: ChatSession[]
+  onToggle: () => void
+  renderRow: (s: ChatSession) => ReactNode
+}) {
+  const Icon = axis === "workspace" ? FolderIcon : BotIcon
+  return (
+    <section aria-label={name}>
+      <div className="flex items-center gap-1 px-2 pb-1">
+        <button
+          type="button"
+          onClick={onToggle}
+          className="flex min-w-0 flex-1 items-center gap-1.5 text-left"
+          aria-expanded={!collapsed}
+          aria-label={name}
+        >
+          {collapsed ? (
+            <ChevronRightIcon className="size-3 shrink-0 text-muted-foreground" />
+          ) : (
+            <ChevronDownIcon className="size-3 shrink-0 text-muted-foreground" />
+          )}
+          <Icon className="size-3 shrink-0 text-muted-foreground" aria-hidden />
+          <span className="truncate text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+            {name}
+            {sessions.length > 0 ? (
+              <span className="ml-1 normal-case opacity-60">{sessions.length}</span>
+            ) : null}
+          </span>
+        </button>
+      </div>
+      {collapsed ? null : <ul className="flex flex-col gap-0.5">{sessions.map(renderRow)}</ul>}
+    </section>
   )
 }
 

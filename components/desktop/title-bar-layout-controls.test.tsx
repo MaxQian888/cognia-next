@@ -8,24 +8,19 @@ jest.mock("next-intl", () => ({
   useTranslations: () => (key: string) => key,
 }))
 
-const defaultBarItems = {
-  connectivity: true,
-  sync: true,
-  perf: false,
-  accountStatus: true,
-  usage: true,
-  workspace: true,
-  quickActions: true,
-  accountTop: true,
-}
 const mockUiState = {
   sidebarCollapsed: false,
   guildRailCollapsed: false,
   statusBarCollapsed: false,
   toggleSidebar: jest.fn(),
-  barItems: { ...defaultBarItems },
-  toggleBarItem: jest.fn(),
 }
+
+// The per-segment checkboxes moved into the shared customizer, which has its
+// own suite (`components/shell/bar-customizer.test.tsx`).
+jest.mock("@/components/shell/shell-layout-dialog", () => ({
+  ShellLayoutDialog: ({ open, surface }: { open: boolean; surface?: string }) =>
+    open ? <div data-testid="shell-layout-dialog" data-surface={surface} /> : null,
+}))
 jest.mock("@/stores/ui/ui-store", () => ({
   useUIStore: (selector: (s: typeof mockUiState) => unknown) => selector(mockUiState),
 }))
@@ -160,7 +155,7 @@ jest.mock("@cognia/logging", () => ({
 }))
 
 const mockSetTheme = jest.fn()
-const themeRef = { value: "system" as string }
+const themeRef = { value: "system" as string | undefined }
 jest.mock("next-themes", () => ({
   useTheme: () => ({ theme: themeRef.value, setTheme: mockSetTheme }),
 }))
@@ -200,8 +195,6 @@ beforeEach(() => {
   mockArtifactDockState.openBrowser.mockClear()
   mockToggleGuildRail.mockClear()
   mockToggleStatusBar.mockClear()
-  mockUiState.barItems = { ...defaultBarItems }
-  mockUiState.toggleBarItem.mockClear()
   mockSetTheme.mockClear()
   mockSetLanguage.mockReset().mockResolvedValue(undefined)
   mockSaveSettings.mockReset().mockResolvedValue(undefined)
@@ -240,8 +233,10 @@ describe("TitleBarLayoutControls", () => {
     render(<TitleBarLayoutControls />)
     expect(screen.getByTestId("title-bar-customize-layout")).toBeInTheDocument()
     const items = screen.getAllByRole("menuitemcheckbox")
-    // 5 panel toggles + 5 status-bar segments + 3 title-bar segments.
-    expect(items).toHaveLength(13)
+    // 5 panel toggles. The 8 per-segment checkboxes that used to follow them
+    // are gone: they could only toggle visibility, and a menu is the wrong
+    // place to drag things into an order.
+    expect(items).toHaveLength(5)
 
     fireEvent.click(screen.getByText("toggleGuildRail"))
     fireEvent.click(screen.getByText("toggleSidebar"))
@@ -264,24 +259,21 @@ describe("TitleBarLayoutControls", () => {
     expect(sidebarItem).toHaveAttribute("aria-checked", "true")
   })
 
-  it("wires each bar-item checkbox to toggleBarItem and reflects its state", () => {
-    mockUiState.barItems = { ...defaultBarItems, perf: false, usage: false }
+  it("no longer lists the per-segment checkboxes", () => {
     render(<TitleBarLayoutControls />)
+    for (const id of ["perf", "usage", "connectivity", "workspace", "accountTop"]) {
+      expect(screen.queryByTestId(`title-bar-item-${id}`)).toBeNull()
+    }
+  })
 
-    // Perf + usage start unchecked; the rest checked.
-    expect(screen.getByTestId("title-bar-item-perf")).toHaveAttribute("aria-checked", "false")
-    expect(screen.getByTestId("title-bar-item-usage")).toHaveAttribute("aria-checked", "false")
-    expect(screen.getByTestId("title-bar-item-connectivity")).toHaveAttribute(
-      "aria-checked",
-      "true"
-    )
-
-    fireEvent.click(screen.getByTestId("title-bar-item-perf"))
-    expect(mockUiState.toggleBarItem).toHaveBeenCalledWith("perf")
-    fireEvent.click(screen.getByTestId("title-bar-item-workspace"))
-    expect(mockUiState.toggleBarItem).toHaveBeenCalledWith("workspace")
-    fireEvent.click(screen.getByTestId("title-bar-item-accountTop"))
-    expect(mockUiState.toggleBarItem).toHaveBeenCalledWith("accountTop")
+  it("opens the shared customizer on the top-bar tab", () => {
+    render(<TitleBarLayoutControls />)
+    expect(screen.queryByTestId("shell-layout-dialog")).toBeNull()
+    fireEvent.click(screen.getByTestId("views-customize-bars"))
+    const dialog = screen.getByTestId("shell-layout-dialog")
+    expect(dialog).toBeInTheDocument()
+    // This trigger lives on the title bar, so that is the surface it opens on.
+    expect(dialog).toHaveAttribute("data-surface", "title")
   })
 
   it("reveals the browser panel — relocated from the chat header's globe button", () => {
@@ -353,10 +345,56 @@ describe("TitleBarLayoutControls", () => {
       await waitFor(() => expect(mockLogWarn).toHaveBeenCalled())
     })
 
+    // Each of the three rejection paths stringifies non-Error throws too — a
+    // rejected promise carrying a bare string must still reach the log with a
+    // readable reason rather than "[object Object]".
+    it.each([
+      [
+        "theme",
+        "views-theme-dark",
+        () => mockSaveSettings.mockRejectedValueOnce("disk full"),
+        "views theme persist failed",
+      ],
+      [
+        "locale",
+        "views-locale-zh",
+        () => mockSetLanguage.mockRejectedValueOnce("nope"),
+        "views setLanguage failed",
+      ],
+      [
+        "zoom",
+        "views-zoom-in",
+        () => mockSaveSettings.mockRejectedValueOnce("nope"),
+        "views zoom persist failed",
+      ],
+    ])("stringifies a non-Error %s failure", async (_what, testId, arrange, message) => {
+      arrange()
+      render(<TitleBarLayoutControls />)
+      fireEvent.click(screen.getByTestId(testId))
+      await waitFor(() =>
+        expect(mockLogWarn).toHaveBeenCalledWith(message, { error: expect.any(String) })
+      )
+    })
+
     it("clamps a persisted zoom that is out of range", () => {
       settingsRef.webviewZoom = 99
       render(<TitleBarLayoutControls />)
       expect(screen.getByTestId("views-zoom-value")).not.toHaveTextContent("9900%")
+    })
+
+    it("falls back to the default zoom when none is persisted", () => {
+      settingsRef.webviewZoom = undefined
+      render(<TitleBarLayoutControls />)
+      expect(screen.getByTestId("views-zoom-value")).toHaveTextContent("100%")
+    })
+
+    it("falls back to the system theme when next-themes has not rehydrated", () => {
+      themeRef.value = undefined
+      const { container } = render(<TitleBarLayoutControls />)
+      // The mocked radio item cannot report `aria-checked` (no group context),
+      // so read the group's resolved value — same convention as "marks the
+      // active theme" above.
+      expect(container.querySelector("[data-radio-value='system']")).not.toBeNull()
     })
 
     it("keeps the menu open while stepping the zoom", () => {

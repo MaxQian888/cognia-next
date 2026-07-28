@@ -1,13 +1,13 @@
 /** @jest-environment jsdom */
 import { act, renderHook } from "@testing-library/react"
-import {
-  DEFAULT_BAR_ITEMS,
-  useBarItemVisible,
-  useMemberStatus,
-  useUIStore,
-  type SelectedGuild,
-} from "./ui-store"
+import { DEFAULT_BAR_ITEMS, useMemberStatus, useUIStore, type SelectedGuild } from "./ui-store"
 import { getPluginEventHooks } from "@/lib/plugin"
+import {
+  DEFAULT_STATUS_BAR_LAYOUT,
+  DEFAULT_TITLE_BAR_LAYOUT,
+  STATUS_BAR_ITEMS,
+  TITLE_BAR_ITEMS,
+} from "@/types/shell/bars"
 
 const RESET = {
   selectedGuild: { kind: "dm" } as SelectedGuild,
@@ -228,6 +228,7 @@ describe("useUIStore", () => {
         sidebarWidth: 256,
         channelListView: "active",
         collapsedFolderIds: [],
+        groupCollapseOverrides: {},
         guildRailCollapsed: true,
         statusBarCollapsed: true,
         barItems: { ...DEFAULT_BAR_ITEMS },
@@ -346,7 +347,40 @@ describe("useUIStore", () => {
     })
   })
 
-  describe("barItems", () => {
+  // `barItems` is legacy: both bars persist a full `{ order, hidden }` layout
+  // on AppSettings now (see `@/types/shell/bars`). It survives only as the
+  // migration source `components/shell/use-bar-layout.ts` folds in once, so
+  // what matters here is that it still reads back — not that it can be written.
+  describe("barItems (legacy migration source)", () => {
+    it("exposes no setter", () => {
+      const { result } = renderHook(() => useUIStore())
+      expect((result.current as unknown as Record<string, unknown>).toggleBarItem).toBeUndefined()
+    })
+
+    it("keeps ids that match the new bar catalogs, so migration is an identity map", () => {
+      const catalogIds = new Set([
+        ...TITLE_BAR_ITEMS.map((m) => m.id),
+        ...STATUS_BAR_ITEMS.map((m) => m.id),
+      ])
+      for (const id of Object.keys(DEFAULT_BAR_ITEMS)) {
+        expect(catalogIds.has(id)).toBe(true)
+      }
+    })
+
+    it("agrees with the shipped bar layouts about what is hidden", () => {
+      // A fresh install migrates through this map, so a disagreement here would
+      // silently change the default chrome for everyone.
+      const legacyOff = Object.entries(DEFAULT_BAR_ITEMS)
+        .filter(([, on]) => !on)
+        .map(([id]) => id)
+        .sort()
+      const shippedHidden = [
+        ...DEFAULT_TITLE_BAR_LAYOUT.hidden,
+        ...DEFAULT_STATUS_BAR_LAYOUT.hidden,
+      ].sort()
+      expect(legacyOff).toEqual(shippedHidden)
+    })
+
     it("defaults to DEFAULT_BAR_ITEMS with perf off", () => {
       const { result } = renderHook(() => useUIStore())
       expect(result.current.barItems).toEqual(DEFAULT_BAR_ITEMS)
@@ -367,43 +401,11 @@ describe("useUIStore", () => {
       expect(DEFAULT_BAR_ITEMS.quickActions).toBe(false)
     })
 
-    it("toggleBarItem flips a single segment", () => {
-      const { result } = renderHook(() => useUIStore())
-      act(() => result.current.toggleBarItem("perf"))
-      expect(result.current.barItems.perf).toBe(true)
-      act(() => result.current.toggleBarItem("perf"))
-      expect(result.current.barItems.perf).toBe(false)
-      // Other segments untouched.
-      expect(result.current.barItems.connectivity).toBe(true)
-    })
-
-    it("toggleBarItem falls back to the default when the key is missing", () => {
-      const { result } = renderHook(() => useUIStore())
-      // Simulate a persisted snapshot that predates the `usage` segment.
+    it("reads back a persisted opt-out so the migration can see it", () => {
       act(() => {
-        const { usage: _omit, ...rest } = result.current.barItems
-        useUIStore.setState({ barItems: rest as typeof result.current.barItems })
+        useUIStore.setState({ barItems: { ...DEFAULT_BAR_ITEMS, usage: false } })
       })
-      act(() => result.current.toggleBarItem("usage"))
-      // Default is true → toggling yields false.
-      expect(result.current.barItems.usage).toBe(false)
-    })
-  })
-
-  describe("useBarItemVisible", () => {
-    it("reads a segment's visibility", () => {
-      const { result } = renderHook(() => useBarItemVisible("connectivity"))
-      expect(result.current).toBe(true)
-    })
-
-    it("falls back to the default for a missing key", () => {
-      act(() => {
-        const cur = useUIStore.getState().barItems
-        const { perf: _omit, ...rest } = cur
-        useUIStore.setState({ barItems: rest as typeof cur })
-      })
-      const { result } = renderHook(() => useBarItemVisible("perf"))
-      expect(result.current).toBe(false)
+      expect(useUIStore.getState().barItems.usage).toBe(false)
     })
   })
 
@@ -455,6 +457,26 @@ describe("useUIStore", () => {
       expect(result.current.channelListView).toBe("archived")
       act(() => result.current.setChannelListView("active"))
       expect(result.current.channelListView).toBe("active")
+    })
+  })
+
+  describe("groupCollapseOverrides", () => {
+    it("records an explicit choice in both directions", () => {
+      const { result } = renderHook(() => useUIStore())
+      expect(result.current.groupCollapseOverrides).toEqual({})
+      // A tri-state: absent means "use the default", which is not uniform —
+      // every workspace but the active one starts collapsed.
+      act(() => result.current.setGroupCollapsed("workspace:w1", false))
+      expect(result.current.groupCollapseOverrides).toEqual({ "workspace:w1": false })
+      act(() => result.current.setGroupCollapsed("workspace:w1", true))
+      expect(result.current.groupCollapseOverrides).toEqual({ "workspace:w1": true })
+    })
+
+    it("no-ops when the value already matches", () => {
+      act(() => useUIStore.getState().setGroupCollapsed("agent:a1", true))
+      const before = useUIStore.getState().groupCollapseOverrides
+      act(() => useUIStore.getState().setGroupCollapsed("agent:a1", true))
+      expect(useUIStore.getState().groupCollapseOverrides).toBe(before)
     })
   })
 

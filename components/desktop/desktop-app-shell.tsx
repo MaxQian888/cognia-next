@@ -54,11 +54,14 @@ const BYPASS_PREFIXES = [
   "/pet-overlay",
   "/pet-popup",
   "/island",
+  "/selection-toolbar",
 ]
 
 export function isShellBypassRoute(pathname: string | null | undefined): boolean {
   if (!pathname) return false
-  return BYPASS_PREFIXES.some((p) => pathname === p || pathname.startsWith(p + "/"))
+  return BYPASS_PREFIXES.some(
+    (p) => pathname === p || pathname === `${p}.html` || pathname.startsWith(p + "/")
+  )
 }
 
 export function DesktopAppShell({ children }: { children: React.ReactNode }) {

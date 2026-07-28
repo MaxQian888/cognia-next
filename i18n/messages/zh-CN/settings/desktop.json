@@ -36,6 +36,17 @@
   "revealDataDir": "打开数据目录",
   "revealFailed": "无法打开数据目录：{error}",
   "schedulerBackgroundHint": "定时任务（聊天、智能体、脚本）仅在 Cognia 运行时执行。开启“登录时启动”并将关闭按钮设为“最小化到托盘”，即可让它们在后台持续触发。",
+  "selectionToolbar": {
+    "description": "在受支持的 macOS 和 Windows 应用中划词后显示紧凑工具栏。",
+    "disabledApps": "禁用的应用",
+    "disabledAppsHint": "每行输入一个应用名称。候选文本和窗口标题仅保存在内存中。",
+    "disabledAppsPlaceholder": "1Password\nAuthy",
+    "enableFailed": "无法启用划词工具栏",
+    "permissionHint": "macOS 需要辅助功能和输入监控权限；Cognia 不申请屏幕录制权限。",
+    "saveDisabledApps": "保存应用列表",
+    "title": "系统划词工具栏",
+    "toggle": "切换系统划词工具栏"
+  },
   "subtitle": "仅在原生桌面 App 运行时生效的设置。",
   "system": "系统",
   "tauriDocs": "Tauri 文档",

@@ -22,6 +22,7 @@ const BUILT_IN_DEFAULTS: Array<{ id: string; chord: Chord; label: string }> = [
   { id: "tray.show", chord: "ctrl+shift+space", label: "Show / hide window" },
   { id: "tray.open-logs", chord: "ctrl+shift+l", label: "Open log panel" },
   { id: "tray.automation-kill", chord: "ctrl+alt+k", label: "Automation kill switch" },
+  { id: "selection.captureClipboard", chord: "alt+shift+c", label: "" },
 ]
 
 /**
@@ -148,7 +149,10 @@ export function ShortcutsSection() {
   const rows: Array<{ id: string; label: string; chord: Chord | null; hasDefault: boolean }> = [
     ...BUILT_IN_DEFAULTS.map((def) => ({
       id: def.id,
-      label: def.label,
+      label:
+        def.id === "selection.captureClipboard"
+          ? t("selectionCaptureClipboard", { fallback: "Capture copied selection" })
+          : def.label,
       chord: bindings[def.id] ?? def.chord,
       hasDefault: true,
     })),

@@ -1,14 +1,24 @@
 "use client"
 
 /**
- * Shared three-bucket layout editor (Pinned / More / Hidden) used by both the
- * desktop nav-rail customizer (`sidebar-customizer.tsx`) and the discover
- * category customizer (`components/discover/discover-customizer.tsx`).
+ * Shared layout editor used by every catalog-style customizer in the app: the
+ * desktop nav rail (`sidebar-customizer.tsx`), the discover categories
+ * (`components/discover/discover-customizer.tsx`) and the two window bars
+ * (`bar-customizer.tsx`).
  *
- * The two used to be the same ~350 lines of dnd-kit plumbing duplicated; this
+ * They used to be the same ~350 lines of dnd-kit plumbing duplicated; this
  * module owns it once. Callers pass their resolved buckets (as generic
  * `{ id, Icon, label }` items), the mutation handlers, and a `testIdPrefix` so
  * existing test ids stay stable per surface.
+ *
+ * ## Three buckets or two
+ *
+ * Surfaces with an overflow home (the rail's "More" popover, the discover
+ * overflow row) pass `overflow` and get the three-bucket editor. A window bar
+ * has no third home — a segment is in the bar or it is not — so it omits
+ * `overflow`, and the More section plus the per-row "move to More" action drop
+ * out. `onPin` is optional for the same reason: with two buckets, unhiding is
+ * the only way back in.
  *
  * dnd-kit setup mirrors `components/settings/ocr/tabs/ocr-platform-overrides-tab.tsx`.
  */
@@ -49,54 +59,88 @@ export interface CustomizerItem {
   id: string
   Icon: React.ComponentType<{ className?: string }>
   label: string
+  /**
+   * Optional trailing annotation, rendered as a muted badge after the label.
+   * The bar customizers use it for the item's zone ("Left" / "Centre" /
+   * "Right"), which is what makes a drag that crosses a zone boundary
+   * understandable rather than mysterious.
+   */
+  hint?: string
 }
 
-/** Localized strings — supplied by the caller from its own i18n namespace. */
+/** Localized strings every editor needs, from the caller's i18n namespace. */
 export interface CustomizerLabels {
   restoreDefaults: string
   pinned: string
   dragHint: string
   pinnedEmpty: string
-  more: string
-  moreEmpty: string
   hidden: string
   hiddenEmpty: string
-  moveToMore: string
   hideItem: string
-  pin: string
   showItem: string
 }
 
-export interface CustomizerListsProps {
+/** The extra strings the three-bucket editor's "More" section needs. */
+export interface CustomizerOverflowLabels extends CustomizerLabels {
+  more: string
+  moreEmpty: string
+  moveToMore: string
+  pin: string
+}
+
+interface CustomizerListsBaseProps {
   pinned: CustomizerItem[]
-  overflow: CustomizerItem[]
   hidden: CustomizerItem[]
   isDefault: boolean
-  labels: CustomizerLabels
   /** Prefix for every `data-testid` so each surface keeps stable ids. */
   testIdPrefix: string
   onReorderPinned: (ids: string[]) => void
-  onPin: (id: string) => void
-  onUnpin: (id: string) => void
   onHide: (id: string) => void
   onShow: (id: string) => void
   onReset: () => void
 }
 
-export function CustomizerLists({
-  pinned,
-  overflow,
-  hidden,
-  isDefault,
-  labels,
-  testIdPrefix,
-  onReorderPinned,
-  onPin,
-  onUnpin,
-  onHide,
-  onShow,
-  onReset,
-}: CustomizerListsProps): React.ReactElement {
+/**
+ * Two shapes, so the impossible middles cannot be constructed: a three-bucket
+ * editor must supply the overflow bucket, its two handlers AND its four extra
+ * strings together, and a two-bucket editor supplies none of them.
+ */
+export type CustomizerListsProps = CustomizerListsBaseProps &
+  (
+    | {
+        /** Three buckets — the surface has a "More" home. */
+        overflow: CustomizerItem[]
+        labels: CustomizerOverflowLabels
+        onPin: (id: string) => void
+        onUnpin: (id: string) => void
+      }
+    | {
+        /** Two buckets — an item is in the surface or it is not. */
+        overflow?: never
+        labels: CustomizerLabels
+        onPin?: never
+        onUnpin?: never
+      }
+  )
+
+export function CustomizerLists(props: CustomizerListsProps): React.ReactElement {
+  const {
+    pinned,
+    hidden,
+    isDefault,
+    labels,
+    testIdPrefix,
+    onReorderPinned,
+    onHide,
+    onShow,
+    onReset,
+  } = props
+  // One narrowing for the whole render: either the caller opted into the
+  // three-bucket editor (bucket + handlers + strings, all present together) or
+  // it did not. Re-checking `props.overflow` at each use site would force TS to
+  // re-narrow `labels` too.
+  const withOverflow = props.overflow ? props : null
+
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
@@ -143,9 +187,15 @@ export function CustomizerLists({
                     key={item.id}
                     item={item}
                     testIdPrefix={testIdPrefix}
-                    moveLabel={labels.moveToMore}
                     hideLabel={labels.hideItem}
-                    onMoveToMore={() => onUnpin(item.id)}
+                    moveToMore={
+                      withOverflow
+                        ? {
+                            label: withOverflow.labels.moveToMore,
+                            onClick: () => withOverflow.onUnpin(item.id),
+                          }
+                        : undefined
+                    }
                     onHide={() => onHide(item.id)}
                   />
                 ))}
@@ -155,30 +205,37 @@ export function CustomizerLists({
         )}
       </ListSection>
 
-      <ListSection title={labels.more}>
-        {overflow.length === 0 ? (
-          <EmptyRow label={labels.moreEmpty} />
-        ) : (
-          <ul className="space-y-1">
-            {overflow.map((item) => (
-              <StaticRow
-                key={item.id}
-                item={item}
-                testIdPrefix={testIdPrefix}
-                actions={[
-                  { key: "pin", label: labels.pin, Icon: PinIcon, onClick: () => onPin(item.id) },
-                  {
-                    key: "hide",
-                    label: labels.hideItem,
-                    Icon: EyeOffIcon,
-                    onClick: () => onHide(item.id),
-                  },
-                ]}
-              />
-            ))}
-          </ul>
-        )}
-      </ListSection>
+      {withOverflow ? (
+        <ListSection title={withOverflow.labels.more}>
+          {withOverflow.overflow.length === 0 ? (
+            <EmptyRow label={withOverflow.labels.moreEmpty} />
+          ) : (
+            <ul className="space-y-1">
+              {withOverflow.overflow.map((item) => (
+                <StaticRow
+                  key={item.id}
+                  item={item}
+                  testIdPrefix={testIdPrefix}
+                  actions={[
+                    {
+                      key: "pin",
+                      label: withOverflow.labels.pin,
+                      Icon: PinIcon,
+                      onClick: () => withOverflow.onPin(item.id),
+                    },
+                    {
+                      key: "hide",
+                      label: labels.hideItem,
+                      Icon: EyeOffIcon,
+                      onClick: () => onHide(item.id),
+                    },
+                  ]}
+                />
+              ))}
+            </ul>
+          )}
+        </ListSection>
+      ) : null}
 
       <ListSection title={labels.hidden}>
         {hidden.length === 0 ? (
@@ -198,7 +255,16 @@ export function CustomizerLists({
                     Icon: EyeIcon,
                     onClick: () => onShow(item.id),
                   },
-                  { key: "pin", label: labels.pin, Icon: PinIcon, onClick: () => onPin(item.id) },
+                  ...(withOverflow
+                    ? [
+                        {
+                          key: "pin",
+                          label: withOverflow.labels.pin,
+                          Icon: PinIcon,
+                          onClick: () => withOverflow.onPin(item.id),
+                        },
+                      ]
+                    : []),
                 ]}
               />
             ))}
@@ -311,6 +377,14 @@ function RowLabel({ item }: { item: CustomizerItem }) {
     <>
       <item.Icon className="size-4 shrink-0 text-muted-foreground" />
       <span className="flex-1 truncate text-sm">{item.label}</span>
+      {item.hint ? (
+        <span
+          className="shrink-0 rounded-sm bg-muted px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground"
+          data-testid={`customizer-hint-${item.id}`}
+        >
+          {item.hint}
+        </span>
+      ) : null}
     </>
   )
 }
@@ -318,16 +392,15 @@ function RowLabel({ item }: { item: CustomizerItem }) {
 function PinnedRow({
   item,
   testIdPrefix,
-  moveLabel,
   hideLabel,
-  onMoveToMore,
+  moveToMore,
   onHide,
 }: {
   item: CustomizerItem
   testIdPrefix: string
-  moveLabel: string
   hideLabel: string
-  onMoveToMore: () => void
+  /** Present only in the three-bucket editor — label and handler travel together. */
+  moveToMore?: { label: string; onClick: () => void }
   onHide: () => void
 }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
@@ -355,11 +428,13 @@ function PinnedRow({
         <GripVerticalIcon className="size-4" />
       </button>
       <RowLabel item={item} />
-      <IconAction
-        action={{ key: "unpin", label: moveLabel, Icon: EllipsisIcon, onClick: onMoveToMore }}
-        itemId={item.id}
-        testIdPrefix={testIdPrefix}
-      />
+      {moveToMore ? (
+        <IconAction
+          action={{ key: "unpin", Icon: EllipsisIcon, ...moveToMore }}
+          itemId={item.id}
+          testIdPrefix={testIdPrefix}
+        />
+      ) : null}
       <IconAction
         action={{ key: "hide", label: hideLabel, Icon: EyeOffIcon, onClick: onHide }}
         itemId={item.id}

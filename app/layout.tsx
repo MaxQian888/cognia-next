@@ -41,6 +41,7 @@ import { OcrRuntimeInitializer } from "@/components/providers/initializers/ocr-r
 import { ProviderCostMirrorInitializer } from "@/components/providers/initializers/provider-cost-mirror-initializer"
 import { WindowTitleInitializer } from "@/components/providers/initializers/window-title-initializer"
 import { ContextKeysInitializer } from "@/components/providers/initializers/context-keys-initializer"
+import { SessionFocusInitializer } from "@/components/providers/initializers/session-focus-initializer"
 import { AppShortcutDispatcher } from "@/components/providers/app-shortcut-dispatcher"
 import { DeferredBootInitializers } from "@/components/providers/initializers/deferred-boot-initializers"
 import { WindowLivenessInitializers } from "@/components/providers/initializers/window-liveness-initializers"
@@ -69,6 +70,10 @@ import { PluginModalRoot } from "@/components/plugins/dialogs/plugin-modal-root"
 import { PluginConsentOverlay } from "@/components/plugins/dialogs/plugin-consent-overlay"
 import { PluginEnableFailureToaster } from "@/components/plugins/plugin-enable-failure-toaster"
 import { PluginErrorToaster } from "@/components/plugins/plugin-error-toaster"
+import { SettingsLoadFailedBanner } from "@/components/error/settings-load-failed-banner"
+import { DbUpgradeBlockedDialog } from "@/components/error/db-upgrade-blocked-dialog"
+import { DiagnosticNotifier } from "@/components/error/diagnostic-notifier"
+import { PluginSurfaceReferenceHarness } from "@/app/e2e/plugin-ui-surfaces/plugin-surface-reference-harness"
 import { WorkflowRunToaster } from "@/components/workflow/runs/workflow-run-toaster"
 import { OrchestrationDispatchProvider } from "@/components/providers/orchestration-dispatch-provider"
 import { SubscriptionUsageProvider } from "@/components/providers/subscription-usage-provider"
@@ -160,6 +165,12 @@ export default async function RootLayout({
           >
             <AccountStoreInitializer />
             <LocaleGate>
+              {process.env.NEXT_PUBLIC_E2E === "1" ? (
+                <>
+                  <PluginRuntimeInitializer />
+                  <PluginSurfaceReferenceHarness />
+                </>
+              ) : null}
               {/* Reveals the hidden Tauri main window on first paint and starts
                   the white-screen watchdog heartbeat. Mounted ABOVE AccountGate
                   so a locked / first-run cold boot (which never renders the
@@ -167,6 +178,13 @@ export default async function RootLayout({
                   immediately instead of an 8-second black window. Inside
                   LocaleGate because the heartbeat consumes i18n. */}
               <WindowLivenessInitializers />
+              {/* A stuck Dexie schema upgrade hangs boot before AccountGate ever
+                  renders its children, so this sits ABOVE the gate for the same
+                  reason WindowLivenessInitializers does — otherwise the one
+                  screen explaining the freeze would itself be unreachable.
+                  Inside LocaleGate because it needs i18n. Renders null until
+                  `getDb()` actually gives up. */}
+              <DbUpgradeBlockedDialog />
               <AccountGate>
                 <SettingsHydrator />
                 <AccountAutoLock />
@@ -214,6 +232,10 @@ export default async function RootLayout({
                         <ProjectKnowledgeWorkerInitializer />
                         <ProviderCostMirrorInitializer />
                         <ContextKeysInitializer />
+                        {/* Drops the right rail's conversation-shaped leftovers
+                         * (reveal intents, workspace target, artifact-list
+                         * filters) whenever the focused conversation changes. */}
+                        <SessionFocusInitializer />
                         {/* Single keydown listener for all rebindable in-app
                          * (renderer-scope) shortcuts. Reads the context-key
                          * store, so it mounts after ContextKeysInitializer. */}
@@ -311,6 +333,12 @@ export default async function RootLayout({
                          * `lib/plugin/error-bus.ts`. Coexists with the narrower
                          * enable-failure toaster above. */}
                         <PluginErrorToaster />
+                        {/* Sink for diagnostics raised outside React (storage,
+                         * Tauri transport, health probes). Resolves the code to
+                         * localized text and files it through the notification
+                         * center. Additive — it does not intercept the paths
+                         * that already surface their own errors. */}
+                        <DiagnosticNotifier />
                         {/* Global live progress for workflow runs started outside
                          * the editor (library Run button, /workflow chat command,
                          * IM/API). Editor/run-list runs keep their own inline
@@ -335,6 +363,12 @@ export default async function RootLayout({
                         {/* Modal for the agent's `ask_user` tool — self-hides when
                          * no prompt is pending. */}
                         <AskUserDialog />
+                        {/* Persistent notice when `settings.load()` fell back to
+                         * DEFAULTS. Self-hides unless the store's `loadFailed`
+                         * flag is set, so it costs one selector in the normal
+                         * case. Above <Toaster /> so a transient toast never
+                         * paints over a condition that lasts the whole session. */}
+                        <SettingsLoadFailedBanner />
                         <Toaster />
                         {/* Capacitor-only boot surfaces (splash). Consolidated +
                          * runtime-gated + dynamically imported; the browser/Tauri

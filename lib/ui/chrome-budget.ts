@@ -133,6 +133,20 @@ export const CHROME_BUDGET = {
   chatHeader: 2,
   /** `components/chat/composer/bottom-toolbar.tsx` — wide (non-compact) branch. */
   composerToolbar: 5,
+  /**
+   * `components/inbox/conversation-header.tsx`, desktop branch. Five of these
+   * are the strip proper — platform badge, mode switcher, `⋯` overflow,
+   * artifact-dock toggle, overrides gear — plus the back button and sidebar
+   * trigger, which are `md:hidden` but still in the DOM (`countControls` reads
+   * the tree, not the cascade).
+   *
+   * This was ~20 before the overflow popover landed. The row laid every
+   * control out flat, and because `buttonVariants` / `badgeVariants` bake
+   * `shrink-0` into their base, none of them compressed — the strip ran past
+   * the pane, which `ResizablePanel` clips, so the trailing gear was
+   * unreachable. Adding a control back here re-opens that failure mode.
+   */
+  inboxConversationHeader: 7,
 } as const
 
 export type ChromeBudgetBand = keyof typeof CHROME_BUDGET

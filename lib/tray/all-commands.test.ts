@@ -72,6 +72,23 @@ describe("buildAllCommandsSubmenu", () => {
     }
   })
 
+  it("emits plugin i18n keys for localized tray items", () => {
+    registerTrayItem({
+      id: "shot:capture",
+      pluginId: "shot",
+      label: "Capture Area",
+      labelKey: "tray.capture",
+    })
+
+    const root = buildAllCommandsSubmenu()
+    const plugins = root.items.find(
+      (item) => item.kind === "submenu" && item.label === "tray.categories.plugins"
+    )
+    expect(plugins?.kind === "submenu" ? plugins.items : []).toEqual(
+      expect.arrayContaining([expect.objectContaining({ label: "plugin.shot.tray.capture" })])
+    )
+  })
+
   it("sorts items alphabetically within each bucket", () => {
     for (const name of ["zeta", "alpha", "mid"]) {
       registerSlashCommand({

@@ -9,11 +9,13 @@
 // "All Commands ▶ Plugins" submenu.
 
 import { loggers } from "@cognia/logging"
+import { registerCommand } from "@/lib/plugin/commands/registry"
 
 export interface PluginTrayItem {
   id: string
   pluginId: string
   label: string
+  labelKey?: string
   icon?: string
   /** when-expression evaluated by `lib/tray/when.ts` before flushing. */
   when?: string
@@ -21,11 +23,15 @@ export interface PluginTrayItem {
   category?: string
   /** Optional shortcut hint, cosmetic in the OS menu. */
   accelerator?: string
+  command?: string
+  slash?: string
+  run?: () => void | Promise<void>
 }
 
 type Listener = (snapshot: PluginTrayItem[]) => void
 
 const items = new Map<string, PluginTrayItem>()
+const commandDisposers = new Map<string, () => void>()
 const listeners = new Set<Listener>()
 
 function emit(): void {
@@ -46,12 +52,38 @@ export function registerTrayItem(item: PluginTrayItem): void {
   if (!item.id) throw new Error("registerTrayItem: id is required")
   if (!item.pluginId) throw new Error("registerTrayItem: pluginId is required")
   items.set(item.id, item)
+  commandDisposers.get(item.id)?.()
+  commandDisposers.set(
+    item.id,
+    registerCommand({
+      id: trayItemCommandId(item.id),
+      title: item.label,
+      category: item.category ?? "plugins",
+      pluginId: item.pluginId,
+      when: item.when,
+      handler: async () => {
+        if (item.run) {
+          await item.run()
+        } else if (item.command) {
+          const { executeCommand } = await import("@/lib/plugin/commands/registry")
+          await executeCommand(item.command)
+        } else if (item.slash) {
+          const { dispatchSlashCommand } = await import("@/lib/slash-commands/registry")
+          await dispatchSlashCommand(item.slash.startsWith("/") ? item.slash : `/${item.slash}`)
+        }
+      },
+    })
+  )
   emit()
 }
 
 export function unregisterTrayItem(id: string): boolean {
   const removed = items.delete(id)
-  if (removed) emit()
+  if (removed) {
+    commandDisposers.get(id)?.()
+    commandDisposers.delete(id)
+    emit()
+  }
   return removed
 }
 
@@ -65,6 +97,8 @@ export function unregisterTrayItemsByPlugin(pluginId: string): number {
   for (const [id, item] of items) {
     if (item.pluginId === pluginId) {
       items.delete(id)
+      commandDisposers.get(id)?.()
+      commandDisposers.delete(id)
       removed++
     }
   }
@@ -93,6 +127,12 @@ export function subscribeTrayItems(listener: Listener): () => void {
 
 /** Test-only escape hatch. */
 export function __resetTrayRegistryForTesting(): void {
+  for (const dispose of commandDisposers.values()) dispose()
+  commandDisposers.clear()
   items.clear()
   listeners.clear()
+}
+
+export function trayItemCommandId(itemId: string): string {
+  return `_tray:${itemId}`
 }

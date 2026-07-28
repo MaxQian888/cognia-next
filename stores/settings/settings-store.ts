@@ -9,6 +9,8 @@ import type {
   UpdateSettings,
 } from "@cognia/agent-config-types"
 import { DEFAULT_BUILTIN_TOOLS, DEFAULT_UPDATE_SETTINGS } from "@cognia/agent-config-types"
+import { createDiagnostic } from "@cognia/diagnostics"
+import { dispatchDiagnostic } from "@/lib/diagnostics/bus"
 import type { ColorThemePreset, CustomTheme } from "@/types/plugin/plugin"
 import type {
   AutoModeSettings,
@@ -92,6 +94,25 @@ import {
 interface SettingsState {
   settings: AppSettings | null
   loaded: boolean
+  /**
+   * True when `load()` fell back to `DEFAULTS` because the Dexie read threw.
+   *
+   * This is NOT cosmetic. Without it the whole session silently runs on default
+   * settings — no provider, no API key, no theme — and the user has no way to
+   * tell that from "I never configured this". The flag drives
+   * `components/error/settings-load-failed-banner.tsx`, which stays on screen
+   * until a retry succeeds.
+   *
+   * Note that persistence itself stays safe while this is set: `saveSettings`
+   * re-reads the row from Dexie inside its retry wrapper and merges the patch
+   * onto *that*, never onto the in-memory defaults — so a write cannot clobber
+   * the real settings. The damage is purely that the session runs blind.
+   */
+  loadFailed: boolean
+  /** Raw failure text for the banner's diagnostics / crash report. */
+  loadError: string | null
+  /** Clear `loadFailed` and re-run `load()`. Resolves once the retry settles. */
+  retryLoad: () => Promise<void>
   /**
    * In-memory mirror of the OS keyring (Tauri) or web-fallback Dexie store
    * for TTS provider API keys. Populated lazily on first TTS use (or when the
@@ -412,6 +433,38 @@ const DEFAULTS: AppSettings = {
   canvasCodeSandboxEnabled: true,
 }
 
+/**
+ * Both of these used to be `console.warn` and nothing else, which made their
+ * user-visible consequences invisible:
+ *
+ *  - a proxy that failed to reach the Rust side means outgoing requests are
+ *    silently NOT going through the proxy the user configured — a privacy
+ *    consequence, not a cosmetic one;
+ *  - a sidecar that failed to restart keeps serving the OLD environment, so a
+ *    just-changed API key or base URL appears to have had no effect.
+ *
+ * They stay non-throwing (both are fire-and-forget side effects of a save that
+ * already succeeded) but now raise a diagnostic that reaches the notification
+ * center.
+ */
+function reportProxyFailure(err: unknown): void {
+  dispatchDiagnostic(
+    createDiagnostic("proxyApplyFailed", {
+      source: "settings",
+      message: err instanceof Error ? err.message : String(err),
+    })
+  )
+}
+
+function reportSidecarRestartFailure(err: unknown): void {
+  dispatchDiagnostic(
+    createDiagnostic("sidecarUnreachable", {
+      source: "settings",
+      message: err instanceof Error ? err.message : String(err),
+    })
+  )
+}
+
 async function syncApiKeyToTauri(key: string | null | undefined) {
   if (!isTauri()) return
   try {
@@ -443,7 +496,10 @@ function scheduleAnthropicSidecarRestart(apiKey: string | null, baseURL: string 
   if (anthropicEnvRestartTimer) clearTimeout(anthropicEnvRestartTimer)
   anthropicEnvRestartTimer = setTimeout(() => {
     anthropicEnvRestartTimer = null
-    restartSidecar().catch((err) => console.warn("restartSidecar failed", err))
+    restartSidecar().catch((err) => {
+      console.warn("restartSidecar failed", err)
+      reportSidecarRestartFailure(err)
+    })
   }, ANTHROPIC_ENV_RESTART_DEBOUNCE_MS)
 }
 
@@ -639,6 +695,8 @@ export const useSettingsStore = create<SettingsState>((rawSet, get) => {
   return {
     settings: null,
     loaded: false,
+    loadFailed: false,
+    loadError: null,
     providerKeys: {},
     providerKeysLoaded: false,
     ...deriveFlatPluginFields(null),
@@ -667,7 +725,7 @@ export const useSettingsStore = create<SettingsState>((rawSet, get) => {
         if (Object.keys(patch).length > 0) {
           await saveSettings(patch)
         }
-        set({ settings: s, loaded: true })
+        set({ settings: s, loaded: true, loadFailed: false, loadError: null })
         // Push the API key to the Rust process on first load. The user expects
         // their previously-entered key to be active without a manual save.
         if (s.apiKey) {
@@ -687,14 +745,32 @@ export const useSettingsStore = create<SettingsState>((rawSet, get) => {
             void maybeAutoDetectProxy()
           } catch (err) {
             console.warn("networkProxy.applyToRust failed", err)
+            // Outgoing requests are now bypassing a proxy the user configured.
+            // That is a privacy consequence, not a cosmetic one.
+            reportProxyFailure(err)
           }
         }
         // TTS provider keys are loaded lazily (see `ensureProviderKeys`), NOT
         // here — keeping the `1 + N` keyring round-trips off the boot path.
       } catch (err) {
+        // Falling back to DEFAULTS keeps the app usable, but running the whole
+        // session on defaults without telling anyone is how a user loses an
+        // afternoon wondering where their provider went. Record the failure so
+        // `SettingsLoadFailedBanner` can say so and offer a retry.
         console.error("settings.load failed", err)
-        set({ settings: DEFAULTS, loaded: true })
+        set({
+          settings: DEFAULTS,
+          loaded: true,
+          loadFailed: true,
+          loadError: err instanceof Error ? err.message : String(err),
+        })
       }
+    },
+
+    retryLoad: async () => {
+      // `load()` early-returns on `loaded`, so clear both flags first.
+      set({ loaded: false, loadFailed: false, loadError: null })
+      await get().load()
     },
 
     save: async (patch) => {
@@ -709,6 +785,7 @@ export const useSettingsStore = create<SettingsState>((rawSet, get) => {
           await applyProxyToRust(next.networkProxy)
         } catch (err) {
           console.warn("networkProxy.applyToRust failed", err)
+          reportProxyFailure(err)
         }
       }
     },
@@ -820,6 +897,7 @@ export const useSettingsStore = create<SettingsState>((rawSet, get) => {
           await restartSidecar()
         } catch (err) {
           console.warn("restartSidecar failed", err)
+          reportSidecarRestartFailure(err)
         }
       }
     },

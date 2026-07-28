@@ -10,18 +10,24 @@ import {
   WorkflowIcon,
 } from "lucide-react"
 
-import { CustomizerLists, type CustomizerItem } from "./customizer-list"
+import {
+  CustomizerLists,
+  type CustomizerItem,
+  type CustomizerListsProps,
+  type CustomizerOverflowLabels,
+} from "./customizer-list"
 
-// Pure three-bucket layout editor (Pinned drag-reorderable / More / Hidden)
-// shared by the nav-rail customizer and the discover customizer. All data +
-// handlers come from props.
+// Pure layout editor shared by the nav-rail / discover customizers (three
+// buckets: Pinned drag-reorderable / More / Hidden) and the window-bar
+// customizers (two buckets: In the bar / Hidden). All data + handlers come from
+// props.
 const item = (id: string, label: string, Icon: CustomizerItem["Icon"]): CustomizerItem => ({
   id,
   label,
   Icon,
 })
 
-const LABELS = {
+const LABELS: CustomizerOverflowLabels = {
   restoreDefaults: "Restore defaults",
   pinned: "Pinned",
   dragHint: "Drag to reorder",
@@ -68,7 +74,10 @@ const meta = {
 } satisfies Meta<typeof CustomizerLists>
 
 export default meta
-type Story = StoryObj<typeof meta>
+// The props are a discriminated union (three buckets vs two), which Storybook's
+// `StoryObj<typeof meta>` collapses to `never` when a story overrides args. Pin
+// the arg type to the union itself instead.
+type Story = StoryObj<CustomizerListsProps>
 
 export const Populated: Story = {}
 
@@ -79,4 +88,19 @@ export const IsDefault: Story = {
 
 export const AllEmpty: Story = {
   args: { pinned: [], overflow: [], hidden: [], isDefault: true },
+}
+
+// The two-bucket shape the window bars use: no More section, and no per-row
+// "move to More" / "pin" actions.
+export const TwoBuckets: Story = {
+  args: {
+    overflow: undefined,
+    onPin: undefined,
+    onUnpin: undefined,
+    pinned: [
+      item("inbox", "Inbox", InboxIcon),
+      item("dashboard", "Dashboard", LayoutDashboardIcon),
+    ],
+    hidden: [item("eval", "Eval", FlaskConicalIcon)],
+  },
 }

@@ -19,6 +19,7 @@ import { invoke } from "@tauri-apps/api/core"
 import { loggers } from "@cognia/logging"
 import { useSettingsStore } from "@/stores/settings/settings-store"
 import { TraySection } from "./tray-section"
+import { SelectionToolbarSettings } from "./selection-toolbar-settings"
 
 /**
  * Desktop-only preferences. Combined surface for autostart, system info, and
@@ -232,6 +233,8 @@ export function DesktopSection() {
           </RadioGroup>
         </div>
       </section>
+
+      <SelectionToolbarSettings />
 
       <section className="space-y-3 rounded-md border p-4">
         <div className="flex items-start justify-between gap-4">

@@ -34,6 +34,7 @@ import { useTranslations } from "next-intl"
 import { usePathname, useRouter } from "next/navigation"
 import { AvatarBadge } from "@/components/desktop/avatar-badge"
 import { PluginExtensionSlot } from "@/components/plugins/plugin-extension-slot"
+import { resolvePluginLabel } from "@/lib/plugin/i18n/plugin-label"
 import { ResolvedRailIcon } from "@/components/shell/plugin-view-container-panel"
 import {
   getViewContainerSnapshot,
@@ -45,7 +46,7 @@ import {
   subscribeContextKeys,
 } from "@/lib/plugin/context-keys/context-key-store"
 import { useSidebarLayout } from "./use-sidebar-layout"
-import { SidebarCustomizeDialog } from "./sidebar-customize-dialog"
+import { ShellLayoutDialog } from "./shell-layout-dialog"
 import { WorkspaceSwitcher } from "./workspace-switcher"
 import type { SidebarCatalogItem } from "@/lib/shell/sidebar-nav"
 
@@ -87,6 +88,7 @@ interface Props {
  */
 export function GuildRail({ onCreateTeam, onOpenSettings, variant = "rail" }: Props) {
   const t = useTranslations("desktop.guildRail")
+  const pluginT = useTranslations()
   const router = useRouter()
   const pathname = usePathname() ?? "/"
   const selected = useUIStore((s) => s.selectedGuild)
@@ -194,20 +196,30 @@ export function GuildRail({ onCreateTeam, onOpenSettings, variant = "rail" }: Pr
             <PencilRulerIcon className="size-5" />
           </RailButton>
 
-          {railContainers.map((c) => (
-            <RailButton
-              key={c.fullId}
-              active={
-                onHomeRoute && selected.kind === "plugin-view" && selected.containerId === c.fullId
-              }
-              ariaLabel={c.def.title}
-              tooltip={c.def.title}
-              onClick={() => switchToViewContainer(c.fullId)}
-              testId={`guild-view-container-${c.fullId}`}
-            >
-              <ResolvedRailIcon name={c.def.icon} className="size-5" />
-            </RailButton>
-          ))}
+          {railContainers.map((c) => {
+            const title = resolvePluginLabel(
+              pluginT as never,
+              c.pluginId,
+              c.def.titleKey,
+              c.def.title
+            )
+            return (
+              <RailButton
+                key={c.fullId}
+                active={
+                  onHomeRoute &&
+                  selected.kind === "plugin-view" &&
+                  selected.containerId === c.fullId
+                }
+                ariaLabel={title}
+                tooltip={title}
+                onClick={() => switchToViewContainer(c.fullId)}
+                testId={`guild-view-container-${c.fullId}`}
+              >
+                <ResolvedRailIcon name={c.def.icon} className="size-5" />
+              </RailButton>
+            )
+          })}
 
           <Separator className="my-1 w-8" aria-label={t("featuresGroup")} />
 
@@ -320,7 +332,7 @@ export function GuildRail({ onCreateTeam, onOpenSettings, variant = "rail" }: Pr
         className="mt-2 flex flex-col items-center gap-2 empty:hidden"
       />
 
-      <SidebarCustomizeDialog open={customizeOpen} onOpenChange={setCustomizeOpen} />
+      <ShellLayoutDialog open={customizeOpen} onOpenChange={setCustomizeOpen} surface="sidebar" />
     </aside>
   )
 }

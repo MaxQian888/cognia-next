@@ -32,7 +32,7 @@ export const RegisteredEmpty: Story = {
   beforeEach: () => {
     __resetViewContainersForTesting()
     registerViewContainer(
-      { id: "files", title: "Project Files", icon: "folder-tree", location: "panel" },
+      { id: "files", title: "Project Files", icon: "FolderTree", location: "panel" },
       { pluginId: "demo-plugin" }
     )
     return () => __resetViewContainersForTesting()

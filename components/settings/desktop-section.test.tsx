@@ -73,6 +73,9 @@ jest.mock("@/lib/tauri/notification", () => ({
   notify: (...args: unknown[]) => notifyMock(...args),
 }))
 jest.mock("./tray-section", () => ({ TraySection: () => null }))
+jest.mock("./selection-toolbar-settings", () => ({
+  SelectionToolbarSettings: () => <div data-testid="selection-toolbar-settings" />,
+}))
 
 const saveSettingsMock = jest.fn().mockResolvedValue(undefined)
 let cookieImportEnabled = false
@@ -121,6 +124,7 @@ it("renders the three close-behavior options", async () => {
   expect(screen.getByText("settings.desktop.closeBehaviorAsk")).toBeInTheDocument()
   expect(screen.getByText("settings.desktop.closeBehaviorTray")).toBeInTheDocument()
   expect(screen.getByText("settings.desktop.closeBehaviorQuit")).toBeInTheDocument()
+  expect(screen.getByTestId("selection-toolbar-settings")).toBeInTheDocument()
 })
 
 it("persists the chosen behavior when a radio is selected", async () => {

@@ -1,0 +1,22 @@
+{
+  "ask": "Ask",
+  "chooseLanguage": "Choose translation language",
+  "copy": "Copy",
+  "explain": "Explain",
+  "languages": {
+    "de": "German",
+    "en": "English",
+    "es": "Spanish",
+    "fr": "French",
+    "ja": "Japanese",
+    "ko": "Korean",
+    "zh-CN": "Simplified Chinese"
+  },
+  "prompts": {
+    "explain": "Please explain this selection.",
+    "translate": "Please translate this selection into {language}."
+  },
+  "translate": "Translate",
+  "truncated": "Truncated",
+  "truncatedHint": "The selection exceeded 20,000 characters and was truncated."
+}

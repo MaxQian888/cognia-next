@@ -1,0 +1,9 @@
+[[permission]]
+identifier = "allow-selection-toolbar-app-commands"
+description = "Allows the least-privilege selection toolbar webview to read and act on its current in-memory candidate."
+commands.allow = [
+  "selection_toolbar_current_candidate",
+  "selection_toolbar_execute",
+  "selection_toolbar_reveal",
+  "selection_toolbar_set_interactive",
+]

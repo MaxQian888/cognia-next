@@ -48,6 +48,8 @@ import { useUIStore } from "@/stores/ui"
 import { markSessionRead } from "@/lib/db/session-state"
 import { updateSession, setSessionOrder } from "@/lib/db/sessions"
 import { guildFromSession } from "@/lib/claude/guild"
+import { resolveConversationGroupBy } from "@/lib/chat/conversation-grouping"
+import { useProjectStore } from "@/stores/project/project-store"
 import { planGuildReconcile } from "@/lib/shell/guild-session-sync"
 import { loggers } from "@cognia/logging"
 
@@ -56,10 +58,17 @@ const log = loggers.shell
 export function DesktopChatWorkspace() {
   const platform = usePlatform()
   const router = useRouter()
+  // Grouping by workspace is the one mode that needs conversations from every
+  // workspace; every other mode keeps the sidebar workspace-isolated.
+  const sidebarGroupBy = resolveConversationGroupBy(
+    useSettingsStore((s) => s.settings?.conversationSidebar)
+  )
   const {
     sessions,
     isLoadingSessions,
     activeSessionId,
+    activeSession,
+    activeSessionState,
     select,
     create,
     remove,
@@ -75,7 +84,7 @@ export function DesktopChatWorkspace() {
     renameFolder,
     deleteFolder,
     assignToFolder,
-  } = useSessions()
+  } = useSessions({ crossWorkspace: sidebarGroupBy === "workspace" })
   const directChat = useClaudeChat()
   const teamChat = useTeamChat()
 
@@ -140,11 +149,14 @@ export function DesktopChatWorkspace() {
   // elsewhere still pulls the guild over to match it.
   useEffect(() => {
     if (!mounted) return
-    const activeSession = sessions.find((s) => s.id === activeSessionId) ?? null
     const action = planGuildReconcile({
       guild: selectedGuild,
       guildWins: selectedGuildEpoch > activeSessionEpoch,
       activeSession,
+      // `useSessions` resolves the active id against Dexie, not against the
+      // (eventually-consistent) list, so a conversation that was just created
+      // reconciles as itself instead of looking deleted for a render.
+      activeSessionPending: activeSessionState === "pending",
       sessions,
     })
     switch (action.type) {
@@ -168,7 +180,8 @@ export function DesktopChatWorkspace() {
     selectedGuildEpoch,
     activeSessionEpoch,
     sessions,
-    activeSessionId,
+    activeSession,
+    activeSessionState,
     select,
     setSelectedGuild,
   ])
@@ -183,11 +196,6 @@ export function DesktopChatWorkspace() {
       setLastErrorShown(null)
     }
   }, [errorMessage, lastErrorShown])
-
-  const activeSession = useMemo(
-    () => sessions.find((s) => s.id === activeSessionId) ?? null,
-    [sessions, activeSessionId]
-  )
 
   // Recent sessions for the welcome-page "Continue" group (newest first,
   // excluding the one already open).
@@ -235,8 +243,24 @@ export function DesktopChatWorkspace() {
   const handleSwitchToSession = useCallback(
     (id: string) => {
       log.info("switch-to-session", { sessionId: id })
-      select(id)
       const target = sessions.find((s) => s.id === id)
+      // Follow the conversation into its workspace *before* focusing it. Under
+      // `groupBy: "workspace"` the list spans every workspace, and everything
+      // downstream of the chat pane — artifacts, terminals, the workspace panel,
+      // memories — resolves against `activeProjectId`. Selecting without this
+      // leaves all of them pointed at the workspace the user just left, and the
+      // conversation itself reads as `absent` (see `use-sessions.ts`).
+      if (target?.projectId) {
+        const { activeProjectId, setActiveProject } = useProjectStore.getState()
+        if (target.projectId !== activeProjectId) {
+          log.info("switch-to-session crosses workspace", {
+            sessionId: id,
+            projectId: target.projectId,
+          })
+          setActiveProject(target.projectId)
+        }
+      }
+      select(id)
       if (!target) return
       setSelectedGuild(guildFromSession(target))
     },
@@ -251,10 +275,14 @@ export function DesktopChatWorkspace() {
   // parameterized, so team and direct panes share one ChatPaneGroup.
   const isTeamSessionId = useCallback(
     (sid: string) => {
-      const s = sessions.find((x) => x.id === sid)
+      // Prefer the resolved active row: a conversation created moments ago is
+      // not in the list yet, and misreading it as a direct chat would route its
+      // send / close through the wrong hook.
+      const s =
+        (activeSession?.id === sid ? activeSession : null) ?? sessions.find((x) => x.id === sid)
       return s?.kind === "team" && Boolean(s.teamId)
     },
-    [sessions]
+    [sessions, activeSession]
   )
 
   // Workspace Trust: bump a nonce on each send so the trust gate can lazily
