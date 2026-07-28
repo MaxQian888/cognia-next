@@ -1,0 +1,57 @@
+---
+title: Operations, updates, and troubleshooting
+description: Local and paired hosting, transactional updates, migration, Dev Mode, and recovery.
+---
+
+# Operations, updates, and troubleshooting
+
+Local operation stays in Tauri. For a paired host, code-server, profiles,
+plugins, permissions, secrets, proxies, and protocol processes run on the
+remote Cognia host. The desktop does not upgrade that binary. It reaches the
+remote workbench through a local ephemeral relay that pins the paired
+certificate SPKI fingerprint, then sends the existing device JWT in an
+`Authorization` header. The real remote port and credentials stay loopback-only.
+
+Plugin updates use a durable transaction:
+
+1. `plugin_stage_version` downloads and verifies checksum/signature, extracts
+   into host-owned transaction storage, validates the manifest and resources,
+   and leaves the working package untouched.
+2. The renderer validates permission expansion and the declarative migration
+   plan, then stages the deterministic proxy.
+3. The host snapshots the old package and `.host-state`, including managed IDE
+   SQLite state and secret indexes.
+4. The old runtime is disabled/unloaded and
+   `plugin_commit_staged_update` atomically renames the staged package into
+   place.
+5. The exact staged proxy is activated. The code-server host attempts live
+   activation first, restarts only the extension host when required, and
+   restores the old proxy on handshake failure.
+6. Runtime verification succeeds before the transaction is finalized.
+
+A failure after commit restores package and host state, rescans the runtime,
+and re-enables the old version. A full Pro IDE restart is offered only when the
+old package/state are confirmed restored but old runtime activation still
+cannot complete. Uncommitted artifacts have no activation marker and are
+ignored on code-server restart.
+
+On first profile migration, native Open VSX installs move to the isolated native
+profile. The old shim remains export-only for one major release. Settings,
+keybindings, and theme are filtered before synchronization; extension state,
+secrets, trust decisions, and tickets are never copied.
+
+Dev Mode uses the same catalog and authorization path and adds schema
+diagnostics, resource watching, temporary proxy rebuilds, RPC inspection,
+permission simulation, and local development signing.
+
+For an unavailable contribution:
+
+1. Verify plugin status and Workspace Trust.
+2. Compare plugin version, manifest hash, catalog hash, platform version, and
+   connection generation.
+3. Check the `cognia.<pluginId>.*` namespace for conflicts.
+4. Inspect redacted local traces for permission, path, deadline,
+   backpressure, cancellation, or circuit-breaker errors.
+5. Verify the proxy activation marker still points to a signed cached artifact.
+6. Rebuild the proxy; restart the extension host only after the old artifact
+   remains recoverable.

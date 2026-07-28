@@ -1,0 +1,55 @@
+---
+title: Authoring and SDK
+description: Public manifest, Code 1.128 catalog, providers, protocols, and deterministic proxy generation.
+---
+
+# Authoring and SDK
+
+Authors declare only `manifest.ide`:
+
+```ts
+ide: {
+  schemaVersion: 1,
+  targets: ["monaco", "pro-ide"],
+  requirements: {
+    codeApiVersion: "1.128.0",
+    brokerProtocol: "^1.0.0"
+  },
+  contributions: {},
+  providers: [],
+  executables: [],
+  protocols: { lsp: [], dap: [], mcp: [] },
+  agents: []
+}
+```
+
+The generator locks the live Code 1.128 extension schema and every referenced
+schema in `packages/plugin-sdk/contract/code-1.128-contribution-schemas.json`.
+Exact upstream digests and provenance are checked before generation. The
+resulting `code-1.128-ide.json` catalog hash is part of broker negotiation and
+proxy activation. The generated public JSON Schema is self-contained and has
+no external references.
+
+The build emits TypeScript types/helpers, JSON Schema, normalized
+engine-neutral IR, exhaustive conformance fixtures, and proxy contribution
+metadata. An unclassified stable contribution or provider fails generation.
+Legacy `vscode*` author fields are normalized with field-level deprecation
+diagnostics for one major; generated SDK output uses only `manifest.ide`.
+
+Global IDs are rewritten to `cognia.<pluginId>.*`. Duplicate, reserved, or
+externally occupied IDs reject the entire activation transaction. Static
+assets are canonical plugin-relative files. A plugin cannot provide an
+extension entrypoint.
+
+Proxy VSIX output is deterministic and content-addressed. Its Ed25519-signed
+descriptor binds plugin id/version, manifest hash, platform version, catalog
+hash, executable resource hashes, and VSIX digest. `codeserver_build_proxy`
+only stages the artifact; `codeserver_activate_proxy` promotes it after a live
+handshake. The activation marker, not the artifact cache, is authoritative on
+restart.
+
+Stable provider coverage includes language features and virtual filesystems;
+views, trees, status, decorations, webviews and custom editors; terminals,
+tasks, SCM, debug, tests, notebooks and comments; authentication, URI handling
+and storage; Chat participants, language-model tools, MCP definitions, and the
+stable contribution families in the locked catalog.

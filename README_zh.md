@@ -93,7 +93,7 @@ pnpm dev                       # 浏览器开发服务器 → http://localhost:3
 
 ```bash
 pnpm tauri dev                 # 桌面窗口
-pnpm build && pnpm mobile:sync # 移动端（再用 mobile:open:ios / :android 打开）
+pnpm mobile:sync:ios          # iOS（构建并同步，再用 mobile:open:ios 打开）
 ```
 
 > Husky 钩子由根 `prepare` 脚本自动接管，无需额外配置。
@@ -104,7 +104,7 @@ pnpm build && pnpm mobile:sync # 移动端（再用 mobile:open:ios / :android �
 | ------ | ------------------------------------------------------------------------------------------------- |
 | Web    | Node.js ≥ 20、pnpm 10                                                                             |
 | 桌面   | Rust ≥ 1.84.1（Tauri 2）+ 平台 C/C++ 工具链（[前置要求](https://tauri.app/start/prerequisites/)） |
-| 移动端 | Xcode 15+（iOS）或 Android Studio Hedgehog+（Android）；iOS 需要 CocoaPods                        |
+| 移动端 | Xcode 26+（iOS）或 Android Studio Hedgehog+（Android）；iOS 需要 CocoaPods                        |
 
 可选：`cloudflared`（GitHub Delivery webhook 自动派生）、自托管 WebRTC 时的 TURN 凭据、
 构建 `ocr-tesseract` Cargo 特性时的 CMake/C++ 工具链。
@@ -123,7 +123,8 @@ pnpm test | test:watch | test:coverage
 
 # 桌面 / 移动端（先跑 pnpm build —— Capacitor 包裹 out/）
 pnpm tauri dev | build | info
-pnpm mobile:sync | mobile:open:ios | mobile:open:android
+pnpm mobile:sync:ios | mobile:sync:android
+pnpm mobile:open:ios | mobile:open:android
 
 # 文档站（Fumadocs，端口 3001）· sidecars · E2E
 pnpm docs:dev | docs:build

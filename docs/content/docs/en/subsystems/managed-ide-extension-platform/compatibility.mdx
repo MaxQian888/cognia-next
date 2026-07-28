@@ -1,0 +1,36 @@
+---
+title: Compatibility and release gates
+description: Supported versions, hosts, exclusions, protocol compatibility, and stable-release verification.
+---
+
+# Compatibility and release gates
+
+| Host | Architecture | Result |
+| --- | --- | --- |
+| Linux | amd64 / arm64 | supported |
+| macOS | amd64 / arm64 | supported |
+| Windows | any | `unsupported_platform`; no npm fallback |
+
+This release pins code-server `4.128.0` and Code `1.128.0`. An upgrade requires
+an upstream catalog diff, schema import digest refresh, generator changes,
+compatibility fixtures, and real E2E approval. Remote hosts must preload the
+matching binary; mismatch returns `REMOTE_CODE_SERVER_UPGRADE_REQUIRED`.
+
+Proposed/internal VS Code APIs, remote-authority implementations,
+extension-management APIs, Windows hosts, and third-party
+`extensionDependencies` in managed profile return structured compatibility
+errors. They never silently no-op.
+
+Stable release requires catalog-entry conformance, malformed/oversized frame
+and cancellation-race tests, stale-generation and reconnect tests, path and
+ticket security tests, profile isolation, deterministic proxy/update rollback,
+offline artifacts, two-major negotiation, and real local/paired E2E for LSP,
+DAP, MCP, SCM, tests, notebooks, webviews/custom editors, and Chat flows.
+
+Performance gates are: cold readiness regression at most 20% and 2 seconds;
+idle RSS regression at most 20% and 150 MiB; local empty broker RPC p95 at most
+30 ms; remote relay overhead excluding physical RTT p95 at most 75 ms; and no
+control/lifecycle event loss within declared capacity.
+
+Remote telemetry is opt-in and aggregate-only. Source, paths, prompts,
+arguments, environments, secrets, and content handles never enter telemetry.

@@ -1,0 +1,39 @@
+---
+title: 协议与安全
+description: Broker negotiation、callback 授权、存储、content handle、webview 与进程监管。
+---
+
+# 协议与安全
+
+协议 1.0 是 loopback TCP 上使用 `Content-Length` framing 的 JSON-RPC 2.0。
+frame、header、queue、handle、in-flight request 与 deadline 都有硬上限。
+challenge/HMAC 认证证明扩展持有实例 secret，但不在 hello 中发送它。hello
+协商协议 major、Code API version、catalog hash、host、canonical workspace 与
+capability。
+
+每条连接有单调递增 generation。断线会使全部 pending request 失败；旧
+generation 的 response、cancel、progress、event、content handle 与 ticket
+全部拒绝。重连只重建 registration、subscription 与 snapshot，不重放 action。
+协议支持当前与上一 major。旧 `0.2.x` newline bridge 仅兼容一个发布周期，新能力
+返回 unsupported。
+
+大对象和二进制使用 30 秒、单次兑换的 content handle，同时绑定 root、
+generation、plugin、provider、permission 与方向。字节经独立认证 loopback
+endpoint 传输，凭据不进入 URL。
+
+每次 callback 都重新检查 canonical host/root、Workspace Trust、generation、
+插件启用/版本、声明、provider handler、权限决定及需要时的 contextual ticket。
+shell、debug、test、notebook execution、external write 与 agent tool 需要上下文
+确认。路径和 URI 在 IDE host canonicalize；不存在的后代从最深存在祖先解析，
+symlink escape fail closed。
+
+Managed state 存在插件不可写的 host-owned SQLite。global state、workspace state
+和 secret 按 user、host、plugin、workspace 与 area 分区，单个 state partition
+上限 5 MiB。secret value 只在 OS keyring；SQLite 只存分区后的 key index。
+每次操作重新检查 `secrets:read`/`secrets:write`。proxy-local state 仅是可重建
+cache，secret 从不缓存。
+
+Webview 使用 `default-src 'none'`、typed message 与内容寻址资源。文件、命令、
+网络和 secret 操作全部回到 broker 授权。协议 executable 只能来自签名插件资源、
+注册 host tool 或用户显式选择的程序；supervisor 使用参数数组、净化环境、
+canonical cwd、资源限制、取消与 process-tree termination。

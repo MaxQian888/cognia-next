@@ -1,0 +1,50 @@
+---
+title: 作者与 SDK
+description: 公共 manifest、Code 1.128 catalog、provider、协议与确定性代理生成。
+---
+
+# 作者与 SDK
+
+作者只声明 `manifest.ide`：
+
+```ts
+ide: {
+  schemaVersion: 1,
+  targets: ["monaco", "pro-ide"],
+  requirements: {
+    codeApiVersion: "1.128.0",
+    brokerProtocol: "^1.0.0"
+  },
+  contributions: {},
+  providers: [],
+  executables: [],
+  protocols: { lsp: [], dap: [], mcp: [] },
+  agents: []
+}
+```
+
+生成器把 Code 1.128 的实时 extension schema 及全部引用 schema 锁定在
+`packages/plugin-sdk/contract/code-1.128-contribution-schemas.json`，生成前会
+核对精确 upstream digest 与 provenance。生成的 `code-1.128-ide.json`
+catalog hash 同时参与 broker negotiation 与 proxy activation。公共 JSON
+Schema 自包含，不含外部引用。
+
+构建产出 TypeScript types/helpers、JSON Schema、engine-neutral IR、穷举
+conformance fixtures 与代理 contribution metadata。任何未分类 stable
+contribution/provider 都会使生成失败。旧 `vscode*` 作者字段只兼容一个 major，
+并产生字段级弃用诊断；SDK 只输出 `manifest.ide`。
+
+全局 ID 重写为 `cognia.<pluginId>.*`。重复、保留或被外部占用的 ID 会拒绝整次
+activation transaction。静态资源必须是规范化的插件相对路径，插件不能提供
+extension entrypoint。
+
+代理 VSIX 确定性且内容寻址。Ed25519 签名 descriptor 绑定 plugin id/version、
+manifest hash、platform version、catalog hash、executable resource hash 与
+VSIX digest。`codeserver_build_proxy` 只 stage artifact；
+`codeserver_activate_proxy` 在 live handshake 后提交。重启时以 activation
+marker 而非 artifact cache 为准。
+
+稳定 provider 覆盖 language feature、virtual filesystem、view/tree/status、
+decoration、webview/custom editor、terminal/task/SCM、debug/test/notebook/comment、
+authentication、URI/storage、Chat participant、language-model tool、MCP definition
+以及锁定 catalog 中的全部稳定 contribution family。

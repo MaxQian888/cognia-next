@@ -99,7 +99,7 @@ For the desktop and mobile shells:
 
 ```bash
 pnpm tauri dev                 # desktop window
-pnpm build && pnpm mobile:sync # mobile (then mobile:open:ios / :android)
+pnpm mobile:sync:ios          # iOS (build + sync, then mobile:open:ios)
 ```
 
 > Husky hooks are wired automatically through the root `prepare` script — no extra setup.
@@ -110,7 +110,7 @@ pnpm build && pnpm mobile:sync # mobile (then mobile:open:ios / :android)
 | ------- | ------------------------------------------------------------------------------------------------------ |
 | Web     | Node.js ≥ 20, pnpm 10                                                                                  |
 | Desktop | Rust ≥ 1.84.1 (Tauri 2) + platform C/C++ toolchain ([prereqs](https://tauri.app/start/prerequisites/)) |
-| Mobile  | Xcode 15+ (iOS) or Android Studio Hedgehog+ (Android); CocoaPods for iOS                               |
+| Mobile  | Xcode 26+ (iOS) or Android Studio Hedgehog+ (Android); CocoaPods for iOS                               |
 
 Optional: `cloudflared` (auto-spawned for the GitHub Delivery webhook), TURN credentials for
 self-hosted WebRTC, CMake/C++ for the `ocr-tesseract` Cargo feature.
@@ -129,7 +129,8 @@ pnpm test | test:watch | test:coverage
 
 # Desktop / mobile (run pnpm build first — Capacitor wraps out/)
 pnpm tauri dev | build | info
-pnpm mobile:sync | mobile:open:ios | mobile:open:android
+pnpm mobile:sync:ios | mobile:sync:android
+pnpm mobile:open:ios | mobile:open:android
 
 # Docs (Fumadocs, port 3001) · sidecars · E2E
 pnpm docs:dev | docs:build
