@@ -35,30 +35,85 @@ interface MemoryBackend {
   embedding: PrebuiltTwinDeps["embedding"]
 }
 
+/** Why recall fell back to keyword-only search. */
+export type MemoryRetrievalDegradeReason =
+  /** The user turned `hybridEnabled` off — the only reason the old UI could show. */
+  | "hybrid_disabled"
+  /** No Twin embedding/vector backend is configured at all. */
+  | "no_backend"
+  /** A vector store exists but exposes no `searchByEmbedding`. */
+  | "store_unsupported"
+  /** A cloud embedder is configured but `allowCloudEmbedding` is off (the default). */
+  | "cloud_blocked"
+
 /**
- * Resolve the shared embedding + vector backend, applying the privacy gate
- * once. Returns `undefined` (→ BM25-only) when no usable, privacy-compliant
- * backend is available.
+ * What memory recall will *actually* do right now — as opposed to what the
+ * config claims. `hybridEnabled: true` is not enough: three further conditions
+ * silently degrade recall to BM25-only, and `cloud_blocked` is the default
+ * state for anyone whose embedder is not local.
+ */
+export type MemoryRetrievalMode =
+  | { kind: "hybrid"; provider: string }
+  | { kind: "bm25"; reason: MemoryRetrievalDegradeReason; provider?: string }
+  | { kind: "off"; reason: "disabled" | "temporary" }
+
+/**
+ * Single source of truth for the privacy/capability gate: returns both the
+ * usable backend (absent → BM25-only) and the reason, so the runtime and the
+ * settings probe can never disagree about why recall degraded.
  *
  * `prebuiltTwinDeps`: when the caller already built twin deps this turn, pass
  * them to skip the second `tryBuildTwinDeps()` (a Dexie read + vector-client
  * construction). Falls back to building them when omitted.
  */
+async function resolveMemoryBackendOutcome(
+  config: MemoryConfig,
+  prebuiltTwinDeps?: PrebuiltTwinDeps
+): Promise<{ backend?: MemoryBackend; mode: MemoryRetrievalMode }> {
+  if (!config.hybridEnabled) return { mode: { kind: "bm25", reason: "hybrid_disabled" } }
+  const twinDeps = prebuiltTwinDeps ?? (await tryBuildTwinDeps())
+  const store = twinDeps?.store
+  const embedding = twinDeps?.embedding
+  if (!store || !embedding) return { mode: { kind: "bm25", reason: "no_backend" } }
+  const provider = String(embedding.provider)
+  if (typeof store.searchByEmbedding !== "function") {
+    return { mode: { kind: "bm25", reason: "store_unsupported", provider } }
+  }
+  if (!config.allowCloudEmbedding && provider !== "transformersjs") {
+    return { mode: { kind: "bm25", reason: "cloud_blocked", provider } }
+  }
+  return { backend: { store, embedding }, mode: { kind: "hybrid", provider } }
+}
+
+/**
+ * Resolve the shared embedding + vector backend, applying the privacy gate
+ * once. Returns `undefined` (→ BM25-only) when no usable, privacy-compliant
+ * backend is available.
+ */
 async function resolveMemoryBackend(
   config: MemoryConfig,
   prebuiltTwinDeps?: PrebuiltTwinDeps
 ): Promise<MemoryBackend | undefined> {
-  if (!config.hybridEnabled) return undefined
-  const twinDeps = prebuiltTwinDeps ?? (await tryBuildTwinDeps())
-  const store = twinDeps?.store
-  const embedding = twinDeps?.embedding
-  const canEmbed =
-    !!store &&
-    !!embedding &&
-    typeof store.searchByEmbedding === "function" &&
-    (config.allowCloudEmbedding || embedding.provider === "transformersjs")
-  if (canEmbed && store && embedding) return { store, embedding }
-  return undefined
+  return (await resolveMemoryBackendOutcome(config, prebuiltTwinDeps)).backend
+}
+
+/**
+ * Read-only probe for the settings UI: what recall does today, and why.
+ *
+ * Does no network I/O — `tryBuildTwinDeps` reads settings and constructs a
+ * client object, and the capability check is a `typeof` test. Never throws;
+ * a failure to even build twin deps reads as `no_backend`.
+ */
+export async function describeMemoryRetrievalMode(
+  config: MemoryConfig
+): Promise<MemoryRetrievalMode> {
+  if (!config.enabled) return { kind: "off", reason: "disabled" }
+  if (config.temporary) return { kind: "off", reason: "temporary" }
+  try {
+    return (await resolveMemoryBackendOutcome(config)).mode
+  } catch {
+    return { kind: "bm25", reason: "no_backend" }
+  }
 }
 
 export async function tryBuildMemoryDeps(

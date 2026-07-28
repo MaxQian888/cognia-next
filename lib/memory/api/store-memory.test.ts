@@ -23,6 +23,11 @@ jest.mock("@/lib/memory/runtime/build-deps", () => ({
   tryBuildMemoryVectorSink: (...args: unknown[]) => mockVectorSink(...(args as [])),
 }))
 
+const mockAppendAudit = jest.fn()
+jest.mock("@/lib/db/memory-governance", () => ({
+  appendMemoryAuditEvent: (...args: unknown[]) => mockAppendAudit(...(args as [])),
+}))
+
 const PII_TEXT = "reach me at bob@example.com"
 const ATTRIBUTION = { channel: "plugin" as const, pluginId: "com.example.notes" }
 
@@ -35,6 +40,10 @@ beforeEach(() => {
   mockBuildDeps.mockResolvedValue({ consolidate: mockConsolidate })
   mockCreateMemory.mockResolvedValue({ id: "mem_new", text: "stored" })
   mockVectorSink.mockResolvedValue(undefined)
+  // Must be re-armed every test: `clearAllMocks` wipes call data but keeps a
+  // `mockRejectedValue` set by an earlier case, and a bare jest.fn() returns
+  // undefined — which the `.catch(...)` on the audit call would blow up on.
+  mockAppendAudit.mockResolvedValue(undefined)
 })
 
 describe("clampImportance", () => {
@@ -96,6 +105,45 @@ describe("storeMemoryCore", () => {
       reason: "pii_blocked",
     })
     expect(mockConsolidate).not.toHaveBeenCalled()
+  })
+
+  it("audits a PII block so the settings pane can count withheld writes", async () => {
+    // The block used to return silently, leaving no record anywhere — the only
+    // reason "N writes withheld" is reportable at all.
+    await storeMemoryCore({
+      text: PII_TEXT,
+      provenance: "system",
+      source: { sessionId: "s1" },
+    })
+
+    expect(mockAppendAudit).toHaveBeenCalledWith({
+      action: "learn-denied",
+      sessionId: "s1",
+      reason: "pii_blocked",
+      metadata: { provenance: "system", type: "semantic" },
+    })
+  })
+
+  it("audits a PII block that survives redaction on the redact path", async () => {
+    await storeMemoryCore({ text: PII_TEXT, provenance: "user", piiGate: "redact" })
+    // Redaction may or may not clear the text; either way a block must audit and
+    // a success must not.
+    const blocked = mockAppendAudit.mock.calls.length > 0
+    const stored = mockConsolidate.mock.calls.length > 0
+    expect(blocked).toBe(!stored)
+  })
+
+  it("does not audit anything when the gate lets the write through", async () => {
+    await storeMemoryCore({ text: "User ships on Fridays", provenance: "user" })
+    expect(mockAppendAudit).not.toHaveBeenCalled()
+  })
+
+  it("still blocks when the audit write itself fails", async () => {
+    mockAppendAudit.mockRejectedValue(new Error("db closed"))
+    await expect(storeMemoryCore({ text: PII_TEXT, provenance: "system" })).resolves.toEqual({
+      ok: false,
+      reason: "pii_blocked",
+    })
   })
 
   it("threads attribution into the consolidator and reports the ADDed id", async () => {

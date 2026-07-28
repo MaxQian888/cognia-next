@@ -81,5 +81,11 @@ export async function buildEpisodicMaintenanceDeps(
         })
       }
     },
+    recordDecay: async ({ reason, memoryIds, sessionId }) => {
+      const { appendMemoryAuditEvent } = await import("@/lib/db/memory-governance")
+      for (const memoryId of memoryIds) {
+        await appendMemoryAuditEvent({ action: "invalidated", memoryId, sessionId, reason })
+      }
+    },
   }
 }

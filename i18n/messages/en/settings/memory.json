@@ -20,6 +20,38 @@
     "label": "Allow cloud embeddings"
   },
   "description": "What the assistant remembers about you across sessions.",
+  "danger": {
+    "backupFirst": "Back up first",
+    "clear": "Clear memories",
+    "clearFailed": "Could not clear memories",
+    "cleared": "Cleared {count} memories",
+    "collapse": "Collapse",
+    "confirm": {
+      "cancel": "Cancel",
+      "confirm": "Clear memories",
+      "descriptions": {
+        "all": "Permanently delete every stored memory, including invalidated rows.",
+        "character": "Permanently delete memories scoped to characters.",
+        "global": "Permanently delete memories available across all workspaces and characters.",
+        "invalidated": "Permanently delete memories that have already been invalidated.",
+        "workspace": "Permanently delete memories scoped to workspaces."
+      },
+      "title": "Clear selected memories?"
+    },
+    "description": "Clearing memory is permanent. Create a backup before removing anything you may need.",
+    "expand": "Expand",
+    "scope": {
+      "label": "Memories to clear",
+      "options": {
+        "all": "Everything",
+        "character": "Character memories",
+        "global": "Global memories",
+        "invalidated": "Invalidated memories",
+        "workspace": "Workspace memories"
+      }
+    },
+    "title": "Danger zone"
+  },
   "enabled": {
     "description": "Recall durable facts about you and inject them into future chats.",
     "heading": "Enable long-term memory",
@@ -29,6 +61,33 @@
     "description": "Combine semantic (vector) and keyword search when recalling.",
     "heading": "Hybrid retrieval",
     "label": "Hybrid retrieval"
+  },
+  "learning": {
+    "autoExtract": {
+      "description": "Extract durable facts after eligible turns.",
+      "label": "Extract automatically"
+    },
+    "externalContext": {
+      "description": "Do not learn from turns that used web, MCP, screen, or connector context.",
+      "label": "Block external-context learning"
+    },
+    "gates": {
+      "learningOff": "Turn on learning from chats to edit these controls.",
+      "memoryOff": "Turn on long-term memory to edit learning controls."
+    },
+    "learnFromChats": {
+      "description": "Learn durable facts from eligible conversations in the background.",
+      "label": "Learn from chats"
+    },
+    "scope": {
+      "description": "Choose where newly learned memories are available.",
+      "label": "Default memory scope",
+      "options": {
+        "character": "Current character",
+        "global": "Global",
+        "workspace": "Current workspace"
+      }
+    }
   },
   "useMemory": {
     "description": "Allow eligible chats to recall saved memories. Each chat can override this.",
@@ -50,10 +109,122 @@
   "halfLife": { "label": "Recency half-life (days)" },
   "maxIdle": { "label": "Forget after unused days (0 = never)" },
   "manage": "Manage memories",
+  "nav": {
+    "items": {
+      "learning": {
+        "description": "Control what Cognia learns and where it stores it.",
+        "label": "Learning"
+      },
+      "maintenance": {
+        "description": "Review retention, conflicts, and cleanup.",
+        "label": "Maintenance"
+      },
+      "overview": {
+        "description": "See corpus health, coverage, and retrieval mode.",
+        "label": "Overview"
+      },
+      "privacy": {
+        "description": "Manage embedding privacy and destructive actions.",
+        "label": "Privacy"
+      },
+      "retrieval": {
+        "description": "Tune recall quality, limits, and preview results.",
+        "label": "Retrieval"
+      }
+    },
+    "title": "Memory settings"
+  },
+  "overview": {
+    "byScope": {
+      "title": "Memories by scope"
+    },
+    "coverage": {
+      "hint": "Hybrid recall can only search memories that have embeddings.",
+      "readout": "{percent}% · {embedded} of {active} embedded",
+      "title": "Vector coverage"
+    },
+    "manage": "Open memory manager",
+    "stats": {
+      "active": "Active",
+      "conflicts": "Conflicts"
+    }
+  },
+  "preview": {
+    "budget": {
+      "basis": "Estimated from {lines} candidates at about {avg} tokens each.",
+      "readout": "{used} / {limit} tokens",
+      "title": "Recall budget"
+    },
+    "dryRun": {
+      "cloudNotice": "This preview may send the query to your configured cloud embedding provider.",
+      "degraded": "Semantic retrieval was unavailable, so this preview used keyword matching.",
+      "empty": "No memories matched this query.",
+      "floorLowered": "Run the preview again to include results below the previous relevance floor.",
+      "floorRaised": "Results below the new relevance floor are crossed out.",
+      "inputLabel": "Recall preview query",
+      "placeholder": "Ask something your memories should answer…",
+      "run": "Preview recall",
+      "summary": "{count} shown · {used}/{limit} tokens · {withheld} withheld · {procedural} procedural",
+      "title": "Dry-run recall"
+    },
+    "errors": {
+      "failed": "The recall preview failed.",
+      "unavailable": "Memory retrieval is not available with the current configuration."
+    }
+  },
   "queryExpansion": {
     "description": "Widen the keyword leg with synonym expansion when recalling memories.",
     "heading": "Query expansion",
     "label": "Query expansion"
+  },
+  "retrieval": {
+    "gates": {
+      "memoryOff": "Turn on long-term memory to edit retrieval controls.",
+      "recallOff": "Turn on memory recall to edit these controls."
+    },
+    "halfLife": {
+      "description": "Older memories gradually receive less weight during recall.",
+      "label": "Recency half-life (days)"
+    },
+    "hybrid": {
+      "description": "Combine semantic vector search with keyword matching.",
+      "label": "Hybrid retrieval"
+    },
+    "queryExpansion": {
+      "description": "Expand the keyword query with related terms.",
+      "label": "Query expansion"
+    },
+    "relevanceFloor": {
+      "description": "Exclude memories whose relevance score falls below this value.",
+      "label": "Minimum relevance"
+    },
+    "tokenBudget": {
+      "description": "Maximum number of memory tokens that may be injected into a turn.",
+      "label": "Recall token budget"
+    },
+    "topK": {
+      "description": "Maximum number of memories considered for each turn.",
+      "label": "Memories per turn"
+    },
+    "useMemory": {
+      "description": "Recall eligible stored memories in future conversations.",
+      "label": "Use memories"
+    }
+  },
+  "retrievalMode": {
+    "actions": {
+      "allowCloud": "Allow cloud embeddings",
+      "configureEmbedding": "Configure embeddings",
+      "enableHybrid": "Enable hybrid retrieval"
+    },
+    "degradedTitle": "Recall is using keyword search only",
+    "hybrid": "Hybrid retrieval is active with {provider}.",
+    "reasons": {
+      "cloud_blocked": "The configured {provider} embedder is cloud-based, but cloud embeddings are not allowed.",
+      "hybrid_disabled": "Hybrid retrieval is turned off.",
+      "no_backend": "No embedding and vector-search backend is configured.",
+      "store_unsupported": "The configured vector store does not support embedding search."
+    }
   },
   "scope": {
     "character": "Per character",

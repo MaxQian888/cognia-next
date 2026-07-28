@@ -20,6 +20,38 @@
     "label": "允许云端向量化"
   },
   "description": "助手跨会话记住关于你的内容。",
+  "danger": {
+    "backupFirst": "先备份",
+    "clear": "清除记忆",
+    "clearFailed": "无法清除记忆",
+    "cleared": "已清除 {count} 条记忆",
+    "collapse": "收起",
+    "confirm": {
+      "cancel": "取消",
+      "confirm": "清除记忆",
+      "descriptions": {
+        "all": "永久删除所有已存记忆，包括已失效记录。",
+        "character": "永久删除按人格作用域保存的记忆。",
+        "global": "永久删除所有工作区和人格都可使用的全局记忆。",
+        "invalidated": "永久删除已经失效的记忆。",
+        "workspace": "永久删除按工作区作用域保存的记忆。"
+      },
+      "title": "清除所选记忆？"
+    },
+    "description": "清除记忆后无法恢复。请先备份仍可能需要的内容。",
+    "expand": "展开",
+    "scope": {
+      "label": "要清除的记忆",
+      "options": {
+        "all": "全部",
+        "character": "人格记忆",
+        "global": "全局记忆",
+        "invalidated": "已失效记忆",
+        "workspace": "工作区记忆"
+      }
+    },
+    "title": "危险区域"
+  },
   "enabled": {
     "description": "召回关于你的耐久事实，并注入到后续对话中。",
     "heading": "启用长期记忆",
@@ -29,6 +61,33 @@
     "description": "召回时结合语义（向量）与关键词检索。",
     "heading": "混合检索",
     "label": "混合检索"
+  },
+  "learning": {
+    "autoExtract": {
+      "description": "在符合条件的对话轮次后抽取耐久事实。",
+      "label": "自动抽取"
+    },
+    "externalContext": {
+      "description": "不从使用了网页、MCP、屏幕或连接器上下文的轮次中学习。",
+      "label": "阻止外部上下文学习"
+    },
+    "gates": {
+      "learningOff": "请先开启从对话学习，再编辑这些控制项。",
+      "memoryOff": "请先开启长期记忆，再编辑学习控制项。"
+    },
+    "learnFromChats": {
+      "description": "在后台从符合条件的对话中学习耐久事实。",
+      "label": "从对话学习"
+    },
+    "scope": {
+      "description": "选择新学到的记忆可以在哪些范围使用。",
+      "label": "默认记忆作用域",
+      "options": {
+        "character": "当前人格",
+        "global": "全局",
+        "workspace": "当前工作区"
+      }
+    }
   },
   "useMemory": {
     "description": "允许符合条件的对话召回已保存记忆；每个对话可单独覆盖。",
@@ -50,10 +109,122 @@
   "halfLife": { "label": "新近度半衰期（天）" },
   "maxIdle": { "label": "未使用后遗忘天数（0 为永不）" },
   "manage": "管理记忆",
+  "nav": {
+    "items": {
+      "learning": {
+        "description": "控制 Cognia 学习什么以及保存到哪里。",
+        "label": "学习"
+      },
+      "maintenance": {
+        "description": "检查保留策略、冲突和清理操作。",
+        "label": "维护"
+      },
+      "overview": {
+        "description": "查看语料健康度、覆盖率和检索模式。",
+        "label": "概览"
+      },
+      "privacy": {
+        "description": "管理向量化隐私和破坏性操作。",
+        "label": "隐私"
+      },
+      "retrieval": {
+        "description": "调整召回质量、限制并预览结果。",
+        "label": "检索"
+      }
+    },
+    "title": "记忆设置"
+  },
+  "overview": {
+    "byScope": {
+      "title": "按作用域统计"
+    },
+    "coverage": {
+      "hint": "混合召回只能搜索已经生成向量的记忆。",
+      "readout": "{percent}% · {active} 条中已有 {embedded} 条向量",
+      "title": "向量覆盖率"
+    },
+    "manage": "打开记忆管理",
+    "stats": {
+      "active": "活跃",
+      "conflicts": "冲突"
+    }
+  },
+  "preview": {
+    "budget": {
+      "basis": "根据 {lines} 条候选、每条约 {avg} Token 估算。",
+      "readout": "{used} / {limit} Token",
+      "title": "召回预算"
+    },
+    "dryRun": {
+      "cloudNotice": "此预览可能会把查询发送给已配置的云端向量服务商。",
+      "degraded": "语义检索不可用，本次预览已改用关键词匹配。",
+      "empty": "没有匹配此查询的记忆。",
+      "floorLowered": "请重新运行预览，以包含低于上次相关度阈值的结果。",
+      "floorRaised": "低于新相关度阈值的结果已划除。",
+      "inputLabel": "召回预览查询",
+      "placeholder": "输入一个记忆应该能够回答的问题…",
+      "run": "预览召回",
+      "summary": "显示 {count} 条 · {used}/{limit} Token · 隐去 {withheld} 条 · 程序性 {procedural} 条",
+      "title": "试运行召回"
+    },
+    "errors": {
+      "failed": "召回预览失败。",
+      "unavailable": "当前配置下无法使用记忆检索。"
+    }
+  },
   "queryExpansion": {
     "description": "召回记忆时用同义词扩展加宽关键词检索。",
     "heading": "查询扩展",
     "label": "查询扩展"
+  },
+  "retrieval": {
+    "gates": {
+      "memoryOff": "请先开启长期记忆，再编辑检索控制项。",
+      "recallOff": "请先开启记忆召回，再编辑这些控制项。"
+    },
+    "halfLife": {
+      "description": "较旧的记忆会在召回时逐渐降低权重。",
+      "label": "新近度半衰期（天）"
+    },
+    "hybrid": {
+      "description": "结合语义向量检索与关键词匹配。",
+      "label": "混合检索"
+    },
+    "queryExpansion": {
+      "description": "使用相关词扩展关键词查询。",
+      "label": "查询扩展"
+    },
+    "relevanceFloor": {
+      "description": "排除相关度分数低于此值的记忆。",
+      "label": "最低相关度"
+    },
+    "tokenBudget": {
+      "description": "每轮最多可注入的记忆 Token 数。",
+      "label": "召回 Token 预算"
+    },
+    "topK": {
+      "description": "每轮最多考虑的记忆数量。",
+      "label": "每轮记忆数"
+    },
+    "useMemory": {
+      "description": "在后续对话中召回符合条件的已存记忆。",
+      "label": "使用记忆"
+    }
+  },
+  "retrievalMode": {
+    "actions": {
+      "allowCloud": "允许云端向量化",
+      "configureEmbedding": "配置向量模型",
+      "enableHybrid": "开启混合检索"
+    },
+    "degradedTitle": "当前仅使用关键词召回",
+    "hybrid": "已通过 {provider} 启用混合检索。",
+    "reasons": {
+      "cloud_blocked": "已配置的 {provider} 向量模型位于云端，但尚未允许云端向量化。",
+      "hybrid_disabled": "混合检索已关闭。",
+      "no_backend": "尚未配置向量模型和向量检索后端。",
+      "store_unsupported": "已配置的向量存储不支持向量检索。"
+    }
   },
   "scope": {
     "character": "按人格",

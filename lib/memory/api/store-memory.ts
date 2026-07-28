@@ -107,15 +107,33 @@ export async function storeMemoryCore(input: StoreMemoryCoreInput): Promise<Stor
 
   // PII gate — mandatory on the write path (memory text persists durably).
   const { hasNoLeakingPii, redactText } = await import("@cognia/redact")
+  // Audit the block so the settings pane can report "N writes withheld".
+  // Content-free by construction: only the provenance and the reason, never the
+  // text that tripped the gate. Fires only on a block, so this is not a hot path.
+  const auditPiiBlock = async () => {
+    const { appendMemoryAuditEvent } = await import("@/lib/db/memory-governance")
+    await appendMemoryAuditEvent({
+      action: "learn-denied",
+      sessionId: input.source?.sessionId,
+      reason: "pii_blocked",
+      metadata: { provenance: input.provenance, type },
+    }).catch(() => undefined)
+  }
   let text = rawText
   let piiRedacted = false
   if ((input.piiGate ?? "block") === "block") {
-    if (!hasNoLeakingPii(rawText)) return { ok: false, reason: "pii_blocked" }
+    if (!hasNoLeakingPii(rawText)) {
+      await auditPiiBlock()
+      return { ok: false, reason: "pii_blocked" }
+    }
   } else {
     const result = redactText(rawText)
     text = result.redacted
     piiRedacted = Object.keys(result.map).length > 0
-    if (!hasNoLeakingPii(text)) return { ok: false, reason: "pii_blocked" }
+    if (!hasNoLeakingPii(text)) {
+      await auditPiiBlock()
+      return { ok: false, reason: "pii_blocked" }
+    }
   }
 
   const tags = (input.tags ?? []).map((t) => t.trim()).filter(Boolean)

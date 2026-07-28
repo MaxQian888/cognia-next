@@ -248,8 +248,39 @@ describe("manageMemory", () => {
   it("clears through the governed delete path", async () => {
     mockList.mockResolvedValue([{ id: "m1" }, { id: "m2" }])
     mockGet.mockImplementation(async (id) => ({ id, version: 1 }))
-    await manageMemory({ kind: "clear" })
+    const result = await manageMemory({ kind: "clear" })
     expect(mockDelete).toHaveBeenCalledTimes(2)
     expect(mockSinkDelete).toHaveBeenCalledTimes(2)
+    expect(result).toEqual({ ok: true, clearedCount: 2 })
+  })
+
+  it("clears everything — active and invalidated — when no query is given", async () => {
+    // `listMemories()` returns both statuses when `status` is unset, so an
+    // unscoped clear must not silently leave history behind.
+    mockList.mockResolvedValue([])
+    mockGet.mockImplementation(async (id) => ({ id, version: 1 }))
+    await manageMemory({ kind: "clear" })
+    expect(mockList).toHaveBeenCalledWith(undefined)
+  })
+
+  it("scopes the clear to the query it is given", async () => {
+    mockList.mockResolvedValue([{ id: "w1" }])
+    mockGet.mockImplementation(async (id) => ({ id, version: 1 }))
+    const result = await manageMemory({
+      kind: "clear",
+      query: { scope: "workspace", projectId: "project_1" },
+    })
+    expect(mockList).toHaveBeenCalledWith({ scope: "workspace", projectId: "project_1" })
+    expect(mockDelete).toHaveBeenCalledTimes(1)
+    expect(mockDelete).toHaveBeenCalledWith("w1")
+    expect(result).toEqual({ ok: true, clearedCount: 1 })
+  })
+
+  it("can purge only the invalidated rows", async () => {
+    mockList.mockResolvedValue([{ id: "i1" }, { id: "i2" }, { id: "i3" }])
+    mockGet.mockImplementation(async (id) => ({ id, version: 1 }))
+    const result = await manageMemory({ kind: "clear", query: { status: "invalidated" } })
+    expect(mockList).toHaveBeenCalledWith({ status: "invalidated" })
+    expect(result).toEqual({ ok: true, clearedCount: 3 })
   })
 })

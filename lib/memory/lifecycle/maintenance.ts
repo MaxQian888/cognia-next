@@ -38,6 +38,14 @@ export interface MemoryMaintenanceInput {
   now?: number
 }
 
+/** What a decay pass invalidated, for the audit trail. */
+export interface MemoryDecayRecord {
+  /** `capacity` = over `maxActivePerScope`; `idle` = untouched past `maxIdleDays`. */
+  reason: "capacity" | "idle"
+  memoryIds: string[]
+  sessionId?: string
+}
+
 export interface MemoryMaintenanceDeps {
   distillDeps: RunEpisodicDistillDeps
   decayDeps: DecayDeps
@@ -45,6 +53,12 @@ export interface MemoryMaintenanceDeps {
     input: MemoryMaintenanceInput,
     operations: ConsolidationOp[]
   ) => Promise<void>
+  /**
+   * Audit what decay removed. Without this, eviction and idle-expiry are
+   * invisible: `deps.invalidate` writes no audit event, so a user who set
+   * `maxIdleDays` has no way to tell whether it ever fired.
+   */
+  recordDecay?: (record: MemoryDecayRecord) => Promise<void>
 }
 
 /** Pure core: distill the session's episodes, then evict scope overflow. */
@@ -81,7 +95,7 @@ export async function runMemoryMaintenance(
     branch: input.branch,
     pathPattern: input.pathPattern,
   }
-  await evictOverflow(
+  const { evicted } = await evictOverflow(
     {
       scope: input.scope,
       ...decayNamespace,
@@ -89,10 +103,17 @@ export async function runMemoryMaintenance(
     },
     deps.decayDeps
   )
+  if (evicted.length > 0) {
+    await deps.recordDecay?.({
+      reason: "capacity",
+      memoryIds: evicted,
+      sessionId: input.source?.sessionId,
+    })
+  }
   // Access-time forgetting (opt-in via `maxIdleDays > 0`; a no-op otherwise).
   // Runs on the same scope as eviction, so it forgets stale memories across the
   // active scope whenever maintenance fires.
-  await expireStale(
+  const { expired } = await expireStale(
     {
       scope: input.scope,
       ...decayNamespace,
@@ -101,6 +122,13 @@ export async function runMemoryMaintenance(
     },
     deps.decayDeps
   )
+  if (expired.length > 0) {
+    await deps.recordDecay?.({
+      reason: "idle",
+      memoryIds: expired,
+      sessionId: input.source?.sessionId,
+    })
+  }
 }
 
 // Scheduling is deduped durably by `(session, transcript length)` in memoryJobs.

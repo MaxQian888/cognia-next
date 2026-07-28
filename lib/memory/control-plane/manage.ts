@@ -7,6 +7,7 @@ import {
   listMemories,
   setMemoryPinned,
   updateMemory,
+  type ListMemoriesQuery,
 } from "@/lib/db/memories"
 import {
   appendMemoryAuditEvent,
@@ -58,10 +59,17 @@ export type ManageMemoryCommand =
       mode: "keep" | "keep-both" | "merge"
       mergedText?: string
     }
-  | { kind: "clear" }
+  /**
+   * Hard-delete every memory matching `query` (each row still goes through the
+   * `delete` path, so vectors/evidence/audit are cleaned per row). Omitting
+   * `query` clears everything — active *and* invalidated, since `listMemories`
+   * returns both when `status` is unset.
+   */
+  | { kind: "clear"; query?: ListMemoriesQuery }
 
 export type ManageMemoryResult =
-  | { ok: true; memoryId?: string; piiRedacted?: boolean }
+  /** `clearedCount` is only set by `clear` — how many rows the query matched. */
+  | { ok: true; memoryId?: string; piiRedacted?: boolean; clearedCount?: number }
   | { ok: false; reason: "not_found" | "disabled" | "temporary" | "pii_blocked" }
 
 export async function manageMemory(command: ManageMemoryCommand): Promise<ManageMemoryResult> {
@@ -86,9 +94,9 @@ export async function manageMemory(command: ManageMemoryCommand): Promise<Manage
   }
 
   if (command.kind === "clear") {
-    const rows = await listMemories()
+    const rows = await listMemories(command.query)
     for (const row of rows) await manageMemory({ kind: "delete", id: row.id })
-    return { ok: true }
+    return { ok: true, clearedCount: rows.length }
   }
 
   if (command.kind === "resolve-conflict") {

@@ -56,6 +56,40 @@ export async function listMemoryAuditEvents(
   return (await collection.toArray()).sort((a, b) => a.createdAt - b.createdAt)
 }
 
+/**
+ * Audit events newer than `cutoff`. Walks the `createdAt` index rather than
+ * reading the whole (unbounded, never-pruned) table.
+ */
+export async function listMemoryAuditEventsSince(cutoff: number): Promise<MemoryAuditEvent[]> {
+  return getDb().memoryAuditEvents.where("createdAt").above(cutoff).toArray()
+}
+
+/**
+ * When decay/PII instrumentation started producing data, or `undefined` if it
+ * never has. Used to decide whether a maintenance window can be reported
+ * exactly or must fall back to the heuristic derived from `memories`.
+ *
+ * Walks the `createdAt` index in order and stops at the first match, so the
+ * common case (instrumented data exists, and the earliest such event is old)
+ * terminates almost immediately. The full-scan worst case is exactly the case
+ * where the answer is "never instrumented" — and that scan stays on the index.
+ */
+export async function findEarliestInstrumentedAuditAt(
+  reasons: readonly string[]
+): Promise<number | undefined> {
+  const match = new Set(reasons)
+  const row = await getDb()
+    .memoryAuditEvents.orderBy("createdAt")
+    .filter((event) => match.has(event.reason))
+    .first()
+  return row?.createdAt
+}
+
+/** Every job row, newest-queued first. Completed rows are retained, not deleted. */
+export async function listMemoryJobs(): Promise<MemoryJob[]> {
+  return getDb().memoryJobs.orderBy("queuedAt").reverse().toArray()
+}
+
 export type MemoryJobDraft = Omit<MemoryJob, "id" | "status" | "queuedAt" | "retryCount"> &
   Partial<Pick<MemoryJob, "id" | "status" | "queuedAt" | "retryCount">>
 

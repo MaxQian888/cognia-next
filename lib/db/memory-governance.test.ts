@@ -9,9 +9,12 @@ import {
   createMemoryEvidence,
   enqueueMemoryJob,
   failMemoryJob,
+  findEarliestInstrumentedAuditAt,
   getMemoryJob,
   listMemoryAuditEvents,
+  listMemoryAuditEventsSince,
   listMemoryEvidence,
+  listMemoryJobs,
 } from "./memory-governance"
 
 beforeEach(async () => {
@@ -113,5 +116,66 @@ describe("durable memory jobs", () => {
     await enqueueMemoryJob({ ...draft, status: "failed" })
     const retry = await enqueueMemoryJob({ ...draft, id: "j2" }, { reuseCompleted: true })
     expect(retry.id).toBe("j2")
+  })
+})
+
+describe("insight readers", () => {
+  it("returns only audit events newer than the cutoff", async () => {
+    await appendMemoryAuditEvent({
+      id: "a1",
+      action: "invalidated",
+      reason: "idle",
+      createdAt: 100,
+    })
+    await appendMemoryAuditEvent({
+      id: "a2",
+      action: "invalidated",
+      reason: "idle",
+      createdAt: 300,
+    })
+    await appendMemoryAuditEvent({ id: "a3", action: "created", reason: "user", createdAt: 400 })
+
+    const rows = await listMemoryAuditEventsSince(200)
+    expect(rows.map((r) => r.id).sort()).toEqual(["a2", "a3"])
+  })
+
+  it("finds the earliest event carrying an instrumented reason", async () => {
+    await appendMemoryAuditEvent({ id: "b1", action: "created", reason: "user", createdAt: 50 })
+    await appendMemoryAuditEvent({
+      id: "b2",
+      action: "invalidated",
+      reason: "capacity",
+      createdAt: 200,
+    })
+    await appendMemoryAuditEvent({
+      id: "b3",
+      action: "invalidated",
+      reason: "idle",
+      createdAt: 900,
+    })
+
+    await expect(findEarliestInstrumentedAuditAt(["idle", "capacity"])).resolves.toBe(200)
+  })
+
+  it("returns undefined when instrumentation never produced anything", async () => {
+    await appendMemoryAuditEvent({ id: "c1", action: "created", reason: "user", createdAt: 50 })
+    await expect(findEarliestInstrumentedAuditAt(["idle", "capacity"])).resolves.toBeUndefined()
+  })
+
+  it("lists jobs newest-queued first, including completed rows", async () => {
+    const base = {
+      kind: "turn-extraction" as const,
+      scope: "global" as const,
+      provenance: "user" as const,
+      evidenceIds: [],
+    }
+    await enqueueMemoryJob({ ...base, id: "j-old", dedupeKey: "k1", queuedAt: 100 })
+    await enqueueMemoryJob({ ...base, id: "j-new", dedupeKey: "k2", queuedAt: 900 })
+    await completeMemoryJob("j-old", 150)
+
+    const jobs = await listMemoryJobs()
+    expect(jobs.map((j) => j.id)).toEqual(["j-new", "j-old"])
+    // Completed jobs are retained, which is what makes "last run" reportable.
+    expect(jobs[1]).toMatchObject({ status: "completed", completedAt: 150 })
   })
 })

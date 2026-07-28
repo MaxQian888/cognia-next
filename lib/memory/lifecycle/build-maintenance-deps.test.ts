@@ -107,4 +107,32 @@ describe("buildEpisodicMaintenanceDeps", () => {
       expect.objectContaining({ memoryId: "mem_1", reason: "session_distillation" })
     )
   })
+
+  it("wires recordDecay to one audit event per invalidated id", async () => {
+    const deps = await buildEpisodicMaintenanceDeps(params, cfg())
+
+    await deps!.recordDecay?.({ reason: "idle", memoryIds: ["m1", "m2"], sessionId: "s1" })
+
+    expect(mockAppendAudit).toHaveBeenCalledTimes(2)
+    expect(mockAppendAudit).toHaveBeenNthCalledWith(1, {
+      action: "invalidated",
+      memoryId: "m1",
+      sessionId: "s1",
+      reason: "idle",
+    })
+    expect(mockAppendAudit).toHaveBeenNthCalledWith(2, {
+      action: "invalidated",
+      memoryId: "m2",
+      sessionId: "s1",
+      reason: "idle",
+    })
+  })
+
+  it("stamps the capacity reason distinctly from idle", async () => {
+    const deps = await buildEpisodicMaintenanceDeps(params, cfg())
+    await deps!.recordDecay?.({ reason: "capacity", memoryIds: ["m9"] })
+    expect(mockAppendAudit).toHaveBeenCalledWith(
+      expect.objectContaining({ memoryId: "m9", reason: "capacity" })
+    )
+  })
 })

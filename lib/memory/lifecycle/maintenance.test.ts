@@ -85,6 +85,83 @@ describe("runMemoryMaintenance", () => {
     expect(invalidated).toEqual(["a"]) // lowest-scored evicted to reach cap 1
   })
 
+  it("audits what decay removed, split by capacity vs idle", async () => {
+    // Without this, `deps.invalidate` writes no audit event and a user who set
+    // maxIdleDays has no way to tell whether it ever fired.
+    const records: unknown[] = []
+    const now = 1_700_000_000_000
+    const rows = [
+      // Over the cap AND stale — capacity evicts the lowest-scored one first,
+      // then idle expiry sweeps whatever is still active and untouched.
+      mem({ id: "old", importance: 1, lastAccessedAt: now - 60 * 24 * 60 * 60 * 1000 }),
+      mem({ id: "alsoOld", importance: 9, lastAccessedAt: now - 60 * 24 * 60 * 60 * 1000 }),
+    ]
+    const invalidated = new Set<string>()
+    const deps: MemoryMaintenanceDeps = {
+      distillDeps: { distill: async () => [], consolidate: async () => ({ applied: [] }) },
+      decayDeps: {
+        listActive: async () => rows.filter((m) => !invalidated.has(m.id)),
+        invalidate: async (id) => {
+          invalidated.add(id)
+        },
+      },
+      recordDecay: async (record) => {
+        records.push(record)
+      },
+    }
+
+    await runMemoryMaintenance(
+      {
+        transcript,
+        scope: "global",
+        provenance: "user",
+        source: { sessionId: "s1" },
+        config: cfg({ maxActivePerScope: 1, maxIdleDays: 30 }),
+        now,
+      },
+      deps
+    )
+
+    expect(records).toEqual([
+      { reason: "capacity", memoryIds: ["old"], sessionId: "s1" },
+      { reason: "idle", memoryIds: ["alsoOld"], sessionId: "s1" },
+    ])
+  })
+
+  it("does not record a decay pass that removed nothing", async () => {
+    const records: unknown[] = []
+    const deps: MemoryMaintenanceDeps = {
+      distillDeps: { distill: async () => [], consolidate: async () => ({ applied: [] }) },
+      decayDeps: { listActive: async () => [], invalidate: async () => undefined },
+      recordDecay: async (record) => {
+        records.push(record)
+      },
+    }
+    await runMemoryMaintenance(
+      { transcript, scope: "global", provenance: "user", config: cfg({ maxIdleDays: 30 }) },
+      deps
+    )
+    expect(records).toEqual([])
+  })
+
+  it("stays functional when no recordDecay dep is wired", async () => {
+    const invalidated: string[] = []
+    const deps: MemoryMaintenanceDeps = {
+      distillDeps: { distill: async () => [], consolidate: async () => ({ applied: [] }) },
+      decayDeps: {
+        listActive: async () => [mem({ id: "a", importance: 1 }), mem({ id: "b", importance: 9 })],
+        invalidate: async (id) => {
+          invalidated.push(id)
+        },
+      },
+    }
+    await runMemoryMaintenance(
+      { transcript, scope: "global", provenance: "user", config: cfg({ maxActivePerScope: 1 }) },
+      deps
+    )
+    expect(invalidated).toEqual(["a"])
+  })
+
   it("evicts global-scope overflow even when the session carries a characterId", async () => {
     // Regression: global memories are stored with characterId: undefined, so a
     // realistic listActive (mirroring listMemories) honors the characterId

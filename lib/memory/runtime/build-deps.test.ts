@@ -23,6 +23,7 @@ jest.mock("@/lib/db/memories", () => ({
 import {
   tryBuildMemoryDeps,
   tryBuildMemoryVectorSink,
+  describeMemoryRetrievalMode,
   MEMORY_VECTOR_COLLECTION,
 } from "./build-deps"
 
@@ -238,5 +239,99 @@ describe("tryBuildMemoryVectorSink", () => {
     })
     expect(await tryBuildMemoryVectorSink(cfg({ allowCloudEmbedding: false }))).toBeUndefined()
     expect(await tryBuildMemoryVectorSink(cfg({ allowCloudEmbedding: true }))).toBeDefined()
+  })
+})
+
+describe("describeMemoryRetrievalMode", () => {
+  it("reports `off` rather than a degradation when memory is not running", async () => {
+    await expect(describeMemoryRetrievalMode(cfg({ enabled: false }))).resolves.toEqual({
+      kind: "off",
+      reason: "disabled",
+    })
+    await expect(describeMemoryRetrievalMode(cfg({ temporary: true }))).resolves.toEqual({
+      kind: "off",
+      reason: "temporary",
+    })
+    expect(mockTryBuildTwinDeps).not.toHaveBeenCalled()
+  })
+
+  it("reports hybrid_disabled without even consulting the backend", async () => {
+    await expect(describeMemoryRetrievalMode(cfg({ hybridEnabled: false }))).resolves.toEqual({
+      kind: "bm25",
+      reason: "hybrid_disabled",
+    })
+    expect(mockTryBuildTwinDeps).not.toHaveBeenCalled()
+  })
+
+  it("reports no_backend when twin embeddings were never configured", async () => {
+    mockTryBuildTwinDeps.mockResolvedValue(undefined)
+    await expect(describeMemoryRetrievalMode(cfg())).resolves.toEqual({
+      kind: "bm25",
+      reason: "no_backend",
+    })
+  })
+
+  it("reports store_unsupported when the vector store cannot search by embedding", async () => {
+    mockTryBuildTwinDeps.mockResolvedValue({
+      store: {},
+      embedding: { provider: "transformersjs", model: "x", apiKey: "" },
+    })
+    await expect(describeMemoryRetrievalMode(cfg())).resolves.toEqual({
+      kind: "bm25",
+      reason: "store_unsupported",
+      provider: "transformersjs",
+    })
+  })
+
+  it("reports cloud_blocked — the default state for a cloud embedder", async () => {
+    // hybridEnabled defaults to true and allowCloudEmbedding defaults to false,
+    // so anyone whose twin embedder is cloud-hosted silently gets keyword-only
+    // recall while the config claims hybrid. This is the case the alert exists for.
+    mockTryBuildTwinDeps.mockResolvedValue({
+      store: { searchByEmbedding: mockSearchByEmbedding },
+      embedding: { provider: "openai", model: "x", apiKey: "k" },
+    })
+    await expect(describeMemoryRetrievalMode(cfg())).resolves.toEqual({
+      kind: "bm25",
+      reason: "cloud_blocked",
+      provider: "openai",
+    })
+  })
+
+  it("reports hybrid once every gate passes", async () => {
+    mockTryBuildTwinDeps.mockResolvedValue({
+      store: { searchByEmbedding: mockSearchByEmbedding },
+      embedding: { provider: "transformersjs", model: "x", apiKey: "" },
+    })
+    await expect(describeMemoryRetrievalMode(cfg())).resolves.toEqual({
+      kind: "hybrid",
+      provider: "transformersjs",
+    })
+  })
+
+  it("never throws — a backend explosion reads as no_backend", async () => {
+    mockTryBuildTwinDeps.mockRejectedValue(new Error("boom"))
+    await expect(describeMemoryRetrievalMode(cfg())).resolves.toEqual({
+      kind: "bm25",
+      reason: "no_backend",
+    })
+  })
+
+  it("agrees with tryBuildMemoryDeps about whether the vector leg attached", async () => {
+    // The probe and the runtime share `resolveMemoryBackendOutcome`; this pins
+    // that they can never disagree about a given configuration.
+    for (const embedding of [
+      { provider: "transformersjs", model: "x", apiKey: "" },
+      { provider: "openai", model: "x", apiKey: "k" },
+    ]) {
+      mockTryBuildTwinDeps.mockResolvedValue({
+        store: { searchByEmbedding: mockSearchByEmbedding },
+        embedding,
+      })
+      const config = cfg()
+      const mode = await describeMemoryRetrievalMode(config)
+      const deps = await tryBuildMemoryDeps(config)
+      expect(mode.kind === "hybrid").toBe(deps?.vectorSearch !== undefined)
+    }
   })
 })
