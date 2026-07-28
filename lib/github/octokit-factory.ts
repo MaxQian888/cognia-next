@@ -19,7 +19,7 @@ import { throttling } from "@octokit/plugin-throttling"
 import { createTokenAuth } from "@octokit/auth-token"
 import { getInstallationToken, type AppAuthConfig, type RefreshDeps } from "./auth-app"
 
-const COGNIA_UA = "cognia-github-delivery/1.0"
+const COGNIA_UA = "cognia-agent-team/1.0"
 
 const ThrottledRetriedOctokit = Octokit.plugin(retry, throttling)
 type ConfiguredOctokit = InstanceType<typeof ThrottledRetriedOctokit>

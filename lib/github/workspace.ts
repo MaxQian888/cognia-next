@@ -1,9 +1,9 @@
 /**
- * Git workspace abstraction for AI-driven Issue → PR loops.
+ * Git workspace abstraction for plugin-driven repository automation.
  *
- * The runIssueLoop workflow node clones the target repo into a sandboxed
- * directory, hands it to the AI driver (Claude Code), then commits and pushes
- * the result. There are two backends:
+ * A Marketplace plugin can clone a target repository into a sandboxed
+ * directory, hand it to an AI driver, then commit and push the result.
+ * There are two backends:
  *
  *   - `local`: Tauri Rust commands shell out to system `git` under the
  *     `<baseDir>/<repo>/<timestamp>` worktree, then `tokio::fs` cleans up.
@@ -33,8 +33,8 @@ export interface WorkspaceHandle {
 }
 
 /**
- * Pluggable E2B backend. The github-delivery plugin's activate() may wire
- * a real implementation backed by the `e2b-sandbox` plugin when present.
+ * Pluggable E2B backend. A repository Integration plugin may wire a real
+ * implementation backed by the `e2b-sandbox` plugin when present.
  * Tests inject fakes.
  */
 export interface E2BBackend {
