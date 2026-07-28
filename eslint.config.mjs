@@ -25,6 +25,7 @@ const eslintConfig = defineConfig([
     "**/coverage/**",
     "target/**",
     "packages/**/dist/**",
+    "crates/**/dist/**",
     "crates/**/extension/out/**",
     "next-env.d.ts",
     "docs/.next/**",
@@ -107,7 +108,13 @@ const eslintConfig = defineConfig([
   },
   // Vendored components (ai-elements, shadcn/ui) — relaxed rules per CLAUDE.md
   {
-    files: ["components/ai-elements/**/*.{ts,tsx}", "components/ui/**/*.{ts,tsx}"],
+    files: [
+      "components/ai-elements/**/*.{ts,tsx}",
+      "components/ui/**/*.{ts,tsx}",
+      // The marketing workspace keeps its own shadcn copies (ADR-0092 §1
+      // forbids importing the product's), so they need the same relaxation.
+      "web/components/ui/**/*.{ts,tsx}",
+    ],
     rules: {
       "react-hooks/refs": "off",
       "react-hooks/set-state-in-effect": "off",

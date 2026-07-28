@@ -7,7 +7,7 @@
  * the real detail panel.
  */
 
-import { expect, test, type Page } from "@playwright/test"
+import { expect, test, type Page } from "@/tests/e2e/fixtures/test"
 
 import { resetCogniaDb } from "../helpers/db-reset"
 

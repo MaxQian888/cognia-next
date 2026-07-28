@@ -11,7 +11,7 @@
  * bridge contracts require the real Tauri shell.
  */
 
-import { expect, test } from "@playwright/test"
+import { expect, test } from "@/tests/e2e/fixtures/test"
 
 import { ensureCogniaAccount, readDexieRow, readDexieRows } from "../helpers/db-reset"
 

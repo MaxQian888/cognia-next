@@ -80,8 +80,36 @@ export function renderPlaywright(pw) {
     `**${pw.total - pw.failed.length - pw.skipped}** passed · ` +
       `**${pw.failed.length}** failed · **${pw.flaky.length}** flaky · ` +
       `**${pw.skipped}** skipped`,
+    `First-pass ${pw.firstPassRate === null || pw.firstPassRate === undefined ? "—" : `${pw.firstPassRate.toFixed(2)}%`} · ` +
+      `Flaky rate ${pw.flakyRate === null || pw.flakyRate === undefined ? "—" : `${pw.flakyRate.toFixed(2)}%`} · ` +
+      `P95 ${ms(pw.p95Duration)}`,
     "",
   ]
+
+  if (pw.trend?.hasBase) {
+    const label = {
+      firstPassRate: "First-pass rate",
+      flakyRate: "Flaky rate",
+      p95Duration: "P95 duration",
+    }
+    const value = (metric, number) =>
+      metric === "p95Duration" ? ms(number) : `${Number(number).toFixed(2)}%`
+    const delta = (metric, number) => {
+      if (number === null || number === undefined) return "—"
+      const rendered = metric === "p95Duration" ? ms(number) : Number(number).toFixed(2)
+      return number > 0 ? `+${rendered}` : rendered
+    }
+    lines.push(
+      "| Metric | Trunk baseline | This run | Δ |",
+      "| --- | --: | --: | --: |",
+      ...pw.trend.metrics.map(
+        (metric) =>
+          `| ${label[metric.key] ?? metric.key} | ${value(metric.key, metric.from)} | ` +
+          `${value(metric.key, metric.to)} | ${delta(metric.key, metric.delta)} |`
+      ),
+      ""
+    )
+  }
 
   if (pw.failed.length) {
     const { shown, hidden } = truncate(pw.failed, 20)

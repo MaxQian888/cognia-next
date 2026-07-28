@@ -2,6 +2,14 @@
 * @AstroAir @MaxQian888
 /lib/telemetry/events/catalog.ts @AstroAir @MaxQian888
 
-# Example: scope-specific owners (uncomment + edit when growing the team).
-# /src-tauri/  @AstroAir @MaxQian888
-# /docs/       @AstroAir
+# E2E platform and domain boundaries. Keep these explicit so test-infra,
+# mobile, workflow, and native harness changes cannot become ownerless.
+/playwright.config.ts @AstroAir @MaxQian888
+/tests/e2e/fixtures/ @AstroAir @MaxQian888
+/tests/e2e/helpers/ @AstroAir @MaxQian888
+/tests/e2e/mobile/ @AstroAir @MaxQian888
+/tests/e2e/tauri/ @AstroAir @MaxQian888
+/tests/e2e/workflows/ @AstroAir @MaxQian888
+/scripts/e2e/ @AstroAir @MaxQian888
+/scripts/gates/check-e2e-governance.mjs @AstroAir @MaxQian888
+/scripts/gates/check-e2e-governance.test.mjs @AstroAir @MaxQian888

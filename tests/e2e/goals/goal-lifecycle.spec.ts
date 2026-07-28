@@ -8,7 +8,7 @@
  * or judge result; model-driven progress belongs to the runtime harness.
  */
 
-import { expect, test } from "@playwright/test"
+import { expect, test } from "@/tests/e2e/fixtures/test"
 import { ensureCogniaAccount, waitForTestGlobals } from "../helpers/db-reset"
 
 const OBJECTIVE = "Keep the release checklist current and verifiable"
@@ -23,7 +23,7 @@ test.describe("goals — product lifecycle", () => {
     await expect(page.getByTestId("goal-console")).toBeVisible()
   })
 
-  test("creates, pauses, restores, resumes, and stops a goal", async ({ page }) => {
+  test("@critical creates, pauses, restores, resumes, and stops a goal", async ({ page }) => {
     const consoleHeader = page.getByTestId("goal-console").locator("header")
     await consoleHeader.getByTestId("goal-quick-create-trigger").click()
 

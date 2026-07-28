@@ -158,6 +158,7 @@ const projectCommon: Config = {
     "^@cognia/provider-routing(.*)$": "<rootDir>/packages/provider-routing/src$1",
     "^@cognia/rag(.*)$": "<rootDir>/packages/rag/src$1",
     "^@cognia/error-parsers(.*)$": "<rootDir>/packages/error-parsers/src$1",
+    "^@cognia/diagnostics(.*)$": "<rootDir>/packages/diagnostics/src$1",
     "^@cognia/vector(.*)$": "<rootDir>/packages/vector/src$1",
     "^@cognia/transformers-runtime$": "<rootDir>/packages/transformers-runtime/src/index.ts",
     "^@cognia/transformers-runtime/(.*)$": "<rootDir>/packages/transformers-runtime/src/$1",
@@ -323,6 +324,15 @@ const globalConfig: Config = {
     // by overlay.injected.test.ts + overlay.injected.record.test.ts.
     "!lib/browser/overlay.injected.js",
     "stores/**/*.{js,jsx,ts,tsx}",
+    // The marketing workspace (ADR-0092). `check-colocated-tests.mjs` has
+    // audited these same three roots since the site was built, but coverage
+    // never collected them — so `test:coverage:changed --strict` reported
+    // "nothing to do" for a whole workspace of components. `web/app/` and
+    // `web/content/` stay out for the reasons that gate documents: the former
+    // is thin route glue, the latter is data whose en/zh parity `tsc` proves.
+    "web/components/**/*.{ts,tsx}",
+    "web/hooks/**/*.{ts,tsx}",
+    "web/lib/**/*.{ts,tsx}",
     // Extracted provider workspace packages. provider-core originated from
     // lib/ai/providers (coverage-gated), so keep it collected. provider-types is
     // NOT listed — it came from types/, which was never coverage-collected.
@@ -333,6 +343,11 @@ const globalConfig: Config = {
     "packages/rag/src/**/*.{ts,tsx}",
     // error-parsers was lifted out of lib/error-parsers (coverage-collected).
     "packages/error-parsers/src/**/*.{ts,tsx}",
+    // diagnostics is new code, held to the 90% floor rather than a legacy one.
+    "packages/diagnostics/src/**/*.{ts,tsx}",
+    // Type-only module: the v8 provider still maps it back to source and scores
+    // it 0%, exactly as for transformers-runtime/src/types.ts below.
+    "!packages/diagnostics/src/types.ts",
     // memory core was lifted out of lib/memory (coverage-collected), so keep it collected.
     "packages/memory/src/**/*.{ts,tsx}",
     // ocr core was lifted out of lib/ocr (coverage-collected), so keep it collected.

@@ -17,7 +17,7 @@
  * real URL rewrites, real pane presence per breakpoint.
  */
 
-import { expect, test, type Page } from "@playwright/test"
+import { expect, test, type Page } from "@/tests/e2e/fixtures/test"
 import { resetCogniaDb } from "../helpers/db-reset"
 
 const DESKTOP = { width: 1440, height: 900 }

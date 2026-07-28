@@ -12,7 +12,13 @@
 import { test } from "node:test"
 import assert from "node:assert/strict"
 
-import { flattenTests, isFailure, isFlaky, summarizePlaywright } from "./playwright.mjs"
+import {
+  diffPlaywright,
+  flattenTests,
+  isFailure,
+  isFlaky,
+  summarizePlaywright,
+} from "./playwright.mjs"
 
 const REPORT = {
   suites: [
@@ -128,6 +134,9 @@ test("summarizePlaywright separates real failures from flakes", () => {
   assert.equal(summary.failed[0].title, "chat.spec.ts › with attachments › rejects a huge file")
   assert.equal(summary.flaky.length, 1)
   assert.equal(summary.flaky[0].title, "chat.spec.ts › with attachments › uploads a file")
+  assert.equal(summary.firstPassRate, 33.33)
+  assert.equal(summary.flakyRate, 33.33)
+  assert.equal(summary.p95Duration, 5900)
 })
 
 test("summarizePlaywright ranks the slowest tests", () => {
@@ -143,4 +152,26 @@ test("summarizePlaywright copes with no report at all", () => {
   assert.equal(summary.total, 0)
   assert.deepEqual(summary.failed, [])
   assert.deepEqual(summary.flaky, [])
+  assert.equal(summary.firstPassRate, null)
+  assert.equal(summary.flakyRate, null)
+  assert.equal(summary.p95Duration, 0)
+})
+
+test("diffPlaywright reports first-pass, flaky, and P95 changes", () => {
+  const trend = diffPlaywright(
+    { firstPassRate: 99, flakyRate: 0.5, p95Duration: 40_000 },
+    { firstPassRate: 98, flakyRate: 1, p95Duration: 45_000 }
+  )
+
+  assert.equal(trend.hasBase, true)
+  assert.deepEqual(trend.metrics, [
+    { key: "firstPassRate", from: 98, to: 99, delta: 1 },
+    { key: "flakyRate", from: 1, to: 0.5, delta: -0.5 },
+    { key: "p95Duration", from: 45_000, to: 40_000, delta: -5000 },
+  ])
+})
+
+test("diffPlaywright remains useful without a baseline", () => {
+  const current = { firstPassRate: 99, flakyRate: 0.5, p95Duration: 40_000 }
+  assert.deepEqual(diffPlaywright(current, null), { hasBase: false, current })
 })

@@ -51,8 +51,16 @@ export const TS_ROOTS = [
   "web/hooks/",
   "web/lib/",
 ]
-/** Carve-outs the rule names explicitly. */
-export const TS_EXCLUDED = ["components/ui/", "components/ai-elements/"]
+/**
+ * Carve-outs the rule names explicitly.
+ *
+ * `web/components/ui/` needs its own entry rather than riding on
+ * `components/ui/`: the match is `file.startsWith(root)`, so the marketing
+ * workspace's shadcn copies never match the product path. Without it every
+ * generated shadcn file would demand a hand-written test, which is the same
+ * bargain the product tree already declined.
+ */
+export const TS_EXCLUDED = ["components/ui/", "components/ai-elements/", "web/components/ui/"]
 export const RUST_ROOT = "src-tauri/src/"
 
 const TS_EXT = /\.(ts|tsx)$/

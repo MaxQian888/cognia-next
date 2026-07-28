@@ -90,6 +90,7 @@ jobs:
           node scripts/ci/report/build-report.mjs \
             --jest-dir artifacts \
             --playwright-json artifacts/playwright-json/report.json \
+            --base-playwright-json baseline/playwright-json/report.json \
             --coverage artifacts/coverage-report/coverage-final.json \
             --base-coverage baseline/coverage-report/coverage-final.json \
             --bundle artifacts/bundle-size/bundle-size.json \

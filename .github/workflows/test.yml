@@ -337,6 +337,7 @@ jobs:
   build-e2e:
     name: Build E2E Static Export
     runs-on: ubuntu-latest
+    timeout-minutes: 30
 
     permissions:
       contents: read
@@ -388,6 +389,7 @@ jobs:
     name: E2E ${{ matrix.project }} (shard ${{ matrix.shard }}/2)
     runs-on: ubuntu-latest
     needs: build-e2e
+    timeout-minutes: 30
 
     permissions:
       contents: read
@@ -446,7 +448,18 @@ jobs:
       # PLAYWRIGHT_STATIC=1 serves the downloaded export via
       # scripts/e2e/serve-out.mjs — no Turbopack, no per-route compiles.
       # Blob reporter feeds the e2e-report merge job.
-      - name: Run Playwright tests (${{ matrix.project }} ${{ matrix.shard }}/2)
+      - name: Run PR Playwright gate (${{ matrix.project }} ${{ matrix.shard }}/2)
+        if: github.event_name == 'pull_request'
+        run: >-
+          pnpm exec playwright test --project=${{ matrix.project }}
+          --grep "@smoke|@critical|@a11y|@visual"
+          --shard=${{ matrix.shard }}/2 --reporter=blob,list
+        env:
+          CI: "true"
+          PLAYWRIGHT_STATIC: "1"
+
+      - name: Run full Playwright suite (${{ matrix.project }} ${{ matrix.shard }}/2)
+        if: github.event_name != 'pull_request'
         run: >-
           pnpm exec playwright test --project=${{ matrix.project }}
           --shard=${{ matrix.shard }}/2 --reporter=blob,list
@@ -475,6 +488,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: e2e
     if: always()
+    timeout-minutes: 15
 
     permissions:
       contents: read
@@ -537,6 +551,8 @@ jobs:
   e2e-ios-weekly:
     name: E2E iOS (Weekly)
     runs-on: macos-14
+    needs: build-e2e
+    timeout-minutes: 45
     # Run on schedule + manual dispatch; the workflow_call parent decides
     # whether to fan this out via its own schedule.
     if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule'
@@ -562,11 +578,16 @@ jobs:
         run: pnpm install --frozen-lockfile
       - name: Install Playwright (chromium + webkit)
         run: pnpm exec playwright install --with-deps chromium webkit
+      - name: Download E2E static export
+        uses: actions/download-artifact@v7
+        with:
+          name: nextjs-build-e2e
+          path: out/
       - name: Run Playwright mobile-iphone-13 project
         run: pnpm exec playwright test --project=mobile-iphone-13 tests/e2e/mobile/
         env:
           CI: "true"
-          NEXT_PUBLIC_E2E: "1"
+          PLAYWRIGHT_STATIC: "1"
           PLAYWRIGHT_MOBILE_IOS: "1"
       - name: Upload Playwright HTML report
         uses: actions/upload-artifact@v7
@@ -576,9 +597,62 @@ jobs:
           path: playwright-report/
           retention-days: 14
 
+  e2e-cross-browser:
+    name: E2E ${{ matrix.project }} Critical (Weekly)
+    runs-on: ubuntu-latest
+    needs: build-e2e
+    timeout-minutes: 45
+    if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule'
+
+    permissions:
+      contents: read
+
+    strategy:
+      fail-fast: false
+      matrix:
+        project: [firefox, webkit]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 10
+      - name: Setup Node.js 26.x
+        uses: actions/setup-node@v6
+        with:
+          node-version: 26.x
+          cache: "pnpm"
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Install Playwright ${{ matrix.project }}
+        run: pnpm exec playwright install --with-deps ${{ matrix.project }}
+      - name: Download E2E static export
+        uses: actions/download-artifact@v7
+        with:
+          name: nextjs-build-e2e
+          path: out/
+      - name: Run critical browser journeys
+        run: >-
+          pnpm exec playwright test --project=${{ matrix.project }}
+          --grep "@smoke|@critical"
+        env:
+          CI: "true"
+          PLAYWRIGHT_STATIC: "1"
+          PLAYWRIGHT_CROSS_BROWSER: "1"
+      - name: Upload Playwright report
+        uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: playwright-report-${{ matrix.project }}
+          path: playwright-report/
+          retention-days: 14
+
   e2e-tauri:
     name: E2E Tauri (Windows)
     runs-on: windows-latest
+    timeout-minutes: 120
     # Runs nightly (schedule) and on manual dispatch. Avoids paying the cargo
     # build cost on every PR.
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'

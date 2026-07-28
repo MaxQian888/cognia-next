@@ -7,7 +7,7 @@
  * and load the selected trace again for its waterfall drill-down.
  */
 
-import { expect, test, type Page } from "@playwright/test"
+import { expect, test, type Page } from "@/tests/e2e/fixtures/test"
 
 import { readDexieRows, resetCogniaDb } from "../helpers/db-reset"
 

@@ -51,6 +51,7 @@ test("isGatedTsSource leaves the other workspaces alone", () => {
 test("isGatedTsSource honours the rule's carve-outs and non-source shapes", () => {
   for (const f of [
     "components/ui/button.tsx", // shadcn — excluded by the rule
+    "web/components/ui/button.tsx", // the marketing workspace's own shadcn copies
     "components/ai-elements/message.tsx", // vendored — excluded by the rule
     "app/page.tsx", // outside the gated roots
     "stores/chat/store.ts", // outside the gated roots

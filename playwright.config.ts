@@ -40,10 +40,16 @@ import { defineConfig, devices } from "@playwright/test"
 const tauriEnabled =
   process.env.PLAYWRIGHT_TAURI === "1" || process.env.PLAYWRIGHT_TAURI_DRIVER === "1"
 const iosEnabled = process.env.PLAYWRIGHT_MOBILE_IOS === "1"
+const crossBrowserEnabled = process.env.PLAYWRIGHT_CROSS_BROWSER === "1"
 const staticMode = process.env.PLAYWRIGHT_STATIC === "1"
+const isCI = Boolean(process.env.CI)
 
 export default defineConfig({
   testDir: "./tests/e2e",
+  // Visual baselines are generated from the same checked-in web fonts and
+  // fixed Chromium project in CI. Keeping the path OS-neutral makes the
+  // baseline reviewable once instead of silently creating per-runner copies.
+  snapshotPathTemplate: "{testDir}/{testFilePath}-snapshots/{arg}{ext}",
   // Individual tests — not just files — spread across workers. Every
   // chromium/mobile spec is parallel-safe: each test gets a fresh browser
   // context (fresh IndexedDB/Dexie), workflow specs reset the DB per test, and
@@ -63,10 +69,14 @@ export default defineConfig({
   // assumed "mounts fast" and made every heavyweight spec fail in its
   // beforeEach the moment workers competed; 60s reflects the measured cost.
   timeout: Number(process.env.PLAYWRIGHT_TEST_TIMEOUT ?? 60_000),
-  forbidOnly: !!process.env.CI,
-  retries: process.env.CI ? 1 : 0,
-  workers: tauriEnabled ? 1 : process.env.CI ? 4 : "50%",
-  reporter: process.env.CI
+  forbidOnly: isCI,
+  // A retry is diagnostic evidence, not permission to merge an unstable test.
+  retries: isCI ? 1 : 0,
+  failOnFlakyTests: isCI,
+  workers: tauriEnabled ? 1 : isCI ? 4 : "50%",
+  maxFailures: isCI ? 10 : 0,
+  globalTimeout: isCI ? 30 * 60_000 : 0,
+  reporter: isCI
     ? [["list"], ["html", { open: "never", outputFolder: "playwright-report" }], ["github"]]
     : [["list"], ["html", { open: "never", outputFolder: "playwright-report" }]],
 
@@ -77,6 +87,8 @@ export default defineConfig({
     trace: "retain-on-failure",
     video: "retain-on-failure",
     screenshot: "only-on-failure",
+    locale: process.env.E2E_LOCALE ?? "en-US",
+    timezoneId: process.env.E2E_TIMEZONE ?? "UTC",
   },
 
   webServer: process.env.PLAYWRIGHT_NO_SERVER
@@ -110,6 +122,20 @@ export default defineConfig({
       use: { ...devices["Desktop Chrome"] },
       testIgnore: ["**/tests/e2e/tauri/**", "**/tests/e2e/mobile/**"],
     },
+    ...(crossBrowserEnabled
+      ? [
+          {
+            name: "firefox",
+            use: { ...devices["Desktop Firefox"] },
+            testIgnore: ["**/tests/e2e/tauri/**", "**/tests/e2e/mobile/**"],
+          },
+          {
+            name: "webkit",
+            use: { ...devices["Desktop Safari"] },
+            testIgnore: ["**/tests/e2e/tauri/**", "**/tests/e2e/mobile/**"],
+          },
+        ]
+      : []),
     // Mobile-viewport e2e suite. Pixel 7 covers the Android Chromium path; the
     // iPhone 13 project is opt-in (webkit must be installed separately).
     // 60s budget even in static mode: with the Capacitor mock injected the

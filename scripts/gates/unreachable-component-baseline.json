@@ -14,8 +14,6 @@
     "components/settings/connections/forms/adapter-form.tsx",
     "components/settings/connections/tabs/tunnel-tab.tsx",
     "components/settings/developer/lsp-dev-toggle.tsx",
-    "components/settings/github-delivery/audit-export-dialog.tsx",
-    "components/settings/github-delivery/forms/policy-form.tsx",
     "components/settings/provider/add-provider-popover.tsx",
     "components/settings/provider/add-provider-wizard.tsx",
     "components/settings/provider/batch-test-progress.tsx",

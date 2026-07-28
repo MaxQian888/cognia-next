@@ -33,7 +33,12 @@ const REQUIRED_ACTION_METHODS = new Set([
   "tap",
   "uncheck",
 ])
-const NON_EXEMPT_RULES = new Set(["focused-test", "vacuous-assertion", "conditional-locator-guard"])
+const NON_EXEMPT_RULES = new Set([
+  "focused-test",
+  "vacuous-assertion",
+  "conditional-locator-guard",
+  "direct-playwright-import",
+])
 
 function memberName(node) {
   if (!node || node.type !== "MemberExpression") return null
@@ -97,8 +102,25 @@ export function auditSource(source, file = "unknown.ts") {
     plugins: ["jsx", "typescript", "decorators-legacy", "importAttributes"],
   })
   const findings = []
+  const normalizedFile = file.replaceAll("\\", "/")
+  const requiresSharedFixture =
+    normalizedFile.endsWith(".spec.ts") && !normalizedFile.startsWith("tests/e2e/tauri/")
 
   walk(ast, (node) => {
+    if (
+      requiresSharedFixture &&
+      node.type === "ImportDeclaration" &&
+      node.source.value === "@playwright/test"
+    ) {
+      addFinding(
+        findings,
+        file,
+        node,
+        "direct-playwright-import",
+        "Browser specs must import the shared E2E fixture so failures include redacted diagnostics"
+      )
+    }
+
     if (node.type === "IfStatement") {
       let guardsOnLocatorCount = false
       let conditionallyRunsAction = false

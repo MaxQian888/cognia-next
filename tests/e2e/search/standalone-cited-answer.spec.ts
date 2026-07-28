@@ -7,7 +7,7 @@
  * model answer. Source navigation then opens a real target=_blank document.
  */
 
-import { expect, test, type BrowserContext } from "@playwright/test"
+import { expect, test, type BrowserContext } from "@/tests/e2e/fixtures/test"
 
 import { resetCogniaDb, setCogniaSettings } from "../helpers/db-reset"
 
@@ -62,7 +62,7 @@ async function installNetworkBoundaries(context: BrowserContext) {
 }
 
 test.describe("search — standalone cited answer", () => {
-  test("searches through Exa, synthesizes an answer, and opens its source", async ({
+  test("@critical searches through Exa, synthesizes an answer, and opens its source", async ({
     context,
     page,
   }) => {

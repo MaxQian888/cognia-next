@@ -7,7 +7,7 @@
  * workspace, and prove the updated row remains durable.
  */
 
-import { expect, test } from "@playwright/test"
+import { expect, test } from "@/tests/e2e/fixtures/test"
 
 import { ensureCogniaAccount } from "../helpers/db-reset"
 
@@ -32,7 +32,7 @@ test.describe("skills — management lifecycle", () => {
     await expect(page.getByRole("heading", { name: "Skills" })).toBeVisible()
   })
 
-  test("creates, disables, restores, enables, and edits a skill", async ({ page }) => {
+  test("@critical creates, disables, restores, enables, and edits a skill", async ({ page }) => {
     await page.getByRole("button", { name: "New", exact: true }).click()
 
     const createSheet = page.getByRole("dialog", { name: "Create" })

@@ -7,7 +7,7 @@
  * gate persistence, and full-document restoration from the real Dexie tables.
  */
 
-import { expect, test } from "@playwright/test"
+import { expect, test } from "@/tests/e2e/fixtures/test"
 
 import { ensureCogniaAccount, readDexieRows } from "../helpers/db-reset"
 

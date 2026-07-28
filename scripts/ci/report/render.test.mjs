@@ -64,11 +64,29 @@ test("renderJest says so when there is no JUnit output at all", () => {
 })
 
 test("renderPlaywright separates failures from flakes in the output", () => {
-  const md = renderPlaywright(PW).join("\n")
+  const md = renderPlaywright({
+    ...PW,
+    firstPassRate: 99.25,
+    flakyRate: 0.25,
+    p95Duration: 42_000,
+    trend: {
+      hasBase: true,
+      metrics: [
+        { key: "firstPassRate", from: 98, to: 99.25, delta: 1.25 },
+        { key: "flakyRate", from: 1, to: 0.25, delta: -0.75 },
+        { key: "p95Duration", from: 50_000, to: 42_000, delta: -8000 },
+      ],
+    },
+  }).join("\n")
   assert.match(md, /\*\*1\*\* failed/)
   assert.match(md, /\*\*1\*\* flaky/)
   assert.match(md, /Flaky — passed only on retry/)
   assert.match(md, /`tests\/e2e\/b\.spec\.ts` › retried \(2 attempts\)/)
+  assert.match(md, /First-pass 99\.25%/)
+  assert.match(md, /Flaky rate 0\.25%/)
+  assert.match(md, /P95 42\.0s/)
+  assert.match(md, /\| First-pass rate \| 98\.00% \| 99\.25% \| \+1\.25 \|/)
+  assert.match(md, /\| P95 duration \| 50\.0s \| 42\.0s \| -8\.0s \|/)
 })
 
 test("renderPlaywright says so when the report is missing", () => {

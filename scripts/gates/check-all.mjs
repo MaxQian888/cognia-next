@@ -87,6 +87,12 @@ const REGISTRY = [
 
   { script: "typecheck", group: "types", resource: "package-build" },
   { script: "knip", group: "types", resource: "package-build" },
+  // The root `typecheck` excludes `web` (tsconfig `exclude`), so the marketing
+  // workspace needs its own run. This is not optional bookkeeping: ADR-0092 §5
+  // chose a typed `SiteCopy` over an i18n bundle precisely because "a missing
+  // or extra key in either locale fails typecheck" — and until this entry
+  // existed, nothing on a PR ever ran that check.
+  { script: "web:typecheck", group: "types" },
 
   { script: "lint:i18n", group: "i18n" },
   { script: "i18n:build:check", group: "i18n" },
@@ -104,6 +110,7 @@ const REGISTRY = [
 
   // Repo-specific structural audits (see the ADRs each one cites).
   { script: "audit:slots", group: "audit" },
+  { script: "audit:plugin-surfaces", group: "audit" },
   // ADR-0090: unified execution paths must stay vendor-neutral (no
   // GLM/Kimi/provider-name branches in dispatch logic).
   { script: "check:provider-name-branches", group: "audit" },
@@ -135,6 +142,9 @@ const REGISTRY = [
   { script: "scripts:test:i18n", group: "gate-tests" },
   { script: "scripts:test:plugin", group: "gate-tests" },
   { script: "scripts:test:ci", group: "gate-tests" },
+  // `node --test` over web/scripts/ — the evidence pipeline and the two capture
+  // scripts. Introduced by ADR-0092 but never registered, so it ran nowhere.
+  { script: "web:test:scripts", group: "gate-tests" },
   { script: "test:coverage:runner:test", group: "gate-tests" },
 
   // The plugin SDK's cross-language contract surface.

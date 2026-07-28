@@ -7,7 +7,7 @@
  * document, and resume it from the durable task row.
  */
 
-import { expect, test } from "@playwright/test"
+import { expect, test } from "@/tests/e2e/fixtures/test"
 import { ensureCogniaAccount } from "../helpers/db-reset"
 
 const TASK_NAME = "E2E Release Reminder"

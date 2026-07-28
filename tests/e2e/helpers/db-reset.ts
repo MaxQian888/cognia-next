@@ -51,10 +51,11 @@ export async function waitForTestGlobals(page: Page, timeoutMs = 10_000): Promis
  *
  * We sidestep Tauri entirely by writing an account straight through
  * `LocalAccountRegistry.createAccount` (which takes the password verifier as
- * input and never touches Tauri) with a stub verifier, then marking it
- * dev-unlocked (sessionStorage) so `AccountGate` treats it as unlocked on the
- * next load. Test-infra only — no product code changes, and `isTauri()` is left
- * false so the app stays in web/mobile mode.
+ * input and never touches Tauri) with a stub verifier and pointing the registry
+ * at it. Dev builds then auto-unlock that active account on the next load (see
+ * `lib/accounts/dev-auto-unlock.ts`), so `AccountGate` never prompts.
+ * Test-infra only — no product code changes, and `isTauri()` is left false so
+ * the app stays in web/mobile mode.
  */
 export async function ensureCogniaAccount(page: Page): Promise<string> {
   // React can paint the onboarding route before AccountStoreInitializer's
@@ -113,9 +114,6 @@ export async function ensureCogniaAccount(page: Page): Promise<string> {
           }
         }
       })
-      if (seeded) {
-        window.sessionStorage.setItem("cognia-dev-unlocked-account", accountId)
-      }
       return seeded
     },
     { accountId: E2E_ACCOUNT_ID, databaseName: ACCOUNT_REGISTRY_DB_NAME },
@@ -138,78 +136,83 @@ export async function ensureCogniaAccount(page: Page): Promise<string> {
  */
 async function installMobileBootstrapMode(
   page: Page,
-  mode: "standalone" | "paired"
+  mode: "standalone" | "paired",
+  settingsPatch: Record<string, unknown> = {}
 ): Promise<void> {
-  await page.addInitScript((runtimeMode) => {
-    const bootstrapKey = "cognia-e2e-mobile-bootstrap-mode"
-    try {
-      if (window.sessionStorage.getItem(bootstrapKey) === runtimeMode) {
-        ;(
-          window as unknown as { __cogniaMobileBootstrapReady?: boolean }
-        ).__cogniaMobileBootstrapReady = true
-        return
-      }
-    } catch {
-      // about:blank has an opaque origin; continue on the next app document.
-    }
-    void (async () => {
-      for (let attempt = 0; attempt < 200; attempt += 1) {
-        try {
-          const databases = await indexedDB.databases()
-          const candidateNames = databases
-            .map((info) => info.name)
-            .filter((name): name is string => Boolean(name?.startsWith("cognia-")))
-          for (const candidateName of candidateNames) {
-            const seeded = await new Promise<boolean>((resolve) => {
-              const req = indexedDB.open(candidateName)
-              req.onerror = () => resolve(false)
-              req.onsuccess = () => {
-                const db = req.result
-                if (!db.objectStoreNames.contains("settings")) {
-                  db.close()
-                  resolve(false)
-                  return
-                }
-                const tx = db.transaction("settings", "readwrite")
-                const store = tx.objectStore("settings")
-                const get = store.get("singleton")
-                get.onerror = () => {
-                  db.close()
-                  resolve(false)
-                }
-                get.onsuccess = () => {
-                  store.put({
-                    ...(get.result ?? {}),
-                    id: "singleton",
-                    mobileRuntimeMode: runtimeMode,
-                  })
-                }
-                tx.oncomplete = () => {
-                  db.close()
-                  resolve(true)
-                }
-                tx.onerror = () => {
-                  db.close()
-                  resolve(false)
-                }
-              }
-            })
-            if (seeded) {
-              window.sessionStorage.setItem(bootstrapKey, runtimeMode)
-              ;(
-                window as unknown as { __cogniaMobileBootstrapReady?: boolean }
-              ).__cogniaMobileBootstrapReady = true
-              return
-            }
-          }
-        } catch {
-          // about:blank has an opaque origin; the script runs again on the
-          // next real app document where IndexedDB is available.
+  await page.addInitScript(
+    (bootstrapSettings) => {
+      const bootstrapKey = "cognia-e2e-mobile-bootstrap-mode"
+      const bootstrapSignature = JSON.stringify(bootstrapSettings)
+      try {
+        if (window.sessionStorage.getItem(bootstrapKey) === bootstrapSignature) {
+          ;(
+            window as unknown as { __cogniaMobileBootstrapReady?: boolean }
+          ).__cogniaMobileBootstrapReady = true
+          return
         }
-        await new Promise((resolve) => setTimeout(resolve, 50))
+      } catch {
+        // about:blank has an opaque origin; continue on the next app document.
       }
-    })()
-  }, mode)
+      void (async () => {
+        for (let attempt = 0; attempt < 200; attempt += 1) {
+          try {
+            const databases = await indexedDB.databases()
+            const candidateNames = databases
+              .map((info) => info.name)
+              .filter((name): name is string => Boolean(name?.startsWith("cognia-")))
+            for (const candidateName of candidateNames) {
+              const seeded = await new Promise<boolean>((resolve) => {
+                const req = indexedDB.open(candidateName)
+                req.onerror = () => resolve(false)
+                req.onsuccess = () => {
+                  const db = req.result
+                  if (!db.objectStoreNames.contains("settings")) {
+                    db.close()
+                    resolve(false)
+                    return
+                  }
+                  const tx = db.transaction("settings", "readwrite")
+                  const store = tx.objectStore("settings")
+                  const get = store.get("singleton")
+                  get.onerror = () => {
+                    db.close()
+                    resolve(false)
+                  }
+                  get.onsuccess = () => {
+                    store.put({
+                      ...(get.result ?? {}),
+                      id: "singleton",
+                      ...bootstrapSettings,
+                    })
+                  }
+                  tx.oncomplete = () => {
+                    db.close()
+                    resolve(true)
+                  }
+                  tx.onerror = () => {
+                    db.close()
+                    resolve(false)
+                  }
+                }
+              })
+              if (seeded) {
+                window.sessionStorage.setItem(bootstrapKey, bootstrapSignature)
+                ;(
+                  window as unknown as { __cogniaMobileBootstrapReady?: boolean }
+                ).__cogniaMobileBootstrapReady = true
+                return
+              }
+            }
+          } catch {
+            // about:blank has an opaque origin; the script runs again on the
+            // next real app document where IndexedDB is available.
+          }
+          await new Promise((resolve) => setTimeout(resolve, 50))
+        }
+      })()
+    },
+    { ...settingsPatch, mobileRuntimeMode: mode }
+  )
 }
 
 /**
@@ -221,10 +224,11 @@ async function installMobileBootstrapMode(
  */
 export async function bootstrapCogniaMobile(
   page: Page,
-  mode: "standalone" | "paired"
+  mode: "standalone" | "paired",
+  settingsPatch: Record<string, unknown> = {}
 ): Promise<void> {
   await ensureCogniaAccount(page)
-  await installMobileBootstrapMode(page, mode)
+  await installMobileBootstrapMode(page, mode, settingsPatch)
   const appUrl = new URL("/", page.url()).toString()
   const welcomeUrl = new URL("/welcome", page.url()).toString()
   await page.goto("about:blank")

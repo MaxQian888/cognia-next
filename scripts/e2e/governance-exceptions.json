@@ -9,13 +9,6 @@
       "reviewAfter": "2026-10-31"
     },
     {
-      "file": "tests/e2e/mobile/standalone-chat.spec.ts",
-      "rule": "runtime-skip",
-      "occurrences": 1,
-      "reason": "The mobile standalone composer is not yet wired to runStandaloneTurn; this spec is its acceptance pin.",
-      "reviewAfter": "2026-08-31"
-    },
-    {
       "file": "tests/e2e/helpers/gestures.ts",
       "rule": "arbitrary-timeout",
       "occurrences": 3,

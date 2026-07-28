@@ -7,7 +7,7 @@
  * round-trip is covered by tests/e2e/tauri/telegram-bidirectional.spec.ts
  * (nightly Windows job). What web mode owns is the read-only degradation
  * story, and that is what this spec pins:
- *   - Settings → Connections shows the web-mode banner.
+ *   - Settings → Connections shows the desktop-only degradation message.
  *   - /inbox renders its shell for a signed-in account.
  *
  * An earlier version wrapped both assertions in `.catch(() => test.skip())`
@@ -20,7 +20,7 @@
  * concern, not product coverage.
  */
 
-import { test, expect } from "@playwright/test"
+import { test, expect } from "@/tests/e2e/fixtures/test"
 import { resetCogniaDb } from "../helpers/db-reset"
 
 test.describe("connectors — web-mode surfaces", () => {
@@ -29,11 +29,14 @@ test.describe("connectors — web-mode surfaces", () => {
     await resetCogniaDb(page)
   })
 
-  test("Settings → Connections shows the web-mode banner (no Tauri)", async ({ page }) => {
+  test("@smoke Settings → Connections explains the desktop-only boundary", async ({ page }) => {
     await page.goto("/settings?section=connections", { waitUntil: "domcontentloaded" })
-    const banner = page.getByRole("status", { name: /web mode banner/i })
-    await expect(banner).toBeVisible({ timeout: 15_000 })
-    await expect(banner).toContainText(/desktop/i)
+    await expect(page.getByText("Available in the desktop app only")).toBeVisible({
+      timeout: 15_000,
+    })
+    await expect(
+      page.getByText(/credentials and local files the browser can't reach/i)
+    ).toBeVisible()
   })
 
   test("inbox renders the sidebar shell", async ({ page }) => {

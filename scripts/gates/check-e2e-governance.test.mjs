@@ -33,6 +33,30 @@ test("auditSource flags trust-eroding Playwright patterns but ignores comments",
   )
 })
 
+test("browser specs must use the shared diagnostic fixture", () => {
+  assert.deepEqual(
+    auditSource(
+      `import { test, expect } from "@playwright/test"`,
+      "tests/e2e/chat/message.spec.ts"
+    ).map((finding) => finding.rule),
+    ["direct-playwright-import"]
+  )
+  assert.deepEqual(
+    auditSource(
+      `import { test, expect } from "@/tests/e2e/fixtures/test"`,
+      "tests/e2e/chat/message.spec.ts"
+    ),
+    []
+  )
+  assert.deepEqual(
+    auditSource(
+      `import { test, expect } from "@playwright/test"`,
+      "tests/e2e/tauri/window.spec.ts"
+    ),
+    []
+  )
+})
+
 test("evaluateFindings accepts an exact, reviewed debt entry", () => {
   const findings = [
     {
@@ -103,8 +127,13 @@ test("evaluateFindings rejects new, stale, expired, and count-drift debt", () =>
   )
 })
 
-test("focused, vacuous, and conditional-locator tests can never be exempted", () => {
-  for (const rule of ["focused-test", "vacuous-assertion", "conditional-locator-guard"]) {
+test("structural trust rules can never be exempted", () => {
+  for (const rule of [
+    "focused-test",
+    "vacuous-assertion",
+    "conditional-locator-guard",
+    "direct-playwright-import",
+  ]) {
     const result = evaluateFindings(
       [{ file: "a.ts", line: 1, rule, message: "invalid" }],
       {

@@ -11,7 +11,7 @@
  * and measure what actually gets painted.
  */
 
-import { expect, test } from "@playwright/test"
+import { expect, test } from "@/tests/e2e/fixtures/test"
 import { scopePluginCss } from "../../../lib/plugin/styles/plugin-stylesheet"
 
 const PLUGIN_CSS = `

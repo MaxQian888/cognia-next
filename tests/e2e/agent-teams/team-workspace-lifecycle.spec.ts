@@ -11,7 +11,7 @@
  * this spec must not turn a swallowed runtime failure into pseudo coverage.
  */
 
-import { expect, test } from "@playwright/test"
+import { expect, test } from "@/tests/e2e/fixtures/test"
 import { ensureCogniaAccount, waitForTestGlobals } from "../helpers/db-reset"
 
 const TEAM_NAME = "E2E Release Readiness"

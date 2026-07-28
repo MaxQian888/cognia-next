@@ -20,6 +20,7 @@ import {
   isVerificationScript,
   main,
 } from "./check-gate-registry.mjs"
+import { hasGate } from "./check-all.mjs"
 
 test("isVerificationScript matches whole name segments, not substrings", () => {
   for (const name of [
@@ -42,6 +43,10 @@ test("isVerificationScript matches whole name segments, not substrings", () => {
 test("VERIFICATION_PATTERNS is a non-empty list of regexes", () => {
   assert.ok(VERIFICATION_PATTERNS.length > 0)
   assert.ok(VERIFICATION_PATTERNS.every((re) => re instanceof RegExp))
+})
+
+test("plugin surface audit is registered in the audit group", () => {
+  assert.equal(hasGate("audit:plugin-surfaces"), true)
 })
 
 test("auditRegistry flags a verification script that is neither registered nor exempt", () => {

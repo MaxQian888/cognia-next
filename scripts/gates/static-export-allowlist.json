@@ -45,11 +45,6 @@
     "reason": "Orchestration proxy client runs in the Node host process; guarded require with fallback."
   },
   {
-    "file": "lib/github/webhook-verify.ts",
-    "module": "node:crypto",
-    "reason": "HMAC webhook verification runs host-side (webhook receiver lives in Tauri/Node, not the renderer)."
-  },
-  {
     "file": "lib/plugin/contracts/contract-path-audit.ts",
     "module": "node:fs",
     "reason": "Contract-path audit is a dev/CI tool executed under Node, not bundled into pages."

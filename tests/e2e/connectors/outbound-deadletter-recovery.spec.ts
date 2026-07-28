@@ -6,7 +6,7 @@
  * explicitly confirm a bulk replay, and observe both queue + audit durability.
  */
 
-import { expect, test, type Page } from "@playwright/test"
+import { expect, test, type Page } from "@/tests/e2e/fixtures/test"
 import { ensureCogniaAccount, readDexieRows, waitForTestGlobals } from "../helpers/db-reset"
 
 interface OutboundJobView {
@@ -104,7 +104,7 @@ test.describe("connectors — outbound dead-letter recovery", () => {
     await waitForTestGlobals(page, 30_000)
   })
 
-  test("Retry all re-arms visible dead letters and records replay audits", async ({ page }) => {
+  test("@critical Retry all re-arms dead letters and records replay audits", async ({ page }) => {
     await seedDeadletteredJobs(page)
 
     await expect(page.getByRole("tab", { name: "Outbound" })).toHaveAttribute(

@@ -42,10 +42,19 @@ const COLLECTED_ROOTS = [
   /^stores\//,
   /^cli\/src\//,
   /^packages\/[^/]+\/src\//,
+  // The marketing workspace (ADR-0092), matching `collectCoverageFrom`.
+  /^web\/(components|hooks|lib)\//,
 ]
 
-/** Paths excluded from coverage (mirrors coveragePathIgnorePatterns + globs). */
-const EXCLUDED = [/^components\/ui\//, /^components\/ai-elements\//]
+/**
+ * Paths excluded from coverage (mirrors coveragePathIgnorePatterns + globs).
+ *
+ * `web/components/ui/` needs its own anchored entry: Jest's
+ * `coveragePathIgnorePatterns` uses the unanchored `/components/ui/`, which
+ * happens to catch the web copy too, but these patterns are anchored at the
+ * repo root and would not.
+ */
+const EXCLUDED = [/^components\/ui\//, /^components\/ai-elements\//, /^web\/components\/ui\//]
 
 const SOURCE_EXT = /\.(ts|tsx|js|jsx)$/
 const NON_SOURCE = /\.(test|spec|stories)\.[^/]+$/

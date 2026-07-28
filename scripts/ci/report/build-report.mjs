@@ -24,12 +24,13 @@ import { join } from "node:path"
 import { diffBundle } from "./bundle.mjs"
 import { diffCoverage, summarizeCoverage } from "./coverage.mjs"
 import { summarizeJUnit } from "./junit.mjs"
-import { summarizePlaywright } from "./playwright.mjs"
+import { diffPlaywright, summarizePlaywright } from "./playwright.mjs"
 import { renderReport } from "./render.mjs"
 
 export const FLAGS = [
   "jest-dir",
   "playwright-json",
+  "base-playwright-json",
   "coverage",
   "base-coverage",
   "bundle",
@@ -95,6 +96,7 @@ export function readJUnitDocuments(dir, io = {}) {
 export function assemble({
   junitDocs,
   playwrightJson,
+  basePlaywrightJson,
   coverage,
   baseCoverage,
   bundle,
@@ -102,7 +104,13 @@ export function assemble({
   meta,
 }) {
   const jest = junitDocs?.length ? summarizeJUnit(junitDocs) : undefined
-  const playwright = playwrightJson ? summarizePlaywright(playwrightJson) : undefined
+  const playwright = playwrightJson
+    ? (() => {
+        const current = summarizePlaywright(playwrightJson)
+        const base = basePlaywrightJson ? summarizePlaywright(basePlaywrightJson) : null
+        return { ...current, trend: diffPlaywright(current, base) }
+      })()
+    : undefined
 
   const coverageDiff = coverage
     ? diffCoverage(
@@ -122,6 +130,7 @@ export function main(argv = []) {
   const data = assemble({
     junitDocs: readJUnitDocuments(args["jest-dir"]),
     playwrightJson: readJsonOrNull(args["playwright-json"]),
+    basePlaywrightJson: readJsonOrNull(args["base-playwright-json"]),
     coverage: readJsonOrNull(args.coverage),
     baseCoverage: readJsonOrNull(args["base-coverage"]),
     bundle: readJsonOrNull(args.bundle),

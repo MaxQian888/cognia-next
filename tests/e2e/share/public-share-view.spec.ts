@@ -7,7 +7,7 @@
  * branches are part of the same recipient-facing contract.
  */
 
-import { expect, test, type Page } from "@playwright/test"
+import { expect, test, type Page } from "@/tests/e2e/fixtures/test"
 import { encryptSharePayload } from "@/lib/share/crypto"
 import { encodeShareKey, generateShareKey } from "@/lib/share/keys"
 import type { ShareEnvelopeV1, SharePayload } from "@/lib/share/types"
@@ -59,7 +59,7 @@ test.describe("public share viewer", () => {
     await prepareViewer(page)
   })
 
-  test("fetches an opaque envelope, keeps the fragment key local, and renders the payload", async ({
+  test("@smoke @critical keeps the fragment key local and renders the payload", async ({
     page,
   }) => {
     const { envelope, encodedKey } = await encryptedFixture()

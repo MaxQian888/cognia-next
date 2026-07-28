@@ -37,6 +37,7 @@ test("parseArgs reads every documented flag", () => {
   assert.equal(args.sha, "deadbeef")
   assert.equal(args.out, "r.md")
   assert.ok(FLAGS.includes("base-bundle"))
+  assert.ok(FLAGS.includes("base-playwright-json"))
 })
 
 test("parseArgs rejects unknown flags and missing values", () => {
@@ -87,6 +88,34 @@ test("assemble summarizes jest when shard documents are present", () => {
   const data = assemble({ junitDocs: [JUNIT] })
   assert.equal(data.jest.total, 1)
   assert.equal(data.jest.passed, 1)
+})
+
+test("assemble compares Playwright health with the trunk baseline", () => {
+  const report = {
+    suites: [
+      {
+        specs: [
+          {
+            title: "works",
+            tests: [
+              {
+                status: "expected",
+                results: [{ status: "passed", duration: 1000 }],
+              },
+            ],
+          },
+        ],
+      },
+    ],
+  }
+  const data = assemble({
+    junitDocs: [],
+    playwrightJson: report,
+    basePlaywrightJson: report,
+  })
+
+  assert.equal(data.playwright.trend.hasBase, true)
+  assert.equal(data.playwright.trend.metrics.length, 3)
 })
 
 test("assemble diffs coverage against the base when both sides exist", () => {

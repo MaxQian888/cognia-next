@@ -16,7 +16,7 @@
  * no network dependency and no mock server to drift.
  */
 
-import { test, expect } from "@playwright/test"
+import { test, expect } from "@/tests/e2e/fixtures/test"
 import { resetCogniaDb } from "../helpers/db-reset"
 
 test.describe("lark web entry surfaces", () => {

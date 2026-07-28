@@ -1,13 +1,13 @@
 /** E2E harness contract: account seeding waits for the registry schema. */
 
-import { expect, test } from "@playwright/test"
+import { expect, test } from "@/tests/e2e/fixtures/test"
 
 import { ensureCogniaAccount } from "../helpers/db-reset"
 import { injectCapacitor } from "../helpers/inject-capacitor"
 
 const ACCOUNT_ID = "acct_e2e_seed_account"
 
-test("account bootstrap persists the active unlocked account after DOM readiness", async ({
+test("@smoke @critical account bootstrap persists the active unlocked account", async ({
   page,
 }) => {
   await injectCapacitor(page, { platform: "android" })

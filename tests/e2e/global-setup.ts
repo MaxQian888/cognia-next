@@ -6,7 +6,6 @@
  * Mocks booted here:
  *   - MockV2Server         (mobile companion API — pair / status / events / sidecar RPC)
  *   - MockAnthropicServer  (AI nodes: /v1/messages, /v1/embeddings)
- *   - MockGithubServer     (action.github.* executors + GitHub Delivery plugin)
  *   - MockLarkServer       (action.connector.send/draft with Lark adapter)
  *   - MockVectorDbServer   (twin RAG, plugin vector ops)
  *
@@ -26,7 +25,6 @@
 import type { FullConfig } from "@playwright/test"
 import { createMockV2Server, type MockV2Server } from "./mobile/mock-v2-server"
 import { createMockAnthropicServer, type MockAnthropicServer } from "./mocks/anthropic/server"
-import { createMockGithubServer, type MockGithubServer } from "./mocks/github/server"
 import { createMockLarkServer, type MockLarkServer } from "./mocks/lark/server"
 import { createMockVectorDbServer, type MockVectorDbServer } from "./mocks/vector-db/server"
 import { launchTauriCdp, type TauriCdpHandle } from "./helpers/tauri-cdp-launch"
@@ -34,7 +32,6 @@ import { launchTauriCdp, type TauriCdpHandle } from "./helpers/tauri-cdp-launch"
 interface Booted {
   v2?: MockV2Server
   anthropic?: MockAnthropicServer
-  github?: MockGithubServer
   lark?: MockLarkServer
   vectorDb?: MockVectorDbServer
   tauri?: TauriCdpHandle
@@ -71,14 +68,6 @@ async function globalSetup(_config: FullConfig): Promise<() => Promise<void>> {
     )
     process.env.E2E_ANTHROPIC_BASE_URL = state.anthropic.baseUrl
     process.env.E2E_ANTHROPIC_PORT_RESOLVED = String(state.anthropic.port)
-  }
-  if (!process.env.E2E_DISABLE_GITHUB) {
-    state.github = await startOrFallback(
-      createMockGithubServer(),
-      Number(process.env.E2E_GITHUB_PORT ?? "7893")
-    )
-    process.env.E2E_GITHUB_BASE_URL = state.github.baseUrl
-    process.env.E2E_GITHUB_PORT_RESOLVED = String(state.github.port)
   }
   if (!process.env.E2E_DISABLE_LARK) {
     state.lark = await startOrFallback(
@@ -146,7 +135,6 @@ async function globalSetup(_config: FullConfig): Promise<() => Promise<void>> {
     )
     state.v2 = undefined
     state.anthropic = undefined
-    state.github = undefined
     state.lark = undefined
     state.vectorDb = undefined
     state.tauri = undefined
