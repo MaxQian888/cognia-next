@@ -8,6 +8,8 @@ import {
   ExternalLinkIcon,
   GlobeIcon,
   Loader2Icon,
+  LockIcon,
+  MoreHorizontalIcon,
   MousePointerSquareDashedIcon,
   RotateCwIcon,
   SearchIcon,
@@ -40,9 +42,11 @@ import { TooltipIconButton } from "@/components/chat/ui/tooltip-icon-button"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Textarea } from "@/components/ui/textarea"
+import { useElementWidth } from "@/hooks/use-element-width"
 import { useBrowserHistory } from "@/hooks/browser/use-browser-history"
 import { useBrowserLoading } from "@/hooks/browser/use-browser-loading"
 import { useBrowserPaneWebview } from "@/hooks/browser/use-browser-pane-webview"
@@ -80,6 +84,17 @@ const DETAIL_LEVEL_STORAGE_KEY = "cognia.browser.output-detail"
 const ZOOM_STORAGE_KEY = "cognia.browser.zoom"
 const DETAIL_LEVELS: OutputDetailLevel[] = ["compact", "standard", "detailed", "forensic"]
 
+/**
+ * Measured toolbar widths at which the secondary controls stop being inline and
+ * pack into the "⋯" popover instead. The pane is docked in the chat right rail
+ * as often as it fills the `/browser` page, and that rail's floor is 24% of the
+ * window (~300px on a laptop) — well under the ~620px the full control row
+ * needs. Wrapping instead of packing cost four toolbar rows and pushed the
+ * address bar onto a line of its own.
+ */
+const COMPACT_TOOLBAR_PX = 460
+const WIDE_TOOLBAR_PX = 680
+
 /** Host of a URL for display, or the raw string / "" if it can't be parsed. */
 function hostOf(url: string | null): string {
   if (!url) return ""
@@ -87,6 +102,33 @@ function hostOf(url: string | null): string {
     return new URL(url).host
   } catch {
     return url
+  }
+}
+
+/**
+ * The address bar's read-mode form: scheme (carried by the lock / globe icon),
+ * a leading `www.` and a bare trailing slash are dropped, so what survives
+ * end-truncation in a narrow rail is the host — not `https://www.exam…`. The
+ * host and the rest are returned separately so the path can be dimmed.
+ *
+ * Returns `null` for anything that isn't a parseable http(s) address; a
+ * half-typed draft is always shown verbatim.
+ */
+export function addressDisplayParts(
+  url: string
+): { host: string; rest: string; secure: boolean } | null {
+  let parsed: URL
+  try {
+    parsed = new URL(url)
+  } catch {
+    return null
+  }
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return null
+  const rest = `${parsed.pathname}${parsed.search}${parsed.hash}`
+  return {
+    host: parsed.host.replace(/^www\./, ""),
+    rest: rest === "/" ? "" : rest,
+    secure: parsed.protocol === "https:",
   }
 }
 
@@ -115,6 +157,7 @@ export function BrowserPreviewPane({
   const t = useTranslations("browser")
   const normalizedInitialUrl = initialUrl ? normalizePreviewUrl(initialUrl) : null
   const reservedRef = useRef<HTMLDivElement>(null)
+  const toolbarRef = useRef<HTMLDivElement>(null)
   const urlInputRef = useRef<HTMLInputElement>(null)
   const [urlInput, setUrlInput] = useState(normalizedInitialUrl ?? "")
   const [editingUrl, setEditingUrl] = useState(false)
@@ -179,6 +222,7 @@ export function BrowserPreviewPane({
   const { sendComment, queueAnnotation, sendAnnotations, sendScreenshot, sendText } =
     useSelectionToChat()
   const { driver, lastAction } = useBrowserAgentActivity()
+  const toolbarWidth = useElementWidth(toolbarRef)
   const remoteBrowserEnabled = useSettingsStore(
     (state) => state.settings?.remoteBrowserEnabled ?? false
   )
@@ -218,6 +262,17 @@ export function BrowserPreviewPane({
 
   // The preview's real location (follows in-page navigations and redirects).
   const currentUrl = navigated?.url ?? committedUrl
+
+  // How the toolbar packs itself. Width 0 means "not measured yet" (SSR, first
+  // paint, jsdom) — take the widest branch, matching the `/browser` page. Each
+  // tier renders the identical control roster, only in a different container,
+  // so nothing mounts twice and no action becomes unreachable.
+  const tier: "compact" | "medium" | "wide" =
+    toolbarWidth === 0 || toolbarWidth >= WIDE_TOOLBAR_PX
+      ? "wide"
+      : toolbarWidth >= COMPACT_TOOLBAR_PX
+        ? "medium"
+        : "compact"
 
   // Record each visited location for the address-bar history menu.
   useEffect(() => {
@@ -468,9 +523,95 @@ export function BrowserPreviewPane({
     )
   }
 
+  // Read-mode address: only while the field still mirrors the live location.
+  // An uncommitted draft is never rewritten under the user's cursor.
+  const addressDisplay =
+    editingUrl || urlInput !== (currentUrl ?? "") ? null : addressDisplayParts(urlInput)
+  const SchemeIcon = addressDisplay?.secure ? LockIcon : GlobeIcon
+
+  // Page-inspection actions: the ones a reviewer reaches for on every pass.
+  // First to stay inline, last to collapse.
+  const inspectActions = (
+    <>
+      <BrowserHistoryMenu
+        recent={recentHistory}
+        onNavigate={navigateHistory}
+        onClear={clearHistory}
+        disabled={recentHistory.length === 0}
+      />
+      <TooltipIconButton
+        tooltip={t("actions.screenshot")}
+        aria-label={t("actions.screenshot")}
+        disabled={!committedUrl || capturing}
+        onClick={() => void onScreenshot()}
+      >
+        <CameraIcon />
+      </TooltipIconButton>
+      <TooltipIconButton
+        tooltip={selectMode ? t("actions.cancelSelect") : t("actions.selectElement")}
+        aria-label={selectMode ? t("actions.cancelSelect") : t("actions.selectElement")}
+        disabled={!committedUrl}
+        className={cn(selectMode && "bg-primary/15 text-primary")}
+        onClick={() => void setSelectMode(!selectMode)}
+      >
+        <MousePointerSquareDashedIcon />
+      </TooltipIconButton>
+      <TooltipIconButton
+        tooltip={t("actions.find")}
+        aria-label={t("actions.find")}
+        disabled={!committedUrl}
+        className={cn(findOpen && "bg-primary/15 text-primary")}
+        onClick={() => (findOpen ? closeFind() : setFindOpen(true))}
+      >
+        <SearchIcon />
+      </TooltipIconButton>
+    </>
+  )
+
+  // Page-setup actions: set once and left alone, so they collapse first.
+  const pageActions = (
+    <>
+      <BrowserZoomControl zoom={zoom} onZoomChange={setZoom} disabled={!committedUrl} />
+      <BrowserCookieImportAction currentUrl={currentUrl} onReload={reloadAfterCookieImport} />
+      <TooltipIconButton
+        tooltip={t("actions.openExternal")}
+        aria-label={t("actions.openExternal")}
+        disabled={!currentUrl}
+        onClick={() => {
+          if (currentUrl) void openExternal(currentUrl)
+        }}
+      >
+        <ExternalLinkIcon />
+      </TooltipIconButton>
+    </>
+  )
+
+  // Annotation detail is an output setting for the comment/screenshot payload,
+  // not navigation chrome — it lives in the popover at every width rather than
+  // spending 96px of the narrowest row.
+  const detailControl = (
+    <select
+      value={detailLevel}
+      onChange={(event) => setDetailLevel(event.target.value as OutputDetailLevel)}
+      aria-label={t("detail.label")}
+      className="h-7 w-full rounded-md border bg-background px-1 text-xs"
+    >
+      {DETAIL_LEVELS.map((level) => (
+        <option key={level} value={level}>
+          {t(`detail.${level}`)}
+        </option>
+      ))}
+    </select>
+  )
+
+  // Mark the trigger when a collapsed control is in a non-default state, so
+  // "select mode is armed" / "zoom isn't 100%" can't hide inside the popover.
+  const collapsedActive =
+    (tier === "compact" && (selectMode || findOpen)) || (tier !== "wide" && zoom !== 1)
+
   return (
     <div
-      className="@container flex h-full min-h-0 flex-col"
+      className="flex h-full min-h-0 flex-col"
       onKeyDown={(e) => {
         // Best-effort Cmd/Ctrl+F while the React chrome has focus; when the
         // native webview holds focus the toolbar Find button is the trigger.
@@ -482,8 +623,10 @@ export function BrowserPreviewPane({
       }}
     >
       <div
-        className="relative flex flex-wrap items-center gap-1.5 border-b px-2 py-1.5 @lg:flex-nowrap"
+        ref={toolbarRef}
+        className="relative flex items-center gap-1.5 border-b px-2 py-1.5"
         data-testid="browser-toolbar"
+        data-tier={tier}
       >
         {phase === "loading" && (
           <div
@@ -495,19 +638,7 @@ export function BrowserPreviewPane({
             <div className="browser-progress-bar h-full w-1/3 rounded-full bg-primary" />
           </div>
         )}
-        <div className="flex items-center">
-          <select
-            value={detailLevel}
-            onChange={(event) => setDetailLevel(event.target.value as OutputDetailLevel)}
-            aria-label={t("detail.label")}
-            className="h-7 max-w-24 rounded-md border bg-background px-1 text-xs"
-          >
-            {DETAIL_LEVELS.map((level) => (
-              <option key={level} value={level}>
-                {t(`detail.${level}`)}
-              </option>
-            ))}
-          </select>
+        <div className="flex shrink-0 items-center">
           <TooltipIconButton
             tooltip={t("actions.back")}
             aria-label={t("actions.back")}
@@ -541,19 +672,10 @@ export function BrowserPreviewPane({
           >
             <RotateCwIcon />
           </TooltipIconButton>
-          <BrowserHistoryMenu
-            recent={recentHistory}
-            onNavigate={navigateHistory}
-            onClear={clearHistory}
-            disabled={recentHistory.length === 0}
-          />
         </div>
-        <form
-          onSubmit={commitUrl}
-          className="order-last min-w-0 basis-full @lg:order-none @lg:flex-1 @lg:basis-auto"
-        >
+        <form onSubmit={commitUrl} className="min-w-0 flex-1">
           <div className="relative">
-            <GlobeIcon className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+            <SchemeIcon className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
             <Input
               ref={urlInputRef}
               type="text"
@@ -570,58 +692,84 @@ export function BrowserPreviewPane({
               onKeyDown={onUrlKeyDown}
               placeholder={t("url.placeholder")}
               aria-label={t("url.placeholder")}
-              className="h-8 rounded-full border-transparent bg-muted/60 pl-8 text-sm shadow-none focus-visible:border-input focus-visible:bg-background"
+              className={cn(
+                "h-8 rounded-full border-transparent bg-muted/60 pl-8 text-sm shadow-none focus-visible:border-input focus-visible:bg-background",
+                // Read mode paints the pretty form over the field instead of
+                // rewriting `value`, so copying still yields the real URL and
+                // focusing reveals it without a reformat flicker.
+                addressDisplay && "text-transparent"
+              )}
             />
+            {addressDisplay && (
+              <div
+                aria-hidden
+                data-testid="browser-url-display"
+                // Same border + padding as the Input so the content boxes line
+                // up to the pixel and focusing doesn't nudge the text sideways.
+                className="pointer-events-none absolute inset-0 flex items-center border border-transparent pl-8 pr-3"
+              >
+                <span className="min-w-0 truncate text-sm">
+                  {addressDisplay.host}
+                  {addressDisplay.rest && (
+                    <span className="text-muted-foreground">{addressDisplay.rest}</span>
+                  )}
+                </span>
+              </div>
+            )}
           </div>
         </form>
-        <div className="flex items-center">
-          <BrowserZoomControl zoom={zoom} onZoomChange={setZoom} disabled={!committedUrl} />
-          <BrowserCookieImportAction currentUrl={currentUrl} onReload={reloadAfterCookieImport} />
-          <TooltipIconButton
-            tooltip={t("actions.screenshot")}
-            aria-label={t("actions.screenshot")}
-            disabled={!committedUrl || capturing}
-            onClick={() => void onScreenshot()}
-          >
-            <CameraIcon />
-          </TooltipIconButton>
-          <TooltipIconButton
-            tooltip={t("actions.openExternal")}
-            aria-label={t("actions.openExternal")}
-            disabled={!currentUrl}
-            onClick={() => {
-              if (currentUrl) void openExternal(currentUrl)
-            }}
-          >
-            <ExternalLinkIcon />
-          </TooltipIconButton>
-          <TooltipIconButton
-            tooltip={selectMode ? t("actions.cancelSelect") : t("actions.selectElement")}
-            aria-label={selectMode ? t("actions.cancelSelect") : t("actions.selectElement")}
-            disabled={!committedUrl}
-            className={cn(selectMode && "bg-primary/15 text-primary")}
-            onClick={() => void setSelectMode(!selectMode)}
-          >
-            <MousePointerSquareDashedIcon />
-          </TooltipIconButton>
-          <TooltipIconButton
-            tooltip={t("actions.find")}
-            aria-label={t("actions.find")}
-            disabled={!committedUrl}
-            className={cn(findOpen && "bg-primary/15 text-primary")}
-            onClick={() => (findOpen ? closeFind() : setFindOpen(true))}
-          >
-            <SearchIcon />
-          </TooltipIconButton>
-        </div>
-        <div className="ml-auto min-w-0 @lg:ml-0">
-          <BrowserAgentIndicator driver={driver} lastAction={lastAction} />
-        </div>
+        {tier !== "compact" && <div className="flex shrink-0 items-center">{inspectActions}</div>}
+        {tier === "wide" && <div className="flex shrink-0 items-center">{pageActions}</div>}
+        <BrowserAgentIndicator driver={driver} lastAction={lastAction} compact={tier !== "wide"} />
+        {/* `modal` is load-bearing, not a style choice: the native webview is
+            always-on-top and cannot be clipped, so a non-modal popover would
+            open *behind* the page. Modal makes Radix mark the rest of the app
+            `aria-hidden`, which is exactly what `useRegionVisibility` watches
+            to park the webview off-screen — the same path the history menu and
+            the cookie dialog already rely on. */}
+        <Popover modal>
+          <PopoverTrigger asChild>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-sm"
+              aria-label={t("actions.more")}
+              data-testid="browser-toolbar-more"
+              className="relative shrink-0"
+            >
+              <MoreHorizontalIcon />
+              {collapsedActive && (
+                <span
+                  aria-hidden
+                  data-testid="browser-toolbar-more-active"
+                  className="absolute right-1 top-1 size-1.5 rounded-full bg-primary"
+                />
+              )}
+            </Button>
+          </PopoverTrigger>
+          <PopoverContent align="end" className="w-56 p-2">
+            <div className="flex flex-col gap-2">
+              {tier === "compact" && (
+                <div className="flex flex-wrap items-center gap-0.5">{inspectActions}</div>
+              )}
+              {tier !== "wide" && (
+                <div className="flex flex-wrap items-center gap-0.5">{pageActions}</div>
+              )}
+              <div className="flex flex-col gap-1">
+                <span className="text-xs text-muted-foreground">{t("detail.label")}</span>
+                {detailControl}
+              </div>
+            </div>
+          </PopoverContent>
+        </Popover>
       </div>
 
       {findOpen && <BrowserFindBarSection onSearch={runFind} onClose={closeFind} />}
 
-      <div className="flex min-h-0 flex-1">
+      {/* Below the compact threshold a 320px side rail would leave the page
+          nothing to render into, and the native webview floats above React so
+          it cannot be overlaid — the rail stacks under the page instead. */}
+      <div className={cn("flex min-h-0 flex-1", tier === "compact" && "flex-col")}>
         <div
           ref={reservedRef}
           className="relative min-h-0 min-w-0 flex-1"
@@ -684,9 +832,18 @@ export function BrowserPreviewPane({
               if (e.target === e.currentTarget && !railWanted) setRailRendered(false)
             }}
             className={cn(
-              "flex w-80 shrink-0 flex-col overflow-hidden border-l bg-background duration-200",
-              "data-[state=open]:animate-in data-[state=open]:fade-in data-[state=open]:slide-in-from-right",
-              "data-[state=closed]:animate-out data-[state=closed]:fade-out data-[state=closed]:slide-out-to-right"
+              "flex shrink-0 flex-col overflow-hidden bg-background duration-200",
+              "data-[state=open]:animate-in data-[state=open]:fade-in",
+              "data-[state=closed]:animate-out data-[state=closed]:fade-out",
+              tier === "compact"
+                ? [
+                    "h-1/2 border-t",
+                    "data-[state=open]:slide-in-from-bottom data-[state=closed]:slide-out-to-bottom",
+                  ]
+                : [
+                    "w-80 border-l",
+                    "data-[state=open]:slide-in-from-right data-[state=closed]:slide-out-to-right",
+                  ]
             )}
           >
             <ScrollArea className="min-h-0 flex-1">

@@ -42,31 +42,48 @@ export function useBrowserAgentActivity(): { driver: BrowserDriver; lastAction: 
  * Presentational badge showing who is currently driving the preview. The
  * `lastAction` value is raw agent data (e.g. "click e3"), rendered inside the
  * localized "last action" label.
+ *
+ * `compact` drops to the icon alone — same element, same driver state, the
+ * labels move into the hover title. A narrow right-rail toolbar cannot afford
+ * ~90px for a line that reads "You're driving" 99% of the time, but the
+ * agent-took-over signal still has to be visible there.
  */
 export function BrowserAgentIndicator({
   driver,
   lastAction,
+  compact = false,
 }: {
   driver: BrowserDriver
   lastAction: string | null
+  compact?: boolean
 }) {
   const t = useTranslations("browser")
   const isAgent = driver === "agent"
+  const label = isAgent ? t("agent.driving") : t("agent.human")
+  const action = lastAction ? t("agent.lastAction", { action: lastAction }) : null
   return (
     <div
       className={cn(
-        "flex items-center gap-1 rounded-md px-2 py-1 text-xs",
+        "flex min-w-0 shrink-0 items-center gap-1 rounded-md py-1 text-xs",
+        compact ? "px-1" : "px-2",
         isAgent ? "bg-primary/15 text-primary" : "text-muted-foreground"
       )}
       data-driver={driver}
+      {...(compact
+        ? { role: "img", "aria-label": [label, action].filter(Boolean).join(" · ") }
+        : {})}
     >
       {isAgent ? <BotIcon className="size-3.5" /> : <MousePointerIcon className="size-3.5" />}
-      <span className="font-medium">{isAgent ? t("agent.driving") : t("agent.human")}</span>
-      {lastAction && (
-        <span className="truncate text-muted-foreground">
-          {" · "}
-          {t("agent.lastAction", { action: lastAction })}
-        </span>
+      {!compact && (
+        <>
+          <span className="font-medium">{label}</span>
+          {action && (
+            <span className="truncate text-muted-foreground">
+              {" · "}
+              {action}
+            </span>
+          )}
+        </>
       )}
     </div>
   )

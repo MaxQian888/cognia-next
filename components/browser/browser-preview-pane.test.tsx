@@ -49,6 +49,14 @@ jest.mock("@/components/browser/browser-cookie-import-action", () => ({
 }))
 // The history dropdown uses the shared manual mock so its items render inline.
 jest.mock("@/components/ui/dropdown-menu")
+// Same for the toolbar overflow: the manual mock renders `PopoverContent`
+// unconditionally, so a test can assert *which container* a control packed
+// into without driving the trigger open.
+jest.mock("@/components/ui/popover")
+// jsdom has no layout, so the pane's measured toolbar width is whatever a test
+// dictates; 0 (the default) is the "not measured yet" widest branch.
+let mockToolbarWidth = 0
+jest.mock("@/hooks/use-element-width", () => ({ useElementWidth: () => mockToolbarWidth }))
 const mockOpenExternal = jest.fn().mockResolvedValue(undefined)
 let mockSelection: BrowserSelection | null = null
 let mockNavigated: BrowserNavigated | null = null
@@ -130,7 +138,7 @@ jest.mock("sonner", () => ({ toast: { success: jest.fn(), error: jest.fn() } }))
 
 import { toast } from "sonner"
 import { browserClient } from "@/lib/browser/client"
-import { BrowserPreviewPane } from "./browser-preview-pane"
+import { addressDisplayParts, BrowserPreviewPane } from "./browser-preview-pane"
 
 const SELECTION: BrowserSelection = {
   paneId: "browser-embed",
@@ -147,6 +155,9 @@ const SELECTION: BrowserSelection = {
 }
 
 const urlBar = () => screen.getByPlaceholderText("http://localhost:3000")
+const toolbar = () => screen.getByTestId("browser-toolbar")
+/** The "⋯" popover body — where a tier packs whatever didn't stay inline. */
+const overflow = () => screen.getByTestId("popover-content")
 
 /** Type an address into the URL bar and press Enter (form submit). */
 const commitUrl = (value: string) => {
@@ -156,6 +167,7 @@ const commitUrl = (value: string) => {
 
 beforeEach(() => {
   window.localStorage.clear()
+  mockToolbarWidth = 0
   mockSelection = null
   mockNavigated = null
   mockTauri = true
@@ -301,13 +313,158 @@ it("renders the empty state and URL bar in Tauri", () => {
   expect(urlBar()).toBeInTheDocument()
 })
 
-it("wraps the browser toolbar and moves the URL row on narrow right rails", () => {
+it("keeps the toolbar on one row with the address bar taking the slack", () => {
+  mockToolbarWidth = 320
   renderPane(<BrowserPreviewPane />)
-  const toolbar = screen.getByTestId("browser-toolbar")
-  const form = toolbar.querySelector("form")
 
-  expect(toolbar).toHaveClass("flex-wrap", "@lg:flex-nowrap")
-  expect(form).toHaveClass("order-last", "basis-full", "@lg:order-none", "@lg:basis-auto")
+  expect(toolbar()).not.toHaveClass("flex-wrap")
+  expect(toolbar().querySelector("form")).toHaveClass("min-w-0", "flex-1")
+})
+
+it("keeps every toolbar action inline on a wide pane", () => {
+  renderPane(<BrowserPreviewPane />)
+
+  expect(toolbar()).toHaveAttribute("data-tier", "wide")
+  for (const name of [
+    "History",
+    "Send screenshot to chat",
+    "Select element",
+    "Find",
+    "Open in external browser",
+  ]) {
+    expect(overflow()).not.toContainElement(screen.getByRole("button", { name }))
+  }
+  // Annotation detail is an output setting, not navigation chrome — it lives
+  // in the overflow at every width.
+  expect(overflow()).toContainElement(screen.getByRole("combobox", { name: "Annotation detail" }))
+})
+
+it("packs the set-once page actions away first on a medium pane", () => {
+  mockToolbarWidth = 520
+  renderPane(<BrowserPreviewPane />)
+
+  expect(toolbar()).toHaveAttribute("data-tier", "medium")
+  expect(overflow()).not.toContainElement(screen.getByRole("button", { name: "Select element" }))
+  expect(overflow()).toContainElement(
+    screen.getByRole("button", { name: "Open in external browser" })
+  )
+  expect(overflow()).toContainElement(screen.getByTestId("cookie-import-action"))
+})
+
+it("leaves only navigation and the address bar inline on a narrow rail", () => {
+  mockToolbarWidth = 320
+  renderPane(<BrowserPreviewPane />)
+
+  expect(toolbar()).toHaveAttribute("data-tier", "compact")
+  for (const name of ["Back", "Forward", "Reload"]) {
+    expect(overflow()).not.toContainElement(screen.getByRole("button", { name }))
+  }
+  for (const name of [
+    "History",
+    "Send screenshot to chat",
+    "Select element",
+    "Find",
+    "Open in external browser",
+  ]) {
+    expect(overflow()).toContainElement(screen.getByRole("button", { name }))
+  }
+})
+
+it("flags the overflow trigger while a packed-away control is armed", () => {
+  mockToolbarWidth = 320
+  mockSelectMode = true
+  renderPane(<BrowserPreviewPane />)
+  expect(screen.getByTestId("browser-toolbar-more-active")).toBeInTheDocument()
+})
+
+it("opens the overflow modally so the always-on-top webview parks off-screen", () => {
+  // Non-modal, the popover would render behind the native webview: only a
+  // modal layer marks the rest of the app aria-hidden, which is what
+  // `useRegionVisibility` watches.
+  renderPane(<BrowserPreviewPane />)
+  expect(screen.getByTestId("popover")).toHaveAttribute("data-modal", "true")
+})
+
+it("leaves the overflow trigger unflagged when nothing packed away is active", () => {
+  mockToolbarWidth = 320
+  renderPane(<BrowserPreviewPane />)
+  expect(screen.queryByTestId("browser-toolbar-more-active")).not.toBeInTheDocument()
+})
+
+it("flags the overflow trigger while find-in-page is open behind it", () => {
+  mockToolbarWidth = 320
+  renderPane(<BrowserPreviewPane />)
+  commitUrl("http://localhost:3000/")
+  fireEvent.click(screen.getByRole("button", { name: "Find" }))
+  expect(screen.getByTestId("browser-toolbar-more-active")).toBeInTheDocument()
+  // Toggling it back off clears both the find bar and the flag.
+  fireEvent.click(screen.getByRole("button", { name: "Find" }))
+  expect(browserClient.embedFindClear).toHaveBeenCalled()
+  expect(screen.queryByTestId("browser-toolbar-more-active")).not.toBeInTheDocument()
+})
+
+it("flags the overflow trigger while the packed-away zoom is off 100%", () => {
+  window.localStorage.setItem("cognia.browser.zoom", "1.5")
+  mockToolbarWidth = 520
+  renderPane(<BrowserPreviewPane />)
+  expect(screen.getByTestId("browser-toolbar-more-active")).toBeInTheDocument()
+})
+
+describe("addressDisplayParts", () => {
+  it("splits an http(s) address into host + dimmable remainder", () => {
+    expect(addressDisplayParts("https://www.example.com/a/b?q=1#f")).toEqual({
+      host: "example.com",
+      rest: "/a/b?q=1#f",
+      secure: true,
+    })
+    expect(addressDisplayParts("http://localhost:3000/")).toEqual({
+      host: "localhost:3000",
+      rest: "",
+      secure: false,
+    })
+  })
+
+  it("declines anything that isn't a parseable http(s) address", () => {
+    expect(addressDisplayParts("localhost:30")).toBeNull()
+    expect(addressDisplayParts("file:///tmp/index.html")).toBeNull()
+    expect(addressDisplayParts("")).toBeNull()
+  })
+})
+
+it("stacks the inspection rail under the page instead of beside it when narrow", () => {
+  mockToolbarWidth = 320
+  mockSelection = SELECTION
+  renderPane(<BrowserPreviewPane sessionId="s1" />)
+
+  const rail = screen.getByTestId("browser-inspection-rail")
+  expect(rail).toHaveClass("h-1/2", "border-t")
+  expect(rail).not.toHaveClass("w-80")
+})
+
+it("shows the address host-first once the field mirrors the live page", () => {
+  renderPane(<BrowserPreviewPane initialUrl="https://www.example.com/docs/start?q=1" />)
+
+  // The scheme and `www.` are painted away so the host survives truncation…
+  expect(screen.getByTestId("browser-url-display")).toHaveTextContent("example.com/docs/start?q=1")
+  // …while the field itself still carries the real URL for copy + submit.
+  expect(urlBar()).toHaveValue("https://www.example.com/docs/start?q=1")
+})
+
+it("reveals the raw URL while the address bar is focused", () => {
+  renderPane(<BrowserPreviewPane initialUrl="https://example.com/a" />)
+  fireEvent.focus(urlBar())
+  expect(screen.queryByTestId("browser-url-display")).not.toBeInTheDocument()
+})
+
+it("never rewrites an uncommitted draft into the display form", () => {
+  renderPane(<BrowserPreviewPane />)
+  commitUrl("http://localhost:3000/")
+  fireEvent.focus(urlBar())
+  fireEvent.change(urlBar(), { target: { value: "https://example.com" } })
+  fireEvent.blur(urlBar())
+
+  expect(screen.queryByTestId("browser-url-display")).not.toBeInTheDocument()
+  expect(urlBar()).toHaveValue("https://example.com")
 })
 
 it("commits a typed URL via Enter and clears the empty state", async () => {

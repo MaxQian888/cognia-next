@@ -4,7 +4,8 @@ import * as React from "react"
 // unconditionally (matches the dominant inline-factory shape — tests
 // typically render the trigger + content together and don't gate on open).
 // The `open` prop is mirrored as `data-state` on the root for opt-in
-// inspection.
+// inspection, and `modal` as `data-modal` (it changes whether Radix marks the
+// rest of the app `aria-hidden`, which some surfaces depend on).
 
 type DivProps = React.HTMLAttributes<HTMLDivElement> & { children?: React.ReactNode }
 type ButtonProps = React.ButtonHTMLAttributes<HTMLButtonElement> & {
@@ -16,11 +17,13 @@ export function Popover({
   children,
   open,
   defaultOpen,
+  modal,
   onOpenChange: _onOpenChange,
   ...rest
 }: DivProps & {
   open?: boolean
   defaultOpen?: boolean
+  modal?: boolean
   onOpenChange?: (open: boolean) => void
 }) {
   void _onOpenChange
@@ -29,6 +32,7 @@ export function Popover({
     <div
       data-testid="popover"
       data-state={isOpen ? "open" : isOpen === false ? "closed" : undefined}
+      data-modal={modal === undefined ? undefined : String(modal)}
       {...rest}
     >
       {children}

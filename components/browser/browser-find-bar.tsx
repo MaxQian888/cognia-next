@@ -88,7 +88,7 @@ export function BrowserFindBar({
     <div
       data-testid="browser-find-bar"
       className={cn(
-        "flex items-center gap-1 rounded-md border bg-background/95 p-1 shadow-md",
+        "flex max-w-full items-center gap-1 rounded-md border bg-background/95 p-1 shadow-md",
         className
       )}
     >
@@ -102,7 +102,7 @@ export function BrowserFindBar({
         onKeyDown={onKeyDown}
         placeholder={t("placeholder")}
         aria-label={t("placeholder")}
-        className="h-7 w-40 border-transparent bg-transparent text-sm shadow-none focus-visible:ring-0"
+        className="h-7 w-40 min-w-16 border-transparent bg-transparent text-sm shadow-none focus-visible:ring-0"
       />
       <span className="min-w-12 shrink-0 px-1 text-center text-xs tabular-nums text-muted-foreground">
         {counter}
