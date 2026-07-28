@@ -91,6 +91,7 @@ describe("MODULE_BRIDGE_CAPABILITIES", () => {
         "message-renderer",
         "tool-renderer",
         "connectors",
+        "integrations",
         "fonts",
         "wallpapers",
         "density-preset",
@@ -111,8 +112,11 @@ describe("MODULE_BRIDGE_CAPABILITIES", () => {
       ])
     )
     // Lock the count — silent growth means the manager dispatch loop picked
-    // up new behaviour that may need verification.
-    expect(MODULE_BRIDGE_CAPABILITY_KEYS).toHaveLength(23)
+    // up new behaviour that may need verification. `integrations` (24th) was
+    // verified: the loop at `manager.ts:3830` / `:4118` is fully generic, and
+    // `registerIntegrationsForPlugin` / `unregisterIntegrationsForPlugin` are
+    // real and covered by `integrations-bridge.test.ts`.
+    expect(MODULE_BRIDGE_CAPABILITY_KEYS).toHaveLength(24)
   })
 
   describe.each(MODULE_BRIDGE_CAPABILITY_KEYS)("%s", (key) => {

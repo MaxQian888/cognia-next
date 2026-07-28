@@ -217,6 +217,10 @@
     "tauri": {
       "availability": "supported",
       "entrypoint": "src/index.tsx"
+    },
+    "mobile": {
+      "availability": "blocked",
+      "reason": "Exercises rail view containers, tray items and modal mounts — surfaces the Capacitor shell does not render."
     }
   }
 }
