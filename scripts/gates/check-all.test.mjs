@@ -61,11 +61,14 @@ test("registry picks up the gates that were previously wired to nothing", () => 
     "build:packages",
     "version:sync:check",
     "audit:trusted-publishers",
+    "audit:docs-links",
     "skills:check",
     "plugin-node:check",
     "plugin-convert:check",
+    "ide:check",
     "lint:claude-md",
     "test:coverage:runner:test",
+    "sidecar:codeserver-agent:test",
   ]) {
     assert.ok(hasGate(script), `${script} should be registered`)
   }

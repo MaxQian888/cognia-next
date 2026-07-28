@@ -103,6 +103,7 @@ const REGISTRY = [
   { script: "plugin-node:check", group: "artifacts" },
   { script: "plugin-convert:check", group: "artifacts" },
   { script: "plugin:contract:check", group: "artifacts" },
+  { script: "ide:check", group: "artifacts" },
   // The declarations `cognia plugin new` vendors must match the packages they
   // came from; a stale bundle ships authors a type surface the host no longer
   // has. Shares `package-build` because it rebuilds the same packages.
@@ -121,6 +122,7 @@ const REGISTRY = [
   { script: "audit:pii-boundaries", group: "audit" },
   { script: "audit:command-parity", group: "audit" },
   { script: "audit:e2e-governance", group: "audit" },
+  { script: "audit:docs-links", group: "audit" },
   { script: "audit:colocated-tests", group: "audit" },
   { script: "audit:unreachable-components", group: "audit" },
   { script: "lint:static-export", group: "audit" },
@@ -146,6 +148,7 @@ const REGISTRY = [
   // scripts. Introduced by ADR-0092 but never registered, so it ran nowhere.
   { script: "web:test:scripts", group: "gate-tests" },
   { script: "test:coverage:runner:test", group: "gate-tests" },
+  { script: "sidecar:codeserver-agent:test", group: "gate-tests" },
 
   // The plugin SDK's cross-language contract surface.
   { script: "sdk:ts:build", group: "plugin-sdk", resource: "package-build" },
