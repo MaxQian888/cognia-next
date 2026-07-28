@@ -257,6 +257,9 @@ const projectCommon: Config = {
     // provides a functional line-based markdown parser sufficient for unit tests.
     "^react-markdown$": "<rootDir>/__mocks__/react-markdown.js",
     "^@streamdown/cjk$": "<rootDir>/__mocks__/streamdown-cjk.js",
+    "^@streamdown/code$": "<rootDir>/__mocks__/streamdown-plugins.js",
+    "^@streamdown/math$": "<rootDir>/__mocks__/streamdown-plugins.js",
+    "^@streamdown/mermaid$": "<rootDir>/__mocks__/streamdown-plugins.js",
     "^rehype-sanitize$": "<rootDir>/__mocks__/rehype-sanitize.js",
     "^remark-gfm$": "<rootDir>/__mocks__/esm-plugin-stub.js",
     "^remark-math$": "<rootDir>/__mocks__/esm-plugin-stub.js",
