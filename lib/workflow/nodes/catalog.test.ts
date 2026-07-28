@@ -84,13 +84,12 @@ describe("nodeCatalogEntry", () => {
     expect(e.iconName).toBe("Clock")
   })
 
-  it("exposes the GitHub webhook trigger as a desktop-only palette entry", () => {
-    const e = nodeCatalogEntry("trigger.github.webhook")
-    expect(e.category).toBe("trigger")
-    expect(e.label).toBe("On GitHub event")
-    expect(e.iconName).toBe("GitBranch")
-    expect(e.desktopOnly).toBe(true)
-    expect(e.keywords).toEqual(expect.arrayContaining(["github", "webhook"]))
+  it("exposes the platform-neutral Marketplace integration trigger", () => {
+    const entry = nodeCatalogEntry("trigger.integration.event")
+    expect(entry.category).toBe("trigger")
+    expect(entry.label).toBe("On integration event")
+    expect(entry.iconName).toBe("PlugZap")
+    expect(entry.keywords).toEqual(expect.arrayContaining(["integration", "marketplace"]))
   })
 
   it("exposes the native desktop UIA-event trigger", () => {
@@ -235,7 +234,6 @@ describe("groupedCatalog", () => {
     const groups = groupedCatalog({ includeDesktopOnly: false })
     const all = groups.flatMap((g) => g.entries)
     expect(all.some((e) => e.kind === "trigger.webhook")).toBe(false)
-    expect(all.some((e) => e.kind === "trigger.github.webhook")).toBe(false)
     expect(all.some((e) => e.kind === "trigger.manual")).toBe(true)
   })
 })
@@ -256,9 +254,9 @@ describe("searchCatalog", () => {
     expect(out.some((e) => e.kind === "action.connector.send")).toBe(true)
   })
 
-  it("matches the GitHub webhook trigger by GitHub and PR terms", () => {
-    expect(searchCatalog("github")[0]?.kind).toBe("trigger.github.webhook")
-    expect(searchCatalog("pr").some((e) => e.kind === "trigger.github.webhook")).toBe(true)
+  it("does not expose platform-specific nodes from Core", () => {
+    expect(searchCatalog("github")).toEqual([])
+    expect(NODE_CATALOG.some((entry) => entry.kind.startsWith("action.github."))).toBe(false)
   })
 
   it("matches goal lifecycle actions by goal terms", () => {

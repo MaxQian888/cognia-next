@@ -38,6 +38,7 @@ const INDEXED_KINDS: readonly WorkflowNodeKind[] = [
   "trigger.desktop.event",
   "trigger.pet.event",
   "trigger.workflow.completed",
+  "trigger.integration.event",
 ]
 
 interface SubscriptionState {
@@ -177,6 +178,13 @@ export interface TriggerMatchContext {
    * with `requireMention: true` only fires when this is true.
    */
   selfMentioned?: boolean
+  /** Marketplace integration identifiers and normalized event filters. */
+  pluginId?: string
+  integrationId?: string
+  accountId?: string
+  eventType?: string
+  resourceKind?: string
+  resourceId?: string
 }
 
 /**
@@ -253,6 +261,36 @@ function matches(entry: SubscribedTrigger, ctx: TriggerMatchContext): boolean {
     if (!hit) return false
   }
   if (p.requireMention === true && ctx.selfMentioned !== true) return false
+  if (typeof p.pluginId === "string" && p.pluginId.length > 0 && ctx.pluginId !== p.pluginId) {
+    return false
+  }
+  if (
+    typeof p.integrationId === "string" &&
+    p.integrationId.length > 0 &&
+    ctx.integrationId !== p.integrationId
+  ) {
+    return false
+  }
+  if (typeof p.accountId === "string" && p.accountId.length > 0 && ctx.accountId !== p.accountId) {
+    return false
+  }
+  if (Array.isArray(p.eventTypes) && p.eventTypes.length > 0) {
+    if (typeof ctx.eventType !== "string" || !p.eventTypes.includes(ctx.eventType)) return false
+  }
+  if (
+    typeof p.resourceKind === "string" &&
+    p.resourceKind.length > 0 &&
+    ctx.resourceKind !== p.resourceKind
+  ) {
+    return false
+  }
+  if (
+    typeof p.resourceId === "string" &&
+    p.resourceId.length > 0 &&
+    ctx.resourceId !== p.resourceId
+  ) {
+    return false
+  }
   return true
 }
 

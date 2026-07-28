@@ -29,22 +29,6 @@ import {
   DesktopLaunchAppConfig,
 } from "./forms/desktop"
 import {
-  GithubClosePrConfig,
-  GithubCloseIssueConfig,
-  GithubCommentIssueConfig,
-  GithubCommentPrConfig,
-  GithubCreateReleaseConfig,
-  GithubGenerateChangelogConfig,
-  GithubLabelIssueConfig,
-  GithubMergePrConfig,
-  GithubOpenPrConfig,
-  GithubPushTagConfig,
-  GithubReviewPrConfig,
-  GithubReviewPrInlineConfig,
-  GithubRunIssueLoopConfig,
-  GithubWebhookTriggerConfig,
-} from "./forms/github-forms"
-import {
   GitStageConfig,
   GitCommitConfig,
   GitPushConfig,
@@ -125,6 +109,7 @@ import {
   GoalUpdateObjectiveConfig,
   GroupAnnotationConfig,
   HttpRequestConfig,
+  IntegrationEventTriggerConfig,
   JoinConfig,
   LoopConfig,
   BreakConfig,
@@ -187,6 +172,7 @@ const REGISTRY: Partial<Record<WorkflowNodeKind, NodeConfigComponent>> = {
   "trigger.goal.completed": GoalCompletedTriggerConfig,
   "trigger.workflow.completed": WorkflowCompletedTriggerConfig,
   "trigger.webhook": WebhookTriggerConfig,
+  "trigger.integration.event": IntegrationEventTriggerConfig,
   "trigger.team": TeamTriggerConfig,
   "trigger.desktop.event": DesktopEventTriggerConfig,
   "trigger.pet.event": PetEventTriggerConfig,
@@ -353,21 +339,6 @@ const REGISTRY: Partial<Record<WorkflowNodeKind, NodeConfigComponent>> = {
   // Annotations
   "annotation.note": NoteConfig,
   "annotation.group": GroupAnnotationConfig,
-  // GitHub Delivery
-  "trigger.github.webhook": GithubWebhookTriggerConfig,
-  "action.github.openPr": GithubOpenPrConfig,
-  "action.github.closePr": GithubClosePrConfig,
-  "action.github.mergePr": GithubMergePrConfig,
-  "action.github.reviewPr": GithubReviewPrConfig,
-  "action.github.reviewPrInline": GithubReviewPrInlineConfig,
-  "action.github.commentPr": GithubCommentPrConfig,
-  "action.github.commentIssue": GithubCommentIssueConfig,
-  "action.github.labelIssue": GithubLabelIssueConfig,
-  "action.github.closeIssue": GithubCloseIssueConfig,
-  "action.github.createRelease": GithubCreateReleaseConfig,
-  "action.github.generateChangelog": GithubGenerateChangelogConfig,
-  "action.github.pushTag": GithubPushTagConfig,
-  "action.github.runIssueLoop": GithubRunIssueLoopConfig,
 }
 
 /**

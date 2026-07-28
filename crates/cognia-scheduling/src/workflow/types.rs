@@ -17,7 +17,7 @@ pub const TRIGGER_KINDS: &[&str] = &[
     "trigger.connector.inbound",
     "trigger.chat.message",
     "trigger.webhook",
-    "trigger.github.webhook",
+    "trigger.integration.event",
     "trigger.team",
     "trigger.goal.completed",
     "trigger.desktop.event",
@@ -124,10 +124,6 @@ pub struct RegisterTriggerInput {
     /// to the static response. Absent / 0 = the Rust default.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub webhook_response_timeout_ms: Option<u64>,
-    /// Signature header convention. "cognia" (default) reads
-    /// `x-signature-256`; "github" reads `x-hub-signature-256`.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub signature_mode: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub binding: Option<TriggerBinding>,
 }
@@ -259,7 +255,6 @@ mod tests {
             webhook_response_body: None,
             webhook_await_response: None,
             webhook_response_timeout_ms: None,
-            signature_mode: None,
             binding: Some(TriggerBinding {
                 adapter_id: Some("telegram_main".into()),
                 ..Default::default()
@@ -302,7 +297,6 @@ mod tests {
         assert!(TRIGGER_KINDS.contains(&"trigger.connector.inbound"));
         assert!(TRIGGER_KINDS.contains(&"trigger.chat.message"));
         assert!(TRIGGER_KINDS.contains(&"trigger.webhook"));
-        assert!(TRIGGER_KINDS.contains(&"trigger.github.webhook"));
         assert!(TRIGGER_KINDS.contains(&"trigger.team"));
         assert!(TRIGGER_KINDS.contains(&"trigger.goal.completed"));
         assert!(TRIGGER_KINDS.contains(&"trigger.desktop.event"));

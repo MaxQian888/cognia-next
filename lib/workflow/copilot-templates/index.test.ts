@@ -28,9 +28,9 @@ function nodesForValidator(workflow: {
 }
 
 describe("listCopilotTemplates", () => {
-  it("returns at least the three first-wave templates in stable order", () => {
+  it("returns the platform-neutral templates in stable order", () => {
     const ids = listCopilotTemplates().map((t) => t.id)
-    expect(ids).toEqual(["github-pr", "cron-report", "webhook-ai-connector"])
+    expect(ids).toEqual(["cron-report", "webhook-ai-connector"])
   })
 
   it("each registered template is reachable via getCopilotTemplate", () => {
@@ -101,49 +101,53 @@ describe("materializeCopilotTemplate", () => {
   })
 
   it("treats empty / whitespace strings as missing", () => {
-    const result = materializeCopilotTemplate("github-pr", { repoFullName: "   " })
+    const result = materializeCopilotTemplate("cron-report", {
+      sourceUrl: "   ",
+      adapterId: "telegram_main",
+      conversationKey: "ops",
+    })
     expect(result.ok).toBe(false)
     if (!result.ok) {
-      expect(result.missing).toContain("repoFullName")
+      expect(result.missing).toContain("sourceUrl")
     }
   })
 
   it("substitutes caller-provided slots and falls back to defaultValue when slot is silent", () => {
     const slots: CopilotSlotValues = {
-      repoFullName: "acme/widgets",
-      // labelName intentionally omitted — should fall back to defaultValue "auto-fix"
-      // baseBranch intentionally omitted — should fall back to "main"
+      sourceUrl: "https://example.com/feed",
+      adapterId: "lark_main",
+      conversationKey: "weekly-delivery",
     }
-    const result = materializeCopilotTemplate("github-pr", slots)
+    const result = materializeCopilotTemplate("cron-report", slots)
     expect(result.ok).toBe(true)
     if (result.ok) {
-      const triggerNode = result.workflow.nodes.find((n) => n.id === "n_trigger")
+      const triggerNode = result.workflow.nodes.find((n) => n.id === "n_cron")
       expect(triggerNode?.data.params).toMatchObject({
-        filter: expect.stringContaining("auto-fix"),
+        cron: "0 9 * * 1-5",
       })
-      const openPrNode = result.workflow.nodes.find((n) => n.id === "n_open_pr")
-      expect(openPrNode?.data.params).toMatchObject({
-        repoFullName: "acme/widgets",
-        base: "main",
+      const sendNode = result.workflow.nodes.find((n) => n.id === "n_send")
+      expect(sendNode?.data.params).toMatchObject({
+        adapterId: "lark_main",
+        conversationKey: "weekly-delivery",
       })
     }
   })
 
   it("honours caller overrides over default", () => {
-    const result = materializeCopilotTemplate("github-pr", {
-      repoFullName: "acme/widgets",
-      labelName: "ship-it",
-      baseBranch: "trunk",
+    const result = materializeCopilotTemplate("cron-report", {
+      cronExpression: "0 9 * * *",
+      sourceUrl: "https://example.com/operations",
+      adapterId: "telegram_main",
+      conversationKey: "operations",
     })
     expect(result.ok).toBe(true)
     if (result.ok) {
-      const openPrNode = result.workflow.nodes.find((n) => n.id === "n_open_pr")
-      expect(openPrNode?.data.params).toMatchObject({
-        repoFullName: "acme/widgets",
-        base: "trunk",
+      const triggerNode = result.workflow.nodes.find((n) => n.id === "n_cron")
+      expect(triggerNode?.data.params).toMatchObject({ cron: "0 9 * * *" })
+      const fetchNode = result.workflow.nodes.find((n) => n.id === "n_fetch")
+      expect(fetchNode?.data.params).toMatchObject({
+        url: "https://example.com/operations",
       })
-      const triggerNode = result.workflow.nodes.find((n) => n.id === "n_trigger")
-      expect((triggerNode?.data.params as { filter: string }).filter).toContain("ship-it")
     }
   })
 })

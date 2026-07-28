@@ -30,6 +30,7 @@ use tauri::{AppHandle, Emitter};
 use tokio::sync::oneshot;
 
 use super::backend::AutomationBackend;
+use super::selection::TextSelectionSnapshot;
 use super::types::*;
 
 /// Max panic restarts allowed inside `RESTART_WINDOW`. Hitting the cap
@@ -129,6 +130,9 @@ enum Request {
     PickAtPoint {
         point: Point,
         reply: oneshot::Sender<Result<ElementInfo>>,
+    },
+    ReadTextSelection {
+        reply: oneshot::Sender<Result<Option<TextSelectionSnapshot>>>,
     },
     Shutdown,
 }
@@ -347,6 +351,9 @@ fn dispatch(backend: &dyn AutomationBackend, req: Request) -> DispatchControl {
         Request::PickAtPoint { point, reply } => {
             let _ = reply.send(backend.pick_at_point(point));
         }
+        Request::ReadTextSelection { reply } => {
+            let _ = reply.send(backend.read_text_selection());
+        }
         Request::Shutdown => return DispatchControl::Stop,
     }
     DispatchControl::Continue
@@ -498,6 +505,10 @@ impl AutomationHandle {
         round_trip(&self.tx, |reply| Request::PickAtPoint { point, reply }).await
     }
 
+    pub async fn read_text_selection(&self) -> Result<Option<TextSelectionSnapshot>> {
+        round_trip(&self.tx, |reply| Request::ReadTextSelection { reply }).await
+    }
+
     /// Best-effort shutdown — the worker drains in-flight requests and then
     /// exits. The handle's Drop joins the thread.
     pub async fn shutdown(&self) {
@@ -521,6 +532,8 @@ mod tests {
         assert_eq!(caps.platform, Platform::Unsupported);
         // Stub returns UnsupportedPlatform for everything else.
         let err = h.get_focus().await.unwrap_err();
+        assert!(matches!(err, AutomationError::UnsupportedPlatform));
+        let err = h.read_text_selection().await.unwrap_err();
         assert!(matches!(err, AutomationError::UnsupportedPlatform));
         h.shutdown().await;
     }

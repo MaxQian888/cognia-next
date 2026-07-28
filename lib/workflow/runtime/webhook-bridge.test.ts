@@ -121,32 +121,6 @@ describe("syncWorkflowTriggers", () => {
     })
   })
 
-  it("registers a trigger.github.webhook with GitHub signature mode and webhook shape", async () => {
-    await syncWorkflowTriggers(
-      workflow([
-        node("trg", "trigger.github.webhook", {
-          path: "github-events",
-          method: "POST",
-          hmacSecret: "ghs_secret",
-          responseStatus: 202,
-          responseTemplate: "accepted",
-        }),
-      ])
-    )
-    expect(mockRegister).toHaveBeenCalledTimes(1)
-    expect(mockRegister.mock.calls[0][0]).toMatchObject({
-      triggerId: "trg",
-      kind: "trigger.github.webhook",
-      webhookPath: "github-events",
-      webhookMethod: "POST",
-      webhookHmacSecret: "ghs_secret",
-      webhookResponseStatus: 202,
-      webhookResponseBody: "accepted",
-      webhookAwaitResponse: false,
-      signatureMode: "github",
-    })
-  })
-
   it("sets webhookAwaitResponse when the workflow has an io.webhook.respond node", async () => {
     await syncWorkflowTriggers(
       workflow([

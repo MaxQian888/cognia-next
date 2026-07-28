@@ -29,15 +29,16 @@ use std::ffi::c_void;
 
 use accessibility::{AXUIElement, AXUIElementAttributes};
 use accessibility_sys::{
-    kAXErrorSuccess, kAXTrustedCheckOptionPrompt, kAXValueTypeCGPoint, kAXValueTypeCGSize,
-    AXIsProcessTrusted, AXIsProcessTrustedWithOptions, AXUIElementCopyAttributeValue,
-    AXUIElementRef, AXUIElementSetAttributeValue, AXValueGetValue, AXValueRef,
+    kAXErrorSuccess, kAXTrustedCheckOptionPrompt, kAXValueTypeCFRange, kAXValueTypeCGPoint,
+    kAXValueTypeCGRect, kAXValueTypeCGSize, AXIsProcessTrusted, AXIsProcessTrustedWithOptions,
+    AXUIElementCopyAttributeValue, AXUIElementCopyParameterizedAttributeValue, AXUIElementRef,
+    AXUIElementSetAttributeValue, AXValueCreate, AXValueGetValue, AXValueRef,
 };
 use core_foundation_0_9 as cf_ax;
-use core_foundation_sys::base::{CFRelease, CFTypeRef};
+use core_foundation_sys::base::{CFRange, CFRelease, CFTypeRef};
 use core_foundation_sys::dictionary::CFDictionaryRef;
 use core_foundation_sys::number::{kCFBooleanTrue, CFBooleanGetValue, CFBooleanRef};
-use core_graphics_types::geometry::{CGPoint, CGSize};
+use core_graphics_types::geometry::{CGPoint, CGRect, CGSize};
 
 use cf_ax::base::TCFType;
 use cf_ax::string::CFString;
@@ -106,6 +107,10 @@ fn copy_element_attr(el: &AXUIElement, name: &str) -> Option<AXUIElement> {
     Some(unsafe { AXUIElement::wrap_under_create_rule(out as AXUIElementRef) })
 }
 
+pub fn focused_ui_element(app: &AXUIElement) -> Option<AXUIElement> {
+    copy_element_attr(app, "AXFocusedUIElement")
+}
+
 /// Resolve the window `read_tree` should root at: the focused window, then the
 /// main window, then the first window that actually has children (skips
 /// empty helper windows), then the first window, then the application element
@@ -150,9 +155,105 @@ pub fn has_visible_windows(app: &AXUIElement) -> bool {
 /// those controls with the `AXSecureTextField` subrole, so treat that signal as
 /// authoritative without reading the field's value.
 pub fn focused_element_is_secure_text_field(app: &AXUIElement) -> bool {
-    copy_element_attr(app, "AXFocusedUIElement")
+    focused_ui_element(app)
         .and_then(|element| element.subrole().ok())
         .is_some_and(|subrole| subrole.to_string() == "AXSecureTextField")
+}
+
+pub fn selected_text(element: &AXUIElement) -> Option<String> {
+    let attr = cfstr("AXSelectedText");
+    let mut out: CFTypeRef = std::ptr::null();
+    let err = unsafe {
+        AXUIElementCopyAttributeValue(el_ref(element), attr.as_concrete_TypeRef(), &mut out)
+    };
+    if err != kAXErrorSuccess || out.is_null() {
+        return None;
+    }
+    let value = unsafe { cf_ax::base::CFType::wrap_under_create_rule(out) };
+    value
+        .downcast::<CFString>()
+        .map(|text| text.to_string())
+        .filter(|text| !text.trim().is_empty())
+}
+
+pub fn selected_text_bounds(element: &AXUIElement) -> Option<Rect> {
+    let range_attr = cfstr("AXSelectedTextRange");
+    let mut range_out: CFTypeRef = std::ptr::null();
+    let range_err = unsafe {
+        AXUIElementCopyAttributeValue(
+            el_ref(element),
+            range_attr.as_concrete_TypeRef(),
+            &mut range_out,
+        )
+    };
+    if range_err != kAXErrorSuccess || range_out.is_null() {
+        return None;
+    }
+    let range_value = unsafe { cf_ax::base::CFType::wrap_under_create_rule(range_out) };
+
+    // AXBoundsForRange returns the union of a multi-line selection. Anchor the
+    // toolbar to the final selected character first so the overlay follows the
+    // selection tail; fall back to the full range for controls that reject a
+    // one-character parameter.
+    let mut selected_range = CFRange::init(0, 0);
+    let has_range = unsafe {
+        AXValueGetValue(
+            range_value.as_CFTypeRef() as AXValueRef,
+            kAXValueTypeCFRange,
+            (&mut selected_range as *mut CFRange).cast::<c_void>(),
+        )
+    };
+    if has_range && selected_range.length > 0 {
+        let tail_range = CFRange::init(selected_range.location + selected_range.length - 1, 1);
+        let tail_value = unsafe {
+            AXValueCreate(
+                kAXValueTypeCFRange,
+                (&tail_range as *const CFRange).cast::<c_void>(),
+            )
+        };
+        if !tail_value.is_null() {
+            let tail_value =
+                unsafe { cf_ax::base::CFType::wrap_under_create_rule(tail_value as CFTypeRef) };
+            if let Some(bounds) = bounds_for_range(element, tail_value.as_CFTypeRef()) {
+                return Some(bounds);
+            }
+        }
+    }
+    bounds_for_range(element, range_value.as_CFTypeRef())
+}
+
+fn bounds_for_range(element: &AXUIElement, range: CFTypeRef) -> Option<Rect> {
+    let bounds_attr = cfstr("AXBoundsForRange");
+    let mut bounds_out: CFTypeRef = std::ptr::null();
+    let bounds_err = unsafe {
+        AXUIElementCopyParameterizedAttributeValue(
+            el_ref(element),
+            bounds_attr.as_concrete_TypeRef(),
+            range,
+            &mut bounds_out,
+        )
+    };
+    if bounds_err != kAXErrorSuccess || bounds_out.is_null() {
+        return None;
+    }
+    let bounds_value = unsafe { cf_ax::base::CFType::wrap_under_create_rule(bounds_out) };
+    let mut rect = CGRect::default();
+    let ok = unsafe {
+        AXValueGetValue(
+            bounds_value.as_CFTypeRef() as AXValueRef,
+            kAXValueTypeCGRect,
+            (&mut rect as *mut CGRect).cast::<c_void>(),
+        )
+    };
+    if !ok {
+        return None;
+    }
+    Some(Rect {
+        x: rect.origin.x.round() as i32,
+        y: rect.origin.y.round() as i32,
+        width: rect.size.width.round() as i32,
+        height: rect.size.height.round() as i32,
+    })
 }
 
 /// Read `AXValue` as a string when it is one (text fields, static text). Returns

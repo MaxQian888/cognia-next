@@ -16,8 +16,10 @@ mod events;
 mod find;
 mod input;
 mod pattern;
+mod text_selection;
 
 use crate::automation::platform::shared::screenshot;
+use crate::automation::selection::{build_text_selection, TextSelectionSnapshot};
 use element::{element_info, ElementCache};
 
 pub struct UiaBackend {
@@ -201,6 +203,29 @@ impl AutomationBackend for UiaBackend {
     }
     fn unsubscribe(&self, sub: SubscriptionId) -> Result<()> {
         self.events.unsubscribe(&sub)
+    }
+
+    fn read_text_selection(&self) -> Result<Option<TextSelectionSnapshot>> {
+        let focused = self.automation.get_focused_element().map_err(|error| {
+            AutomationError::BackendError {
+                message: format!("get_focused_element: {error}"),
+            }
+        })?;
+        let focused_info = element_info(&self.cache, &focused);
+        let Some((_container, ranges)) =
+            text_selection::selected_ranges(&self.automation, &focused)
+        else {
+            return Ok(None);
+        };
+        let Some(text) = text_selection::selected_text(&ranges) else {
+            return Ok(None);
+        };
+        Ok(build_text_selection(
+            &text,
+            focused_info.process_name.as_deref().unwrap_or("Unknown"),
+            focused_info.window_title.as_deref(),
+            text_selection::last_visible_bounds(&ranges),
+        ))
     }
 
     // ── M5 completion primitives ─────────────────────────────────────────

@@ -114,7 +114,7 @@ describe("supportsErrorHandling", () => {
   it("allows the fallible families", () => {
     for (const kind of [
       "action.agent.turn",
-      "action.github.openPr",
+      "demo-delivery.action.openPr",
       "ai.prompt",
       "data.transform",
       "io.http",

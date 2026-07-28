@@ -11,7 +11,7 @@
  * child rather than no-op'ing. Runs in the chromium PR CI job (no AI creds).
  */
 
-import { expect, test, type Page } from "@playwright/test"
+import { expect, test, type Page } from "@/tests/e2e/fixtures/test"
 import { resetCogniaDb } from "../../helpers/db-reset"
 import { readLatestRun, readRuns } from "../../helpers/workflow-spec-helpers"
 

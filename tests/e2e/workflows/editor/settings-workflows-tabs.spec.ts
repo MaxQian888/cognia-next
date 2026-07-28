@@ -10,7 +10,7 @@
  * param must be the selected one.
  */
 
-import { expect, test } from "@playwright/test"
+import { expect, test } from "@/tests/e2e/fixtures/test"
 import { resetCogniaDb } from "../../helpers/db-reset"
 
 const TABS: Array<{ slug: string; name: string }> = [

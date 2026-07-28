@@ -305,6 +305,7 @@ describe("updateWorkflow / replaceWorkflow", () => {
         description: "Allowed",
       } as Parameters<typeof updateWorkflow>[1] & Record<string, unknown>)
 
+      if (!updated) throw new Error("updated workflow was not returned")
       expect(updated).toMatchObject({
         id: wf.id,
         createdAt: wf.createdAt,

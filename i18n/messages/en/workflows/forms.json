@@ -592,6 +592,38 @@
       "placeholder": "ou_abc, ou_def"
     }
   },
+  "integrationEventTrigger": {
+    "pluginId": {
+      "label": "Plugin (optional)",
+      "hint": "Limit events to one installed Marketplace plugin.",
+      "placeholder": "example-delivery"
+    },
+    "integrationId": {
+      "label": "Integration (optional)",
+      "hint": "Limit events to one integration definition from the plugin.",
+      "placeholder": "delivery"
+    },
+    "accountId": {
+      "label": "Account (optional)",
+      "hint": "Limit events to one connected account.",
+      "placeholder": "account_..."
+    },
+    "resourceKind": {
+      "label": "Resource kind (optional)",
+      "hint": "Limit events to a normalized resource kind.",
+      "placeholder": "repository"
+    },
+    "resourceId": {
+      "label": "Resource id (optional)",
+      "hint": "Limit events to one repository, workspace, team, or other resource.",
+      "placeholder": "owner/project"
+    },
+    "eventTypes": {
+      "label": "Event types (optional)",
+      "hint": "Comma-separated normalized event types; empty matches every event.",
+      "placeholder": "pull_request.opened, issue.updated"
+    }
+  },
   "connectorReaction": {
     "adapter": {
       "label": "Adapter"

@@ -55,7 +55,7 @@ const TEMPLATE: PluginWorkflowTemplateDef = {
   name: "Demo pipeline",
   description: "A plugin-contributed blueprint",
   category: "automation",
-  icon: "newspaper",
+  icon: "Newspaper",
   complexity: "intermediate",
   nodes: [
     {

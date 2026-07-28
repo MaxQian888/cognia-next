@@ -716,6 +716,12 @@
         "label": "On GitHub event"
       }
     },
+    "integration": {
+      "event": {
+        "description": "Fires when an installed Marketplace integration publishes a normalized event.",
+        "label": "On integration event"
+      }
+    },
     "goal": {
       "completed": {
         "description": "Fires when a /goal reaches a terminal status (completed, stopped, budget/turn/timeout).",

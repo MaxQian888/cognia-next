@@ -2,7 +2,7 @@
  * E2E: action.connector.draft — creates a draft row visible in the Inbox.
  */
 
-import { expect, test } from "@playwright/test"
+import { expect, test } from "@/tests/e2e/fixtures/test"
 import { resetCogniaDb } from "../../../helpers/db-reset"
 import { seedAndOpenWorkflow } from "../../../helpers/seed-workflow"
 import {

@@ -2,7 +2,7 @@
  * E2E: run-list pagination + filtering at /workflows/<id>/runs.
  */
 
-import { expect, test } from "@playwright/test"
+import { expect, test } from "@/tests/e2e/fixtures/test"
 import { resetCogniaDb } from "../../helpers/db-reset"
 import { seedAndOpenWorkflow, seedRun } from "../../helpers/seed-workflow"
 

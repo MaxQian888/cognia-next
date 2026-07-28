@@ -181,6 +181,8 @@ impl Alarm for CronEntry {
 /// emitter.
 pub trait TriggerEmitter: Send + Sync + 'static {
     fn emit(&self, event: TriggerEvent);
+
+    fn emit_integration_delivery_available(&self, _route_id: &str, _delivery_id: &str) {}
 }
 
 /// In-test emitter that records every fired event for assertions.

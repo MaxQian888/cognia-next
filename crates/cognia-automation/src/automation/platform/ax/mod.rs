@@ -54,6 +54,7 @@ use crate::automation::backend::AutomationBackend;
 use crate::automation::platform::shared::keymap::{parse_chord, KeyToken, Modifier, NamedKey};
 use crate::automation::platform::shared::screenshot;
 use crate::automation::platform::shared::tree_shape::{self, TreeBudget};
+use crate::automation::selection::{build_text_selection, TextSelectionSnapshot};
 use crate::automation::types::*;
 
 pub struct AxBackend;
@@ -287,6 +288,39 @@ impl AutomationBackend for AxBackend {
         // metadata) so the affordance isn't a no-op.
         let snap = read_focused_window()?;
         Ok(focused_to_element_info(&snap))
+    }
+
+    fn read_text_selection(&self) -> Result<Option<TextSelectionSnapshot>> {
+        if !raw::is_trusted() {
+            return Err(AutomationError::PermissionDenied {
+                reason: "macOS Accessibility permission not granted".into(),
+            });
+        }
+        let focused = read_focused_window()?;
+        let Some(pid) = focused.pid else {
+            return Ok(None);
+        };
+        let app = AXUIElement::application(pid as i32);
+        raw::activate_web_a11y(&app);
+        let Some(element) = raw::focused_ui_element(&app) else {
+            return Ok(None);
+        };
+        if element
+            .subrole()
+            .ok()
+            .is_some_and(|subrole| subrole.to_string() == "AXSecureTextField")
+        {
+            return Ok(None);
+        }
+        let Some(text) = raw::selected_text(&element) else {
+            return Ok(None);
+        };
+        Ok(build_text_selection(
+            &text,
+            focused.process_name.as_deref().unwrap_or("Unknown"),
+            focused.window_title.as_deref(),
+            raw::selected_text_bounds(&element),
+        ))
     }
 }
 

@@ -7,7 +7,7 @@
  * run-status-bridge is exercised end-to-end either way.
  */
 
-import { expect, test } from "@playwright/test"
+import { expect, test } from "@/tests/e2e/fixtures/test"
 import { resetCogniaDb } from "../helpers/db-reset"
 
 test.describe("workflow editor — manual trigger run", () => {
@@ -16,7 +16,7 @@ test.describe("workflow editor — manual trigger run", () => {
     await resetCogniaDb(page)
   })
 
-  test("Run button drives the orchestrator and a run row lands in Dexie", async ({ page }) => {
+  test("@critical Run drives the orchestrator and persists a run row", async ({ page }) => {
     // Seed a minimal workflow that doesn't require network calls: a single
     // flow.set + manual trigger. ai.prompt would require credentials.
     await page.evaluate(async () => {

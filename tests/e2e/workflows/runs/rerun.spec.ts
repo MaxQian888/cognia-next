@@ -2,7 +2,7 @@
  * E2E: the rerun button on a run-detail page creates a fresh run.
  */
 
-import { expect, test } from "@playwright/test"
+import { expect, test } from "@/tests/e2e/fixtures/test"
 import { resetCogniaDb } from "../../helpers/db-reset"
 import { configureMockBaseUrls, seedAndOpenWorkflow, seedRun } from "../../helpers/seed-workflow"
 

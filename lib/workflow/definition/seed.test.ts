@@ -65,13 +65,12 @@ describe("buildBuiltInWorkflowTemplates", () => {
     }
   })
 
-  it("ships the four Phase B advanced templates with correct ids and shapes", () => {
+  it("ships the platform-neutral Phase B advanced templates with correct ids and shapes", () => {
     const templates = buildBuiltInWorkflowTemplates()
     const advancedIds = [
       "wf_builtin_http_retry_fallback",
       "wf_builtin_parallel_analysts",
       "wf_builtin_inbox_triage_twin",
-      "wf_builtin_github_issue_to_pr",
     ]
     for (const id of advancedIds) {
       const t = templates.find((x) => x.id === id)
@@ -87,6 +86,20 @@ describe("buildBuiltInWorkflowTemplates", () => {
         expect(nodeIds.has(e.target)).toBe(true)
       }
     }
+  })
+
+  it("does not seed Marketplace platform workflows from Core", () => {
+    const templates = buildBuiltInWorkflowTemplates()
+    expect(templates.some((template) => template.id.includes("github"))).toBe(false)
+    expect(
+      templates.some((template) =>
+        template.nodes.some(
+          (node) =>
+            node.type === ("trigger.github.webhook" as never) ||
+            node.type.startsWith("action.github.")
+        )
+      )
+    ).toBe(false)
   })
 })
 

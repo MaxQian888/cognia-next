@@ -100,6 +100,21 @@ describe("trigger schemas", () => {
     ).toBe(true)
   })
 
+  it("trigger.integration.event accepts generic platform filters", () => {
+    const schema = PARAMS_SCHEMAS["trigger.integration.event"]
+    expect(schema.safeParse({}).success).toBe(true)
+    expect(
+      schema.safeParse({
+        pluginId: "github-delivery",
+        accountId: "account-1",
+        eventTypes: ["pull_request.opened"],
+        resourceKind: "repository",
+        resourceId: "cognia/cognia-next",
+      }).success
+    ).toBe(true)
+    expect(schema.safeParse({ eventTypes: [""] }).success).toBe(false)
+  })
+
   it("trigger.manual is unconditionally happy", () => {
     expect(PARAMS_SCHEMAS["trigger.manual"].safeParse({}).success).toBe(true)
   })
@@ -591,152 +606,6 @@ describe("action: twin / connector / mcp / plugin", () => {
   })
 })
 
-describe("action: GitHub Delivery schemas", () => {
-  const validCases: Array<[WorkflowNodeKind, Record<string, unknown>, Record<string, unknown>]> = [
-    [
-      "action.github.openPr",
-      { repoFullName: "o/r", head: "feature/x", base: "main", title: "Open PR" },
-      { repoFullName: "o/r", head: "feature/x", base: "main" },
-    ],
-    ["action.github.closePr", { repoFullName: "o/r", prNumber: 1 }, { repoFullName: "o/r" }],
-    ["action.github.mergePr", { repoFullName: "o/r", prNumber: 1 }, { repoFullName: "o/r" }],
-    [
-      "action.github.reviewPr",
-      { repoFullName: "o/r", prNumber: 1, event: "APPROVE", body: "LGTM" },
-      { repoFullName: "o/r", prNumber: 1, event: "APPROVE" },
-    ],
-    [
-      "action.github.reviewPrInline",
-      { repoFullName: "o/r", prNumber: 1, provider: "openai", model: "gpt-4.1", apiKey: "sk" },
-      { repoFullName: "o/r", prNumber: 1, provider: "openai", model: "gpt-4.1" },
-    ],
-    [
-      "action.github.commentPr",
-      { repoFullName: "o/r", prNumber: 1, body: "Thanks" },
-      { repoFullName: "o/r", prNumber: 1 },
-    ],
-    [
-      "action.github.commentIssue",
-      { repoFullName: "o/r", issueNumber: 1, body: "Thanks" },
-      { repoFullName: "o/r", issueNumber: 1 },
-    ],
-    [
-      "action.github.labelIssue",
-      { repoFullName: "o/r", issueNumber: 1, add: ["bug"] },
-      { repoFullName: "o/r", issueNumber: 1 },
-    ],
-    ["action.github.closeIssue", { repoFullName: "o/r", issueNumber: 1 }, { repoFullName: "o/r" }],
-    [
-      "action.github.createRelease",
-      { repoFullName: "o/r", tag: "v1.0.0" },
-      { repoFullName: "o/r" },
-    ],
-    [
-      "action.github.generateChangelog",
-      { repoFullName: "o/r", since: "v1.0.0" },
-      { repoFullName: "o/r" },
-    ],
-    [
-      "action.github.pushTag",
-      { repoFullName: "o/r", tag: "v1.0.0", sha: "deadbeef" },
-      { repoFullName: "o/r", tag: "v1.0.0" },
-    ],
-    [
-      "action.github.runIssueLoop",
-      { repoFullName: "o/r", issueNumber: 1 },
-      { repoFullName: "o/r" },
-    ],
-  ]
-
-  it("requires repoFullName plus each node's executor-required fields", () => {
-    for (const [kind, valid, missingSpecific] of validCases) {
-      expect(PARAMS_SCHEMAS[kind].safeParse(valid).success).toBe(true)
-      expect(PARAMS_SCHEMAS[kind].safeParse({}).success).toBe(false)
-      expect(PARAMS_SCHEMAS[kind].safeParse({ ...valid, repoFullName: "" }).success).toBe(false)
-      expect(PARAMS_SCHEMAS[kind].safeParse(missingSpecific).success).toBe(false)
-    }
-  })
-
-  it("keeps GitHub enum, numeric, and list fields aligned with plugin executors", () => {
-    expect(
-      PARAMS_SCHEMAS["action.github.runIssueLoop"].parse({
-        repoFullName: "o/r",
-        issueNumber: 1,
-        externalAgentId: "codex-main",
-      })
-    ).toMatchObject({ externalAgentId: "codex-main" })
-    expect(
-      PARAMS_SCHEMAS["action.github.runIssueLoop"].safeParse({
-        repoFullName: "o/r",
-        issueNumber: 1,
-      }).success
-    ).toBe(true)
-    expect(
-      PARAMS_SCHEMAS["action.github.mergePr"].safeParse({
-        repoFullName: "o/r",
-        prNumber: 1,
-        mergeMethod: "octopus",
-      }).success
-    ).toBe(false)
-    expect(
-      PARAMS_SCHEMAS["action.github.reviewPr"].safeParse({
-        repoFullName: "o/r",
-        prNumber: 1,
-        event: "DISMISS",
-        body: "x",
-      }).success
-    ).toBe(false)
-    expect(
-      PARAMS_SCHEMAS["action.github.closeIssue"].safeParse({
-        repoFullName: "o/r",
-        issueNumber: 1,
-        reason: "duplicate",
-      }).success
-    ).toBe(false)
-    expect(
-      PARAMS_SCHEMAS["action.github.runIssueLoop"].safeParse({
-        repoFullName: "o/r",
-        issueNumber: 1,
-        worktreeMode: "remote",
-      }).success
-    ).toBe(false)
-    expect(
-      PARAMS_SCHEMAS["action.github.reviewPrInline"].safeParse({
-        repoFullName: "o/r",
-        prNumber: 1,
-        provider: "openai",
-        model: "gpt-4.1",
-        apiKey: "sk",
-        maxFiles: 0,
-      }).success
-    ).toBe(false)
-    expect(
-      PARAMS_SCHEMAS["action.github.reviewPrInline"].safeParse({
-        repoFullName: "o/r",
-        prNumber: 1,
-        provider: "openai",
-        model: "gpt-4.1",
-        apiKey: "sk",
-        maxFiles: 30,
-      }).success
-    ).toBe(true)
-    expect(
-      PARAMS_SCHEMAS["action.github.labelIssue"].safeParse({
-        repoFullName: "o/r",
-        issueNumber: 1,
-        add: [""],
-      }).success
-    ).toBe(false)
-    expect(
-      PARAMS_SCHEMAS["action.github.labelIssue"].safeParse({
-        repoFullName: "o/r",
-        issueNumber: 1,
-        remove: ["needs-info"],
-      }).success
-    ).toBe(true)
-  })
-})
-
 describe("action: Desktop automation schemas", () => {
   it("validates desktop action required fields and executor enums", () => {
     expect(PARAMS_SCHEMAS["action.desktop.screenshot"].safeParse({ format: "webp" }).success).toBe(
@@ -1096,23 +965,6 @@ describe("flow schemas", () => {
     expect(s.safeParse({ variable: "ok_name", value: false }).success).toBe(true)
     expect(s.safeParse({ variable: "ok_name", value: { nested: [1, null] } }).success).toBe(true)
     expect(s.safeParse({ variable: "ok_name" }).success).toBe(false)
-  })
-
-  it("accepts runtime expressions for GitHub issue and PR numbers", () => {
-    expect(
-      PARAMS_SCHEMAS["action.github.commentPr"].safeParse({
-        repoFullName: "owner/repo",
-        prNumber: "{{ $node.open.out.number }}",
-        body: "done",
-      }).success
-    ).toBe(true)
-    expect(
-      PARAMS_SCHEMAS["action.github.commentIssue"].safeParse({
-        repoFullName: "owner/repo",
-        issueNumber: "not-an-expression",
-        body: "done",
-      }).success
-    ).toBe(false)
   })
 
   it("flow.subworkflow requires workflowId", () => {

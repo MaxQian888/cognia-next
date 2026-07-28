@@ -716,6 +716,12 @@
         "label": "GitHub 事件触发"
       }
     },
+    "integration": {
+      "event": {
+        "description": "当已安装的 Marketplace Integration 发布规范化事件时触发。",
+        "label": "Integration 事件触发"
+      }
+    },
     "goal": {
       "completed": {
         "description": "当 /goal 达到终态（完成、停止、预算/轮次/超时）时触发。",

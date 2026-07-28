@@ -17,7 +17,7 @@
  *   pnpx playwright install chromium
  */
 
-import { expect, test } from "@playwright/test"
+import { expect, test } from "@/tests/e2e/fixtures/test"
 
 const APP_BASE_URL = process.env.PLAYWRIGHT_BASE_URL ?? "http://localhost:3000"
 

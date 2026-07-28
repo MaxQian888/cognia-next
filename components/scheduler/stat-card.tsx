@@ -17,7 +17,8 @@ import { cn } from "@/lib/utils"
 
 export interface StatCardProps {
   label: string
-  value: string | number
+  /** Rendered as-is, so a caller can pass an animated counter rather than text. */
+  value: React.ReactNode
   icon: React.ReactNode
   valueClassName?: string
   accentGradient: string

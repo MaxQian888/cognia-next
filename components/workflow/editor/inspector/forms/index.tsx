@@ -285,6 +285,63 @@ export function ConnectorInboundConfig({ params, onChange }: ConfigProps) {
   )
 }
 
+// ── trigger.integration.event ────────────────────────────────────────────
+export function IntegrationEventTriggerConfig({ params, onChange }: ConfigProps) {
+  const t = useTranslations("workflows.forms.integrationEventTrigger")
+  const eventTypes = Array.isArray(params.eventTypes)
+    ? (params.eventTypes as string[]).join(", ")
+    : ""
+  const patchEventTypes = (raw: string) => {
+    const next = raw
+      .split(",")
+      .map((value) => value.trim())
+      .filter(Boolean)
+    onChange(patchParam(params, "eventTypes", next.length > 0 ? next : undefined))
+  }
+
+  return (
+    <FieldGroup>
+      {(
+        [
+          ["pluginId", "integration-plugin"],
+          ["integrationId", "integration-definition"],
+          ["accountId", "integration-account"],
+          ["resourceKind", "integration-resource-kind"],
+          ["resourceId", "integration-resource-id"],
+        ] as const
+      ).map(([name, id]) => (
+        <Field
+          key={name}
+          label={t(`${name}.label`)}
+          hint={t(`${name}.hint`)}
+          htmlFor={id}
+          name={name}
+        >
+          <Input
+            id={id}
+            value={readString(params, name)}
+            onChange={(event) => onChange(patchParam(params, name, event.target.value))}
+            placeholder={t(`${name}.placeholder`)}
+          />
+        </Field>
+      ))}
+      <Field
+        label={t("eventTypes.label")}
+        hint={t("eventTypes.hint")}
+        htmlFor="integration-event-types"
+        name="eventTypes"
+      >
+        <Input
+          id="integration-event-types"
+          value={eventTypes}
+          onChange={(event) => patchEventTypes(event.target.value)}
+          placeholder={t("eventTypes.placeholder")}
+        />
+      </Field>
+    </FieldGroup>
+  )
+}
+
 // ── trigger.chat.message ──────────────────────────────────────────────────
 export function ChatMessageTriggerConfig({ params, onChange }: ConfigProps) {
   const t = useTranslations("workflows.forms.chatMessageTrigger")

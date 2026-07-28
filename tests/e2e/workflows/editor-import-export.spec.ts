@@ -7,7 +7,7 @@
  * the node + edge structure.
  */
 
-import { expect, test } from "@playwright/test"
+import { expect, test } from "@/tests/e2e/fixtures/test"
 import fs from "node:fs/promises"
 import { resetCogniaDb } from "../helpers/db-reset"
 import { seedAndOpenWorkflow } from "../helpers/seed-workflow"

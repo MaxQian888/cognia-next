@@ -21,6 +21,7 @@ use tauri::{Emitter, State};
 use super::audit::{AuditEntry, AuditRing, Decision as AuditDecision};
 use super::consent::ConsentBroker;
 use super::dispatcher;
+use super::input_monitor::InputMonitor;
 use super::permission::{PermissionGate, Surface, TargetMeta, Tier};
 use super::policy::{Policy, PolicyState};
 use super::types::*;
@@ -57,6 +58,8 @@ pub struct AutomationState {
     /// hook + observation drain). Reuses `handle` for screenshots / element
     /// picks. Idle (`None` session) by default; zero cost when unused.
     pub recorder: super::record::session::RecorderState,
+    /// One passive OS input hook shared by the recorder and selection toolbar.
+    pub input_monitor: InputMonitor,
 }
 
 impl AutomationState {
@@ -78,6 +81,7 @@ impl AutomationState {
             virtual_display,
             cua,
             recorder: super::record::session::RecorderState::default(),
+            input_monitor: InputMonitor::default(),
         }
     }
 }

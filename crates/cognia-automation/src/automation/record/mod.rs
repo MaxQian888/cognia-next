@@ -14,18 +14,3 @@
 
 pub mod commands;
 pub mod session;
-
-#[cfg(target_os = "windows")]
-mod hook_win;
-#[cfg(target_os = "windows")]
-pub(crate) use hook_win::HookGuard;
-
-#[cfg(target_os = "macos")]
-mod hook_mac;
-#[cfg(target_os = "macos")]
-pub(crate) use hook_mac::HookGuard;
-
-#[cfg(not(any(target_os = "windows", target_os = "macos")))]
-mod hook_stub;
-#[cfg(not(any(target_os = "windows", target_os = "macos")))]
-pub(crate) use hook_stub::HookGuard;

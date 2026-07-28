@@ -2,7 +2,7 @@
  * E2E: ai.embed — editor + runtime through mock Anthropic /v1/embeddings.
  */
 
-import { expect, test } from "@playwright/test"
+import { expect, test } from "@/tests/e2e/fixtures/test"
 import { resetCogniaDb } from "../../../helpers/db-reset"
 import { configureMockBaseUrls, seedAndOpenWorkflow } from "../../../helpers/seed-workflow"
 import {

@@ -7,6 +7,7 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use crate::workflow::integration_spool::IntegrationSpool;
 use crate::workflow::run_mirror::{self, RunMirror};
 use crate::workflow::triggers::cron_daemon::{CronDaemon, TriggerEmitter};
 use crate::workflow::triggers::webhook_router::WebhookRouter;
@@ -15,6 +16,7 @@ pub struct WorkflowState {
     pub mirror: RunMirror,
     pub cron: CronDaemon,
     pub webhook: WebhookRouter,
+    pub integration_spool: std::sync::Arc<IntegrationSpool>,
 }
 
 impl WorkflowState {
@@ -26,13 +28,15 @@ impl WorkflowState {
         mirror_path: PathBuf,
         emitter: Arc<dyn TriggerEmitter>,
     ) -> Result<Self, run_mirror::MirrorError> {
+        let integration_spool = std::sync::Arc::new(IntegrationSpool::open(mirror_path.clone()));
         let mirror = RunMirror::open(mirror_path)?;
         let cron = CronDaemon::new(emitter);
-        let webhook = WebhookRouter::new();
+        let webhook = WebhookRouter::with_integration_spool(integration_spool.clone());
         Ok(Self {
             mirror,
             cron,
             webhook,
+            integration_spool,
         })
     }
 
@@ -47,12 +51,14 @@ impl WorkflowState {
         let recorder = crate::workflow::triggers::cron_daemon::RecordingEmitter::default();
         let mirror = RunMirror::open_in_memory().expect("in-memory mirror");
         let cron = CronDaemon::new(Arc::new(recorder.clone()));
-        let webhook = WebhookRouter::new();
+        let integration_spool = std::sync::Arc::new(IntegrationSpool::open_in_memory());
+        let webhook = WebhookRouter::with_integration_spool(integration_spool.clone());
         (
             Self {
                 mirror,
                 cron,
                 webhook,
+                integration_spool,
             },
             recorder,
         )

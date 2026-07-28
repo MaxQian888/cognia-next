@@ -12,11 +12,17 @@
  */
 
 import type { VisualWorkflow } from "@/types/workflow/visual"
+import { resolveWorkflowKindAlias } from "./kind-aliases"
 
 const CURRENT_SCHEMA_VERSION = 2 as const
 
 export function migrateWorkflow(wf: VisualWorkflow): VisualWorkflow {
-  if (wf.schemaVersion >= CURRENT_SCHEMA_VERSION) return wf
+  const nodes = wf.nodes.map((node) => {
+    const type = resolveWorkflowKindAlias(node.type)
+    return type === node.type ? node : { ...node, type }
+  })
+  const aliasesChanged = nodes.some((node, index) => node !== wf.nodes[index])
+  if (wf.schemaVersion >= CURRENT_SCHEMA_VERSION && !aliasesChanged) return wf
   // v1 → v2: stamp only. No node/edge rewrites (additive change).
-  return { ...wf, schemaVersion: CURRENT_SCHEMA_VERSION }
+  return { ...wf, nodes, schemaVersion: CURRENT_SCHEMA_VERSION }
 }

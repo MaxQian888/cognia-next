@@ -13,6 +13,7 @@
 //! at `docs/content/docs/adr/0011-workflows-subsystem.md`.
 
 pub mod commands;
+pub mod integration_spool;
 pub mod run_mirror;
 pub mod state;
 pub mod triggers;
@@ -39,6 +40,18 @@ impl TriggerEmitter for AppHandleEmitter {
     fn emit(&self, event: types::TriggerEvent) {
         if let Err(err) = tauri::Emitter::emit(&self.handle, "workflow:trigger", event) {
             log::warn!("workflow:trigger emit failed: {err}");
+        }
+    }
+
+    fn emit_integration_delivery_available(&self, route_id: &str, delivery_id: &str) {
+        let payload = serde_json::json!({
+            "routeId": route_id,
+            "deliveryId": delivery_id,
+        });
+        if let Err(err) =
+            tauri::Emitter::emit(&self.handle, "integration:delivery-available", payload)
+        {
+            log::warn!("integration:delivery-available emit failed: {err}");
         }
     }
 }

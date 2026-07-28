@@ -12,11 +12,9 @@
 
 import { seedBuiltInWorkflows } from "@/lib/db/workflows"
 import { DEFAULT_WORKFLOW_SETTINGS, type VisualWorkflow } from "@/types/workflow/visual"
-import { buildGithubDeliveryTemplates } from "./seed-github"
 import { httpRetryFallbackTemplate } from "./templates/http-retry-fallback"
 import { parallelAnalystsTemplate } from "./templates/parallel-analysts"
 import { inboxTriageTwinTemplate } from "./templates/inbox-triage-twin"
-import { githubIssueToPrTemplate } from "./templates/github-issue-to-pr"
 import { autoTeamObjectiveTemplate } from "./templates/auto-team-objective"
 import { teamDelegationHubTemplate } from "./templates/team-delegation-hub"
 import { teamLifecycleReviewTemplate } from "./templates/team-lifecycle-review"
@@ -723,8 +721,7 @@ export function buildBuiltInWorkflowTemplates(): VisualWorkflow[] {
   // Tag the legacy templates with a complexity hint so the picker can
   // group them alongside the new advanced examples (B1-B4). The first
   // four are linear starters, the next five demonstrate one extra
-  // construct (loops / branches / subworkflows) each, and the GitHub
-  // pack falls through as "advanced" by virtue of cross-service depth.
+  // construct (loops / branches / subworkflows) each.
   const withComplexity = (
     wf: VisualWorkflow,
     complexity: VisualWorkflow["complexity"]
@@ -745,12 +742,10 @@ export function buildBuiltInWorkflowTemplates(): VisualWorkflow[] {
     httpRetryFallbackTemplate(),
     parallelAnalystsTemplate(),
     inboxTriageTwinTemplate(),
-    githubIssueToPrTemplate(),
     // Phase C — agent-team surface templates (compose / status / delegate / message).
     autoTeamObjectiveTemplate(),
     teamDelegationHubTemplate(),
     teamLifecycleReviewTemplate(),
-    ...buildGithubDeliveryTemplates(),
   ]
 }
 

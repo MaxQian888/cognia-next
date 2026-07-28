@@ -167,7 +167,7 @@ describe("built-in trigger passthrough parity", () => {
     "trigger.chat.message",
     "trigger.goal.completed",
     "trigger.webhook",
-    "trigger.github.webhook",
+    "trigger.integration.event",
     "trigger.workflow.completed",
   ] as const)("passes through %s events", async (kind) => {
     const r = await exec(kind, makeCtx(kind, {}))

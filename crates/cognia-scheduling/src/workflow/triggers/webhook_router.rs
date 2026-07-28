@@ -37,14 +37,20 @@ use axum::{
     routing::any,
     Router,
 };
+use base64::Engine as _;
+use chrono::DateTime;
+use cognia_secrets::keyring_secrets;
 use hmac::{Hmac, KeyInit, Mac};
 use parking_lot::RwLock;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use sha2::Sha256;
 use tokio::sync::oneshot;
 use tower_http::limit::RequestBodyLimitLayer;
 
 use super::cron_daemon::TriggerEmitter;
+use crate::workflow::integration_spool::{
+    EnqueueOutcome, IntegrationSpool, SpoolDelivery, SpoolError,
+};
 use crate::workflow::types::{TriggerBinding, TriggerEvent, WebhookTriggerPayload};
 
 /// Fallback hold time for `await_response` webhooks when the entry doesn't
@@ -101,21 +107,59 @@ impl PendingResponses {
 /// abuse. The companion server uses a stricter 64 KiB limit because its
 /// endpoints are tiny RPC calls — webhooks legitimately carry a JSON body.
 const WEBHOOK_BODY_LIMIT_BYTES: usize = 1024 * 1024;
+const INGRESS_SECRET_NAMESPACE: &str = "integration-ingress";
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", tag = "source")]
+pub enum SignedPayloadPart {
+    Body,
+    Header { name: String },
+    Literal { value: String },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", tag = "type")]
+pub enum IntegrationVerification {
+    #[serde(rename = "hmac-sha256")]
+    HmacSha256 {
+        signature_header: String,
+        encoding: String,
+        prefix: Option<String>,
+        signed_payload: Option<Vec<SignedPayloadPart>>,
+        timestamp_header: Option<String>,
+        max_skew_seconds: Option<i64>,
+        secret_handle: String,
+    },
+    #[serde(rename = "static-token")]
+    StaticToken {
+        token_header: String,
+        secret_handle: String,
+    },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct IntegrationIngressEntry {
+    pub route_id: String,
+    pub plugin_id: String,
+    pub integration_id: String,
+    pub account_id: String,
+    pub subscription_id: Option<String>,
+    pub path: String,
+    pub verification: IntegrationVerification,
+    pub delivery_id_header: Option<String>,
+    pub event_type_header: Option<String>,
+    pub enabled: bool,
+}
 
 /// Header for cognia-style triggers (`sha256=<hex>` of body).
 const HMAC_SIGNATURE_HEADER_COGNIA: &str = "x-signature-256";
 
-/// Header GitHub uses for its webhook signatures (`sha256=<hex>` of body,
-/// keyed by the webhook secret). Same hash, different header name.
-const HMAC_SIGNATURE_HEADER_GITHUB: &str = "x-hub-signature-256";
-
-/// Which header convention to read the HMAC signature from.
+/// Signature convention for host-owned legacy webhook triggers.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SignatureMode {
     /// Cognia's own convention — `x-signature-256: sha256=<hex>`.
     Cognia,
-    /// GitHub convention — `x-hub-signature-256: sha256=<hex>`.
-    Github,
 }
 
 impl Default for SignatureMode {
@@ -125,18 +169,8 @@ impl Default for SignatureMode {
 }
 
 impl SignatureMode {
-    pub fn from_str(s: &str) -> Self {
-        match s.to_ascii_lowercase().as_str() {
-            "github" | "gh" => Self::Github,
-            _ => Self::Cognia,
-        }
-    }
-
     pub fn header_name(&self) -> &'static str {
-        match self {
-            Self::Cognia => HMAC_SIGNATURE_HEADER_COGNIA,
-            Self::Github => HMAC_SIGNATURE_HEADER_GITHUB,
-        }
+        HMAC_SIGNATURE_HEADER_COGNIA
     }
 }
 
@@ -145,9 +179,7 @@ impl SignatureMode {
 pub struct WebhookEntry {
     pub trigger_id: String,
     pub workflow_id: String,
-    /// Original trigger kind. Preserved so GitHub-flavoured webhook nodes
-    /// dispatch as `trigger.github.webhook` rather than collapsing to the
-    /// generic webhook kind after HMAC verification.
+    /// Original trigger kind dispatched after HMAC verification.
     pub kind: String,
     /// Path segment after `/webhook/` — e.g., `incoming-events`. Lowercase,
     /// no leading slash. Must be unique across the registry.
@@ -190,6 +222,8 @@ struct RouterInner {
     /// Wrapped in `Arc` so the axum handler can share the registry without
     /// going through `Arc<RouterInner>`.
     entries: Arc<RwLock<BTreeMap<String, WebhookEntry>>>,
+    integration_entries: Arc<RwLock<BTreeMap<String, IntegrationIngressEntry>>>,
+    integration_spool: Arc<IntegrationSpool>,
     /// Held-open `await_response` requests. Shared with the axum handler.
     pending: Arc<PendingResponses>,
     /// Bound socket address; populated once `start` succeeds.
@@ -205,9 +239,15 @@ struct ErrorBody<'a> {
 
 impl WebhookRouter {
     pub fn new() -> Self {
+        Self::with_integration_spool(Arc::new(IntegrationSpool::open_in_memory()))
+    }
+
+    pub fn with_integration_spool(integration_spool: Arc<IntegrationSpool>) -> Self {
         Self {
             inner: Arc::new(RouterInner {
                 entries: Arc::new(RwLock::new(BTreeMap::new())),
+                integration_entries: Arc::new(RwLock::new(BTreeMap::new())),
+                integration_spool,
                 pending: Arc::new(PendingResponses::default()),
                 bound: RwLock::new(None),
                 shutdown_tx: RwLock::new(None),
@@ -271,9 +311,51 @@ impl WebhookRouter {
         self.bound_url_for_path(&path)
     }
 
+    pub fn upsert_integration(
+        &self,
+        mut entry: IntegrationIngressEntry,
+    ) -> Result<Option<String>, String> {
+        let path = normalize_path(&entry.path);
+        if path.is_empty() {
+            return Err("integration ingress path cannot be empty".into());
+        }
+        let mut entries = self.inner.integration_entries.write();
+        if let Some(existing) = entries.get(&path) {
+            if existing.route_id != entry.route_id {
+                return Err(format!(
+                    "integration ingress path '{path}' is already registered"
+                ));
+            }
+        }
+        entry.path = path.clone();
+        entries.insert(path.clone(), entry);
+        Ok(self.bound_integration_url_for_path(&path))
+    }
+
+    pub fn unregister_integration(&self, route_id: &str) {
+        self.inner
+            .integration_entries
+            .write()
+            .retain(|_, entry| entry.route_id != route_id);
+    }
+
+    pub fn integration_url(&self, route_id: &str) -> Option<String> {
+        let entries = self.inner.integration_entries.read();
+        let path = entries
+            .iter()
+            .find(|(_, entry)| entry.route_id == route_id)
+            .map(|(path, _)| path.clone())?;
+        self.bound_integration_url_for_path(&path)
+    }
+
     fn bound_url_for_path(&self, path: &str) -> Option<String> {
         let bound = self.inner.bound.read();
         bound.map(|addr| format!("http://{addr}/webhook/{path}"))
+    }
+
+    fn bound_integration_url_for_path(&self, path: &str) -> Option<String> {
+        let bound = self.inner.bound.read();
+        bound.map(|addr| format!("http://{addr}/integration/{path}"))
     }
 
     /// Number of registered entries (test helper).
@@ -299,12 +381,15 @@ impl WebhookRouter {
 
         let app_state = WebhookAppState {
             entries: self.inner.entries.clone(),
+            integration_entries: self.inner.integration_entries.clone(),
+            integration_spool: self.inner.integration_spool.clone(),
             pending: self.inner.pending.clone(),
             emitter: emitter as Arc<dyn TriggerEmitter>,
         };
         let app = Router::new()
             .route("/webhook/{*path}", any(handle_webhook))
             .route("/webhook/", any(missing_path))
+            .route("/integration/{*path}", any(handle_integration_ingress))
             .with_state(Arc::new(app_state))
             // Reject oversize bodies before the handler reads them. Without
             // this layer axum buffers the entire body in memory — a single
@@ -348,6 +433,8 @@ impl Default for WebhookRouter {
 #[derive(Clone)]
 struct WebhookAppState {
     entries: Arc<RwLock<BTreeMap<String, WebhookEntry>>>,
+    integration_entries: Arc<RwLock<BTreeMap<String, IntegrationIngressEntry>>>,
+    integration_spool: Arc<IntegrationSpool>,
     pending: Arc<PendingResponses>,
     emitter: Arc<dyn TriggerEmitter>,
 }
@@ -366,6 +453,222 @@ async fn missing_path() -> impl IntoResponse {
             error: "webhook path required",
         }),
     )
+}
+
+async fn handle_integration_ingress(
+    State(state): State<Arc<WebhookAppState>>,
+    Path(path): Path<String>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> impl IntoResponse {
+    let normalized = normalize_path(&path);
+    let entry = state.integration_entries.read().get(&normalized).cloned();
+    let Some(entry) = entry else {
+        return (
+            StatusCode::NOT_FOUND,
+            axum::Json(ErrorBody {
+                error: "no integration ingress registered for this path",
+            }),
+        )
+            .into_response();
+    };
+    if !entry.enabled {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            axum::Json(ErrorBody {
+                error: "integration ingress is disabled",
+            }),
+        )
+            .into_response();
+    }
+    if !verify_integration_request(&entry.verification, &body, &headers) {
+        return (
+            StatusCode::UNAUTHORIZED,
+            axum::Json(ErrorBody {
+                error: "signature verification failed",
+            }),
+        )
+            .into_response();
+    }
+
+    let header_map: BTreeMap<String, String> = headers
+        .iter()
+        .filter_map(|(name, value)| {
+            value
+                .to_str()
+                .ok()
+                .map(|value| (name.as_str().to_string(), value.to_string()))
+        })
+        .collect();
+    let delivery_id = entry
+        .delivery_id_header
+        .as_deref()
+        .and_then(|name| header_value(&headers, name))
+        .map(str::to_owned)
+        .unwrap_or_else(|| uuid::Uuid::now_v7().to_string());
+    let event_type = entry
+        .event_type_header
+        .as_deref()
+        .and_then(|name| header_value(&headers, name))
+        .map(str::to_owned);
+    let delivery = SpoolDelivery {
+        route_id: entry.route_id.clone(),
+        delivery_id: delivery_id.clone(),
+        event_type,
+        headers: header_map,
+        body: String::from_utf8_lossy(&body).into_owned(),
+        received_at: chrono::Utc::now().to_rfc3339(),
+        attempts: 0,
+    };
+    match state.integration_spool.enqueue(&delivery) {
+        Ok(EnqueueOutcome::Inserted) => {
+            state
+                .emitter
+                .emit_integration_delivery_available(&entry.route_id, &delivery_id);
+            StatusCode::ACCEPTED.into_response()
+        }
+        Ok(EnqueueOutcome::Duplicate) => StatusCode::OK.into_response(),
+        Err(SpoolError::Full) => (
+            StatusCode::SERVICE_UNAVAILABLE,
+            axum::Json(ErrorBody {
+                error: "integration ingress queue is full",
+            }),
+        )
+            .into_response(),
+        Err(error) => {
+            log::warn!("integration ingress spool write failed: {error}");
+            (
+                StatusCode::SERVICE_UNAVAILABLE,
+                axum::Json(ErrorBody {
+                    error: "integration ingress is unavailable",
+                }),
+            )
+                .into_response()
+        }
+    }
+}
+
+fn verify_integration_request(
+    verification: &IntegrationVerification,
+    body: &Bytes,
+    headers: &HeaderMap,
+) -> bool {
+    match verification {
+        IntegrationVerification::StaticToken {
+            token_header,
+            secret_handle,
+        } => {
+            let Some(provided) = header_value(headers, token_header) else {
+                return false;
+            };
+            let Ok(Some(expected)) = keyring_secrets::get(INGRESS_SECRET_NAMESPACE, secret_handle)
+            else {
+                return false;
+            };
+            constant_time_equal(expected.as_bytes(), provided.as_bytes())
+        }
+        IntegrationVerification::HmacSha256 {
+            signature_header,
+            encoding,
+            prefix,
+            signed_payload,
+            timestamp_header,
+            max_skew_seconds,
+            secret_handle,
+        } => {
+            let Some(raw_signature) = header_value(headers, signature_header) else {
+                return false;
+            };
+            let signature = match prefix {
+                Some(prefix) => match raw_signature.strip_prefix(prefix) {
+                    Some(value) => value,
+                    None => return false,
+                },
+                None => raw_signature,
+            };
+            let provided = if encoding.eq_ignore_ascii_case("base64") {
+                match base64::engine::general_purpose::STANDARD.decode(signature) {
+                    Ok(value) => value,
+                    Err(_) => return false,
+                }
+            } else {
+                match decode_hex(signature) {
+                    Ok(value) => value,
+                    Err(_) => return false,
+                }
+            };
+            if let Some(timestamp_header) = timestamp_header {
+                let Some(timestamp) = header_value(headers, timestamp_header) else {
+                    return false;
+                };
+                if !timestamp_within_skew(timestamp, max_skew_seconds.unwrap_or(300)) {
+                    return false;
+                }
+            }
+            let Ok(Some(secret)) = keyring_secrets::get(INGRESS_SECRET_NAMESPACE, secret_handle)
+            else {
+                return false;
+            };
+            let parts = signed_payload
+                .as_deref()
+                .unwrap_or(&[SignedPayloadPart::Body]);
+            let mut signed = Vec::new();
+            for part in parts {
+                match part {
+                    SignedPayloadPart::Body => signed.extend_from_slice(body),
+                    SignedPayloadPart::Header { name } => {
+                        let Some(value) = header_value(headers, name) else {
+                            return false;
+                        };
+                        signed.extend_from_slice(value.as_bytes());
+                    }
+                    SignedPayloadPart::Literal { value } => {
+                        signed.extend_from_slice(value.as_bytes())
+                    }
+                }
+            }
+            let mut mac = match <Hmac<Sha256> as KeyInit>::new_from_slice(secret.as_bytes()) {
+                Ok(mac) => mac,
+                Err(_) => return false,
+            };
+            mac.update(&signed);
+            mac.verify_slice(&provided).is_ok()
+        }
+    }
+}
+
+fn header_value<'a>(headers: &'a HeaderMap, name: &str) -> Option<&'a str> {
+    headers.get(name)?.to_str().ok()
+}
+
+fn timestamp_within_skew(value: &str, max_skew_seconds: i64) -> bool {
+    let timestamp = value
+        .parse::<i64>()
+        .ok()
+        .map(|seconds| seconds.saturating_mul(1_000))
+        .or_else(|| {
+            DateTime::parse_from_rfc3339(value)
+                .ok()
+                .map(|value| value.timestamp_millis())
+        });
+    let Some(timestamp) = timestamp else {
+        return false;
+    };
+    (chrono::Utc::now().timestamp_millis() - timestamp).abs()
+        <= max_skew_seconds.max(0).saturating_mul(1_000)
+}
+
+fn constant_time_equal(expected: &[u8], provided: &[u8]) -> bool {
+    let mut expected_mac =
+        <Hmac<Sha256> as KeyInit>::new_from_slice(b"cognia-integration-token-compare")
+            .expect("fixed HMAC key");
+    expected_mac.update(expected);
+    let expected_digest = expected_mac.finalize().into_bytes();
+    let mut provided_mac =
+        <Hmac<Sha256> as KeyInit>::new_from_slice(b"cognia-integration-token-compare")
+            .expect("fixed HMAC key");
+    provided_mac.update(provided);
+    provided_mac.verify_slice(&expected_digest).is_ok()
 }
 
 async fn handle_webhook(
@@ -930,80 +1233,9 @@ mod tests {
     }
 
     #[test]
-    fn signature_mode_from_str_round_trips() {
-        assert_eq!(SignatureMode::from_str("github"), SignatureMode::Github);
-        assert_eq!(SignatureMode::from_str("GH"), SignatureMode::Github);
-        assert_eq!(SignatureMode::from_str("cognia"), SignatureMode::Cognia);
-        assert_eq!(SignatureMode::from_str(""), SignatureMode::Cognia);
-        assert_eq!(SignatureMode::from_str("garbage"), SignatureMode::Cognia);
-        assert_eq!(SignatureMode::default(), SignatureMode::Cognia);
-    }
-
-    #[test]
     fn signature_mode_header_name_picks_correct_header() {
+        assert_eq!(SignatureMode::default(), SignatureMode::Cognia);
         assert_eq!(SignatureMode::Cognia.header_name(), "x-signature-256");
-        assert_eq!(SignatureMode::Github.header_name(), "x-hub-signature-256");
-    }
-
-    #[test]
-    fn verify_hmac_signature_github_mode_reads_x_hub_header() {
-        use axum::http::HeaderValue;
-        let secret = "ghs";
-        let body = Bytes::from_static(b"{\"action\":\"opened\"}");
-        let mut mac = <Hmac<Sha256> as KeyInit>::new_from_slice(secret.as_bytes()).unwrap();
-        mac.update(&body);
-        let hex: String = mac
-            .finalize()
-            .into_bytes()
-            .iter()
-            .map(|b| format!("{b:02x}"))
-            .collect();
-        let mut headers = HeaderMap::new();
-        // GitHub-style header.
-        headers.insert(
-            HMAC_SIGNATURE_HEADER_GITHUB,
-            HeaderValue::from_str(&format!("sha256={hex}")).unwrap(),
-        );
-        assert!(verify_hmac_signature(
-            secret,
-            &body,
-            &headers,
-            SignatureMode::Github
-        ));
-        // The same header in cognia mode should NOT verify (it reads x-signature-256).
-        assert!(!verify_hmac_signature(
-            secret,
-            &body,
-            &headers,
-            SignatureMode::Cognia
-        ));
-    }
-
-    #[test]
-    fn verify_hmac_signature_github_mode_rejects_cognia_header() {
-        use axum::http::HeaderValue;
-        let secret = "ghs";
-        let body = Bytes::from_static(b"x");
-        let mut mac = <Hmac<Sha256> as KeyInit>::new_from_slice(secret.as_bytes()).unwrap();
-        mac.update(&body);
-        let hex: String = mac
-            .finalize()
-            .into_bytes()
-            .iter()
-            .map(|b| format!("{b:02x}"))
-            .collect();
-        let mut headers = HeaderMap::new();
-        // Mistakenly send the cognia-style header to a github-mode trigger.
-        headers.insert(
-            HMAC_SIGNATURE_HEADER_COGNIA,
-            HeaderValue::from_str(&format!("sha256={hex}")).unwrap(),
-        );
-        assert!(!verify_hmac_signature(
-            secret,
-            &body,
-            &headers,
-            SignatureMode::Github
-        ));
     }
 
     #[test]
@@ -1018,7 +1250,7 @@ mod tests {
         let secret = "k";
         let mut headers = HeaderMap::new();
         headers.insert(
-            HMAC_SIGNATURE_HEADER_GITHUB,
+            HMAC_SIGNATURE_HEADER_COGNIA,
             HeaderValue::from_static(
                 "sha256=ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
             ),
@@ -1027,7 +1259,7 @@ mod tests {
             secret,
             &Bytes::from_static(b"x"),
             &headers,
-            SignatureMode::Github
+            SignatureMode::Cognia
         ));
     }
 
@@ -1112,35 +1344,6 @@ mod tests {
         router.stop();
     }
 
-    #[tokio::test]
-    async fn github_webhook_entry_emits_the_github_trigger_kind() {
-        let router = WebhookRouter::new();
-        let mut e = entry("github");
-        e.kind = "trigger.github.webhook".into();
-        e.signature_mode = SignatureMode::Github;
-        router.upsert(e).unwrap();
-        let recorder = Arc::new(RecordingEmitter::default());
-        let bound = router.start(recorder.clone(), 0).await.unwrap();
-
-        let url = format!("http://{bound}/webhook/github");
-        let resp = reqwest::Client::new()
-            .post(&url)
-            .header("Content-Type", "application/json")
-            .body(r#"{"action":"opened"}"#)
-            .send()
-            .await
-            .unwrap();
-        assert_eq!(resp.status(), reqwest::StatusCode::OK);
-
-        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-        let events = recorder.fired.lock().clone();
-        assert_eq!(events.len(), 1);
-        assert_eq!(events[0].kind, "trigger.github.webhook");
-        assert_eq!(events[0].workflow_id, "wf_github");
-
-        router.stop();
-    }
-
     fn is_body_limit_connection_abort(err: &reqwest::Error) -> bool {
         if !err.is_request() {
             return false;
@@ -1175,6 +1378,96 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(resp.status(), reqwest::StatusCode::METHOD_NOT_ALLOWED);
+        router.stop();
+    }
+
+    #[test]
+    fn generic_verification_supports_base64_hmac_timestamp_and_static_tokens() {
+        let secret_handle = format!("test-{}", uuid::Uuid::new_v4());
+        keyring_secrets::set(INGRESS_SECRET_NAMESPACE, &secret_handle, "secret").unwrap();
+        let timestamp = chrono::Utc::now().timestamp().to_string();
+        let body = Bytes::from_static(br#"{"id":1}"#);
+        let signed = format!("{timestamp}.{}", String::from_utf8_lossy(&body));
+        let mut mac = <Hmac<Sha256> as KeyInit>::new_from_slice(b"secret").unwrap();
+        mac.update(signed.as_bytes());
+        let signature =
+            base64::engine::general_purpose::STANDARD.encode(mac.finalize().into_bytes());
+        let mut headers = HeaderMap::new();
+        headers.insert("x-time", timestamp.parse().unwrap());
+        headers.insert("x-signature", format!("v1={signature}").parse().unwrap());
+        assert!(verify_integration_request(
+            &IntegrationVerification::HmacSha256 {
+                signature_header: "x-signature".into(),
+                encoding: "base64".into(),
+                prefix: Some("v1=".into()),
+                signed_payload: Some(vec![
+                    SignedPayloadPart::Header {
+                        name: "x-time".into(),
+                    },
+                    SignedPayloadPart::Literal { value: ".".into() },
+                    SignedPayloadPart::Body,
+                ]),
+                timestamp_header: Some("x-time".into()),
+                max_skew_seconds: Some(60),
+                secret_handle: secret_handle.clone(),
+            },
+            &body,
+            &headers,
+        ));
+
+        headers.insert("x-token", "secret".parse().unwrap());
+        assert!(verify_integration_request(
+            &IntegrationVerification::StaticToken {
+                token_header: "x-token".into(),
+                secret_handle: secret_handle.clone(),
+            },
+            &body,
+            &headers,
+        ));
+        keyring_secrets::clear(INGRESS_SECRET_NAMESPACE, &secret_handle).unwrap();
+    }
+
+    #[tokio::test]
+    async fn integration_ingress_spools_before_acknowledging_and_deduplicates() {
+        let router = WebhookRouter::new();
+        let secret_handle = format!("test-{}", uuid::Uuid::new_v4());
+        keyring_secrets::set(INGRESS_SECRET_NAMESPACE, &secret_handle, "shared-token").unwrap();
+        router
+            .upsert_integration(IntegrationIngressEntry {
+                route_id: "route-1".into(),
+                plugin_id: "demo-delivery".into(),
+                integration_id: "demo".into(),
+                account_id: "account-1".into(),
+                subscription_id: Some("subscription-1".into()),
+                path: "demo".into(),
+                verification: IntegrationVerification::StaticToken {
+                    token_header: "x-token".into(),
+                    secret_handle: secret_handle.clone(),
+                },
+                delivery_id_header: Some("x-delivery-id".into()),
+                event_type_header: Some("x-event-type".into()),
+                enabled: true,
+            })
+            .unwrap();
+        let recorder = Arc::new(RecordingEmitter::default());
+        let bound = router.start(recorder, 0).await.unwrap();
+        let client = reqwest::Client::new();
+        for expected in [reqwest::StatusCode::ACCEPTED, reqwest::StatusCode::OK] {
+            let response = client
+                .post(format!("http://{bound}/integration/demo"))
+                .header("x-token", "shared-token")
+                .header("x-delivery-id", "delivery-1")
+                .header("x-event-type", "issue.created")
+                .body(r#"{"id":"issue-1"}"#)
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(response.status(), expected);
+        }
+        let pending = router.inner.integration_spool.pending(10).unwrap();
+        assert_eq!(pending.len(), 1);
+        assert_eq!(pending[0].event_type.as_deref(), Some("issue.created"));
+        keyring_secrets::clear(INGRESS_SECRET_NAMESPACE, &secret_handle).unwrap();
         router.stop();
     }
 }

@@ -174,7 +174,7 @@ const PASSTHROUGH_TRIGGER_KINDS = [
   "trigger.chat.message",
   "trigger.goal.completed",
   "trigger.webhook",
-  "trigger.github.webhook",
+  "trigger.integration.event",
   "trigger.team",
   "trigger.workflow.completed",
 ] as const satisfies readonly WorkflowNodeKind[]

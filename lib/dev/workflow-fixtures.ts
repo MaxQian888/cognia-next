@@ -88,7 +88,6 @@ const PLAN_ID = "plan_fixture"
 const STEP_ID = "step_fixture"
 const TASK_ID = "task_fixture"
 const EXECUTION_ID = "execution_fixture"
-const REPO_FULL_NAME = "owner/repo"
 const VALID_PLAN_STEPS = '[{"title":"Draft answer","kind":"agent_turn"}]'
 const VALID_TASK_EXPORT = '{"version":1,"tasks":[]}'
 
@@ -427,12 +426,6 @@ const FIXTURES = {
     triggerOnly("E2E Connector Trigger", "trigger.connector.inbound", "Connector Inbound", {
       adapterId: "lark",
       conversationKey: "chat-1",
-    }),
-  "trigger-github-webhook": () =>
-    triggerOnly("E2E GitHub Webhook Trigger", "trigger.github.webhook", "GitHub Webhook", {
-      path: "github/pr",
-      method: "POST",
-      hmacSecret: "shh",
     }),
   "trigger-goal-completed": () =>
     triggerOnly("E2E Goal Completed Trigger", "trigger.goal.completed", "Goal Completed", {
@@ -1060,115 +1053,6 @@ const FIXTURES = {
       type: "action.plugin.invoke",
       label: "Plugin",
       params: { pluginId: "p_test", mode: "tool", toolName: "echo", args: { text: "hi" } },
-    }),
-
-  // GitHub actions.
-  "action-github-open-pr": () =>
-    single("E2E GH Open PR", {
-      id: "n_pr",
-      type: "action.github.openPr",
-      label: "Open PR",
-      params: {
-        repoFullName: REPO_FULL_NAME,
-        head: "feat/fixture",
-        base: "main",
-        title: "Fixture PR",
-        body: "Seeded by fixture",
-      },
-    }),
-  "action-github-close-pr": () =>
-    single("E2E GH Close PR", {
-      id: "n_cl",
-      type: "action.github.closePr",
-      label: "Close PR",
-      params: { repoFullName: REPO_FULL_NAME, prNumber: 1 },
-    }),
-  "action-github-merge-pr": () =>
-    single("E2E GH Merge PR", {
-      id: "n_mg",
-      type: "action.github.mergePr",
-      label: "Merge PR",
-      params: { repoFullName: REPO_FULL_NAME, prNumber: 1, mergeMethod: "squash" },
-    }),
-  "action-github-review-pr": () =>
-    single("E2E GH Review PR", {
-      id: "n_rv",
-      type: "action.github.reviewPr",
-      label: "Review",
-      params: { repoFullName: REPO_FULL_NAME, prNumber: 1, event: "COMMENT", body: "lgtm" },
-    }),
-  "action-github-review-pr-inline": () =>
-    single("E2E GH Review PR Inline", {
-      id: "n_rvi",
-      type: "action.github.reviewPrInline",
-      label: "Inline Review",
-      params: {
-        repoFullName: REPO_FULL_NAME,
-        prNumber: 1,
-        provider: "openai",
-        model: "gpt-4.1",
-        apiKey: "sk-test",
-        maxFiles: 10,
-      },
-    }),
-  "action-github-comment-pr": () =>
-    single("E2E GH Comment PR", {
-      id: "n_cpr",
-      type: "action.github.commentPr",
-      label: "Comment PR",
-      // Distinct from the comment-issue fixture's body: both nodes POST to
-      // /issues/1/comments on the SHARED github mock, and parallel spec
-      // workers must be able to tell their own capture apart.
-      params: { repoFullName: REPO_FULL_NAME, prNumber: 1, body: "note (pr)" },
-    }),
-  "action-github-comment-issue": () =>
-    single("E2E GH Comment Issue", {
-      id: "n_ci",
-      type: "action.github.commentIssue",
-      label: "Comment Issue",
-      params: { repoFullName: REPO_FULL_NAME, issueNumber: 1, body: "note (issue)" },
-    }),
-  "action-github-label-issue": () =>
-    single("E2E GH Label Issue", {
-      id: "n_lab",
-      type: "action.github.labelIssue",
-      label: "Label Issue",
-      params: { repoFullName: REPO_FULL_NAME, issueNumber: 1, add: ["bug"] },
-    }),
-  "action-github-close-issue": () =>
-    single("E2E GH Close Issue", {
-      id: "n_clo",
-      type: "action.github.closeIssue",
-      label: "Close Issue",
-      params: { repoFullName: REPO_FULL_NAME, issueNumber: 1, reason: "completed" },
-    }),
-  "action-github-create-release": () =>
-    single("E2E GH Create Release", {
-      id: "n_rel",
-      type: "action.github.createRelease",
-      label: "Create Release",
-      params: { repoFullName: REPO_FULL_NAME, tag: "v1.0.0", name: "v1.0.0", body: "notes" },
-    }),
-  "action-github-generate-changelog": () =>
-    single("E2E GH Generate Changelog", {
-      id: "n_chg",
-      type: "action.github.generateChangelog",
-      label: "Generate Changelog",
-      params: { repoFullName: REPO_FULL_NAME, since: "v0.9.0", currentVersion: "v1.0.0" },
-    }),
-  "action-github-push-tag": () =>
-    single("E2E GH Push Tag", {
-      id: "n_tag",
-      type: "action.github.pushTag",
-      label: "Push Tag",
-      params: { repoFullName: REPO_FULL_NAME, tag: "v1.0.0", sha: "abcd1234" },
-    }),
-  "action-github-run-issue-loop": () =>
-    single("E2E GH Issue Loop", {
-      id: "n_il",
-      type: "action.github.runIssueLoop",
-      label: "Issue Loop",
-      params: { repoFullName: REPO_FULL_NAME, issueNumber: 1, worktreeMode: "local" },
     }),
 
   // Local Git actions.

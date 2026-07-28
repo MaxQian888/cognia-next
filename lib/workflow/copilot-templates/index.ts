@@ -15,7 +15,6 @@
 
 import type { VisualWorkflow } from "@/types/workflow/visual"
 import type { WorkflowCopilotTemplate, CopilotSlotValues } from "./types"
-import { githubPrCopilotTemplate } from "./github-pr"
 import { cronReportCopilotTemplate } from "./cron-report"
 import { webhookAiConnectorCopilotTemplate } from "./webhook-ai-connector"
 
@@ -27,7 +26,6 @@ export type {
 } from "./types"
 
 const TEMPLATES: WorkflowCopilotTemplate[] = [
-  githubPrCopilotTemplate,
   cronReportCopilotTemplate,
   webhookAiConnectorCopilotTemplate,
 ]

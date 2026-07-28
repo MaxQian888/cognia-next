@@ -23,7 +23,7 @@ use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter};
 use tokio::sync::mpsc::Receiver;
 
-use super::HookGuard;
+use crate::automation::input_monitor::{InputButton, InputEvent, InputMonitor, InputSubscription};
 use crate::automation::platform::shared::{credential_window, screenshot};
 use crate::automation::types::{
     ElementInfo, ImageFormat, MonitorInfo, Point, Screenshot, ScreenshotOpts,
@@ -395,9 +395,9 @@ struct ActiveSession {
     observations: Arc<Mutex<Vec<Observation>>>,
     monitors: Vec<MonitorInfo>,
     temp_dir: Option<PathBuf>,
-    /// Owns the native input-hook thread; dropping it ends the message pump and
-    /// unhooks. Kept even though never read directly (drop-on-take is the point).
-    _hook: HookGuard,
+    /// Keeps this recorder registered with the process-wide input monitor.
+    _subscription: InputSubscription,
+    input_monitor: InputMonitor,
     drain: tokio::task::JoinHandle<()>,
 }
 
@@ -435,6 +435,7 @@ impl RecorderState {
         &self,
         app: AppHandle,
         handle: AutomationHandle,
+        input_monitor: InputMonitor,
         settings: CaptureSettings,
         session_id: String,
         temp_dir: Option<PathBuf>,
@@ -446,10 +447,8 @@ impl RecorderState {
         let observations: Arc<Mutex<Vec<Observation>>> = Arc::new(Mutex::new(Vec::new()));
         let started_at = now_ms();
 
-        // Bounded channel: the hook only `try_send`s, so a backed-up consumer
-        // drops the oldest noise rather than blocking the input chain.
-        let (tx, rx) = tokio::sync::mpsc::channel::<RawSignal>(256);
-        let hook = HookGuard::install(tx)?;
+        let mut subscription = input_monitor.subscribe(256)?;
+        let rx = subscription.take_receiver();
 
         if let Some(dir) = temp_dir.as_ref() {
             let _ = std::fs::create_dir_all(dir);
@@ -470,7 +469,8 @@ impl RecorderState {
             observations,
             monitors,
             temp_dir,
-            _hook: hook,
+            _subscription: subscription,
+            input_monitor,
             drain,
         });
 
@@ -494,8 +494,10 @@ impl RecorderState {
     /// session is active.
     pub fn stop(&self, app: &AppHandle) -> Option<RecordingTrace> {
         let session = self.inner.lock().take()?;
+        let input_monitor = session.input_monitor.clone();
         session.drain.abort();
-        // Dropping the hook ends the pump + joins the hook thread.
+        // Dropping the subscription removes only this recorder from the shared
+        // hook; another consumer such as the selection toolbar keeps listening.
         let observations = session.observations.lock().clone();
         let ended_at = now_ms();
         let step_count = observations.len() as u32;
@@ -507,17 +509,22 @@ impl RecorderState {
             monitors: session.monitors.clone(),
         };
         let _ = app.emit("record:event", &RecordEvent::Stopped { step_count });
+        drop(session);
+        input_monitor.stop_if_idle();
         Some(trace)
     }
 
     /// Cancel recording, discarding the trace and any temp screenshots.
     pub fn cancel(&self, app: &AppHandle) {
         if let Some(session) = self.inner.lock().take() {
+            let input_monitor = session.input_monitor.clone();
             session.drain.abort();
             if let Some(dir) = session.temp_dir.as_ref() {
                 let _ = std::fs::remove_dir_all(dir);
             }
             let _ = app.emit("record:event", &RecordEvent::Cancelled);
+            drop(session);
+            input_monitor.stop_if_idle();
         }
     }
 }
@@ -528,7 +535,7 @@ impl RecorderState {
 async fn drain_loop(
     app: AppHandle,
     handle: AutomationHandle,
-    mut rx: Receiver<RawSignal>,
+    mut rx: Receiver<InputEvent>,
     observations: Arc<Mutex<Vec<Observation>>>,
     settings: CaptureSettings,
     temp_dir: Option<PathBuf>,
@@ -538,7 +545,10 @@ async fn drain_loop(
     let idle = std::time::Duration::from_millis(KEY_IDLE_MS as u64);
     loop {
         let intents = match tokio::time::timeout(idle, rx.recv()).await {
-            Ok(Some(sig)) => coalesce.fold(sig),
+            Ok(Some(event)) => match raw_signal_from_input(event) {
+                Some(signal) => coalesce.fold(signal),
+                None => Vec::new(),
+            },
             Ok(None) => break,          // channel closed — hook dropped
             Err(_) => coalesce.flush(), // idle timeout — commit buffered run
         };
@@ -555,6 +565,29 @@ async fn drain_loop(
         let obs = realize(&handle, &settings, temp_dir.as_deref(), seq, intent).await;
         observations.lock().push(obs.clone());
         let _ = app.emit("record:event", &RecordEvent::Step { observation: obs });
+    }
+}
+
+fn raw_signal_from_input(event: InputEvent) -> Option<RawSignal> {
+    match event {
+        InputEvent::MouseUp {
+            x,
+            y,
+            button,
+            ts_ms,
+        } => Some(RawSignal::Click {
+            x,
+            y,
+            button: match button {
+                InputButton::Left => RawButton::Left,
+                InputButton::Right => RawButton::Right,
+                InputButton::Middle => RawButton::Middle,
+            },
+            ts_ms,
+        }),
+        InputEvent::Scroll { x, y, dy, ts_ms } => Some(RawSignal::Scroll { x, y, dy, ts_ms }),
+        InputEvent::KeyDown { vk, ts_ms } => Some(RawSignal::Key { vk, ts_ms }),
+        InputEvent::MouseDown { .. } => None,
     }
 }
 

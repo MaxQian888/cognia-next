@@ -93,6 +93,7 @@ pub async fn record_start(
     match state.recorder.start(
         app.clone(),
         state.handle.clone(),
+        state.input_monitor.clone(),
         settings,
         session_id,
         temp_dir,

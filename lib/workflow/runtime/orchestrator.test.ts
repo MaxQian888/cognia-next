@@ -536,9 +536,8 @@ describe("runWorkflow — loop container (flow.loop v2)", () => {
 
 describe("runWorkflow — failure handling", () => {
   it("reports a failed run when an executor is missing for a node kind", async () => {
-    // GitHub delivery actions are plugin-contributed and intentionally have
-    // no host executor, so this exercises the missing-plugin execution path
-    // without trying to route an edge into a display-only annotation.
+    // A known kind authored at an unsupported future type version reaches the
+    // missing-executor path without depending on any Marketplace plugin.
     const wf = buildWorkflow(
       [
         {
@@ -550,12 +549,12 @@ describe("runWorkflow — failure handling", () => {
         },
         {
           id: "n_note",
-          type: "action.github.openPr",
-          typeVersion: 1,
+          type: "action.agent.turn",
+          typeVersion: 99,
           position: { x: 200, y: 0 },
           data: {
-            label: "open PR",
-            params: { repoFullName: "owner/repo", head: "feature", base: "main", title: "PR" },
+            label: "create resource",
+            params: { title: "Example" },
           },
         },
       ],
@@ -732,7 +731,7 @@ describe("runWorkflow — plugin hook dispatches", () => {
   })
 
   it("step failure fires onWorkflowError + onWorkflowComplete(false)", async () => {
-    // Plugin-contributed GitHub action has no host executor — drives the
+    // Plugin-contributed Marketplace action has no host executor — drives the
     // step-failure path while remaining a semantically valid graph target.
     const wf = buildWorkflow(
       [
@@ -745,12 +744,12 @@ describe("runWorkflow — plugin hook dispatches", () => {
         },
         {
           id: "n_note",
-          type: "action.github.openPr",
-          typeVersion: 1,
+          type: "action.agent.turn",
+          typeVersion: 99,
           position: { x: 200, y: 0 },
           data: {
-            label: "open PR",
-            params: { repoFullName: "owner/repo", head: "feature", base: "main", title: "PR" },
+            label: "create resource",
+            params: { title: "Example" },
           },
         },
       ],

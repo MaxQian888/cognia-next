@@ -11,9 +11,6 @@ import {
 // Kinds that intentionally fall back to the raw-JSON editor (no dedicated form).
 // Keep this list tight — adding a kind here must be a deliberate decision.
 const INTENTIONAL_FALLBACKS = new Set<WorkflowNodeKind>([
-  // GitHub actions ship their own forms via the github-delivery plugin overlay,
-  // but the trigger + 13 actions ARE wired below, so none remain here.
-  //
   // The kinds below are synthesizer-emitted only — they carry NO palette /
   // catalog entry (see `lib/workflow/nodes/catalog.ts` and the "not placed by
   // users in the editor" comments in `types/workflow/visual.ts`), so the
@@ -50,6 +47,7 @@ const DESKTOP_KINDS: WorkflowNodeKind[] = [
 ]
 
 const NEWLY_WIRED: WorkflowNodeKind[] = [
+  "trigger.integration.event",
   "trigger.team",
   "action.team.task.dispatch",
   "trigger.desktop.event",

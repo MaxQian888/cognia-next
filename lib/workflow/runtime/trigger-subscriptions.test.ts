@@ -72,6 +72,38 @@ describe("trigger-subscriptions", () => {
     expect(idx.get("trigger.webhook" as never)).toBeUndefined()
   })
 
+  it("matches integration events without platform-specific workflow kinds", () => {
+    _seedTriggerSubscriptionsForTest([
+      wf("wf_repo", [
+        trigger("n", "trigger.integration.event", {
+          pluginId: "github-delivery",
+          accountId: "account-1",
+          eventTypes: ["pull_request.opened", "issue.opened"],
+          resourceKind: "repository",
+          resourceId: "cognia/cognia-next",
+        }),
+      ]),
+      wf("wf_any", [trigger("n", "trigger.integration.event", {})]),
+    ])
+
+    const matches = findMatchingWorkflows("trigger.integration.event", {
+      pluginId: "github-delivery",
+      integrationId: "github",
+      accountId: "account-1",
+      eventType: "pull_request.opened",
+      resourceKind: "repository",
+      resourceId: "cognia/cognia-next",
+    })
+    expect(matches.map((match) => match.workflowId)).toEqual(["wf_repo", "wf_any"])
+
+    const other = findMatchingWorkflows("trigger.integration.event", {
+      pluginId: "linear-delivery",
+      accountId: "account-1",
+      eventType: "issue.created",
+    })
+    expect(other.map((match) => match.workflowId)).toEqual(["wf_any"])
+  })
+
   it("matches connector.inbound by adapterId when params bind it", () => {
     _seedTriggerSubscriptionsForTest([
       wf("wf_tg", [trigger("n", "trigger.connector.inbound", { adapterId: "tg" })]),

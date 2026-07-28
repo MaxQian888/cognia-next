@@ -38,13 +38,6 @@ function positiveInteger() {
   return z.number().int().min(1, "minValue")
 }
 
-function positiveIntegerOrExpression() {
-  return z.union([
-    positiveInteger(),
-    requiredString("required").refine((value) => value.includes("{{"), "invalidType"),
-  ])
-}
-
 /**
  * Accepts an http(s) URL or any value containing a `{{ … }}` expression
  * (resolved at run time, so we can't validate the final shape here). Empty
@@ -142,6 +135,15 @@ const WebhookTriggerParams = z.object({
   hmacSecret: optionalString,
   responseStatus: numberRange(100, 599).optional(),
   responseTemplate: optionalString,
+})
+
+const IntegrationEventTriggerParams = z.object({
+  pluginId: optionalString,
+  integrationId: optionalString,
+  accountId: optionalString,
+  eventTypes: z.array(z.string().min(1)).optional(),
+  resourceKind: optionalString,
+  resourceId: optionalString,
 })
 
 // ── Actions: characters / teams / skills ────────────────────────────────────
@@ -953,108 +955,6 @@ const PluginInvokeParams = z.object({
   args: z.unknown().optional(),
 })
 
-// ── GitHub Delivery ─────────────────────────────────────────────────────────
-
-const GithubCommonParams = z.object({
-  repoFullName: requiredString("required"),
-  policyOverride: z.record(z.string(), z.unknown()).optional(),
-})
-
-const GithubPrNumberParams = GithubCommonParams.extend({
-  prNumber: positiveIntegerOrExpression(),
-})
-
-const GithubIssueNumberParams = GithubCommonParams.extend({
-  issueNumber: positiveIntegerOrExpression(),
-})
-
-const GithubOpenPrParams = GithubCommonParams.extend({
-  head: requiredString("required"),
-  base: requiredString("required"),
-  title: requiredString("required"),
-  body: optionalString,
-  draft: z.boolean().optional(),
-})
-
-const GithubClosePrParams = GithubPrNumberParams
-
-const GithubMergePrParams = GithubPrNumberParams.extend({
-  mergeMethod: z.enum(["merge", "squash", "rebase"]).optional(),
-  commitTitle: optionalString,
-  commitMessage: optionalString,
-})
-
-const GithubReviewPrParams = GithubPrNumberParams.extend({
-  event: z.enum(["APPROVE", "REQUEST_CHANGES", "COMMENT"]),
-  body: requiredString("required"),
-  comments: z
-    .array(
-      z.object({
-        path: requiredString("required"),
-        position: positiveInteger(),
-        body: requiredString("required"),
-      })
-    )
-    .optional(),
-})
-
-const GithubReviewPrInlineParams = GithubPrNumberParams.extend({
-  provider: requiredString("required"),
-  model: requiredString("required"),
-  apiKey: requiredString("required"),
-  baseURL: optionalString,
-  maxFiles: z.number().int().min(1, "minValue").max(30, "maxValue").optional(),
-  focus: optionalString,
-})
-
-const GithubCommentPrParams = GithubPrNumberParams.extend({
-  body: requiredString("required"),
-})
-
-const GithubCommentIssueParams = GithubIssueNumberParams.extend({
-  body: requiredString("required"),
-})
-
-const GithubLabelList = z.array(requiredString("required")).optional()
-
-const GithubLabelIssueParams = GithubIssueNumberParams.extend({
-  add: GithubLabelList,
-  remove: GithubLabelList,
-}).refine(
-  (v) =>
-    (Array.isArray(v.add) && v.add.length > 0) || (Array.isArray(v.remove) && v.remove.length > 0),
-  { message: "required", path: ["add"] }
-)
-
-const GithubCloseIssueParams = GithubIssueNumberParams.extend({
-  reason: z.enum(["completed", "not_planned"]).optional(),
-})
-
-const GithubCreateReleaseParams = GithubCommonParams.extend({
-  tag: requiredString("required"),
-  targetCommitish: optionalString,
-  name: optionalString,
-  body: optionalString,
-  draft: z.boolean().optional(),
-  prerelease: z.boolean().optional(),
-})
-
-const GithubGenerateChangelogParams = GithubCommonParams.extend({
-  since: requiredString("required"),
-  currentVersion: optionalString,
-})
-
-const GithubPushTagParams = GithubCommonParams.extend({
-  tag: requiredString("required"),
-  sha: requiredString("required"),
-})
-
-const GithubRunIssueLoopParams = GithubIssueNumberParams.extend({
-  worktreeMode: z.enum(["local", "e2b"]).optional(),
-  branchTemplate: optionalString,
-  externalAgentId: optionalString,
-})
-
 // ── Desktop automation ──────────────────────────────────────────────────────
 
 const DesktopElementRef = z.union([requiredString("required"), z.array(z.string()).min(1)])
@@ -1751,7 +1651,7 @@ export const PARAMS_SCHEMAS = {
   "trigger.pet.event": PetEventTriggerParams,
   "action.pet.interact": PetInteractActionParams,
   "trigger.webhook": WebhookTriggerParams,
-  "trigger.github.webhook": WebhookTriggerParams,
+  "trigger.integration.event": IntegrationEventTriggerParams,
   "trigger.team": TeamTriggerParams,
   // Actions: characters
   "action.character.send": CharacterSendParams,
@@ -1851,19 +1751,6 @@ export const PARAMS_SCHEMAS = {
   // Actions: extensibility
   "action.mcp.invokeTool": McpInvokeToolParams,
   "action.plugin.invoke": PluginInvokeParams,
-  "action.github.openPr": GithubOpenPrParams,
-  "action.github.closePr": GithubClosePrParams,
-  "action.github.mergePr": GithubMergePrParams,
-  "action.github.reviewPr": GithubReviewPrParams,
-  "action.github.reviewPrInline": GithubReviewPrInlineParams,
-  "action.github.commentPr": GithubCommentPrParams,
-  "action.github.commentIssue": GithubCommentIssueParams,
-  "action.github.labelIssue": GithubLabelIssueParams,
-  "action.github.closeIssue": GithubCloseIssueParams,
-  "action.github.createRelease": GithubCreateReleaseParams,
-  "action.github.generateChangelog": GithubGenerateChangelogParams,
-  "action.github.pushTag": GithubPushTagParams,
-  "action.github.runIssueLoop": GithubRunIssueLoopParams,
   "action.desktop.screenshot": DesktopScreenshotParams,
   "action.desktop.findElement": DesktopFindElementParams,
   "action.desktop.readTree": DesktopReadTreeParams,

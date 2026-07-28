@@ -22,23 +22,23 @@ use windows::Win32::System::Threading::GetCurrentThreadId;
 use windows::Win32::UI::WindowsAndMessaging::{
     CallNextHookEx, DispatchMessageW, GetMessageW, PostThreadMessageW, SetWindowsHookExW,
     TranslateMessage, UnhookWindowsHookEx, HC_ACTION, KBDLLHOOKSTRUCT, MSG, MSLLHOOKSTRUCT,
-    WH_KEYBOARD_LL, WH_MOUSE_LL, WM_KEYDOWN, WM_LBUTTONUP, WM_MBUTTONUP, WM_MOUSEWHEEL, WM_QUIT,
-    WM_RBUTTONUP, WM_SYSKEYDOWN,
+    WH_KEYBOARD_LL, WH_MOUSE_LL, WM_KEYDOWN, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MBUTTONDOWN,
+    WM_MBUTTONUP, WM_MOUSEWHEEL, WM_QUIT, WM_RBUTTONDOWN, WM_RBUTTONUP, WM_SYSKEYDOWN,
 };
 
-use super::session::{RawButton, RawSignal};
+use super::{InputButton, InputEvent};
 
 thread_local! {
     /// The active sender for the pump thread. Set before the hooks are
     /// installed; cleared when the pump exits. The hook callbacks read it.
-    static SENDER: RefCell<Option<Sender<RawSignal>>> = const { RefCell::new(None) };
+    static SENDER: RefCell<Option<Sender<InputEvent>>> = const { RefCell::new(None) };
 }
 
 fn now_ms() -> i64 {
     chrono::Utc::now().timestamp_millis()
 }
 
-fn send(sig: RawSignal) {
+fn send(sig: InputEvent) {
     SENDER.with(|cell| {
         if let Some(tx) = cell.borrow().as_ref() {
             // Non-blocking: never stall the input chain. A full buffer drops the
@@ -54,28 +54,46 @@ unsafe extern "system" fn mouse_proc(code: i32, wparam: WPARAM, lparam: LPARAM) 
         let (x, y) = (info.pt.x, info.pt.y);
         let ts = now_ms();
         let sig = match wparam.0 as u32 {
-            WM_LBUTTONUP => Some(RawSignal::Click {
+            WM_LBUTTONDOWN => Some(InputEvent::MouseDown {
                 x,
                 y,
-                button: RawButton::Left,
+                button: InputButton::Left,
                 ts_ms: ts,
             }),
-            WM_RBUTTONUP => Some(RawSignal::Click {
+            WM_RBUTTONDOWN => Some(InputEvent::MouseDown {
                 x,
                 y,
-                button: RawButton::Right,
+                button: InputButton::Right,
                 ts_ms: ts,
             }),
-            WM_MBUTTONUP => Some(RawSignal::Click {
+            WM_MBUTTONDOWN => Some(InputEvent::MouseDown {
                 x,
                 y,
-                button: RawButton::Middle,
+                button: InputButton::Middle,
+                ts_ms: ts,
+            }),
+            WM_LBUTTONUP => Some(InputEvent::MouseUp {
+                x,
+                y,
+                button: InputButton::Left,
+                ts_ms: ts,
+            }),
+            WM_RBUTTONUP => Some(InputEvent::MouseUp {
+                x,
+                y,
+                button: InputButton::Right,
+                ts_ms: ts,
+            }),
+            WM_MBUTTONUP => Some(InputEvent::MouseUp {
+                x,
+                y,
+                button: InputButton::Middle,
                 ts_ms: ts,
             }),
             WM_MOUSEWHEEL => {
                 // HIWORD of mouseData is a signed wheel delta (multiple of 120).
                 let delta = ((info.mouseData >> 16) & 0xFFFF) as u16 as i16 as i32;
-                Some(RawSignal::Scroll {
+                Some(InputEvent::Scroll {
                     x,
                     y,
                     dy: delta,
@@ -97,7 +115,7 @@ unsafe extern "system" fn keyboard_proc(code: i32, wparam: WPARAM, lparam: LPARA
         match wparam.0 as u32 {
             WM_KEYDOWN | WM_SYSKEYDOWN => {
                 let info = &*(lparam.0 as *const KBDLLHOOKSTRUCT);
-                send(RawSignal::Key {
+                send(InputEvent::KeyDown {
                     vk: info.vkCode,
                     ts_ms: now_ms(),
                 });
@@ -116,7 +134,7 @@ pub(crate) struct HookGuard {
 }
 
 impl HookGuard {
-    pub(crate) fn install(tx: Sender<RawSignal>) -> Result<HookGuard, String> {
+    pub(crate) fn install(tx: Sender<InputEvent>) -> Result<HookGuard, String> {
         let (ready_tx, ready_rx) = channel::<Result<u32, String>>();
         let join = thread::Builder::new()
             .name("skill-recorder-hook".into())
@@ -186,7 +204,7 @@ mod tests {
     fn install_and_drop_round_trip() {
         // Installing a real hook on the Windows CI/dev host should succeed; the
         // guard's Drop must cleanly tear down the pump thread without hanging.
-        let (tx, _rx) = tokio::sync::mpsc::channel::<RawSignal>(8);
+        let (tx, _rx) = tokio::sync::mpsc::channel::<InputEvent>(8);
         let guard = HookGuard::install(tx).expect("install hook on windows");
         drop(guard); // joins the pump thread — must not hang
     }

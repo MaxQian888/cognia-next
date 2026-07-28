@@ -67,6 +67,7 @@ import {
   ConnectorDeleteConfig,
   ConnectorForwardConfig,
   ConnectorWaitReplyConfig,
+  IntegrationEventTriggerConfig,
   WorkflowCompletedTriggerConfig,
   SubworkflowConfig,
 } from "./index"
@@ -121,6 +122,38 @@ const messages = {
           label: "Wait for delivery",
         },
         waitTimeoutMs: { hint: "Wait budget in ms.", label: "Delivery wait timeout (ms)" },
+      },
+      integrationEventTrigger: {
+        pluginId: {
+          label: "Plugin (optional)",
+          hint: "Limit by plugin.",
+          placeholder: "example-delivery",
+        },
+        integrationId: {
+          label: "Integration (optional)",
+          hint: "Limit by integration.",
+          placeholder: "delivery",
+        },
+        accountId: {
+          label: "Account (optional)",
+          hint: "Limit by account.",
+          placeholder: "account_...",
+        },
+        resourceKind: {
+          label: "Resource kind (optional)",
+          hint: "Limit by resource kind.",
+          placeholder: "repository",
+        },
+        resourceId: {
+          label: "Resource id (optional)",
+          hint: "Limit by resource id.",
+          placeholder: "owner/project",
+        },
+        eventTypes: {
+          label: "Event types (optional)",
+          hint: "Comma-separated event types.",
+          placeholder: "pull_request.opened, issue.updated",
+        },
       },
       teamTrigger: {
         intro: "Fires when an agent-team run finishes.",
@@ -733,6 +766,28 @@ function wrap(ui: React.ReactNode) {
 describe("BrowserModelConfig export", () => {
   it("is exposed from the inspector forms module", () => {
     expect(BrowserModelConfig).toEqual(expect.any(Function))
+  })
+})
+
+describe("IntegrationEventTriggerConfig", () => {
+  it("authors platform-neutral account, resource, and event filters", () => {
+    const onChange = jest.fn()
+    wrap(
+      <IntegrationEventTriggerConfig
+        params={{ pluginId: "example-delivery", eventTypes: ["issue.created"] }}
+        onChange={onChange}
+      />
+    )
+
+    expect(screen.getByLabelText("Plugin (optional)")).toHaveValue("example-delivery")
+    expect(screen.getByLabelText("Event types (optional)")).toHaveValue("issue.created")
+    fireEvent.change(screen.getByLabelText("Event types (optional)"), {
+      target: { value: "issue.created, pull_request.updated" },
+    })
+    expect(onChange).toHaveBeenLastCalledWith({
+      pluginId: "example-delivery",
+      eventTypes: ["issue.created", "pull_request.updated"],
+    })
   })
 })
 

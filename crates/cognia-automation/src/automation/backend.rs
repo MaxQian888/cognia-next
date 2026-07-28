@@ -6,6 +6,7 @@
 //! takes care of marshalling requests onto a stable OS thread (which, on
 //! Windows, owns the COM apartment).
 
+use super::selection::TextSelectionSnapshot;
 use super::types::*;
 
 pub trait AutomationBackend {
@@ -68,6 +69,14 @@ pub trait AutomationBackend {
     /// macOS resolves the frontmost window via osascript metadata —
     /// true AXUIElement hit-testing is still Phase 6.b.
     fn pick_at_point(&self, point: Point) -> Result<ElementInfo>;
+
+    /// Read the currently focused text selection without changing application
+    /// state. Backends that cannot expose native text ranges return
+    /// `UnsupportedPlatform`; an accessible control with no active selection
+    /// returns `Ok(None)`.
+    fn read_text_selection(&self) -> Result<Option<TextSelectionSnapshot>> {
+        Err(AutomationError::UnsupportedPlatform)
+    }
 }
 
 /// A back-end that fails every call with `UnsupportedPlatform`. macOS and

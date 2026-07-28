@@ -111,6 +111,7 @@ export function defaultTypeVersionFor(kind: WorkflowNodeKind): number {
 export function supportsErrorHandling(kind: WorkflowNodeKind | string): boolean {
   return (
     kind.startsWith("action.") ||
+    kind.includes(".action.") ||
     kind.startsWith("ai.") ||
     kind.startsWith("data.") ||
     kind.startsWith("io.") ||

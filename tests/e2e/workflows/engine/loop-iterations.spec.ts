@@ -12,7 +12,7 @@
  * assert the body produced exactly 3 distinct iterations. Runs in chromium PR CI.
  */
 
-import { expect, test, type Page } from "@playwright/test"
+import { expect, test, type Page } from "@/tests/e2e/fixtures/test"
 import { resetCogniaDb } from "../../helpers/db-reset"
 import { readLatestRun } from "../../helpers/workflow-spec-helpers"
 

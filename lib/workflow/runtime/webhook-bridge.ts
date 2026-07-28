@@ -37,7 +37,6 @@ const SYNCED_TRIGGER_KINDS = new Set<WorkflowNode["type"]>([
   "trigger.chat.message",
   "trigger.goal.completed",
   "trigger.webhook",
-  "trigger.github.webhook",
   "trigger.team",
   "trigger.desktop.event",
   "trigger.terminal.command",
@@ -133,8 +132,7 @@ async function syncOneTrigger(
       })
       return
     }
-    case "trigger.webhook":
-    case "trigger.github.webhook": {
+    case "trigger.webhook": {
       const webhookParams = params as WebhookParams
       await registerTrigger({
         ...baseInput,
@@ -148,7 +146,6 @@ async function syncOneTrigger(
           typeof webhookParams.responseTimeoutMs === "number"
             ? webhookParams.responseTimeoutMs
             : undefined,
-        signatureMode: node.type === "trigger.github.webhook" ? "github" : undefined,
       })
       return
     }

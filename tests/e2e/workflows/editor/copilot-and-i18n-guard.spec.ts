@@ -18,7 +18,7 @@
  * inspector forms.
  */
 
-import { expect, test, type ConsoleMessage } from "@playwright/test"
+import { expect, test, type ConsoleMessage } from "@/tests/e2e/fixtures/test"
 import { resetCogniaDb } from "../../helpers/db-reset"
 import { seedAndOpenWorkflow } from "../../helpers/seed-workflow"
 import { openNodeInspector } from "../../helpers/workflow-spec-helpers"

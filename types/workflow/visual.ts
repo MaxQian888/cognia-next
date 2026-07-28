@@ -31,7 +31,7 @@ export type WorkflowNodeKind =
   | "trigger.connector.inbound"
   | "trigger.chat.message"
   | "trigger.webhook"
-  | "trigger.github.webhook"
+  | "trigger.integration.event"
   | "trigger.team"
   | "trigger.goal.completed"
   // Actions on cognia-next runtime entities
@@ -152,20 +152,6 @@ export type WorkflowNodeKind =
   | "action.mobile.notify"
   | "action.mcp.invokeTool"
   | "action.plugin.invoke"
-  // GitHub Delivery (provided by the github-delivery plugin)
-  | "action.github.openPr"
-  | "action.github.closePr"
-  | "action.github.mergePr"
-  | "action.github.reviewPr"
-  | "action.github.reviewPrInline"
-  | "action.github.commentPr"
-  | "action.github.commentIssue"
-  | "action.github.labelIssue"
-  | "action.github.closeIssue"
-  | "action.github.createRelease"
-  | "action.github.generateChangelog"
-  | "action.github.pushTag"
-  | "action.github.runIssueLoop"
   // Local Git (Source Control panel backend — ADR-0038)
   | "action.git.stage"
   | "action.git.commit"
@@ -305,7 +291,7 @@ export const WORKFLOW_NODE_KINDS: readonly WorkflowNodeKind[] = [
   "trigger.connector.inbound",
   "trigger.chat.message",
   "trigger.webhook",
-  "trigger.github.webhook",
+  "trigger.integration.event",
   "trigger.team",
   "trigger.goal.completed",
   "action.character.send",
@@ -395,19 +381,6 @@ export const WORKFLOW_NODE_KINDS: readonly WorkflowNodeKind[] = [
   "action.connector.waitReply",
   "action.mcp.invokeTool",
   "action.plugin.invoke",
-  "action.github.openPr",
-  "action.github.closePr",
-  "action.github.mergePr",
-  "action.github.reviewPr",
-  "action.github.reviewPrInline",
-  "action.github.commentPr",
-  "action.github.commentIssue",
-  "action.github.labelIssue",
-  "action.github.closeIssue",
-  "action.github.createRelease",
-  "action.github.generateChangelog",
-  "action.github.pushTag",
-  "action.github.runIssueLoop",
   "action.git.stage",
   "action.git.commit",
   "action.git.push",
@@ -1117,15 +1090,6 @@ export interface RegisterTriggerInput {
    * the static response. Absent / 0 = the Rust default (~25s).
    */
   webhookResponseTimeoutMs?: number
-  /**
-   * Which signature header convention to verify against:
-   *   - "cognia" (default) → reads `x-signature-256: sha256=<hex>`
-   *   - "github"           → reads `x-hub-signature-256: sha256=<hex>`
-   * Used by the Rust verifier; the trigger node kind alone (e.g.
-   * trigger.github.webhook) is also a valid signal but this field is the
-   * authoritative override.
-   */
-  signatureMode?: "cognia" | "github"
   binding?: WorkflowTriggerBinding
   enabled: boolean
 }

@@ -3,7 +3,7 @@
  * Tauri-only; the desktop-runtime path is covered by lib/workflow/nodes/desktop.test.ts.
  */
 
-import { expect, test } from "@playwright/test"
+import { expect, test } from "@/tests/e2e/fixtures/test"
 import { resetCogniaDb } from "../../../helpers/db-reset"
 import { seedAndOpenWorkflow } from "../../../helpers/seed-workflow"
 import {

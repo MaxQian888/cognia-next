@@ -8,7 +8,7 @@ use tauri::State;
 
 use super::run_mirror::MirrorError;
 use super::state::WorkflowState;
-use super::triggers::webhook_router::WebhookEntry;
+use super::triggers::webhook_router::{IntegrationIngressEntry, WebhookEntry};
 use super::types::{InFlightRunRow, PersistRunStateInput, RegisterTriggerInput};
 
 fn map_mirror_err(e: MirrorError) -> String {
@@ -41,28 +41,11 @@ pub async fn workflow_register_trigger(
         }
         // Webhook triggers register a path in the local axum router. The
         // path / method / response settings ride along on the same input.
-        // `trigger.webhook` registers under the cognia signature convention.
-        // `trigger.github.webhook` registers under the GitHub convention. Both
-        // route through the same axum receiver and only differ on which header
-        // (`x-signature-256` vs `x-hub-signature-256`) carries the HMAC.
-        "trigger.webhook" | "trigger.github.webhook" => {
+        "trigger.webhook" => {
             let path = input
                 .webhook_path
                 .clone()
                 .ok_or_else(|| format!("{} requires a 'webhookPath' field", input.kind))?;
-            // Implicit signature_mode = github when the trigger kind is the
-            // github-flavored one; an explicit `signature_mode` field on the
-            // input still overrides for forward compatibility.
-            let signature_mode = match input.signature_mode.as_deref() {
-                Some(m) => crate::workflow::triggers::webhook_router::SignatureMode::from_str(m),
-                None => {
-                    if input.kind == "trigger.github.webhook" {
-                        crate::workflow::triggers::webhook_router::SignatureMode::Github
-                    } else {
-                        crate::workflow::triggers::webhook_router::SignatureMode::Cognia
-                    }
-                }
-            };
             let entry = WebhookEntry {
                 trigger_id: input.trigger_id.clone(),
                 workflow_id: input.workflow_id.clone(),
@@ -73,7 +56,7 @@ pub async fn workflow_register_trigger(
                     .clone()
                     .unwrap_or_else(|| "POST".into()),
                 hmac_secret: input.webhook_hmac_secret.clone(),
-                signature_mode,
+                signature_mode: crate::workflow::triggers::webhook_router::SignatureMode::Cognia,
                 enabled: input.enabled,
                 binding: input.binding.clone(),
                 response_status: input.webhook_response_status.unwrap_or(200),
@@ -95,6 +78,7 @@ pub async fn workflow_register_trigger(
         | "trigger.terminal.command"
         | "trigger.desktop.event"
         | "trigger.pet.event"
+        | "trigger.integration.event"
         | "trigger.team"
         | "trigger.workflow.completed"
         | "trigger.manual" => Ok(()),
@@ -151,6 +135,110 @@ pub async fn workflow_webhook_respond(
             headers: headers.unwrap_or_default(),
         },
     ))
+}
+
+#[tauri::command]
+pub async fn integration_ingress_register(
+    state: State<'_, WorkflowState>,
+    input: IntegrationIngressEntry,
+) -> Result<Option<String>, String> {
+    integration_ingress_register_for_state(state.inner(), input)
+}
+
+pub fn integration_ingress_register_for_state(
+    state: &WorkflowState,
+    input: IntegrationIngressEntry,
+) -> Result<Option<String>, String> {
+    state.webhook.upsert_integration(input)
+}
+
+#[tauri::command]
+pub async fn integration_ingress_unregister(
+    state: State<'_, WorkflowState>,
+    route_id: String,
+) -> Result<(), String> {
+    integration_ingress_unregister_for_state(state.inner(), route_id)
+}
+
+pub fn integration_ingress_unregister_for_state(
+    state: &WorkflowState,
+    route_id: String,
+) -> Result<(), String> {
+    state.webhook.unregister_integration(&route_id);
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn integration_ingress_get_url(
+    state: State<'_, WorkflowState>,
+    route_id: String,
+) -> Result<Option<String>, String> {
+    integration_ingress_get_url_for_state(state.inner(), route_id)
+}
+
+pub fn integration_ingress_get_url_for_state(
+    state: &WorkflowState,
+    route_id: String,
+) -> Result<Option<String>, String> {
+    Ok(state.webhook.integration_url(&route_id))
+}
+
+#[tauri::command]
+pub async fn integration_ingress_poll(
+    state: State<'_, WorkflowState>,
+    limit: Option<usize>,
+) -> Result<Vec<super::integration_spool::SpoolDelivery>, String> {
+    integration_ingress_poll_for_state(state.inner(), limit)
+}
+
+pub fn integration_ingress_poll_for_state(
+    state: &WorkflowState,
+    limit: Option<usize>,
+) -> Result<Vec<super::integration_spool::SpoolDelivery>, String> {
+    state
+        .integration_spool
+        .pending(limit.unwrap_or(100).min(500))
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub async fn integration_ingress_ack(
+    state: State<'_, WorkflowState>,
+    route_id: String,
+    delivery_id: String,
+) -> Result<(), String> {
+    integration_ingress_ack_for_state(state.inner(), route_id, delivery_id)
+}
+
+pub fn integration_ingress_ack_for_state(
+    state: &WorkflowState,
+    route_id: String,
+    delivery_id: String,
+) -> Result<(), String> {
+    state
+        .integration_spool
+        .ack(&route_id, &delivery_id)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub async fn integration_ingress_nack(
+    state: State<'_, WorkflowState>,
+    route_id: String,
+    delivery_id: String,
+) -> Result<(), String> {
+    integration_ingress_nack_for_state(state.inner(), route_id, delivery_id)
+}
+
+pub fn integration_ingress_nack_for_state(
+    state: &WorkflowState,
+    route_id: String,
+    delivery_id: String,
+) -> Result<(), String> {
+    state
+        .integration_spool
+        .nack(&route_id, &delivery_id)
+        .map_err(|error| error.to_string())
 }
 
 /// `workflow_persist_run_state` — upsert the SQLite mirror. Called from the

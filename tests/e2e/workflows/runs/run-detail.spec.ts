@@ -2,7 +2,7 @@
  * E2E: opening a run row navigates to the detail page with the Gantt timeline.
  */
 
-import { expect, test } from "@playwright/test"
+import { expect, test } from "@/tests/e2e/fixtures/test"
 import { resetCogniaDb } from "../../helpers/db-reset"
 import { seedAndOpenWorkflow, seedRun } from "../../helpers/seed-workflow"
 

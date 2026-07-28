@@ -583,6 +583,38 @@
       "placeholder": "ou_abc, ou_def"
     }
   },
+  "integrationEventTrigger": {
+    "pluginId": {
+      "label": "插件（可选）",
+      "hint": "仅接收指定已安装 Marketplace 插件的事件。",
+      "placeholder": "example-delivery"
+    },
+    "integrationId": {
+      "label": "Integration（可选）",
+      "hint": "仅接收插件中指定 Integration 定义的事件。",
+      "placeholder": "delivery"
+    },
+    "accountId": {
+      "label": "账号（可选）",
+      "hint": "仅接收指定已连接账号的事件。",
+      "placeholder": "account_..."
+    },
+    "resourceKind": {
+      "label": "资源类型（可选）",
+      "hint": "仅接收指定规范化资源类型的事件。",
+      "placeholder": "repository"
+    },
+    "resourceId": {
+      "label": "资源 ID（可选）",
+      "hint": "仅接收指定仓库、工作区、团队或其他资源的事件。",
+      "placeholder": "owner/project"
+    },
+    "eventTypes": {
+      "label": "事件类型（可选）",
+      "hint": "以逗号分隔的规范化事件类型；留空匹配全部事件。",
+      "placeholder": "pull_request.opened, issue.updated"
+    }
+  },
   "connectorReaction": {
     "adapter": {
       "label": "适配器"

@@ -12,7 +12,7 @@
  * it actually joined rather than racing ahead). Runs in the chromium PR CI job.
  */
 
-import { expect, test, type Page } from "@playwright/test"
+import { expect, test, type Page } from "@/tests/e2e/fixtures/test"
 import { resetCogniaDb } from "../../helpers/db-reset"
 import { readLatestRun } from "../../helpers/workflow-spec-helpers"
 

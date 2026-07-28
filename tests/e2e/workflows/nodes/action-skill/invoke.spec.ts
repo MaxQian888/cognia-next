@@ -2,7 +2,7 @@
  * E2E: action.skill.invoke — invokes a registered skill by id.
  */
 
-import { expect, test } from "@playwright/test"
+import { expect, test } from "@/tests/e2e/fixtures/test"
 import { resetCogniaDb } from "../../../helpers/db-reset"
 import { seedAndOpenWorkflow, seedSkill } from "../../../helpers/seed-workflow"
 import {

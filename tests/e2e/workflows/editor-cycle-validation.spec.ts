@@ -8,7 +8,7 @@
  *   3. Save still succeeds (drafts are allowed dirty per canvas handleSave).
  */
 
-import { expect, test } from "@playwright/test"
+import { expect, test } from "@/tests/e2e/fixtures/test"
 import { resetCogniaDb } from "../helpers/db-reset"
 
 test.describe("workflow editor — cycle validation", () => {

@@ -2,7 +2,7 @@
  * E2E: data.transform — editor + runtime (in-memory expression eval).
  */
 
-import { expect, test } from "@playwright/test"
+import { expect, test } from "@/tests/e2e/fixtures/test"
 import { resetCogniaDb } from "../../../helpers/db-reset"
 import { seedAndOpenWorkflow } from "../../../helpers/seed-workflow"
 import {

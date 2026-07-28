@@ -32,7 +32,7 @@ use core_graphics::event::{
 };
 use tokio::sync::mpsc::Sender;
 
-use super::session::{RawButton, RawSignal};
+use super::{InputButton, InputEvent};
 
 extern "C" {
     /// Re-enable a tap the system disabled (timeout / secure-input switch).
@@ -128,33 +128,51 @@ pub(crate) fn to_signal(
     scroll_dy: i32,
     keycode: i64,
     ts_ms: i64,
-) -> Option<RawSignal> {
+) -> Option<InputEvent> {
     match etype {
-        CGEventType::LeftMouseUp => Some(RawSignal::Click {
+        CGEventType::LeftMouseDown => Some(InputEvent::MouseDown {
             x,
             y,
-            button: RawButton::Left,
+            button: InputButton::Left,
             ts_ms,
         }),
-        CGEventType::RightMouseUp => Some(RawSignal::Click {
+        CGEventType::RightMouseDown => Some(InputEvent::MouseDown {
             x,
             y,
-            button: RawButton::Right,
+            button: InputButton::Right,
             ts_ms,
         }),
-        CGEventType::OtherMouseUp => Some(RawSignal::Click {
+        CGEventType::OtherMouseDown => Some(InputEvent::MouseDown {
             x,
             y,
-            button: RawButton::Middle,
+            button: InputButton::Middle,
             ts_ms,
         }),
-        CGEventType::ScrollWheel => Some(RawSignal::Scroll {
+        CGEventType::LeftMouseUp => Some(InputEvent::MouseUp {
+            x,
+            y,
+            button: InputButton::Left,
+            ts_ms,
+        }),
+        CGEventType::RightMouseUp => Some(InputEvent::MouseUp {
+            x,
+            y,
+            button: InputButton::Right,
+            ts_ms,
+        }),
+        CGEventType::OtherMouseUp => Some(InputEvent::MouseUp {
+            x,
+            y,
+            button: InputButton::Middle,
+            ts_ms,
+        }),
+        CGEventType::ScrollWheel => Some(InputEvent::Scroll {
             x,
             y,
             dy: scroll_dy,
             ts_ms,
         }),
-        CGEventType::KeyDown => Some(RawSignal::Key {
+        CGEventType::KeyDown => Some(InputEvent::KeyDown {
             vk: cg_keycode_to_vk(keycode),
             ts_ms,
         }),
@@ -165,7 +183,12 @@ pub(crate) fn to_signal(
 /// Read the integer event fields `to_signal` needs and emit the projected
 /// signal. Disable notifications re-enable the tap so a transient timeout /
 /// secure-input switch doesn't silently kill the session mid-recording.
-fn on_event(tx: &Sender<RawSignal>, port: &OnceLock<SendPtr>, etype: CGEventType, event: &CGEvent) {
+fn on_event(
+    tx: &Sender<InputEvent>,
+    port: &OnceLock<SendPtr>,
+    etype: CGEventType,
+    event: &CGEvent,
+) {
     match etype {
         CGEventType::TapDisabledByTimeout | CGEventType::TapDisabledByUserInput => {
             if let Some(p) = port.get() {
@@ -203,7 +226,7 @@ pub(crate) struct HookGuard {
 }
 
 impl HookGuard {
-    pub(crate) fn install(tx: Sender<RawSignal>) -> Result<HookGuard, String> {
+    pub(crate) fn install(tx: Sender<InputEvent>) -> Result<HookGuard, String> {
         let (ready_tx, ready_rx) = channel::<Result<SendRunLoop, String>>();
         let join = thread::Builder::new()
             .name("skill-recorder-hook".into())
@@ -224,6 +247,9 @@ impl HookGuard {
                     CGEventTapPlacement::HeadInsertEventTap,
                     CGEventTapOptions::ListenOnly,
                     vec![
+                        CGEventType::LeftMouseDown,
+                        CGEventType::RightMouseDown,
+                        CGEventType::OtherMouseDown,
                         CGEventType::LeftMouseUp,
                         CGEventType::RightMouseUp,
                         CGEventType::OtherMouseUp,
@@ -335,41 +361,44 @@ mod tests {
     fn to_signal_maps_each_button_and_kind() {
         assert!(matches!(
             to_signal(CGEventType::LeftMouseUp, 3, 4, 0, 0, 9),
-            Some(RawSignal::Click {
+            Some(InputEvent::MouseUp {
                 x: 3,
                 y: 4,
-                button: RawButton::Left,
+                button: InputButton::Left,
                 ts_ms: 9,
             })
         ));
         assert!(matches!(
             to_signal(CGEventType::RightMouseUp, 0, 0, 0, 0, 0),
-            Some(RawSignal::Click {
-                button: RawButton::Right,
+            Some(InputEvent::MouseUp {
+                button: InputButton::Right,
                 ..
             })
         ));
         assert!(matches!(
             to_signal(CGEventType::OtherMouseUp, 0, 0, 0, 0, 0),
-            Some(RawSignal::Click {
-                button: RawButton::Middle,
+            Some(InputEvent::MouseUp {
+                button: InputButton::Middle,
                 ..
             })
         ));
         assert!(matches!(
             to_signal(CGEventType::ScrollWheel, 1, 2, -240, 0, 7),
-            Some(RawSignal::Scroll { dy: -240, .. })
+            Some(InputEvent::Scroll { dy: -240, .. })
         ));
         assert!(matches!(
             to_signal(CGEventType::KeyDown, 0, 0, 0, 0x00, 0),
-            Some(RawSignal::Key { vk: 0x41, .. }) // A
+            Some(InputEvent::KeyDown { vk: 0x41, .. }) // A
         ));
     }
 
     #[test]
     fn to_signal_ignores_non_input_events() {
-        // Mouse-*down*, moves, and disable notifications produce no observation.
-        assert!(to_signal(CGEventType::LeftMouseDown, 0, 0, 0, 0, 0).is_none());
+        assert!(matches!(
+            to_signal(CGEventType::LeftMouseDown, 0, 0, 0, 0, 0),
+            Some(InputEvent::MouseDown { .. })
+        ));
+        // Moves and disable notifications produce no observation.
         assert!(to_signal(CGEventType::MouseMoved, 0, 0, 0, 0, 0).is_none());
         assert!(to_signal(CGEventType::TapDisabledByTimeout, 0, 0, 0, 0, 0).is_none());
     }
@@ -380,7 +409,7 @@ mod tests {
         // it and `keys_to_hint` drops it, exactly like a Windows modifier.
         assert!(matches!(
             to_signal(CGEventType::KeyDown, 0, 0, 0, 0x35, 0),
-            Some(RawSignal::Key { vk: 0, .. })
+            Some(InputEvent::KeyDown { vk: 0, .. })
         ));
     }
 
@@ -391,7 +420,7 @@ mod tests {
     #[test]
     #[ignore = "requires Accessibility/Input Monitoring permission + live run loop"]
     fn install_and_drop_round_trip() {
-        let (tx, _rx) = tokio::sync::mpsc::channel::<RawSignal>(8);
+        let (tx, _rx) = tokio::sync::mpsc::channel::<InputEvent>(8);
         let guard = HookGuard::install(tx).expect("install tap (permission granted)");
         drop(guard); // stops the run loop + joins — must not hang
     }
