@@ -1,5 +1,6 @@
 import { createDiagnostic, __resetDiagnosticSequenceForTesting } from "./create"
 import { DIAGNOSTIC_CODES } from "./registry"
+import type { DiagnosticCode } from "./types"
 
 const now = () => 1_700_000_000_000
 
@@ -125,6 +126,29 @@ describe("createDiagnostic", () => {
       { kind: "wait-and-retry", retryAfterMs: 5_000 },
     ])
     expect(diag.actions.some((a) => a.kind === "retry")).toBe(true)
+  })
+
+  it("substitutes exactly one kind no registry entry lists, and no more", () => {
+    // `applyRetryAfter` is the only place a kind reaches a card without any
+    // registry entry naming it, which is how `wait-and-retry` shipped with no
+    // production handler and left rate-limited turns with zero buttons. A
+    // second substitution would repeat that silently, so pin the set: anything
+    // added here also needs a home in `DiagnosticActions`' handler resolution.
+    const substituted = new Set<string>()
+    for (const code of Object.keys(DIAGNOSTIC_CODES) as DiagnosticCode[]) {
+      const plain = createDiagnostic(code, { source: "provider", now, id: "a" })
+      const delayed = createDiagnostic(code, {
+        source: "provider",
+        meta: { retryAfterMs: 30_000 },
+        now,
+        id: "b",
+      })
+      const baseline = new Set(plain.actions.map((a) => a.kind))
+      for (const action of delayed.actions) {
+        if (!baseline.has(action.kind)) substituted.add(action.kind)
+      }
+    }
+    expect([...substituted]).toEqual(["wait-and-retry"])
   })
 
   it("honours explicit overrides — the Rust side owns its own retryability", () => {

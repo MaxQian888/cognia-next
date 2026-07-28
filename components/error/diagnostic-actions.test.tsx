@@ -2,7 +2,7 @@
  * @jest-environment jsdom
  */
 
-import { render, screen, fireEvent } from "@testing-library/react"
+import { act, render, screen, fireEvent } from "@testing-library/react"
 import type { DiagnosticAction } from "@cognia/diagnostics"
 
 import { DiagnosticActions } from "./diagnostic-actions"
@@ -53,6 +53,60 @@ describe("DiagnosticActions", () => {
       />
     )
     expect(screen.getByTestId("diagnostic-action-wait-and-retry")).toHaveTextContent("1 second")
+  })
+
+  it("services wait-and-retry with the retry handler nobody thought to duplicate", () => {
+    // The regression this pins: `createDiagnostic` swaps `retry` for
+    // `wait-and-retry` whenever the provider sent a Retry-After, but no registry
+    // entry lists that kind and no surface registered it — so a rate-limited
+    // turn rendered a card with zero buttons, strictly worse than before.
+    const retry = jest.fn()
+    const action: DiagnosticAction = { kind: "wait-and-retry", retryAfterMs: 30_000 }
+    render(<DiagnosticActions actions={[action]} handlers={{ retry }} />)
+
+    const button = screen.getByTestId("diagnostic-action-wait-and-retry")
+    expect(button).toHaveTextContent("30 seconds")
+    fireEvent.click(button)
+    expect(retry).toHaveBeenCalledWith(action)
+  })
+
+  it("still drops wait-and-retry when the surface cannot retry at all", () => {
+    const { container } = render(
+      <DiagnosticActions
+        actions={[{ kind: "wait-and-retry", retryAfterMs: 30_000 }]}
+        handlers={{ "view-logs": jest.fn() }}
+      />
+    )
+    expect(container).toBeEmptyDOMElement()
+  })
+
+  it("ticks the countdown down and then reads as a plain retry", () => {
+    jest.useFakeTimers()
+    try {
+      render(
+        <DiagnosticActions
+          actions={[{ kind: "wait-and-retry", retryAfterMs: 3_000 }]}
+          handlers={{ retry: jest.fn() }}
+        />
+      )
+      const button = () => screen.getByTestId("diagnostic-action-wait-and-retry")
+      expect(button()).toHaveTextContent("3 seconds")
+
+      act(() => {
+        jest.advanceTimersByTime(1_000)
+      })
+      expect(button()).toHaveTextContent("2 seconds")
+
+      // At zero the wait is over, so the label stops advertising one. The
+      // button was clickable throughout — retrying early is the user's call.
+      act(() => {
+        jest.advanceTimersByTime(2_000)
+      })
+      expect(button()).toHaveTextContent("Retry")
+      expect(button()).not.toHaveTextContent("second")
+    } finally {
+      jest.useRealTimers()
+    }
   })
 
   it("hands the full action to the handler so its payload survives", () => {
