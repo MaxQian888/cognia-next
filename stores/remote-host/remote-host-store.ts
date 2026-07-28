@@ -26,6 +26,7 @@ import { persistLocalStorage } from "@/stores/persist-storage"
 
 import type { CompanionConfig } from "@/lib/tauri/companion-storage"
 import { CompanionTransport } from "@/lib/tauri/transport-companion"
+import { transport } from "@/lib/tauri/transport-instance"
 import { setActiveRemoteEndpoint, setActiveRemoteTransport } from "@/lib/tauri/transport-routing"
 import type { Transport } from "@/lib/tauri/transport-types"
 
@@ -131,7 +132,11 @@ export const useRemoteHostStore = create<RemoteHostState>()(
         const configProvider = (): CompanionConfig =>
           get().hosts.find((h) => h.id === id)?.config ?? captured
         setActiveRemoteTransport(transportFactory(configProvider))
-        setActiveRemoteEndpoint({ baseUrl: host.config.baseUrl, deviceJwt: host.config.deviceJwt })
+        setActiveRemoteEndpoint({
+          baseUrl: host.config.baseUrl,
+          deviceJwt: host.config.deviceJwt,
+          serverFingerprint: host.config.serverFingerprint,
+        })
         set({
           activeHostId: id,
           hosts: get().hosts.map((h) => (h.id === id ? { ...h, lastActiveAt: Date.now() } : h)),
@@ -141,6 +146,7 @@ export const useRemoteHostStore = create<RemoteHostState>()(
       deactivate: () => {
         setActiveRemoteTransport(null)
         setActiveRemoteEndpoint(null)
+        void transport.call("codeserver_remote_relay_stop", {}).catch(() => undefined)
         set({ activeHostId: null })
       },
     }),

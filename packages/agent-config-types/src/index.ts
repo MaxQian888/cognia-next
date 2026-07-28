@@ -1044,7 +1044,11 @@ export function isControlResponseEvent(evt: ClaudeEvent): evt is ControlResponse
 }
 
 export type FeatureCallOperation =
-  "language-generate" | "language-stream" | "embedding" | "bedrock-discover"
+  | "language-generate"
+  | "language-stream"
+  | "embedding"
+  | "bedrock-discover"
+  | "opencode-v2-discover"
 
 export interface FeatureCallCredentials {
   protocol?: string
@@ -1602,6 +1606,11 @@ export interface ChatSession {
    */
   platformConversationKey?: string
   /**
+   * Host-owned Inbox projection identity for service Integration events.
+   * Kept separate from IM `platformBinding` and ConnectorBus routing.
+   */
+  integrationBinding?: import("@/types/integrations/binding").IntegrationBinding
+  /**
    * Per-session tool/MCP filter. Highest precedence — replaces the character
    * ({@link Character.toolFilter}) and global ({@link AppSettings.toolFilter})
    * filter for this conversation only. See {@link ToolFilterConfig}.
@@ -1734,6 +1743,20 @@ export interface ConversationTimelineSettings {
 export type ConversationSidebarDensity = "comfortable" | "compact"
 /** How far the conversation-sidebar search reaches. */
 export type ConversationSearchScope = "title" | "titleAndContent"
+/**
+ * Primary grouping axis for the conversation list, applied under the pinned and
+ * folder sections.
+ *
+ * - `"workspace"` — one section per workspace, current one first. The only mode
+ *   that lists conversations from *other* workspaces (see
+ *   `hooks/chat/use-sessions.ts`); the sidebar is workspace-isolated otherwise.
+ * - `"team"` — the historical behavior: the guild rail's Direct-messages / Team
+ *   buttons pick which conversations the list shows, and the rest group by date.
+ * - `"date"` — ChatGPT-style relative date buckets.
+ * - `"agent"` — one section per bound character/agent.
+ * - `"none"` — a single flat, recency-ordered list.
+ */
+export type ConversationGroupBy = "workspace" | "team" | "date" | "agent" | "none"
 
 /**
  * Behavior preferences for the conversation sidebar (ChannelList). All fields
@@ -1746,8 +1769,16 @@ export interface ConversationSidebarSettings {
   density?: ConversationSidebarDensity
   /** Show a second line with the last-message preview + relative time. Default off. */
   showPreview?: boolean
-  /** Group non-search results into date buckets. Defaults to on. */
+  /**
+   * @deprecated Superseded by {@link ConversationSidebarSettings.groupBy}. Kept
+   * so a settings blob written before the grouping selector landed still means
+   * something: `false` folds into `groupBy: "none"`. Resolve both through
+   * `lib/chat/conversation-grouping.ts:resolveConversationGroupBy` rather than
+   * reading this field.
+   */
   groupByDate?: boolean
+  /** Primary grouping axis for the conversation list. Defaults to `"workspace"`. */
+  groupBy?: ConversationGroupBy
   /** Show per-conversation unread badges. Defaults to on. */
   showUnreadBadges?: boolean
   /** Whether search also matches message content (async). Defaults to title-only. */
@@ -2812,6 +2843,19 @@ export interface AppSettings {
    * migration. See `@/types/shell/sidebar` for the model + default.
    */
   sidebarLayout?: import("@/types/shell/sidebar").SidebarLayout
+  /**
+   * Customization of the desktop title bar (the top window bar): the order of
+   * its segments plus the ones the user removed. Lives in settings JSON (same
+   * pattern as `sidebarLayout`) so it persists without a Dexie migration and
+   * syncs with the rest of the shell layout. See `@/types/shell/bars` for the
+   * model + default, and `@/lib/shell/bar-items` for the resolver.
+   */
+  titleBarLayout?: import("@/types/shell/bars").BarLayout
+  /**
+   * Customization of the desktop status bar (the bottom window bar). Same
+   * `{ order, hidden }` model and persistence path as `titleBarLayout`.
+   */
+  statusBarLayout?: import("@/types/shell/bars").BarLayout
   /**
    * Customization of the mobile home (chat welcome): the ordered quick-action
    * grid + which home sections are hidden. Lives in settings JSON (same pattern

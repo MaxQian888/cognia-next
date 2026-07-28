@@ -95,6 +95,14 @@ export const BUILT_IN_SKILL_CATALOG: BuiltInSkillCatalogEntry[] = [
     ],
   },
   {
+    id: "plugin-conversion",
+    name: "plugin-conversion",
+    description: "Convert complete plugin bundles between Cognia and Claude Code, Codex, or Gemini CLI using Cognia's deterministic converter. Use when a user asks to import, export, migrate, port, or assess a plugin bundle across these ecosystems.",
+    content: "Use Cognia's typed conversion tools; do not recreate converted manifests or runtime files yourself.\n\n## Inspect before writing\n\n1. Resolve the source plugin directory relative to the active workspace and the requested target: `cognia`, `claude-code`, `codex`, or `gemini-cli`.\n2. Call `inspect_plugin_conversion`.\n3. Report the detected source format, fidelity, converted capabilities, warnings, and blocking issues.\n4. If `applicable` is false or `blocking` is non-empty, stop. Explain the unsupported behavior; do not approximate or drop it.\n\nThe supported whole-bundle paths are foreign ecosystem → Cognia and Cognia → foreign ecosystem. Foreign → foreign conversion fails closed.\n\n## Apply the inspected plan\n\nOnly call `apply_plugin_conversion` with the exact `planId` returned by the latest inspection. Use a new or empty output directory relative to the active workspace. The user will receive a desktop confirmation before files are written.\n\nTreat these errors as safety signals:\n\n- Source changed or plan expired: inspect again and review the new report.\n- Output is non-empty: choose another empty directory; do not delete or overwrite existing work.\n- Source and output overlap: choose a separate sibling directory.\n\nAfter a successful apply, report the plugin id, target format, output directory, written files, and remaining warnings. Never hand-edit the deterministic conversion output as part of the conversion step.",
+    allowedTools: ["inspect_plugin_conversion","apply_plugin_conversion"],
+    surface: [],
+  },
+  {
     id: "web-research",
     name: "Web research and verification",
     description: "How to research with web search and fetch tools and stand behind what you report. Use whenever you are searching the web, fetching pages, or answering a factual question from online sources — to focus queries, read the actual source instead of the snippet, corroborate claims across sources, cite where each fact came from, and separate what the sources say from what you're inferring.",

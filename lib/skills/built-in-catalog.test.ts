@@ -15,6 +15,7 @@ describe("built-in skills catalog", () => {
       "goal-loop-execution",
       "im-auto-reply",
       "ocr-extraction",
+      "plugin-conversion",
       "web-research",
       "workflow-authoring",
     ])

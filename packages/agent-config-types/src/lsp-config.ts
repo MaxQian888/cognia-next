@@ -22,8 +22,8 @@
 /** Where a resolved server entry originated, in increasing override priority. */
 export type LspServerSource = "builtin" | "plugin" | "user" | "project"
 
-/** Transport for talking to the spawned server. Only stdio today. */
-export type LspTransport = "stdio"
+/** Transport for talking to the spawned server. */
+export type LspTransport = "stdio" | "socket"
 
 /**
  * One declarative Language Server definition. The same shape is authored by
@@ -73,8 +73,10 @@ export interface LspServerConfig {
    * tsserver).
    */
   excludeRootMarkers?: string[]
-  /** Transport. Stdio is the only supported value today. */
+  /** Transport. Socket endpoints must be loopback-only. */
   transport?: LspTransport
+  /** Required for `socket`; for example `tcp://127.0.0.1:5007`. */
+  endpoint?: string
   /** Forwarded verbatim as LSP `initializationOptions`. */
   initializationOptions?: Record<string, unknown>
   /**
@@ -110,6 +112,8 @@ export interface LspServerConfig {
    * binaries blocking the editor/agent forever.
    */
   startupTimeout?: number
+  /** Maximum aggregate RSS for the detached language-server process tree. */
+  memoryLimitMb?: number
 }
 
 /**

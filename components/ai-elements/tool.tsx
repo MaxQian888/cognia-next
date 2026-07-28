@@ -20,7 +20,7 @@ import { isValidElement, useState } from "react"
 import { CodeBlock } from "@/components/chat/renderers/code-block"
 import { DiffBlock } from "@/components/chat/renderers/diff-block"
 import { MarkdownRenderer } from "@/components/chat/markdown-renderer"
-import { ErrorParsedView } from "@/components/chat/error-parsed-view"
+import { ErrorParsedView } from "@/components/error/error-parsed-view"
 import { inferLanguageFromPath, resolveToolOutputRender } from "@/lib/chat/tool-output-format"
 
 export type ToolProps = ComponentProps<typeof Collapsible>

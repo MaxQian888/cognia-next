@@ -1,17 +1,17 @@
-//! Git workspace operations for the GitHub Delivery plugin's `local` backend.
+//! Git workspace operations for Marketplace repository plugins' local backend.
 //!
 //! Previously `lib/github/workspace.ts` shelled out to Node's `simple-git`
 //! which pulled `node:fs/promises` / `node:child_process` into the static
 //! browser graph through `lib/plugin/core/browser-builtin-registry.ts`.
 //! That broke the Next.js bundle once the `NODE_ONLY_MODULES` aliases were
 //! deleted from `next.config.ts`. Moving the local backend into Rust here
-//! keeps the renderer free of Node built-ins; the github-delivery plugin
-//! reaches us via Tauri `invoke()`.
+//! keeps the renderer free of Node built-ins; plugins reach it through the
+//! host-owned workspace API.
 //!
 //! We shell out to the user's system `git` for clone/push (same model
 //! simple-git used) instead of pulling libgit2's `https` + `openssl-sys`
-//! features. The github-delivery feature has always required a working
-//! `git` on PATH, so this doesn't add a new prerequisite.
+//! features. Repository automation already requires a working `git` on PATH,
+//! so this doesn't add a new prerequisite.
 
 use std::path::{Path, PathBuf};
 use std::process::Stdio;

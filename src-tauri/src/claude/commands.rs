@@ -707,7 +707,11 @@ fn build_feature_call_payload(mut request: Value) -> Result<Value, String> {
         .unwrap_or_default();
     if !matches!(
         operation,
-        "language-generate" | "language-stream" | "embedding" | "bedrock-discover"
+        "language-generate"
+            | "language-stream"
+            | "embedding"
+            | "bedrock-discover"
+            | "opencode-v2-discover"
     ) {
         return Err(format!("unsupported feature call operation: {operation}"));
     }
@@ -1279,6 +1283,11 @@ mod tests {
             "operation": "shell"
         }))
         .is_err());
+        assert!(build_feature_call_payload(json!({
+            "requestId": "request-3",
+            "operation": "opencode-v2-discover"
+        }))
+        .is_ok());
     }
 
     #[test]

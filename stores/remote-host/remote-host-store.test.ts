@@ -17,6 +17,7 @@ function makeConfig(overrides: Partial<CompanionConfig> = {}): CompanionConfig {
     deviceJwt: "device-jwt",
     deviceId: "device-1",
     serverVersion: "1.2.3",
+    serverFingerprint: "sha256:paired-spki",
     ...overrides,
   }
 }
@@ -117,6 +118,7 @@ describe("activateHost / deactivate", () => {
     expect(getActiveRemoteEndpoint()).toEqual({
       baseUrl: "https://box.example:27890",
       deviceJwt: "device-jwt",
+      serverFingerprint: "sha256:paired-spki",
     })
     expect(useRemoteHostStore.getState().hosts[0].lastActiveAt).toBeGreaterThan(0)
   })
@@ -183,6 +185,7 @@ describe("default transport factory", () => {
     expect(getActiveRemoteEndpoint()).toEqual({
       baseUrl: "https://box.example:27890",
       deviceJwt: "device-jwt",
+      serverFingerprint: "sha256:paired-spki",
     })
   })
 })
