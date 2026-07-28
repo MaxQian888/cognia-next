@@ -26,6 +26,7 @@ const refs: FileReference[] = [
 
 const selections: ArtifactSelectionRef[] = [
   {
+    kind: "artifact",
     artifactId: "art-1",
     title: "resolveSendOptions",
     snapshot: "export function resolveSendOptions() { /* … */ }",
@@ -38,7 +39,7 @@ function seed(state: { refs: FileReference[]; selections: ArtifactSelectionRef[]
   return async () => {
     useChatStore.setState({
       referencedPaths: state.refs,
-      artifactSelections: state.selections,
+      contextSelections: state.selections,
     })
   }
 }

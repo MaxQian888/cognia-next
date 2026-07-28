@@ -5,11 +5,13 @@ import { useLiveQuery } from "dexie-react-hooks"
 import {
   CheckIcon,
   MessageSquareIcon,
+  MessageSquarePlusIcon,
   PencilIcon,
   ReplyIcon,
   Trash2Icon,
   XIcon,
 } from "lucide-react"
+import { useChatStore } from "@/stores/chat"
 import { useTranslations } from "next-intl"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -33,6 +35,7 @@ import type {
   ContextCommentResourceRef,
 } from "@/types/context-comment"
 import { isContextCommentAnchorStale } from "@/types/context-comment"
+import { commentAnchorLabel } from "@/lib/artifacts/format-selection-context"
 
 export interface ContextCommentsPanelProps {
   resource: ContextCommentResourceRef
@@ -40,6 +43,12 @@ export interface ContextCommentsPanelProps {
   anchor?: ContextCommentAnchor
   currentUserId?: string
   currentUserName?: string
+  /**
+   * What the commented-on thing is called, for the chat context chip a comment
+   * can be handed to. Falls back to the resource id, which is at least stable —
+   * hosts that know a human title should pass it.
+   */
+  resourceTitle?: string
 }
 
 export function ContextCommentsPanel({
@@ -48,9 +57,11 @@ export function ContextCommentsPanel({
   anchor = { kind: "resource", revision },
   currentUserId = "local-user",
   currentUserName,
+  resourceTitle,
 }: ContextCommentsPanelProps) {
   const t = useTranslations("contextWorkbench.commentsPanel")
   const authorName = currentUserName ?? t("you")
+  const addContextSelection = useChatStore((state) => state.addContextSelection)
   const comments = useLiveQuery(
     () => listContextCommentsForResource(resource.kind, resource.id),
     [resource.kind, resource.id],
@@ -207,6 +218,28 @@ export function ContextCommentsPanel({
               {t("delete")}
             </Button>
           ) : null}
+          {/* The panel had no route back to the conversation at all: a user
+              could write down exactly what was wrong and the assistant would
+              never see a word of it. Rides the same staging pipeline as an
+              artifact selection, so it lands as a chip the composer folds in. */}
+          <Button
+            size="xs"
+            variant="ghost"
+            data-testid="context-comment-to-chat"
+            aria-label={t("sendToChatAria", { author: comment.authorName })}
+            onClick={() =>
+              addContextSelection({
+                kind: "comment",
+                title: resourceTitle ?? resource.id,
+                snapshot: comment.content,
+                comment: "",
+                anchorLabel: commentAnchorLabel(comment.anchor),
+              })
+            }
+          >
+            <MessageSquarePlusIcon className="size-3.5" />
+            {t("sendToChat")}
+          </Button>
         </div>
       </article>
     )

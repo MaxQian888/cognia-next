@@ -13,13 +13,13 @@ import {
   type RecentSessionEntry,
   type WelcomeSection,
 } from "./empty-state"
-import { InlineError } from "./inline-error"
+import { DiagnosticCard, InlineError } from "@/components/error/diagnostic-card"
+import type { SettingsSectionId } from "@/components/settings/settings-nav-config"
 import { MessageList } from "./message-list"
 import { RunStatusBar } from "./run-status-bar"
 import { PlanApprovalDock } from "@/components/agent/plan/plan-approval-dock"
 import { PlanTrackerDock } from "@/components/agent/plan/plan-tracker-dock"
 import { useRunRecordPersistence } from "@/hooks/chat/use-run-record-persistence"
-import { SIDECAR_EXITED_ERROR } from "@/hooks/chat/use-claude-chat"
 import { useStableCallback } from "@/hooks/ui/use-stable-callback"
 import { FollowUpSuggestions } from "./follow-up-suggestions"
 import { useStarterSuggestions } from "@/hooks/chat/use-starter-suggestions"
@@ -31,6 +31,7 @@ import {
   useSessionStatus,
   useSessionMessages,
   useSessionErrorMessage,
+  useSessionErrorDiagnostic,
   useSessionMessagesLoading,
   useSessionMessagesLoadError,
   useIsAtStreamCap,
@@ -186,6 +187,7 @@ export function ChatPane({
   useRunRecordPersistence(boundId)
   const status = useSessionStatus(boundId)
   const errorMessage = useSessionErrorMessage(boundId)
+  const errorDiagnostic = useSessionErrorDiagnostic(boundId)
   const messagesLoading = useSessionMessagesLoading(boundId)
   const messagesLoadError = useSessionMessagesLoadError(boundId)
   const atCapacity = useIsAtStreamCap(boundId)
@@ -341,15 +343,33 @@ export function ChatPane({
           <span>{tConcurrent("overCapacity", { max: 3 })}</span>
         </div>
       )}
-      {errorMessage && (
-        <InlineError
-          message={
-            errorMessage === SIDECAR_EXITED_ERROR ? tInlineErr("sidecarExited") : errorMessage
-          }
-          onRetry={hasMessages ? handleRetry : undefined}
-          onOpenSettings={() => onOpenSettings("api-key")}
+      {/* Structured failures render the shared card, which derives its label,
+          hint and buttons from the diagnostic's code. The string branch below
+          is the fallback for producers not yet migrated. */}
+      {errorDiagnostic ? (
+        <DiagnosticCard
+          className="mx-4 mt-2"
+          diagnostic={errorDiagnostic}
+          handlers={{
+            ...(hasMessages ? { retry: () => void handleRetry() } : {}),
+            "open-settings": (action) =>
+              onOpenSettings(
+                action.kind === "open-settings"
+                  ? (action.section as SettingsSectionId)
+                  : "providers"
+              ),
+          }}
           onDismiss={() => boundId && useChatStore.getState().setSessionError(boundId, null)}
         />
+      ) : (
+        errorMessage && (
+          <InlineError
+            message={errorMessage}
+            onRetry={hasMessages ? handleRetry : undefined}
+            onOpenSettings={() => onOpenSettings("providers")}
+            onDismiss={() => boundId && useChatStore.getState().setSessionError(boundId, null)}
+          />
+        )
       )}
       <PluginExtensionSlot
         point="chat.footer"

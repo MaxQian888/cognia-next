@@ -5,6 +5,8 @@ import { useTranslations } from "next-intl"
 import type { UnlistenFn } from "@tauri-apps/api/event"
 import type { UIMessage } from "ai"
 import type { AttachmentManifestEntry } from "@/lib/chat/attachments/dispatch"
+import { createDiagnostic } from "@cognia/diagnostics"
+import { toDiagnostic } from "@/lib/diagnostics/to-diagnostic"
 import {
   applySdkEvent,
   contentPreview,
@@ -296,14 +298,23 @@ export function useTeamChat() {
 
       const session = await getSession(sessionId)
       if (!session || session.kind !== "team" || !session.teamId) {
-        useChatStore.getState().setSessionError(sessionId, "Team session not found")
+        useChatStore
+          .getState()
+          .setSessionDiagnostic(
+            sessionId,
+            createDiagnostic("teamSessionMissing", { source: "agent-team", meta: { sessionId } })
+          )
         return
       }
       const team = await getTeam(session.teamId)
       if (!team) {
-        useChatStore
-          .getState()
-          .setSessionError(sessionId, `Team ${session.teamId} no longer exists`)
+        useChatStore.getState().setSessionDiagnostic(
+          sessionId,
+          createDiagnostic("teamMissing", {
+            source: "agent-team",
+            meta: { sessionId, extra: { teamId: session.teamId } },
+          })
+        )
         return
       }
 
@@ -375,7 +386,10 @@ export function useTeamChat() {
         } catch (err) {
           useChatStore
             .getState()
-            .setSessionError(sessionId, err instanceof Error ? err.message : String(err))
+            .setSessionDiagnostic(
+              sessionId,
+              toDiagnostic(err, { source: "agent-team", meta: { sessionId } })
+            )
           return
         }
       }
@@ -762,8 +776,13 @@ async function runLinearTurn(args: RunLinearArgs): Promise<void> {
       useUIStore.getState().setMemberStatus(sessionId, character.id, "idle")
     } catch (err) {
       useUIStore.getState().setMemberStatus(sessionId, character.id, "errored")
-      const msg = err instanceof Error ? err.message : String(err)
-      useChatStore.getState().setSessionError(sessionId, `${character.name}: ${msg}`)
+      useChatStore.getState().setSessionDiagnostic(
+        sessionId,
+        toDiagnostic(err, {
+          source: "agent-team",
+          meta: { sessionId, extra: { memberName: character.name, characterId: character.id } },
+        })
+      )
     }
   }
 }
@@ -789,12 +808,20 @@ async function runSupervisorTurn(args: RunCommonArgs): Promise<void> {
   if (!team.supervisorCharacterId) {
     useChatStore
       .getState()
-      .setSessionError(sessionId, "Supervisor team has no supervisor configured")
+      .setSessionDiagnostic(
+        sessionId,
+        createDiagnostic("supervisorMissing", { source: "agent-team", meta: { sessionId } })
+      )
     return
   }
   const supervisor = members.find((m) => m.id === team.supervisorCharacterId)
   if (!supervisor) {
-    useChatStore.getState().setSessionError(sessionId, "Configured supervisor is not a member")
+    useChatStore
+      .getState()
+      .setSessionDiagnostic(
+        sessionId,
+        createDiagnostic("supervisorNotMember", { source: "agent-team", meta: { sessionId } })
+      )
     return
   }
 
@@ -854,8 +881,13 @@ async function runSupervisorTurn(args: RunCommonArgs): Promise<void> {
       useUIStore.getState().setMemberStatus(sessionId, supervisor.id, "idle")
     } catch (err) {
       useUIStore.getState().setMemberStatus(sessionId, supervisor.id, "errored")
-      const msg = err instanceof Error ? err.message : String(err)
-      useChatStore.getState().setSessionError(sessionId, `${supervisor.name}: ${msg}`)
+      useChatStore.getState().setSessionDiagnostic(
+        sessionId,
+        toDiagnostic(err, {
+          source: "agent-team",
+          meta: { sessionId, extra: { memberName: supervisor.name, characterId: supervisor.id } },
+        })
+      )
       return
     }
 
@@ -899,8 +931,13 @@ async function runSupervisorTurn(args: RunCommonArgs): Promise<void> {
         if (reply.trim()) dispatchedReplies.push({ name: target.name, reply })
       } catch (err) {
         useUIStore.getState().setMemberStatus(sessionId, target.id, "errored")
-        const msg = err instanceof Error ? err.message : String(err)
-        useChatStore.getState().setSessionError(sessionId, `${target.name}: ${msg}`)
+        useChatStore.getState().setSessionDiagnostic(
+          sessionId,
+          toDiagnostic(err, {
+            source: "agent-team",
+            meta: { sessionId, extra: { memberName: target.name, characterId: target.id } },
+          })
+        )
       }
     }
     if (dispatchedReplies.length === 0) return

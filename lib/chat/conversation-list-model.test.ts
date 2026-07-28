@@ -5,6 +5,7 @@ import {
   conversationSectionKey,
   dateBucketFor,
   DATE_BUCKET_ORDER,
+  UNGROUPED_ID,
   type BuildSectionsOptions,
 } from "./conversation-list-model"
 
@@ -43,6 +44,185 @@ describe("conversationSectionKey", () => {
     expect(conversationSectionKey({ kind: "date", bucket: "today" })).toBe("date:today")
     expect(conversationSectionKey({ kind: "recent" })).toBe("recent")
     expect(conversationSectionKey({ kind: "search" })).toBe("search")
+  })
+
+  it("namespaces group sections by axis so a workspace and an agent can share an id", () => {
+    // The key is what scopes `manualOrder` to one section; colliding keys would
+    // let an order dragged in a workspace pin the row inside an agent group too.
+    const group = { id: "x", name: "X" }
+    expect(conversationSectionKey({ kind: "group", axis: "workspace", group })).toBe("workspace:x")
+    expect(conversationSectionKey({ kind: "group", axis: "agent", group })).toBe("agent:x")
+  })
+})
+
+describe("groupBy: workspace", () => {
+  const workspaces = [
+    { id: "w1", name: "Alpha" },
+    { id: "w2", name: "Beta" },
+  ]
+
+  const workspaceOpts = (overrides: Partial<BuildSectionsOptions> = {}) =>
+    opts({ groupBy: "workspace", workspaces, activeWorkspaceId: "w1", ...overrides })
+
+  it("sorts the active workspace first and starts the others collapsed", () => {
+    const sessions = [
+      session("b1", { projectId: "w2" }),
+      session("a1", { projectId: "w1" }),
+      session("a2", { projectId: "w1", updatedAt: NOW - DAY }),
+    ]
+    const { sections } = buildConversationSections(sessions, [], workspaceOpts())
+    expect(sections.map((s) => conversationSectionKey(s))).toEqual(["workspace:w1", "workspace:w2"])
+    const [alpha, beta] = sections
+    expect(alpha.kind === "group" && alpha.collapsed).toBe(false)
+    expect(beta.kind === "group" && beta.collapsed).toBe(true)
+    expect(alpha.sessions.map((s) => s.id)).toEqual(["a1", "a2"])
+  })
+
+  it("keeps collapsed groups out of orderedIds", () => {
+    const sessions = [session("a1", { projectId: "w1" }), session("b1", { projectId: "w2" })]
+    const { orderedIds } = buildConversationSections(sessions, [], workspaceOpts())
+    expect(orderedIds).toEqual(["a1"])
+  })
+
+  it("honors an explicit expand of a non-active workspace", () => {
+    const sessions = [session("a1", { projectId: "w1" }), session("b1", { projectId: "w2" })]
+    const { sections, orderedIds } = buildConversationSections(
+      sessions,
+      [],
+      workspaceOpts({ groupCollapseOverrides: { "workspace:w2": false } })
+    )
+    expect(sections[1].kind === "group" && sections[1].collapsed).toBe(false)
+    expect(orderedIds).toEqual(["a1", "b1"])
+  })
+
+  it("honors an explicit collapse of the active workspace", () => {
+    const sessions = [session("a1", { projectId: "w1" })]
+    const { sections, orderedIds } = buildConversationSections(
+      sessions,
+      [],
+      workspaceOpts({ groupCollapseOverrides: { "workspace:w1": true } })
+    )
+    expect(sections[0].kind === "group" && sections[0].collapsed).toBe(true)
+    expect(orderedIds).toEqual([])
+  })
+
+  it("keeps the caller's order and expands everything before a workspace is active", () => {
+    // The project store hydrates asynchronously, so the sidebar renders at
+    // least once with no active workspace; nothing may be hidden then.
+    const sessions = [session("b1", { projectId: "w2" }), session("a1", { projectId: "w1" })]
+    const { sections, orderedIds } = buildConversationSections(
+      sessions,
+      [],
+      opts({ groupBy: "workspace", workspaces, activeWorkspaceId: null })
+    )
+    expect(sections.map((s) => conversationSectionKey(s))).toEqual(["workspace:w1", "workspace:w2"])
+    expect(sections.every((s) => s.kind === "group" && !s.collapsed)).toBe(true)
+    expect(orderedIds).toEqual(["a1", "b1"])
+  })
+
+  it("keeps the caller's order when the active workspace is not in the list", () => {
+    const sessions = [session("a1", { projectId: "w1" })]
+    const { sections } = buildConversationSections(
+      sessions,
+      [],
+      opts({ groupBy: "workspace", workspaces, activeWorkspaceId: "deleted" })
+    )
+    expect(sections.map((s) => conversationSectionKey(s))).toEqual(["workspace:w1"])
+  })
+
+  it("collects unknown and missing workspaces into one trailing ungrouped section", () => {
+    const sessions = [
+      // Pre-isolation row (Dexie v86 stamps `projectId` on write).
+      session("legacy"),
+      // Points at a workspace that has since been deleted.
+      session("orphan", { projectId: "gone" }),
+      session("a1", { projectId: "w1" }),
+    ]
+    const { sections } = buildConversationSections(sessions, [], workspaceOpts())
+    expect(sections.map((s) => conversationSectionKey(s))).toEqual([
+      "workspace:w1",
+      `workspace:${UNGROUPED_ID}`,
+    ])
+    expect(sections[1].sessions.map((s) => s.id)).toEqual(["legacy", "orphan"])
+    // The renderer supplies a translated label rather than the model inventing one.
+    expect(sections[1].kind === "group" && sections[1].group.name).toBe("")
+    // Pre-isolation rows are grandfathered into every workspace, so unlike a
+    // non-active workspace this bucket must not fold itself away.
+    expect(sections[1].kind === "group" && sections[1].collapsed).toBe(false)
+  })
+
+  it("still lets pinned and folders outrank the workspace axis", () => {
+    const f = folder("f1")
+    const sessions = [
+      session("pinned1", { projectId: "w1", pinned: true }),
+      session("foldered", { projectId: "w2", folderId: "f1" }),
+      session("loose", { projectId: "w1" }),
+    ]
+    const { sections } = buildConversationSections(sessions, [f], workspaceOpts())
+    expect(sections.map((s) => s.kind)).toEqual(["pinned", "folder", "group"])
+    expect(sections[2].sessions.map((s) => s.id)).toEqual(["loose"])
+  })
+
+  it("scopes manualOrder to the workspace it was dragged in", () => {
+    const sessions = [
+      session("a-none", { projectId: "w1", updatedAt: NOW }),
+      session("a-first", {
+        projectId: "w1",
+        manualOrder: 0,
+        manualOrderSection: "workspace:w1",
+        updatedAt: NOW - 10 * DAY,
+      }),
+      // An order set in another section must not pin this row to the top here.
+      session("a-elsewhere", {
+        projectId: "w1",
+        manualOrder: 0,
+        manualOrderSection: "date:today",
+        updatedAt: NOW - 20 * DAY,
+      }),
+    ]
+    const { sections } = buildConversationSections(sessions, [], workspaceOpts())
+    expect(sections[0].sessions.map((s) => s.id)).toEqual(["a-first", "a-none", "a-elsewhere"])
+  })
+})
+
+describe("groupBy: agent", () => {
+  it("groups by the bound character and never auto-collapses", () => {
+    const sessions = [
+      session("s1", { characterId: "c1" }),
+      session("s2", { characterId: "c2" }),
+      session("s3"),
+    ]
+    const { sections, orderedIds } = buildConversationSections(
+      sessions,
+      [],
+      opts({
+        groupBy: "agent",
+        agents: [
+          { id: "c1", name: "Alice" },
+          { id: "c2", name: "Bob" },
+        ],
+        // Only the workspace axis has a non-uniform default.
+        activeWorkspaceId: "w1",
+      })
+    )
+    expect(sections.map((s) => conversationSectionKey(s))).toEqual([
+      "agent:c1",
+      "agent:c2",
+      `agent:${UNGROUPED_ID}`,
+    ])
+    expect(sections.every((s) => s.kind === "group" && !s.collapsed)).toBe(true)
+    expect(orderedIds).toEqual(["s1", "s2", "s3"])
+  })
+})
+
+describe("groupBy: team", () => {
+  it("emits the same date buckets as groupBy: date (the rail does the filtering)", () => {
+    const sessions = [session("today1"), session("old", { updatedAt: NOW - 40 * DAY })]
+    const asTeam = buildConversationSections(sessions, [], opts({ groupBy: "team" }))
+    const asDate = buildConversationSections(sessions, [], opts({ groupBy: "date" }))
+    expect(asTeam.sections.map((s) => conversationSectionKey(s))).toEqual(
+      asDate.sections.map((s) => conversationSectionKey(s))
+    )
   })
 })
 
@@ -254,7 +434,7 @@ describe("buildConversationSections", () => {
     expect(DATE_BUCKET_ORDER).toEqual(["today", "yesterday", "prev7", "prev30", "older"])
   })
 
-  it("collapses date buckets into a single recent section when groupByDate is off", () => {
+  it("collapses date buckets into a single recent section when grouping is off", () => {
     const sessions = [
       session("today1", { updatedAt: NOW }),
       session("old", { updatedAt: NOW - 40 * DAY }),
@@ -263,7 +443,7 @@ describe("buildConversationSections", () => {
     const { sections, orderedIds } = buildConversationSections(
       sessions,
       [],
-      opts({ groupByDate: false })
+      opts({ groupBy: "none" })
     )
     // Pinned still floats; loose sessions merge into one flat "recent" list.
     expect(sections.map((s) => s.kind)).toEqual(["pinned", "recent"])
@@ -350,7 +530,7 @@ describe("buildConversationSections", () => {
       session("r0", { manualOrder: 0, updatedAt: NOW - 40 * DAY }),
       session("r1", { manualOrder: 1, updatedAt: NOW - 10 * DAY }),
     ]
-    const { sections } = buildConversationSections(sessions, [], opts({ groupByDate: false }))
+    const { sections } = buildConversationSections(sessions, [], opts({ groupBy: "none" }))
     const recent = sections.find((s) => s.kind === "recent")
     expect(recent?.sessions.map((s) => s.id)).toEqual(["r0", "r1", "r-none"])
   })

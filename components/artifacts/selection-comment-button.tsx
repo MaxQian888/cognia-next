@@ -41,7 +41,7 @@ interface SelectionCommentButtonProps {
 
 export function SelectionCommentButton({ artifact, className }: SelectionCommentButtonProps) {
   const t = useTranslations("artifacts.review")
-  const addArtifactSelection = useChatStore((s) => s.addArtifactSelection)
+  const addContextSelection = useChatStore((s) => s.addContextSelection)
 
   const [open, setOpen] = useState(false)
   const [comment, setComment] = useState("")
@@ -80,7 +80,8 @@ export function SelectionCommentButton({ artifact, className }: SelectionComment
   const confirm = () => {
     const captured = capturedRef.current
     if (!captured) return
-    addArtifactSelection({
+    addContextSelection({
+      kind: "artifact",
       artifactId: artifact.id,
       title: artifact.title,
       snapshot: captured.snapshot,

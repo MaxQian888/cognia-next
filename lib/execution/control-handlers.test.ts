@@ -6,9 +6,10 @@ import { __resetDbForTesting, getDb } from "@/lib/db/schema"
 import { createExecutionRun } from "@/lib/db/execution-runs"
 import { executeRunControlCommand } from "./run-control"
 
-const mockCancelWorkflowRun = jest.fn(async () => undefined)
+const mockCancelWorkflowRun = jest.fn(async (_runId: string) => undefined)
 jest.mock("@/lib/workflow/runtime/cancel-run", () => ({
-  cancelWorkflowRun: (...args: unknown[]) => mockCancelWorkflowRun(...args),
+  cancelWorkflowRun: (...args: unknown[]) =>
+    mockCancelWorkflowRun(...(args as Parameters<typeof mockCancelWorkflowRun>)),
 }))
 
 const mockPauseGoal = jest.fn(async (id: string) => ({ id, status: "paused" }))

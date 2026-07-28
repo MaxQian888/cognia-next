@@ -17,9 +17,22 @@ import { useTranslations } from "next-intl"
 import { BiometricRow } from "@/components/mobile/me/biometric-row"
 import { MeSection } from "@/components/mobile/me/me-section"
 import { SubPageShell } from "@/components/mobile/me/sub-page-shell"
+import { Item, ItemContent, ItemDescription, ItemTitle } from "@/components/ui/item"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import { useSettingsPatch } from "@/hooks/use-settings-patch"
+import {
+  CONVERSATION_GROUP_BY_OPTIONS,
+  resolveConversationGroupBy,
+} from "@/lib/chat/conversation-grouping"
 import type {
   AppSettings,
+  ConversationGroupBy,
   ConversationTimelineSettings,
   UtilityModelConfig,
 } from "@cognia/agent-config-types"
@@ -151,13 +164,31 @@ export default function MobileConversationPage() {
             onChange={(v) => void setSidebar({ showPreview: v })}
             testid="conversation-sidebar-preview"
           />
-          <BiometricRow
-            label={t("sidebarGroupByDate")}
-            help={t("sidebarGroupByDateHelp")}
-            checked={sidebar.groupByDate !== false}
-            onChange={(v) => void setSidebar({ groupByDate: v })}
-            testid="conversation-sidebar-group-by-date"
-          />
+          <Item size="sm" className="px-0">
+            <ItemContent>
+              <ItemTitle className="text-xs">{t("sidebarGroupBy")}</ItemTitle>
+              <ItemDescription className="text-xs">{t("sidebarGroupByHelp")}</ItemDescription>
+              <Select
+                value={resolveConversationGroupBy(sidebar)}
+                onValueChange={(v) => void setSidebar({ groupBy: v as ConversationGroupBy })}
+              >
+                <SelectTrigger
+                  data-testid="conversation-sidebar-group-by"
+                  aria-label={t("sidebarGroupBy")}
+                  className="mt-1"
+                >
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {CONVERSATION_GROUP_BY_OPTIONS.map((option) => (
+                    <SelectItem key={option} value={option}>
+                      {t(`sidebarGroupByOptions.${option}`)}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </ItemContent>
+          </Item>
           <BiometricRow
             label={t("sidebarUnread")}
             help={t("sidebarUnreadHelp")}

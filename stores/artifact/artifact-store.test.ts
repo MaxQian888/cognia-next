@@ -34,6 +34,14 @@ jest.mock("@/stores/project/project-store", () => ({
   useProjectStore: { getState: () => ({ activeProjectId: mockActiveProjectId }) },
 }))
 
+// Controllable focused conversation. `setActiveArtifact` reads it to decide
+// which conversation's dock an activation lands in, so cross-session opens
+// (the artifact list's "recent" scope) need to be able to drive it.
+let mockActiveSessionId: string | null = null
+jest.mock("@/stores/chat", () => ({
+  useChatStore: { getState: () => ({ activeSessionId: mockActiveSessionId }) },
+}))
+
 // Reset the rate-limiter singleton so the high-frequency dispatch tests
 // start with a full token bucket.
 import { resetPluginRateLimiter } from "@/lib/plugin/security/rate-limiter"
@@ -66,6 +74,25 @@ const initial = {
   activeCanvasId: null,
   panelOpen: false,
   panelView: "artifact" as const,
+  // Staged review outcomes survive an apply/reject, so unlike `pendingReviews`
+  // they do not clear themselves as a side effect of what each test does —
+  // without this they accumulate across the suite.
+  reviewReceipts: [],
+}
+
+/**
+ * What zustand would write to storage right now. Goes through the middleware's
+ * own `partialize` rather than re-implementing it, and is independent of the
+ * active storage key (the account-scoped suites rename it).
+ */
+const readPartialize = (): Record<string, unknown> => {
+  const partialize = (
+    useArtifactStore.persist.getOptions() as {
+      partialize?: (s: ReturnType<typeof useArtifactStore.getState>) => Record<string, unknown>
+    }
+  ).partialize
+  expect(partialize).toBeDefined()
+  return partialize!(useArtifactStore.getState())
 }
 
 /** Tabs and active id are bucketed per session; most suites only use `s1`. */
@@ -80,6 +107,7 @@ beforeEach(() => {
   jest.clearAllMocks()
   resetPluginRateLimiter()
   mockActiveProjectId = null
+  mockActiveSessionId = null
 })
 
 describe("openArtifactIds (the dock's tab strip)", () => {
@@ -408,6 +436,80 @@ describe("setActiveArtifact + panel open/close", () => {
     expect(useArtifactStore.getState().artifacts[a.id]).toBeDefined()
   })
 
+  it("lands a cross-session activation in the conversation the user is looking at", () => {
+    // The artifact list's "recent" scope (and the artifacts workspace route)
+    // surface artifacts from other conversations. Bucketing by the artifact's
+    // own session wrote the active id where nothing was reading it: the dock
+    // expanded and kept showing the previous content.
+    const fromOtherSession = useArtifactStore.getState().createArtifact({
+      sessionId: "origin",
+      messageId: "m",
+      type: "code",
+      title: "t",
+      content: "x",
+    })
+    const parkedInOrigin = useArtifactStore.getState().createArtifact({
+      sessionId: "origin",
+      messageId: "m",
+      type: "code",
+      title: "parked",
+      content: "y",
+    })
+    useArtifactStore.setState({
+      activeArtifactIdBySession: { origin: parkedInOrigin.id },
+      openArtifactIdsBySession: {},
+    })
+
+    mockActiveSessionId = "focused"
+    useArtifactStore.getState().setActiveArtifact(fromOtherSession.id)
+
+    expect(activeTab("focused")).toBe(fromOtherSession.id)
+    // …and it opens a tab there, so the strip matches what the dock shows.
+    expect(openTabs("focused")).toEqual([fromOtherSession.id])
+    // The owning conversation's own parked artifact is left untouched.
+    expect(activeTab("origin")).toBe(parkedInOrigin.id)
+  })
+
+  it("prefers an explicit session over the focused one", () => {
+    const a = useArtifactStore.getState().createArtifact({
+      sessionId: "origin",
+      messageId: "m",
+      type: "code",
+      title: "t",
+      content: "x",
+    })
+    mockActiveSessionId = "focused"
+    useArtifactStore.getState().setActiveArtifact(a.id, "explicit")
+    expect(activeTab("explicit")).toBe(a.id)
+    expect(activeTab("focused")).toBeNull()
+  })
+
+  it("falls back to the artifact's own session when nothing is focused", () => {
+    const a = useArtifactStore.getState().createArtifact({
+      sessionId: "origin",
+      messageId: "m",
+      type: "code",
+      title: "t",
+      content: "x",
+    })
+    mockActiveSessionId = null
+    useArtifactStore.getState().setActiveArtifact(a.id)
+    expect(activeTab("origin")).toBe(a.id)
+  })
+
+  it("points the list's session scope at the bucket it landed in", () => {
+    const a = useArtifactStore.getState().createArtifact({
+      sessionId: "origin",
+      messageId: "m",
+      type: "code",
+      title: "t",
+      content: "x",
+    })
+    mockActiveSessionId = "focused"
+    useArtifactStore.getState().setActiveArtifact(a.id)
+    expect(useArtifactStore.getState().artifactWorkspace.sessionId).toBe("focused")
+  })
+
   it("closes the panel via closePanel and reopens via openPanel", () => {
     useArtifactStore.getState().closePanel()
     expect(useArtifactStore.getState().panelOpen).toBe(false)
@@ -438,6 +540,32 @@ describe("workspace filters", () => {
     const ws = useArtifactStore.getState().artifactWorkspace
     expect(ws.scope).toBe("recent")
     expect(ws.sessionId).toBe("s2")
+  })
+
+  it("resetSessionScopedWorkspaceFilters clears the narrowing but keeps preferences", () => {
+    // One global blob backs every conversation's artifact list, so a query or
+    // type filter typed in one kept narrowing every conversation after it —
+    // usually to nothing, with no visible cause.
+    useArtifactStore.getState().setArtifactWorkspaceScope("recent", "s1")
+    useArtifactStore.getState().setArtifactWorkspaceFilters({
+      searchQuery: "abc",
+      typeFilter: "html",
+      runtimeFilter: "error",
+    })
+    useArtifactStore.setState((state) => ({
+      artifactWorkspace: { ...state.artifactWorkspace, recentArtifactIds: ["a1"] },
+    }))
+
+    useArtifactStore.getState().resetSessionScopedWorkspaceFilters("s2")
+
+    const ws = useArtifactStore.getState().artifactWorkspace
+    expect(ws.searchQuery).toBe("")
+    expect(ws.typeFilter).toBe("all")
+    expect(ws.runtimeFilter).toBe("all")
+    expect(ws.sessionId).toBe("s2")
+    // Durable preferences are untouched.
+    expect(ws.scope).toBe("recent")
+    expect(ws.recentArtifactIds).toEqual(["a1"])
   })
 
   it("setArtifactWorkspaceReturnContext stores context", () => {
@@ -1437,6 +1565,57 @@ describe("persist migration", () => {
       expect(raw.analysisResults).toBeUndefined()
     })
   })
+
+  const onDiskArtifact = (id: string) => ({
+    id,
+    sessionId: "session",
+    messageId: "message",
+    type: "code" as const,
+    title: id,
+    content: `content:${id}`,
+    version: 1,
+    createdAt: "2026-01-01T00:00:00.000Z",
+    updatedAt: "2026-01-01T00:00:00.000Z",
+  })
+
+  it("restores a v5 snapshot's per-conversation parking", () => {
+    const snapshot = JSON.stringify({
+      state: {
+        artifacts: {
+          a1: onDiskArtifact("a1"),
+          a2: onDiskArtifact("a2"),
+        },
+        openArtifactIdsBySession: { s1: ["a1"], s2: ["a2"] },
+        activeArtifactIdBySession: { s1: "a1", s2: "a2" },
+      },
+      version: 5,
+    })
+    localStorage.setItem("cognia-artifacts", snapshot)
+    jest.isolateModules(() => {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const mod = require("./artifact-store") as typeof import("./artifact-store")
+      const state = mod.useArtifactStore.getState()
+      expect(state.activeArtifactIdBySession).toEqual({ s1: "a1", s2: "a2" })
+    })
+  })
+
+  it("seeds an empty parking map for a v4 snapshot that predates it", () => {
+    const snapshot = JSON.stringify({
+      state: {
+        artifacts: { a1: onDiskArtifact("a1") },
+        openArtifactIdsBySession: { s1: ["a1"] },
+      },
+      version: 4,
+    })
+    localStorage.setItem("cognia-artifacts", snapshot)
+    jest.isolateModules(() => {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const mod = require("./artifact-store") as typeof import("./artifact-store")
+      const state = mod.useArtifactStore.getState()
+      expect(state.activeArtifactIdBySession).toEqual({})
+      expect(state.openArtifactIdsBySession).toEqual({ s1: ["a1"] })
+    })
+  })
 })
 
 describe("resolveNextActiveArtifactId fallback paths", () => {
@@ -2164,6 +2343,132 @@ describe("AI-revision review (pending reviews)", () => {
     expect(useArtifactStore.getState().getPendingReview(a.id)).not.toBeNull()
   })
 
+  // The return half of the revision round trip: without a receipt the assistant
+  // never learns what happened to its proposal and can re-propose it verbatim.
+  describe("review receipts", () => {
+    it("records a rejection against the artifact's session", () => {
+      const a = makeArtifact("a\nb\nc\nd")
+      const review = useArtifactStore.getState().proposeArtifactUpdate(a.id, "A\nb\nc\nD")!
+      useArtifactStore.getState().rejectArtifactReview(a.id)
+
+      expect(useArtifactStore.getState().reviewReceipts).toEqual([
+        {
+          sessionId: "s1",
+          artifactId: a.id,
+          title: "Snippet",
+          outcome: "rejected",
+          accepted: 0,
+          total: review.items.length,
+        },
+      ])
+    })
+
+    it("records how many hunks an apply actually kept", () => {
+      const a = makeArtifact("a\nb\nc\nd")
+      const review = useArtifactStore.getState().proposeArtifactUpdate(a.id, "A\nb\nc\nD")!
+      useArtifactStore.getState().setReviewItemStatus(a.id, review.items[0].id, "accepted")
+      useArtifactStore.getState().applyArtifactReview(a.id)
+
+      const [receipt] = useArtifactStore.getState().reviewReceipts
+      expect(receipt.outcome).toBe("applied")
+      expect(receipt.accepted).toBe(1)
+      expect(receipt.total).toBe(review.items.length)
+    })
+
+    it("keeps only the latest verdict per artifact", () => {
+      const a = makeArtifact("a\nb\nc\nd")
+      useArtifactStore.getState().proposeArtifactUpdate(a.id, "A\nb\nc\nD")
+      useArtifactStore.getState().rejectArtifactReview(a.id)
+      useArtifactStore.getState().proposeArtifactUpdate(a.id, "X\nb\nc\nY")
+      useArtifactStore.getState().applyArtifactReview(a.id)
+
+      const receipts = useArtifactStore.getState().reviewReceipts
+      expect(receipts).toHaveLength(1)
+      expect(receipts[0].outcome).toBe("applied")
+    })
+
+    it("peekReviewReceipts reads only the asked-for session and consumes nothing", () => {
+      const a = makeArtifact("a\nb\nc\nd")
+      useArtifactStore.getState().proposeArtifactUpdate(a.id, "A\nb\nc\nD")
+      useArtifactStore.getState().rejectArtifactReview(a.id)
+
+      expect(useArtifactStore.getState().peekReviewReceipts("other")).toEqual([])
+      expect(useArtifactStore.getState().peekReviewReceipts("s1")).toHaveLength(1)
+      // Reading is not consuming — a bailed send must be able to read again.
+      expect(useArtifactStore.getState().peekReviewReceipts("s1")).toHaveLength(1)
+      expect(useArtifactStore.getState().reviewReceipts).toHaveLength(1)
+    })
+
+    it("consumeReviewReceipts drops exactly what rode out, and only once", () => {
+      const a = makeArtifact("a\nb\nc\nd")
+      useArtifactStore.getState().proposeArtifactUpdate(a.id, "A\nb\nc\nD")
+      useArtifactStore.getState().rejectArtifactReview(a.id)
+
+      const sent = useArtifactStore.getState().peekReviewReceipts("s1")
+      useArtifactStore.getState().consumeReviewReceipts(sent)
+      expect(useArtifactStore.getState().reviewReceipts).toEqual([])
+      // A receipt rides exactly one message, never every subsequent one.
+      expect(useArtifactStore.getState().peekReviewReceipts("s1")).toEqual([])
+    })
+
+    it("consumeReviewReceipts is a no-op for an empty list", () => {
+      const a = makeArtifact("a\nb\nc\nd")
+      useArtifactStore.getState().proposeArtifactUpdate(a.id, "A\nb\nc\nD")
+      useArtifactStore.getState().rejectArtifactReview(a.id)
+
+      useArtifactStore.getState().consumeReviewReceipts([])
+      expect(useArtifactStore.getState().reviewReceipts).toHaveLength(1)
+    })
+
+    // The whole reason the read and the clear are split: a send that bails
+    // after the prompt is built must not lose the verdict.
+    it("keeps the receipt when a send is abandoned before it commits", () => {
+      const a = makeArtifact("a\nb\nc\nd")
+      useArtifactStore.getState().proposeArtifactUpdate(a.id, "A\nb\nc\nD")
+      useArtifactStore.getState().rejectArtifactReview(a.id)
+
+      const sent = useArtifactStore.getState().peekReviewReceipts("s1")
+      expect(sent).toHaveLength(1)
+      // …the composer returns early instead of calling `consumeReviewReceipts`.
+      expect(useArtifactStore.getState().peekReviewReceipts("s1")).toEqual(sent)
+    })
+
+    // A newer verdict for the same artifact landing mid-send has not been told
+    // to the assistant, so consuming the older one must leave it standing.
+    it("spares a newer verdict that arrived while the message was in flight", () => {
+      const a = makeArtifact("a\nb\nc\nd")
+      useArtifactStore.getState().proposeArtifactUpdate(a.id, "A\nb\nc\nD")
+      useArtifactStore.getState().rejectArtifactReview(a.id)
+      const sent = useArtifactStore.getState().peekReviewReceipts("s1")
+
+      // Mid-flight: the user re-proposes and applies instead.
+      useArtifactStore.getState().proposeArtifactUpdate(a.id, "X\nb\nc\nY")
+      useArtifactStore.getState().applyArtifactReview(a.id)
+
+      useArtifactStore.getState().consumeReviewReceipts(sent)
+      const left = useArtifactStore.getState().reviewReceipts
+      expect(left).toHaveLength(1)
+      expect(left[0].outcome).toBe("applied")
+    })
+
+    it("stages nothing when the artifact is already gone", () => {
+      const a = makeArtifact("a\nb\nc\nd")
+      useArtifactStore.getState().proposeArtifactUpdate(a.id, "A\nb\nc\nD")
+      useArtifactStore.getState().deleteArtifact(a.id)
+      useArtifactStore.getState().rejectArtifactReview(a.id)
+      // Nothing coherent to tell the assistant about a ghost.
+      expect(useArtifactStore.getState().reviewReceipts).toEqual([])
+    })
+
+    it("drops receipts for a session that gets cleared", () => {
+      const a = makeArtifact("a\nb\nc\nd")
+      useArtifactStore.getState().proposeArtifactUpdate(a.id, "A\nb\nc\nD")
+      useArtifactStore.getState().rejectArtifactReview(a.id)
+      useArtifactStore.getState().clearSessionData("s1")
+      expect(useArtifactStore.getState().reviewReceipts).toEqual([])
+    })
+  })
+
   it("a metadata-only updateArtifact does not mark an open review stale", () => {
     const a = makeArtifact("a\nb\nc\nd")
     useArtifactStore.getState().proposeArtifactUpdate(a.id, "A\nb\nc\nD")
@@ -2205,6 +2510,34 @@ describe("AI-revision review (pending reviews)", () => {
     useArtifactStore.getState().proposeArtifactUpdate(a4.id, "A\nb\nc")
     useArtifactStore.getState().purgeProject("proj_x")
     expect(useArtifactStore.getState().pendingReviews[a4.id]).toBeUndefined()
+  })
+
+  it("persists where each conversation was parked, pruned to surviving artifacts", () => {
+    // Persisting only the tabs restored the strip but dropped every
+    // conversation onto the session workbench after a restart.
+    const kept = makeArtifact("a\nb")
+    useArtifactStore.setState({
+      activeArtifactIdBySession: { s1: kept.id, gone: "evicted-artifact", empty: null },
+    })
+    const persisted = readPartialize()
+    expect(persisted.activeArtifactIdBySession).toEqual({ s1: kept.id })
+  })
+
+  it("drops the conversation-shaped artifact-list filters from the persisted blob", () => {
+    // `searchQuery` + `sessionId` describe whichever conversation was open when
+    // the app closed; restoring them boots the list filtered by a stale query
+    // and a session that may not be open, which just reads as "empty".
+    useArtifactStore.getState().setArtifactWorkspaceFilters({
+      searchQuery: "stale",
+      typeFilter: "code",
+    })
+    useArtifactStore.getState().setArtifactWorkspaceScope("session", "s-gone")
+    const workspace = readPartialize().artifactWorkspace as Record<string, unknown>
+    expect(workspace.searchQuery).toBe("")
+    expect(workspace.sessionId).toBeNull()
+    // Durable preferences still survive.
+    expect(workspace.typeFilter).toBe("code")
+    expect(workspace.scope).toBe("session")
   })
 
   it("excludes pendingReviews from the persisted partition", () => {

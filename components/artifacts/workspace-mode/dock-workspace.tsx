@@ -16,6 +16,7 @@ import {
   useProjectEditorWorkbench,
 } from "@/components/editor/project/project-editor-workbench"
 import { ChangesView } from "@/components/source-control/changes-view"
+import { useChatStore } from "@/stores/chat"
 import { DiffPane } from "@/components/source-control/diff-pane"
 import { useClientLiveQuery } from "@/hooks/data"
 import { useGitActions } from "@/hooks/git/use-git-actions"
@@ -63,15 +64,6 @@ export function DockWorkspace({ activeSessionId, layout = "desktop" }: DockWorks
   const t = useTranslations("artifacts.workspace")
   const request = useArtifactDockLayoutStore((state) => state.workspaceRevealRequest)
   const workspaceContext = useArtifactDockLayoutStore((state) => state.workspaceContext)
-  const clearWorkspaceContext = useArtifactDockLayoutStore((state) => state.clearWorkspaceContext)
-  const previousActiveSessionId = useRef(activeSessionId)
-
-  useEffect(() => {
-    if (previousActiveSessionId.current !== activeSessionId) {
-      previousActiveSessionId.current = activeSessionId
-      if (!request) clearWorkspaceContext()
-    }
-  }, [activeSessionId, request, clearWorkspaceContext])
 
   const session = useClientLiveQuery<ChatSession | undefined>(
     () => (activeSessionId ? getSession(activeSessionId) : Promise.resolve(undefined)),
@@ -90,6 +82,14 @@ export function DockWorkspace({ activeSessionId, layout = "desktop" }: DockWorks
     )
   }
 
+  // A reveal deliberately outranks the session's own root — it can name a
+  // background or split pane's conversation, and the card that fired it belongs
+  // to that conversation. Dropping it once the user navigates elsewhere is
+  // therefore a *session-switch* concern, and it lives in
+  // `session-focus-initializer`: the ref-based guard that used to sit here
+  // could never work, because switching conversations changes the workbench
+  // scope key and remounts this component with the ref already holding the new
+  // id — so conversation B kept rendering conversation A's file.
   const revealContext = request ?? workspaceContext
   if (revealContext) {
     return (
@@ -148,6 +148,7 @@ function WorkspaceEditorBody({
   const t = useTranslations("artifacts.workspace")
   const request = useArtifactDockLayoutStore((state) => state.workspaceRevealRequest)
   const clearRequest = useArtifactDockLayoutStore((state) => state.clearWorkspaceRevealRequest)
+  const addContextSelection = useChatStore((state) => state.addContextSelection)
   const [surface, setSurface] = useState<"file" | "review">("file")
   const [scope, setScope] = useState<"task" | "workspace">("task")
   const [mobileReviewPane, setMobileReviewPane] = useState<"changes" | "diff">("changes")
@@ -335,6 +336,20 @@ function WorkspaceEditorBody({
       staged={selectedStaged}
       actions={gitActions}
       density={layout === "mobile" ? "touch" : "compact"}
+      // The chat could already send the user here (the Edit/Write review
+      // bridge, the workspace-changes card), but nothing could carry a change
+      // back — reading that the assistant got a file wrong meant re-describing
+      // it by hand. Staged as a chip rather than sent outright so the user
+      // still writes the message that goes with it.
+      onSendToChat={({ path, diffText }) =>
+        addContextSelection({
+          kind: "file",
+          relPath: path,
+          title: path.split("/").pop() ?? path,
+          snapshot: diffText,
+          comment: "",
+        })
+      }
     />
   ) : (
     reviewEmpty

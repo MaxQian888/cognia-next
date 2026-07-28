@@ -448,6 +448,47 @@ describe("useArtifactDockLayoutStore", () => {
     })
   })
 
+  describe("clearSessionScopedReveals", () => {
+    it("drops all three reveals so none survives a conversation switch", () => {
+      const { result } = renderHook(() => useArtifactDockLayoutStore())
+      act(() => {
+        result.current.revealWorkspaceFile({
+          sessionId: "session-a",
+          rootPath: "/repo",
+          relPath: "src/a.ts",
+        })
+      })
+      expect(result.current.revealIntent).not.toBeNull()
+      expect(result.current.workspaceRevealRequest).not.toBeNull()
+      expect(result.current.workspaceContext).not.toBeNull()
+
+      act(() => result.current.clearSessionScopedReveals())
+
+      expect(result.current.revealIntent).toBeNull()
+      expect(result.current.workspaceRevealRequest).toBeNull()
+      expect(result.current.workspaceContext).toBeNull()
+    })
+
+    it("leaves the dock's own layout alone", () => {
+      const { result } = renderHook(() => useArtifactDockLayoutStore())
+      act(() => {
+        result.current.setDockSize(48)
+        result.current.setDockProfile("workspace")
+        result.current.setDockCollapsed(false)
+      })
+      act(() => result.current.clearSessionScopedReveals())
+      expect(result.current.dockSize).toBe(48)
+      expect(result.current.dockProfile).toBe("workspace")
+      expect(result.current.dockCollapsed).toBe(false)
+    })
+
+    it("is a no-op reference-wise when nothing is pending", () => {
+      const before = useArtifactDockLayoutStore.getState()
+      act(() => before.clearSessionScopedReveals())
+      expect(useArtifactDockLayoutStore.getState()).toBe(before)
+    })
+  })
+
   describe("resetLayout", () => {
     it("returns to defaults and bumps layoutVersion", () => {
       const { result } = renderHook(() => useArtifactDockLayoutStore())

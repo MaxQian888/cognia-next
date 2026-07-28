@@ -219,14 +219,24 @@ describe("ArtifactWorkspaceDock", () => {
     expect(screen.queryByTestId("artifact-workspace-dock")).not.toBeInTheDocument()
   })
 
-  it("tablet: also uses the Sheet fallback", () => {
+  // Intentional, not an oversight in the breakpoint table: at the 24% narrow
+  // preset an 820px tablet gives the dock ~197px, and the workspace profile's
+  // 480px floor would claim 59% of the screen. The Sheet hosts the same
+  // workbench over the same resource, so this is a different shape rather than
+  // a reduced one — asserted here so a future "tablets are wide enough now"
+  // change has to be deliberate.
+  it("tablet: takes the Sheet, and deliberately not the side-by-side dock", () => {
     useBreakpointMock.mockReturnValue("tablet")
     render(
       <ArtifactWorkspaceDock>
         <div data-testid="chat" />
       </ArtifactWorkspaceDock>
     )
+    expect(screen.getByTestId("chat")).toBeInTheDocument()
     expect(screen.getByTestId("sheet-panel")).toBeInTheDocument()
+    // The resizable two-column host must be absent, not merely collapsed.
+    expect(screen.queryByTestId("artifact-workspace-dock")).not.toBeInTheDocument()
+    expect(screen.getByTestId("artifact-workspace-dock-mobile")).toBeInTheDocument()
   })
 
   it("raises the single Sheet when a Workspace reveal arrives on mobile", async () => {

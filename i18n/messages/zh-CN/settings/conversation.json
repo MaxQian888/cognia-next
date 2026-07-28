@@ -9,13 +9,13 @@
       "hint": "回复流式输出时自动滚动到最新内容。",
       "label": "流式输出时自动滚动"
     },
-    "compactLayout": {
-      "hint": "使用更紧凑的输入区布局，为会话内容留出更多空间。",
-      "label": "使用紧凑输入区布局"
-    },
     "clearAfterSend": {
       "hint": "消息发送后清空输入框。",
       "label": "发送后清空输入框"
+    },
+    "compactLayout": {
+      "hint": "使用更紧凑的输入区布局，为会话内容留出更多空间。",
+      "label": "使用紧凑输入区布局"
     },
     "description": "控制消息输入框的输入、发送与草稿行为。",
     "inputHistory": {
@@ -98,10 +98,17 @@
       "label": "使用紧凑会话行"
     },
     "description": "调整聊天侧边栏列出和搜索会话的方式。",
-    "groupByDate": {
-      "description": "将会话分组为今天 / 昨天 / 更早等时间段。",
-      "heading": "按日期分组",
-      "label": "按日期分组会话"
+    "groupBy": {
+      "description": "选择会话列表的主分组维度。按工作区分组会列出所有工作区的会话；其他模式只显示当前工作区。",
+      "heading": "会话分组方式",
+      "label": "会话分组",
+      "options": {
+        "agent": "角色",
+        "date": "日期",
+        "none": "不分组",
+        "team": "私信 / 团队",
+        "workspace": "工作区"
+      }
     },
     "preview": {
       "description": "在每个会话下方显示一行最新消息预览。",

@@ -64,7 +64,7 @@ describe("SelectionCommentButton", () => {
     fireEvent.change(textarea, { target: { value: "make it const" } })
     fireEvent.click(screen.getByText("addToChat"))
 
-    const selections = useChatStore.getState().artifactSelections
+    const selections = useChatStore.getState().contextSelections
     expect(selections).toHaveLength(1)
     expect(selections[0]).toMatchObject({
       artifactId: "art1",
@@ -85,6 +85,6 @@ describe("SelectionCommentButton", () => {
     fireEvent.mouseDown(trigger)
     fireEvent.click(trigger)
     expect(screen.getByText("addToChat").closest("button")!).toBeDisabled()
-    expect(useChatStore.getState().artifactSelections).toHaveLength(0)
+    expect(useChatStore.getState().contextSelections).toHaveLength(0)
   })
 })

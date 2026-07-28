@@ -60,7 +60,7 @@ export function ShareView() {
   }, [state])
 
   return (
-    <main className="flex min-h-[100dvh] flex-col bg-background text-foreground">
+    <div className="flex min-h-[100dvh] flex-col bg-background text-foreground">
       <div
         aria-hidden
         className="pointer-events-none absolute inset-x-0 top-0 h-64 bg-gradient-to-b from-primary/10 to-transparent"
@@ -73,21 +73,21 @@ export function ShareView() {
           {t("brand")}
         </Link>
       </header>
-      <div
+      <main
         className={cn(
           "relative flex flex-1 justify-center p-4 sm:p-8",
           state.status === "ready" ? "items-start" : "items-center"
         )}
       >
         <Body state={state} onState={setState} />
-      </div>
+      </main>
       <footer className="relative flex flex-col items-center gap-1 border-t border-border px-4 py-3 text-center text-xs text-muted-foreground">
         <span>{t("footer")}</span>
         <Link href="/" className="font-medium text-primary hover:underline">
           {t("createYourOwn")}
         </Link>
       </footer>
-    </main>
+    </div>
   )
 }
 

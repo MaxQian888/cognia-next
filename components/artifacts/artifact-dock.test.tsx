@@ -90,9 +90,23 @@ jest.mock("./artifact-list", () => ({
   },
 }))
 
+// `sessions` is the per-session message slice map, always initialised in the
+// real store — the session surface's metadata panel reads a message count off it.
 jest.mock("@/stores/chat", () => ({
-  useChatStore: (selector: (s: { activeSessionId: string | null }) => unknown) =>
-    selector({ activeSessionId: "sess-1" }),
+  useChatStore: (
+    selector: (s: {
+      activeSessionId: string | null
+      sessions: Record<string, { messages: unknown[] }>
+    }) => unknown
+  ) => selector({ activeSessionId: "sess-1", sessions: { "sess-1": { messages: [] } } }),
+}))
+
+// The conversation record behind the metadata panel. Absent by default; tests
+// that assert on the panel's fields set it.
+let mockSessionRecord: unknown = null
+jest.mock("@/stores/chat/session-store", () => ({
+  useSessionStore: (selector: (s: { sessions: unknown[] }) => unknown) =>
+    selector({ sessions: mockSessionRecord ? [mockSessionRecord] : [] }),
 }))
 
 import { ArtifactContextWorkbench, ArtifactDock, SessionContextWorkbench } from "./artifact-dock"
@@ -134,6 +148,7 @@ beforeEach(() => {
   localStorage.clear()
   workspaceAvailable = true
   artifactListProps.length = 0
+  mockSessionRecord = null
   act(() => {
     useArtifactDockLayoutStore.getState().resetLayout()
     useArtifactStore.setState({
@@ -364,6 +379,61 @@ describe("ArtifactDock — converged workbench shell", () => {
     fireEvent.click(screen.getByRole("button", { name: "contextWorkbench.actions.collapse" }))
 
     expect(onOpenChange).toHaveBeenCalledWith(false)
+  })
+
+  // The session surface carried three panels while the artifact and project
+  // surfaces carried eight, leaving the `inspect` and `comments` rail slots
+  // empty on the view users see most — every conversation that has not opened
+  // an artifact yet.
+  describe("session surface — inspect and comments", () => {
+    const SESSION_SCOPE = "test-workbench::session:sess-1"
+
+    it("shows the conversation's own metadata under inspect", () => {
+      mockSessionRecord = {
+        id: "sess-1",
+        title: "Nightly sync",
+        model: "claude-opus-5",
+        providerOverride: "anthropic",
+        workingDir: "/repo",
+        createdAt: 0,
+        updatedAt: 0,
+      }
+      render(<SessionContextWorkbench />)
+      act(() => {
+        useContextWorkbenchStore.getState().navigatePanel(SESSION_SCOPE, "metadata", "narrow")
+      })
+
+      expect(screen.getByText("claude-opus-5")).toBeInTheDocument()
+      expect(screen.getByText("anthropic")).toBeInTheDocument()
+      expect(screen.getByText("/repo")).toBeInTheDocument()
+      expect(screen.getByText("sess-1")).toBeInTheDocument()
+    })
+
+    it("comments on the conversation itself, not on an artifact", () => {
+      mockSessionRecord = {
+        id: "sess-1",
+        title: "Nightly sync",
+        createdAt: 0,
+        updatedAt: 7,
+      }
+      render(<SessionContextWorkbench />)
+      act(() => {
+        useContextWorkbenchStore.getState().navigatePanel(SESSION_SCOPE, "comments", "narrow")
+      })
+
+      // Revision tracks the conversation's own `updatedAt`, so a comment's
+      // anchor goes stale when the conversation moves on.
+      expect(screen.getByTestId("comments-panel")).toHaveAttribute("data-revision", "7")
+    })
+
+    it("renders neither panel with no conversation record to describe", () => {
+      render(<SessionContextWorkbench />)
+      act(() => {
+        useContextWorkbenchStore.getState().navigatePanel(SESSION_SCOPE, "metadata", "narrow")
+      })
+      // `session` is null here; the panel must not invent fields for it.
+      expect(screen.queryByText("claude-opus-5")).not.toBeInTheDocument()
+    })
   })
 
   it("keeps the artifact tabs on the session surface when no artifact is active", () => {

@@ -125,6 +125,25 @@ describe("ConversationTimeline", () => {
     expect(screen.queryByLabelText("collapse")).not.toBeInTheDocument()
   })
 
+  // The collapsed rail is 16px and lives in the scrollbar gutter, so it has
+  // nothing to displace and stays overlaid.
+  it("overlays the collapsed rail, gated on the pane container query", () => {
+    renderTimeline()
+    const root = screen.getByTestId("conversation-timeline")
+    expect(root).toHaveClass("absolute", "@4xl/message-list:flex")
+    expect(root).not.toHaveClass("shrink-0")
+  })
+
+  // The expanded panel is 256px. Overlaid, it simply covered the message text
+  // in any pane under ~1344px — which is every Inbox detail pane.
+  it("puts the expanded panel in flow so the reading column shrinks around it", () => {
+    mockSettings = { conversationTimeline: { expanded: true } }
+    renderTimeline()
+    const root = screen.getByTestId("conversation-timeline")
+    expect(root).toHaveClass("relative", "shrink-0", "@4xl/message-list:flex")
+    expect(root).not.toHaveClass("absolute")
+  })
+
   it("keeps the collapsed rail DOM bounded for a very long conversation", () => {
     renderTimeline({
       messages: Array.from({ length: 2_000 }, (_, index) =>

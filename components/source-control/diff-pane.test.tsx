@@ -152,6 +152,70 @@ describe("DiffPane", () => {
     expect(await screen.findByTestId("ai-explain-trigger")).toBeInTheDocument()
   })
 
+  // The chat could route a user here (the Edit/Write review bridge) but nothing
+  // could carry a change back. The control is host-supplied so the standalone
+  // source-control route, which has no conversation, does not grow a dead button.
+  describe("handing a diff to the chat", () => {
+    it("is absent when the host supplies no sink", async () => {
+      render(<DiffPane rootDir="/r" path="a.ts" staged={false} actions={makeActions()} />)
+      await screen.findByTestId("diff-viewer-stub")
+      expect(screen.queryByTestId("diff-send-to-chat")).toBeNull()
+    })
+
+    it("hands over the path and the concatenated hunk patches", async () => {
+      const onSendToChat = jest.fn()
+      render(
+        <DiffPane
+          rootDir="/r"
+          path="src/a.ts"
+          staged={false}
+          actions={makeActions()}
+          onSendToChat={onSendToChat}
+        />
+      )
+      fireEvent.click(await screen.findByTestId("diff-send-to-chat"))
+      expect(onSendToChat).toHaveBeenCalledWith({ path: "src/a.ts", diffText: "PATCH" })
+    })
+
+    // Independent of `explainAI.enabled` — hanging it off that toggle would
+    // hide the route to chat behind an unrelated setting.
+    it("appears with the Explain setting off", async () => {
+      mockSettings = { gitSettings: { explainAI: { enabled: false } } }
+      render(
+        <DiffPane
+          rootDir="/r"
+          path="a.ts"
+          staged={false}
+          actions={makeActions()}
+          onSendToChat={jest.fn()}
+        />
+      )
+      expect(await screen.findByTestId("diff-send-to-chat")).toBeInTheDocument()
+      expect(screen.queryByTestId("ai-explain-trigger")).toBeNull()
+    })
+
+    it("stays hidden for a binary diff, which has no patch text", async () => {
+      gitDiffFileMock.mockResolvedValue({
+        path: "logo.png",
+        oldContent: "",
+        newContent: "",
+        hunks: [],
+        isBinary: true,
+      })
+      render(
+        <DiffPane
+          rootDir="/r"
+          path="logo.png"
+          staged={false}
+          actions={makeActions()}
+          onSendToChat={jest.fn()}
+        />
+      )
+      await screen.findByTestId("diff-viewer-stub")
+      expect(screen.queryByTestId("diff-send-to-chat")).toBeNull()
+    })
+  })
+
   it("serves a cached diff without re-fetching", async () => {
     const key = "w:a.ts"
     act(() =>

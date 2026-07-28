@@ -97,9 +97,13 @@ jest.mock("@/hooks/use-platform", () => ({
   usePlatform: jest.fn(() => "desktop"),
 }))
 
-let mockWideTimelineViewport = true
-jest.mock("@/hooks/ui", () => ({
-  useMediaQuery: () => mockWideTimelineViewport,
+// The timeline gate measures the PANE, not the viewport. jsdom reports every
+// `getBoundingClientRect().width` as 0 and `jest.setup.ts` installs a no-op
+// ResizeObserver, so the real hook would pin `paneWidth` at 0 forever and no
+// test could ever mount the minimap.
+let mockPaneWidth = 1200
+jest.mock("@/hooks/use-element-width", () => ({
+  useElementWidth: () => mockPaneWidth,
 }))
 
 jest.mock("@/components/interactions/long-press", () => ({
@@ -166,6 +170,7 @@ import { render, screen, fireEvent, act } from "@testing-library/react"
 import type { ReactNode } from "react"
 import type { UIMessage } from "ai"
 import { MessageList, TIMELINE_THRESHOLD, VIRTUALIZE_THRESHOLD } from "./message-list"
+import { TIMELINE_MIN_PANE_PX } from "./minimap/timeline-visibility"
 import { useAppShortcut } from "@/hooks/shortcuts/use-app-shortcut"
 import { getAppShortcutDescriptor } from "@/lib/shortcuts/app-catalog"
 import { DataAdapterProvider } from "@/lib/data-hooks/context"
@@ -1225,7 +1230,7 @@ describe("MessageList — timeline mount gating", () => {
   beforeEach(() => {
     useSettingsStore.setState({ settings: {} as never })
     ;(usePlatform as jest.Mock).mockReturnValue("desktop")
-    mockWideTimelineViewport = true
+    mockPaneWidth = 1200
     timelineMock().mockClear()
   })
 
@@ -1236,7 +1241,7 @@ describe("MessageList — timeline mount gating", () => {
       useSettingsStore.setState({ settings: {} as never })
     })
     ;(usePlatform as jest.Mock).mockReturnValue("desktop")
-    mockWideTimelineViewport = true
+    mockPaneWidth = 1200
   })
 
   it("stays unmounted at or below TIMELINE_THRESHOLD", () => {
@@ -1255,8 +1260,22 @@ describe("MessageList — timeline mount gating", () => {
     expect(timelineMock()).not.toHaveBeenCalled()
   })
 
-  it("stays unmounted below the timeline's lg viewport", () => {
-    mockWideTimelineViewport = false
+  // The Inbox detail pane is 56% of the window (40% at its floor), so a wide
+  // window is no evidence the pane can host a 256px panel.
+  it("stays unmounted when the pane is narrower than TIMELINE_MIN_PANE_PX", () => {
+    mockPaneWidth = TIMELINE_MIN_PANE_PX - 1
+    renderWith(TIMELINE_THRESHOLD + 20)
+    expect(timelineMock()).not.toHaveBeenCalled()
+  })
+
+  it("mounts once the pane reaches TIMELINE_MIN_PANE_PX", () => {
+    mockPaneWidth = TIMELINE_MIN_PANE_PX
+    renderWith(TIMELINE_THRESHOLD + 20)
+    expect(timelineMock()).toHaveBeenCalled()
+  })
+
+  it("stays unmounted while the pane is still unmeasured", () => {
+    mockPaneWidth = 0
     renderWith(TIMELINE_THRESHOLD + 20)
     expect(timelineMock()).not.toHaveBeenCalled()
   })

@@ -103,6 +103,8 @@ import { Composer } from "./composer"
 import { DataAdapterProvider } from "@/lib/data-hooks/context"
 import type { DataAdapter } from "@/lib/data-hooks/types"
 import { useChatStore } from "@/stores/chat"
+import { useComposerIntentStore } from "@/stores/chat/composer-intent-store"
+import { useArtifactStore } from "@/stores/artifact/artifact-store"
 import { useSettingsStore } from "@/stores/settings"
 import { useProjectStore } from "@/stores/project/project-store"
 import { usePlatform } from "@/hooks/use-platform"
@@ -150,6 +152,7 @@ const mkSession = (overrides: Partial<ChatSession> = {}): ChatSession => ({
 
 beforeEach(() => {
   useChatStore.getState().clear()
+  useComposerIntentStore.setState({ pendingBySession: {} })
   useSettingsStore.setState({ settings: undefined as never })
   useProjectStore.setState({ projects: [], activeProjectId: null, loaded: false })
   mockUsePlatform.mockReturnValue("web")
@@ -159,6 +162,37 @@ beforeEach(() => {
 })
 
 describe("Composer — data-hooks integration", () => {
+  it("consumes a selection intent after draft hydration without overwriting typed text", async () => {
+    const Wrapper = withAdapter(makeAdapter())
+    render(
+      <Wrapper>
+        <Composer
+          session={mkSession()}
+          onStartNewSession={async () => undefined}
+          onOpenSettings={() => undefined}
+          onSend={async () => undefined}
+          onStop={async () => undefined}
+        />
+      </Wrapper>
+    )
+    const textarea = screen.getByRole("textbox")
+    fireEvent.change(textarea, { target: { value: "Existing draft" } })
+
+    await act(async () => {
+      await Promise.resolve()
+      useComposerIntentStore.getState().stage("ses_42", {
+        candidateId: "candidate-1",
+        prompt: "Please explain this selection.",
+      })
+    })
+
+    await waitFor(() =>
+      expect(textarea).toHaveValue("Existing draft\n\nPlease explain this selection.")
+    )
+    expect(textarea).toHaveFocus()
+    expect(useComposerIntentStore.getState().pendingBySession["ses_42"]).toBeUndefined()
+  })
+
   it("renders without crashing when DataAdapterProvider is mounted", () => {
     const Wrapper = withAdapter(makeAdapter())
     render(
@@ -516,6 +550,19 @@ describe("Composer — wallpaper-aware tonality", () => {
     const column = document.querySelector('[data-slot="composer-reading-column"]')
     expect(column).toHaveClass("mx-auto", "max-w-[52rem]")
   })
+
+  // The composer box and the message text must share one content edge. That
+  // only holds while BOTH cap first and pad second — `message-list.tsx` pads
+  // its rows inside the capped reading column, so the padding has to live on
+  // this element and not on the gradient bar around it.
+  it("pads inside the width cap so the content edge matches the message rows", () => {
+    renderComposer()
+    const column = document.querySelector('[data-slot="composer-reading-column"]')
+    expect(column).toHaveClass("px-3", "sm:px-5")
+    const bar = document.querySelector("[class*='@container/composer']")
+    expect(bar).not.toHaveClass("px-3")
+    expect(bar).not.toHaveClass("sm:px-5")
+  })
 })
 
 describe("Composer — large-paste folding", () => {
@@ -770,5 +817,78 @@ describe("Composer — auto-resize is IME-safe", () => {
     // in jsdom ⇒ "0px"), proving the resize was only deferred, not dropped.
     fireEvent.compositionEnd(ta)
     expect(ta.style.height).toBe("0px")
+  })
+})
+
+// A review verdict ("I rejected your proposal" / "I kept 2 of your 5 hunks")
+// rides along on the next message so the assistant stops re-proposing what the
+// user turned down. It is read while the prompt is built but must only be
+// forgotten once the message actually commits.
+describe("Composer — review receipts survive a send that never commits", () => {
+  function seedRejectedReceipt() {
+    const artifact = useArtifactStore.getState().createArtifact({
+      sessionId: "ses_42",
+      messageId: "msg_1",
+      title: "Draft spec",
+      type: "document",
+      content: "a\nb\nc\nd",
+    })
+    useArtifactStore.getState().proposeArtifactUpdate(artifact.id, "A\nb\nc\nD")
+    useArtifactStore.getState().rejectArtifactReview(artifact.id)
+    expect(useArtifactStore.getState().peekReviewReceipts("ses_42")).toHaveLength(1)
+  }
+
+  function renderComposer(onSend: (c: unknown) => Promise<void>) {
+    const Wrapper = withAdapter(makeAdapter())
+    render(
+      <Wrapper>
+        <Composer
+          session={mkSession()}
+          onStartNewSession={async () => undefined}
+          onOpenSettings={() => undefined}
+          onSend={onSend}
+          onStop={async () => undefined}
+        />
+      </Wrapper>
+    )
+    return document.querySelector("textarea") as HTMLTextAreaElement
+  }
+
+  async function send(ta: HTMLTextAreaElement, text: string) {
+    fireEvent.change(ta, { target: { value: text } })
+    await act(async () => {
+      fireEvent.click(document.querySelector('button[aria-label="Send"]') as HTMLButtonElement)
+      await Promise.resolve()
+    })
+  }
+
+  afterEach(() => {
+    useArtifactStore.setState({ reviewReceipts: [] })
+  })
+
+  it("tells the assistant about the verdict and then forgets it", async () => {
+    seedRejectedReceipt()
+    const onSend = jest.fn(async (_c: unknown) => undefined)
+    await send(renderComposer(onSend), "try again")
+
+    await waitFor(() => expect(onSend).toHaveBeenCalledTimes(1))
+    expect(String(onSend.mock.calls[0][0])).toContain("Draft spec")
+    // Committed → the receipt must not ride the next message too.
+    await waitFor(() =>
+      expect(useArtifactStore.getState().peekReviewReceipts("ses_42")).toEqual([])
+    )
+  })
+
+  it("keeps the verdict when onSend throws", async () => {
+    seedRejectedReceipt()
+    const onSend = jest.fn(async (_c: unknown) => {
+      throw new Error("transport down")
+    })
+    await send(renderComposer(onSend), "try again")
+
+    await waitFor(() => expect(onSend).toHaveBeenCalledTimes(1))
+    // The message never landed, so the assistant was never told — the verdict
+    // has to still be there for the retry.
+    expect(useArtifactStore.getState().peekReviewReceipts("ses_42")).toHaveLength(1)
   })
 })

@@ -9,8 +9,9 @@
  */
 
 import { useTranslations } from "next-intl"
-import { Loader2, X, Columns2, Plus, AlertCircle, Clock } from "lucide-react"
+import { Loader2, X, Columns2, Plus, AlertCircle, Clock, FileDiff } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { useSessionArtifactSummary } from "@/hooks/artifacts/use-session-artifacts"
 import { useSessionStatus } from "@/stores/chat"
 import type { ChatStatus } from "@/stores/chat/chat-store"
 
@@ -27,6 +28,45 @@ interface ChatTabStripProps {
   onClose: (id: string) => void
   onToggleSplit: (id: string) => void
   onNew: () => void
+}
+
+/**
+ * What this conversation is holding in the right rail.
+ *
+ * The rail follows `activeSessionId` alone, so in split view everything the
+ * other pane produced was invisible: no artifact tab, no dock expansion, and
+ * `useDockAttentionSignal` ignores background sessions on purpose (an artifact
+ * landing elsewhere must not throw the dock over the conversation you are
+ * reading). Selecting the tab is already the way to bring the rail across —
+ * this only makes it visible that there is a reason to.
+ *
+ * Suppressed on the active tab, whose artifacts are the ones already on screen.
+ */
+function TabArtifactBadge({ sessionId, active }: { sessionId: string; active: boolean }) {
+  const t = useTranslations("chat.concurrent")
+  const { openCount, pendingReviewCount } = useSessionArtifactSummary(sessionId)
+  if (active || openCount === 0) return null
+  // A pending proposal is a request for the user's decision, so it outranks a
+  // plain count and takes the accent colour.
+  const pending = pendingReviewCount > 0
+  return (
+    <span
+      data-testid={`chat-tab-artifacts-${sessionId}`}
+      data-pending-review={pending || undefined}
+      aria-label={
+        pending
+          ? t("artifactsPendingReview", { count: openCount, pending: pendingReviewCount })
+          : t("artifactsOpen", { count: openCount })
+      }
+      className={cn(
+        "flex shrink-0 items-center gap-0.5 rounded-sm px-1 text-[9px] tabular-nums",
+        pending ? "bg-primary/15 text-primary" : "bg-muted text-muted-foreground"
+      )}
+    >
+      <FileDiff className="size-2.5" aria-hidden />
+      {openCount}
+    </span>
+  )
 }
 
 /** Live per-session status indicator for a tab. */
@@ -94,6 +134,7 @@ export function ChatTabStrip({
           >
             <TabStatusDot sessionId={tab.id} />
             <span className="truncate">{tab.title || t("untitled")}</span>
+            <TabArtifactBadge sessionId={tab.id} active={isActive} />
             <button
               type="button"
               aria-label={t("closeTab", { title: tab.title || t("untitled") })}

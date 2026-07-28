@@ -13,6 +13,7 @@
 import { ZapIcon } from "lucide-react"
 import { useTranslations } from "next-intl"
 import { Button } from "@/components/ui/button"
+import { PluginSurface } from "@/components/plugins/plugin-surface"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -21,10 +22,12 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { usePluginQuickActions } from "@/hooks/plugins/use-plugin-quick-actions"
 import { runQuickAction } from "@/lib/plugin/registries/quick-action-registry"
+import { resolvePluginLabel } from "@/lib/plugin/i18n/plugin-label"
 import { loggers } from "@cognia/logging"
 
 export function PluginQuickActionsMenu({ disabled }: { disabled?: boolean }) {
   const t = useTranslations("chat.composer.toolbar")
+  const pluginT = useTranslations()
   const actions = usePluginQuickActions("composer")
   if (actions.length === 0) return null
 
@@ -55,12 +58,27 @@ export function PluginQuickActionsMenu({ disabled }: { disabled?: boolean }) {
               })
             }}
           >
-            <div className="flex min-w-0 flex-col">
-              <span className="truncate">{action.title}</span>
-              {action.description ? (
-                <span className="truncate text-xs text-muted-foreground">{action.description}</span>
-              ) : null}
-            </div>
+            <PluginSurface
+              pluginId={action.pluginId}
+              surfaceId={`quick-action:${action.fullId}`}
+              formFactor="icon"
+            >
+              <div className="flex min-w-0 flex-col">
+                <span className="truncate">
+                  {resolvePluginLabel(
+                    pluginT as never,
+                    action.pluginId,
+                    action.labelKey,
+                    action.title
+                  )}
+                </span>
+                {action.description ? (
+                  <span className="truncate text-xs text-muted-foreground">
+                    {action.description}
+                  </span>
+                ) : null}
+              </div>
+            </PluginSurface>
           </DropdownMenuItem>
         ))}
       </DropdownMenuContent>

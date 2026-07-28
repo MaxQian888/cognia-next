@@ -13,6 +13,9 @@ import {
 } from "@/lib/claude/adapter"
 import { toast } from "sonner"
 import type { AttachmentManifestEntry } from "@/lib/chat/attachments/dispatch"
+import { createDiagnostic } from "@cognia/diagnostics"
+import { toDiagnostic } from "@/lib/diagnostics/to-diagnostic"
+import { dispatchDiagnostic } from "@/lib/diagnostics/bus"
 import { flushProjectEditorEdits } from "@/lib/files/project-editor-bridge"
 import { getGoalRuntime } from "@/lib/goal/runtime"
 import { handleTurnComplete } from "@/lib/goal/turn-driver"
@@ -259,11 +262,16 @@ export { shouldGenerateTitle }
  *
  * The sidecar does NOT emit a per-session `session_ended` on crash (only a
  * single global `sidecar_exited`), so without this the foreground session
- * freezes in `streaming` forever. A readable English sentinel: background
- * surfaces (trigger badge) render it raw like every other sidecar error, while
- * the focused chat view maps it to a localized string (see `chat-view.tsx`).
+ * freezes in `streaming` forever.
+ *
+ * This string is now ONLY a telemetry/log artifact for the agent-trace span.
+ * It used to be written into the session error as a sentinel and then
+ * string-compared back in `chat-view.tsx` to pick a localized message — a
+ * round-trip that existed purely because the store had no way to carry a code.
+ * The UI now reads the `sidecarExited` diagnostic directly, so this is
+ * deliberately module-private: re-exporting it invites the sentinel back.
  */
-export const SIDECAR_EXITED_ERROR =
+const SIDECAR_EXITED_TRACE_MESSAGE =
   "The assistant process stopped unexpectedly. Your last turn was interrupted — retry to continue."
 
 /**
@@ -951,7 +959,12 @@ export function useClaudeChat() {
         // and any other resolver failure surface as the chat error instead
         // of an unhandled rejection.
         const error = err instanceof Error ? err : new Error(String(err))
-        useChatStore.getState().setSessionError(sessionId, error.message)
+        useChatStore
+          .getState()
+          .setSessionDiagnostic(
+            sessionId,
+            toDiagnostic(error, { source: "chat", meta: { sessionId } })
+          )
         return
       }
 
@@ -1022,9 +1035,14 @@ export function useClaudeChat() {
         {} as never
       )
       if (promptDecision.action === "block") {
-        store
-          .getState()
-          .setSessionError(sessionId, promptDecision.reason ?? "A plugin blocked this prompt.")
+        store.getState().setSessionDiagnostic(
+          sessionId,
+          createDiagnostic("promptBlockedByPlugin", {
+            source: "plugin",
+            message: promptDecision.reason ?? "",
+            meta: { sessionId },
+          })
+        )
         return
       }
       if (promptDecision.action === "modify") {
@@ -1268,7 +1286,13 @@ export function useClaudeChat() {
           : delegation!.targetAgentId
         if (!extAgentId) {
           store.getState().replaceSessionMessages(sessionId, previousMessages)
-          store.getState().setSessionError(sessionId, "No external agent selected")
+          store.getState().setSessionDiagnostic(
+            sessionId,
+            createDiagnostic("externalAgentNotSelected", {
+              source: "external-agent",
+              meta: { sessionId },
+            })
+          )
           store.getState().setSessionStatus(sessionId, "idle")
           return
         }
@@ -1303,6 +1327,17 @@ export function useClaudeChat() {
               skipUserAppend: true,
               bypassDelegation: true,
             })
+            // Disclose the substitution. The user routed this turn to a specific
+            // external agent; it ran on the built-in one instead, which changes
+            // cost, tooling and output. Silently succeeding looked identical to
+            // the agent having worked.
+            dispatchDiagnostic(
+              createDiagnostic("fallbackToBuiltin", {
+                source: "external-agent",
+                message,
+                meta: { sessionId, agentId: extAgentId },
+              })
+            )
             return
           }
           const durationMs = finishBehaviorTurn(sessionId)
@@ -1316,7 +1351,13 @@ export function useClaudeChat() {
             })
           }
           store.getState().replaceSessionMessages(sessionId, previousMessages)
-          store.getState().setSessionError(sessionId, message)
+          store.getState().setSessionDiagnostic(
+            sessionId,
+            toDiagnostic(error ?? message, {
+              source: "external-agent",
+              meta: { sessionId, agentId: extAgentId },
+            })
+          )
           store.getState().setSessionStatus(sessionId, "idle")
           if (error) dispatchPluginChatError(sessionId, error)
         }
@@ -1533,7 +1574,13 @@ export function useClaudeChat() {
         }
       } catch (err) {
         const error = err instanceof Error ? err : new Error(String(err))
-        store.getState().setSessionError(sessionId, error.message)
+        store.getState().setSessionDiagnostic(
+          sessionId,
+          toDiagnostic(error, {
+            source: "chat",
+            meta: { sessionId, ...(sendOptions.spanId ? { spanId: sendOptions.spanId } : {}) },
+          })
+        )
         // Notify plugins; fire-and-forget — host already surfaced the error.
         dispatchPluginChatError(sessionId, error)
         // Local pre-sidecar failure — close the agent-trace span we just
@@ -2183,13 +2230,16 @@ async function handleEvent(
           registry.release(sid)
           messagesMirrorRef.current.delete(sid)
         }
-        chat.setSessionError(sid, SIDECAR_EXITED_ERROR)
+        chat.setSessionDiagnostic(
+          sid,
+          createDiagnostic("sidecarExited", { source: "chat", meta: { sessionId: sid } })
+        )
         const cached = chat.lastSendBySession[sid] as
           { options?: { spanId?: string; provider?: string } } | undefined
         if (cached?.options?.spanId) {
           endSpan(cached.options.spanId, {
             errorType: "turn_error",
-            errorMessage: SIDECAR_EXITED_ERROR,
+            errorMessage: SIDECAR_EXITED_TRACE_MESSAGE,
           })
         }
         const durationMs = finishBehaviorTurn(sid)
@@ -2274,7 +2324,20 @@ async function handleEvent(
             // Permanent failure — commit + persist the final partial and drop
             // the mirror. (A retry re-issues `send`, which clears it itself.)
             sealSession(evt.sessionId)
-            useChatStore.getState().setSessionError(evt.sessionId, evt.error)
+            useChatStore.getState().setSessionDiagnostic(
+              evt.sessionId,
+              toDiagnostic(evt.error, {
+                source: "provider",
+                meta: {
+                  sessionId: evt.sessionId,
+                  ...(typeof evt.httpStatus === "number" ? { httpStatus: evt.httpStatus } : {}),
+                  ...(typeof evt.retryAfterMs === "number"
+                    ? { retryAfterMs: evt.retryAfterMs }
+                    : {}),
+                  ...(failedProvider ? { providerId: failedProvider } : {}),
+                },
+              })
+            )
             // End the agent-trace span on permanent failure (no retry). The
             // success path closes the span via the `sdkResult` branch in
             // case "event" instead.

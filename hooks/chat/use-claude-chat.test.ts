@@ -228,6 +228,7 @@ interface SliceLike {
   messages: unknown[]
   status: string
   errorMessage: string | null
+  errorDiagnostic: { message?: string } | null
   pendingApprovals: unknown[]
   activeBranchByGroup: Record<string, string>
 }
@@ -235,6 +236,7 @@ const makeSlice = (): SliceLike => ({
   messages: [],
   status: "idle",
   errorMessage: null,
+  errorDiagnostic: null,
   pendingApprovals: [],
   activeBranchByGroup: {},
 })
@@ -251,6 +253,7 @@ interface ChatStateLike {
   messages: unknown[]
   status: string
   errorMessage: string | null
+  errorDiagnostic: { message?: string } | null
   pendingApprovals: unknown[]
   activeBranchByGroup: Record<string, string>
   pendingCommandOverrides: unknown
@@ -266,6 +269,7 @@ interface ChatStateLike {
   replaceSessionMessages: jest.Mock
   setSessionStatus: jest.Mock
   setSessionError: jest.Mock
+  setSessionDiagnostic: jest.Mock
   setSessionActiveBranch: jest.Mock
   pushApproval: jest.Mock
   clearApproval: jest.Mock
@@ -304,6 +308,7 @@ const chatState: ChatStateLike = {
         messages: chatState.messages,
         status: chatState.status,
         errorMessage: chatState.errorMessage,
+        errorDiagnostic: chatState.errorDiagnostic,
         pendingApprovals: chatState.pendingApprovals,
         activeBranchByGroup: chatState.activeBranchByGroup,
       }
@@ -313,6 +318,7 @@ const chatState: ChatStateLike = {
   messages: [],
   status: "idle",
   errorMessage: null,
+  errorDiagnostic: null,
   pendingApprovals: [],
   activeBranchByGroup: {},
   pendingCommandOverrides: null,
@@ -337,7 +343,16 @@ const chatState: ChatStateLike = {
   replaceSessionMessages: jest.fn((id: string, m: unknown[]) => sliceWrite(id, { messages: m })),
   setSessionStatus: jest.fn((id: string, s: string) => sliceWrite(id, { status: s })),
   setSessionError: jest.fn((id: string, e: string | null) =>
-    sliceWrite(id, { errorMessage: e, status: e ? "error" : "idle" })
+    sliceWrite(id, { errorMessage: e, errorDiagnostic: null, status: e ? "error" : "idle" })
+  ),
+  // Mirrors the real store: the structured write also lands the raw technical
+  // text on the legacy field.
+  setSessionDiagnostic: jest.fn((id: string, d: { message?: string } | null) =>
+    sliceWrite(id, {
+      errorDiagnostic: d,
+      errorMessage: d?.message ?? null,
+      status: d ? "error" : "idle",
+    })
   ),
   setSessionActiveBranch: jest.fn((id: string, g: string, mid: string) => {
     const cur = chatState.sessions[id]?.activeBranchByGroup ?? {}
@@ -452,7 +467,7 @@ jest.mock("@cognia/vector/store", () => ({
   createVectorStore: (...args: unknown[]) => mockCreateVectorStore(...args),
 }))
 
-import { useClaudeChat, SIDECAR_EXITED_ERROR } from "./use-claude-chat"
+import { useClaudeChat } from "./use-claude-chat"
 
 beforeEach(() => {
   isTauriMock.mockReset().mockReturnValue(true)
@@ -503,6 +518,7 @@ beforeEach(() => {
   chatState.replaceSessionMessages.mockClear()
   chatState.setSessionStatus.mockClear()
   chatState.setSessionError.mockClear()
+  chatState.setSessionDiagnostic.mockClear()
   chatState.setSessionActiveBranch.mockClear()
   chatState.pushApproval.mockClear()
   chatState.clearApproval.mockClear()
@@ -810,7 +826,16 @@ describe("useClaudeChat — actions", () => {
       await result.current.send("refactor this module")
     })
     expect(sendPromptMock).not.toHaveBeenCalled()
-    expect(chatState.setSessionError).toHaveBeenCalledWith("sess-1", "spawn failed")
+    expect(chatState.setSessionDiagnostic).toHaveBeenCalledWith(
+      "sess-1",
+      // Strict policy: the external-agent turn is NOT re-issued on the built-in
+      // path, so the diagnostic is attributed to the agent that actually failed.
+      expect.objectContaining({
+        message: "spawn failed",
+        source: "external-agent",
+        meta: expect.objectContaining({ agentId: "ext-1" }),
+      })
+    )
     expect(mockTrackEvent).toHaveBeenCalledWith(
       "chat.turn.failed",
       expect.objectContaining({
@@ -901,7 +926,10 @@ describe("useClaudeChat — actions", () => {
       await result.current.send("nope")
     })
     expect(sendPromptMock).not.toHaveBeenCalled()
-    expect(chatState.setSessionError).toHaveBeenCalledWith("sess-1", "policy violation")
+    expect(chatState.setSessionDiagnostic).toHaveBeenCalledWith(
+      "sess-1",
+      expect.objectContaining({ code: "promptBlockedByPlugin", message: "policy violation" })
+    )
   })
 
   it("send() rewrites the prompt when a plugin returns action:'modify'", async () => {
@@ -941,7 +969,10 @@ describe("useClaudeChat — actions", () => {
     await act(async () => {
       await result.current.send("hello")
     })
-    expect(chatState.setSessionError).toHaveBeenCalledWith("sess-1", "network down")
+    expect(chatState.setSessionDiagnostic).toHaveBeenCalledWith(
+      "sess-1",
+      expect.objectContaining({ message: "network down", source: "chat" })
+    )
     expect(dispatchChatErrorMock).toHaveBeenCalledWith("sess-1", expect.any(Error))
   })
 
@@ -1229,7 +1260,13 @@ describe("useClaudeChat — actions", () => {
       chatState.status = "streaming"
       _messageCallback?.({ type: "sidecar_exited" })
     })
-    expect(chatState.setSessionError).toHaveBeenCalledWith("sess-1", SIDECAR_EXITED_ERROR)
+    // The sidecar crash now emits a code, not a sentinel string the view has
+    // to compare back — that round-trip existed only because the store could
+    // not carry structure.
+    expect(chatState.setSessionDiagnostic).toHaveBeenCalledWith(
+      "sess-1",
+      expect.objectContaining({ code: "sidecarExited", source: "chat", retryable: true })
+    )
     expect(mockTrackEvent).toHaveBeenCalledWith(
       "chat.turn.failed",
       expect.objectContaining({
@@ -1255,7 +1292,13 @@ describe("useClaudeChat — actions", () => {
       "sess-1",
       expect.any(String)
     )
-    expect(chatState.setSessionError).toHaveBeenCalledWith("sess-1", SIDECAR_EXITED_ERROR)
+    // The sidecar crash now emits a code, not a sentinel string the view has
+    // to compare back — that round-trip existed only because the store could
+    // not carry structure.
+    expect(chatState.setSessionDiagnostic).toHaveBeenCalledWith(
+      "sess-1",
+      expect.objectContaining({ code: "sidecarExited", source: "chat", retryable: true })
+    )
     chatState.status = "idle"
     chatState.pendingApprovals = []
   })
@@ -1267,7 +1310,7 @@ describe("useClaudeChat — actions", () => {
     await act(async () => {
       _messageCallback?.({ type: "sidecar_exited" })
     })
-    expect(chatState.setSessionError).not.toHaveBeenCalled()
+    expect(chatState.setSessionDiagnostic).not.toHaveBeenCalled()
   })
 
   it("incoming permission_request for an already-allowed tool auto-approves", async () => {

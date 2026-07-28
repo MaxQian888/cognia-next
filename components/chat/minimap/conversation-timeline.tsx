@@ -301,13 +301,28 @@ export const ConversationTimeline = memo(function ConversationTimeline({
 
   return (
     <div
-      className="absolute right-0 top-0 bottom-0 z-20 hidden lg:flex"
+      className={cn(
+        // `@4xl/message-list` (56rem = 896px) mirrors TIMELINE_MIN_PANE_PX in
+        // `timeline-visibility.ts` — the JS gate decides whether to mount,
+        // this one keeps a mounted-but-too-narrow frame from painting.
+        "hidden @4xl/message-list:flex",
+        expanded
+          ? // In flow: the panel reserves its own 256px so the reading column
+            // shrinks around it. As an overlay it simply sat on top of the
+            // message text, which is unreadable in any pane under ~1344px.
+            "relative h-full shrink-0"
+          : // Collapsed, the 16px grip rail lives in the scrollbar gutter and
+            // has nothing to displace, so it stays overlaid.
+            "absolute right-0 top-0 bottom-0 z-20"
+      )}
       onMouseLeave={() => setScrub(null)}
       data-testid="conversation-timeline"
       data-computer-use-pip-obstacle
     >
       {expanded ? (
-        <div className="flex h-full w-64 flex-col border-l bg-background/95 shadow-lg backdrop-blur supports-[backdrop-filter]:bg-background/80">
+        // No shadow/backdrop-blur: those are overlay treatments, and this
+        // panel is a flush in-flow region now.
+        <div className="flex h-full w-64 flex-col border-l bg-background">
           <div className="flex items-center justify-between border-b px-3 py-2">
             <span className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
               <ListTreeIcon className="size-3.5" />

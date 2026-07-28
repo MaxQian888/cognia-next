@@ -32,6 +32,13 @@ const resource: ContextResource = {
 }
 
 const messages = {
+  plugins: {
+    surface: {
+      title: "{pluginName} could not render",
+      description: "{error}",
+      retry: "Retry",
+    },
+  },
   contextWorkbench: {
     actions: {
       collapse: "Collapse",
@@ -260,7 +267,8 @@ describe("ContextWorkbench", () => {
     ])
 
     // The crash panel is the default active one; no rail click needed.
-    expect(screen.getByText(/Panel (failed|unavailable)/)).toBeInTheDocument()
+    expect(screen.getByRole("alert")).toHaveTextContent("plugin-a could not render")
+    expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument()
     consoleError.mockRestore()
   })
 

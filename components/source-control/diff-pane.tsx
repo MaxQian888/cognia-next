@@ -7,6 +7,8 @@
 
 import { useCallback, useEffect, useState } from "react"
 import { useTranslations } from "next-intl"
+import { MessageSquarePlusIcon } from "lucide-react"
+import { Button } from "@/components/ui/button"
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable"
 import { gitDiffFile } from "@/lib/git/commands"
 import { fileDiffKey, type GitDiff, type GitFileChange, type GitHunk } from "@/types/git"
@@ -24,9 +26,25 @@ interface DiffPaneProps {
   staged: boolean
   actions: Pick<UseGitActionsResult, "stage" | "unstage" | "discard">
   density?: "compact" | "touch"
+  /**
+   * Stage this diff as context for the next chat message.
+   *
+   * Optional because only the chat dock's workspace has a conversation to hand
+   * it to; the standalone source-control route omits it and the control is
+   * absent there rather than present-and-inert. Distinct from the Explain
+   * popover beside it, which answers in place and never reaches the chat.
+   */
+  onSendToChat?: (payload: { path: string; diffText: string }) => void
 }
 
-export function DiffPane({ rootDir, path, staged, actions, density = "compact" }: DiffPaneProps) {
+export function DiffPane({
+  rootDir,
+  path,
+  staged,
+  actions,
+  density = "compact",
+  onSendToChat,
+}: DiffPaneProps) {
   const t = useTranslations("sourceControl")
   const [fetched, setFetched] = useState<GitDiff | null>(null)
   const cacheDiff = useGitStore((s) => s.cacheDiff)
@@ -97,14 +115,32 @@ export function DiffPane({ rootDir, path, staged, actions, density = "compact" }
   const explainEnabled = useSettingsStore(
     (s) => s.settings?.gitSettings?.explainAI?.enabled ?? false
   )
-  const canExplain = explainEnabled && !!diff && !diff.isBinary && diff.hunks.length > 0
+  const hasHunks = !!diff && !diff.isBinary && diff.hunks.length > 0
+  const canExplain = explainEnabled && hasHunks
+  const diffText = hasHunks ? diff.hunks.map((h) => h.patch).join("\n") : ""
+  // Gated on the host supplying a sink, not on the Explain setting — the two
+  // are independent, and hanging this off `explainAI.enabled` would hide the
+  // route to chat behind an unrelated toggle.
+  const canSendToChat = Boolean(onSendToChat) && hasHunks
 
-  // Explain toolbar + Monaco diff in one column so the bar stays pinned above.
+  // Toolbar + Monaco diff in one column so the bar stays pinned above.
   const viewer = (
     <div className="flex h-full min-h-0 flex-col">
-      {canExplain && (
-        <div className="flex shrink-0 items-center justify-end border-b px-2 py-1">
-          <AiExplainPopover subject={path} diffText={diff.hunks.map((h) => h.patch).join("\n")} />
+      {(canExplain || canSendToChat) && (
+        <div className="flex shrink-0 items-center justify-end gap-1 border-b px-2 py-1">
+          {canSendToChat && (
+            <Button
+              type="button"
+              size="xs"
+              variant="ghost"
+              data-testid="diff-send-to-chat"
+              onClick={() => onSendToChat?.({ path, diffText })}
+            >
+              <MessageSquarePlusIcon className="size-3.5" />
+              {t("sendDiffToChat")}
+            </Button>
+          )}
+          {canExplain && <AiExplainPopover subject={path} diffText={diffText} />}
         </div>
       )}
       <div className="min-h-0 flex-1">

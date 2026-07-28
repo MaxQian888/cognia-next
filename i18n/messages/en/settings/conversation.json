@@ -9,13 +9,13 @@
       "hint": "Follow the reply as it streams by scrolling to the newest content.",
       "label": "Auto-scroll while streaming"
     },
-    "compactLayout": {
-      "hint": "Use a denser composer layout that leaves more room for the conversation.",
-      "label": "Use compact composer layout"
-    },
     "clearAfterSend": {
       "hint": "Empty the composer once a message is sent.",
       "label": "Clear input after sending"
+    },
+    "compactLayout": {
+      "hint": "Use a denser composer layout that leaves more room for the conversation.",
+      "label": "Use compact composer layout"
     },
     "description": "Control how the message composer handles typing, sending, and drafts.",
     "inputHistory": {
@@ -98,10 +98,17 @@
       "label": "Use compact conversation rows"
     },
     "description": "Tune how the chat sidebar lists and searches conversations.",
-    "groupByDate": {
-      "description": "Group conversations into Today / Yesterday / Previous buckets.",
-      "heading": "Group by date",
-      "label": "Group conversations by date"
+    "groupBy": {
+      "description": "Choose the primary axis the conversation list groups by. Grouping by workspace lists conversations from every workspace; the other modes stay inside the current one.",
+      "heading": "Group conversations by",
+      "label": "Conversation grouping",
+      "options": {
+        "agent": "Agent",
+        "date": "Date",
+        "none": "No grouping",
+        "team": "Direct messages / Team",
+        "workspace": "Workspace"
+      }
     },
     "preview": {
       "description": "Show a second line with the latest message under each conversation.",

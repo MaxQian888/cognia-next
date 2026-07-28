@@ -47,7 +47,9 @@ import { useTranslations } from "next-intl"
 import { useChatStore } from "@/stores/chat"
 import { useSettingsStore } from "@/stores/settings"
 import { search, formatSearchResultsForLLM } from "@/lib/search/search-service"
-import { formatArtifactSelectionsForLLM } from "@/lib/artifacts/format-selection-context"
+import { formatContextSelectionsForLLM } from "@/lib/artifacts/format-selection-context"
+import { formatReviewReceiptsForLLM } from "@/lib/artifacts/format-review-receipt"
+import { useArtifactStore } from "@/stores/artifact/artifact-store"
 import type { SendContent, ChatSession, Character } from "@cognia/agent-config-types"
 import {
   buildSendContent,
@@ -161,6 +163,8 @@ import {
   type DraftAttachmentMeta,
 } from "@/lib/db/chat-drafts"
 import { draftAttachmentsFromFiles } from "@/lib/chat/draft-attachments"
+import { mergeComposerIntentPrompt } from "@/lib/chat/merge-composer-intent"
+import { useComposerIntentStore } from "@/stores/chat/composer-intent-store"
 import { DraftRestoredAttachments } from "./composer/draft-restored-attachments"
 import { OcrResultBubble } from "./composer/ocr-result-bubble"
 import { applyComposerOcr } from "./composer/ocr-attachment-action"
@@ -1424,6 +1428,10 @@ function ComposerInner(props: InnerProps) {
 
   // ── Per-session draft persistence (Phase 3.2) ─────────────────────────
   const [draftHydratedFor, setDraftHydratedFor] = useState<string | null>(null)
+  const pendingComposerIntent = useComposerIntentStore((state) =>
+    sessionId ? state.pendingBySession[sessionId] : undefined
+  )
+  const consumeComposerIntent = useComposerIntentStore((state) => state.consume)
   // See `restoredAttachments` above: only the ones we could not bring back.
   const tDraft = useTranslations("chat.composer.draftRestore")
   // The next-intl translator isn't a stable reference, so we read it through a
@@ -1512,6 +1520,30 @@ function ComposerInner(props: InnerProps) {
       cancelled = true
     }
   }, [persistDrafts, sessionId, draftHydratedFor, controller.textInput, attachments, staged])
+
+  // A system-selection action arrives while the main window and target session
+  // are being activated. Consume it only after the saved draft has finished
+  // hydrating, otherwise the async draft read can overwrite the inserted stock
+  // instruction. Ask has no stock prompt and only focuses the textarea.
+  useEffect(() => {
+    if (!sessionId || !pendingComposerIntent) return
+    if (persistDrafts && draftHydratedFor !== sessionId) return
+    const intent = consumeComposerIntent(sessionId, pendingComposerIntent.candidateId)
+    if (!intent) return
+    if (intent.prompt) {
+      controller.textInput.setInput(
+        mergeComposerIntentPrompt(controller.textInput.value, intent.prompt)
+      )
+    }
+    requestAnimationFrame(() => textareaRef.current?.focus())
+  }, [
+    consumeComposerIntent,
+    controller.textInput,
+    draftHydratedFor,
+    pendingComposerIntent,
+    persistDrafts,
+    sessionId,
+  ])
 
   // Memoised on the file list + staged state so the persist effect below — which
   // also depends on the text value — doesn't rebuild these rows on every
@@ -2144,7 +2176,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
   const setPermissionMode = useChatStore((s) => s.setPermissionMode)
   const appendMessage = useChatStore((s) => s.appendMessage)
   const clearReferencedPaths = useChatStore((s) => s.clearReferencedPaths)
-  const clearArtifactSelections = useChatStore((s) => s.clearArtifactSelections)
+  const clearContextSelections = useChatStore((s) => s.clearContextSelections)
 
   // Same effective-cwd chain the send path uses — a selected workspace must
   // let `!` shell commands and memory appends run without a per-session dir.
@@ -2397,23 +2429,48 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
         useChatStore.getState().setWebSearchOnForNextSend(false)
       }
 
-      // ── Artifact selections ─────────────────────────────────────────
-      // Prepend the selected snippet(s) + comment as context, and record the
+      // ── Context selections ──────────────────────────────────────────
+      // Prepend the selected material + comment as context, and record the
       // edit target so the assistant reply routes into a per-hunk review
       // proposal against the targeted artifact. The first selection wins; the
       // rest contribute context only. That is now stated in the UI — the lead
       // chip carries an "edit target" badge and the others promote on click
       // (`artifact-selection-chips.tsx`) — where it used to be a `debug` log
       // nobody would ever see.
-      const artifactSelections = useChatStore.getState().artifactSelections
-      if (artifactSelections.length > 0 && session?.id) {
-        const selectionCtx = formatArtifactSelectionsForLLM(artifactSelections)
+      const contextSelections = useChatStore.getState().contextSelections
+      if (contextSelections.length > 0 && session?.id) {
+        const selectionCtx = formatContextSelectionsForLLM(contextSelections)
         augmented = augmented.trim() ? `${selectionCtx}\n\n---\n\n${augmented}` : selectionCtx
-        const primary = artifactSelections[0]
-        useChatStore.getState().setPendingArtifactEditTarget(session.id, {
-          artifactId: primary.artifactId,
-          requestId: crypto.randomUUID(),
-        })
+        // The first *artifact*, not the first selection. A file, comment or web
+        // reference has nothing for a revision proposal to diff against, so
+        // reading index 0 blindly would let a staged workspace file silently
+        // disarm the whole review round trip — the AI's reply would then
+        // auto-create a duplicate artifact instead of proposing hunks against
+        // the one the user was actually working on.
+        const primary = contextSelections.find((sel) => sel.kind === "artifact")
+        if (primary) {
+          useChatStore.getState().setPendingArtifactEditTarget(session.id, {
+            artifactId: primary.artifactId,
+            requestId: crypto.randomUUID(),
+          })
+        }
+      }
+
+      // ── Review outcomes ─────────────────────────────────────────────
+      // Close the revision round trip the block above opens. Rejecting a
+      // proposal (or keeping 2 of its 5 hunks) used to be invisible to the
+      // assistant, which could then re-propose exactly what the user had just
+      // turned down. Read here but consumed only once the send commits, below —
+      // the same lifetime as a staged selection — so a receipt rides exactly
+      // one message and survives a send that bails before `onSend`.
+      const sentReceipts = session?.id
+        ? useArtifactStore.getState().peekReviewReceipts(session.id)
+        : []
+      if (sentReceipts.length > 0) {
+        const receiptCtx = formatReviewReceiptsForLLM(sentReceipts)
+        if (receiptCtx) {
+          augmented = augmented.trim() ? `${receiptCtx}\n\n---\n\n${augmented}` : receiptCtx
+        }
       }
 
       const linkContext = await buildLinkContextBlocks(text)
@@ -2445,14 +2502,15 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
       }
       await onSend(content, attachmentResult.manifest)
       clearReferencedPaths()
-      clearArtifactSelections()
+      clearContextSelections()
+      useArtifactStore.getState().consumeReviewReceipts(sentReceipts)
       return true
     },
     [
       onSend,
       handleBashSubmit,
       clearReferencedPaths,
-      clearArtifactSelections,
+      clearContextSelections,
       pushSystemMessage,
       tAttach,
       tMemory,
@@ -2499,13 +2557,21 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
 
   return (
     <div
-      className="@container/composer shrink-0 bg-gradient-to-t from-background via-background/95 to-transparent px-3 pb-3 pt-5 sm:px-5 sm:pb-4 sm:pt-6"
+      className="@container/composer shrink-0 bg-gradient-to-t from-background via-background/95 to-transparent pb-3 pt-5 sm:pb-4 sm:pt-6"
       // Frosted-glass chrome over an active wallpaper (app/globals.css §5),
       // matching the other toolbar surfaces; bg-background/70 stays the
       // no-wallpaper fallback.
       data-tonality="glass"
     >
-      <div className="mx-auto w-full max-w-[52rem]" data-slot="composer-reading-column">
+      {/* Padding lives INSIDE the max-width cap so the composer box and the
+          message text share one content edge. With the padding on the bar
+          instead, the cap measured the padded box and the composer ran 20px
+          wider per side than the messages above it on any pane past ~872px
+          (see `message-list.tsx`'s reading column, which caps then pads). */}
+      <div
+        className="mx-auto w-full max-w-[52rem] px-3 sm:px-5"
+        data-slot="composer-reading-column"
+      >
         <PromptInputProvider>
           {/* Owns per-attachment extraction / order / OCR opt-in. Must sit INSIDE
               the prompt-input provider: it derives everything from that

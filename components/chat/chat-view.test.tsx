@@ -26,7 +26,10 @@ jest.mock("./character-missing-banner", () => ({
   CharacterMissingBanner: () => null,
 }))
 jest.mock("./empty-state", () => ({ EmptyChatState: jest.fn(() => null) }))
-jest.mock("./inline-error", () => ({ InlineError: jest.fn(() => null) }))
+jest.mock("@/components/error/diagnostic-card", () => ({
+  InlineError: jest.fn(() => null),
+  DiagnosticCard: jest.fn(() => null),
+}))
 jest.mock("./message-list", () => ({
   MessageList: jest.fn(() => null),
 }))
@@ -48,6 +51,7 @@ const storeState = {
   messages: [{ id: "m1", role: "user", parts: [] }] as unknown[],
   status: "idle",
   errorMessage: null as string | null,
+  errorDiagnostic: null as CogniaDiagnostic | null,
   messagesLoading: false,
   messagesLoadError: null as string | null,
   atCapacity: false,
@@ -68,6 +72,7 @@ jest.mock("@/stores/chat", () => ({
   useSessionMessages: () => storeState.messages,
   useSessionStatus: () => storeState.status,
   useSessionErrorMessage: () => storeState.errorMessage,
+  useSessionErrorDiagnostic: () => storeState.errorDiagnostic,
   useSessionHasMessages: () => storeState.messages.length > 0,
   useSessionMessagesLoading: () => storeState.messagesLoading,
   useSessionMessagesLoadError: () => storeState.messagesLoadError,
@@ -112,8 +117,9 @@ import { act, render, screen, waitFor } from "@testing-library/react"
 import { SparklesIcon } from "lucide-react"
 import { ChatPane } from "./chat-view"
 import { MessageList } from "./message-list"
-import { InlineError } from "./inline-error"
-import { SIDECAR_EXITED_ERROR } from "@/hooks/chat/use-claude-chat"
+import { DiagnosticCard, InlineError } from "@/components/error/diagnostic-card"
+import { createDiagnostic } from "@cognia/diagnostics"
+import type { CogniaDiagnostic } from "@cognia/diagnostics"
 import type { ChatSession, SendContent } from "@cognia/agent-config-types"
 
 const mockSession = { id: "s1", title: "Test" } as unknown as ChatSession
@@ -219,18 +225,29 @@ describe("ChatPane", () => {
     expect(first).toBe(second)
   })
 
-  it("maps the sidecar-exited sentinel error to a localized message", () => {
+  it("renders the structured card when the producer emitted a diagnostic", () => {
+    const MockDiagnosticCard = DiagnosticCard as jest.Mock
     const MockInlineError = InlineError as jest.Mock
+    MockDiagnosticCard.mockClear()
     MockInlineError.mockClear()
-    storeState.errorMessage = SIDECAR_EXITED_ERROR
+    const diagnostic = createDiagnostic("sidecarExited", {
+      source: "chat",
+      now: () => 0,
+      id: "d1",
+    })
+    storeState.errorDiagnostic = diagnostic
+    storeState.errorMessage = diagnostic.message
     try {
       render(<ChatPane {...makeProps()} />)
-      // next-intl mock returns the key, so the mapped message is the i18n key.
-      expect(MockInlineError).toHaveBeenCalledWith(
-        expect.objectContaining({ message: "sidecarExited" }),
+      // The card owns the label/hint/buttons now — the view no longer maps a
+      // sentinel string onto a localized message.
+      expect(MockDiagnosticCard).toHaveBeenCalledWith(
+        expect.objectContaining({ diagnostic }),
         undefined
       )
+      expect(MockInlineError).not.toHaveBeenCalled()
     } finally {
+      storeState.errorDiagnostic = null
       storeState.errorMessage = null
     }
   })

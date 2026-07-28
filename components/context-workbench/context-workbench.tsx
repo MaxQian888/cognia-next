@@ -52,6 +52,7 @@ import {
   touchActiveContextHost,
 } from "@/lib/context-workbench/active-context"
 import { PluginExtensionSlot } from "@/components/plugins/plugin-extension-slot"
+import { PluginSurface } from "@/components/plugins/plugin-surface"
 import {
   CONTEXT_WORKBENCH_DEFAULT_WIDTH,
   useContextWorkbenchStore,
@@ -1027,18 +1028,51 @@ export function ContextWorkbench({
                 if (!active && !activatedIn.includes(panel.id)) return null
                 const Renderer = panel.renderer
                 const waitingForChatScope = panel.requiresChatScope && !resourceSession
+                const rendererContent = waitingForChatScope ? (
+                  <div className="flex h-full items-center justify-center p-6 text-sm text-muted-foreground">
+                    {t("contextWorkbench.aiLoading")}
+                  </div>
+                ) : resourceSession ? (
+                  <ChatScopeProvider sessionId={resourceSession.id}>
+                    <Renderer
+                      workbenchInstanceId={workbenchInstanceId}
+                      resource={resource}
+                      active={active}
+                    />
+                  </ChatScopeProvider>
+                ) : (
+                  <Renderer
+                    workbenchInstanceId={workbenchInstanceId}
+                    resource={resource}
+                    active={active}
+                  />
+                )
+                const guardedContent = panel.pluginId ? (
+                  <PluginContextPanelSurface pluginId={panel.pluginId} panelId={panel.id}>
+                    {rendererContent}
+                  </PluginContextPanelSurface>
+                ) : (
+                  <PanelErrorBoundary
+                    fallback={(retry) => (
+                      <div className="flex h-full flex-col items-center justify-center gap-1 p-6 text-center">
+                        <p className="text-sm font-medium">{t("contextWorkbench.panelError")}</p>
+                        <p className="text-xs text-muted-foreground">
+                          {t("contextWorkbench.panelErrorDescription")}
+                        </p>
+                        <Button type="button" size="sm" variant="outline" onClick={retry}>
+                          <RotateCcwIcon className="size-4" />
+                          {t("contextWorkbench.actions.retry")}
+                        </Button>
+                      </div>
+                    )}
+                  >
+                    {rendererContent}
+                  </PanelErrorBoundary>
+                )
                 const content = (
                   <div
                     id={`context-workbench-panel-${panel.id}`}
                     role="tabpanel"
-                    // Scope root for a plugin panel's `manifest.styles` sheet,
-                    // which is injected as `@scope ([data-plugin-root="<id>"])`.
-                    // Absent for host-owned panels so their markup stays
-                    // outside any plugin's bound. Panels read their width from
-                    // `getWorkbenchState()` rather than a container query — a
-                    // `container-type` here would also apply `contain: layout`
-                    // and re-anchor absolutely-positioned panel content.
-                    data-plugin-root={panel.pluginId}
                     className={cn(
                       "h-full",
                       !active && "pointer-events-none",
@@ -1062,40 +1096,7 @@ export function ContextWorkbench({
                     inert={!active}
                     aria-hidden={!active}
                   >
-                    <PanelErrorBoundary
-                      fallback={(retry) => (
-                        <div className="flex h-full flex-col items-center justify-center gap-1 p-6 text-center">
-                          <p className="text-sm font-medium">{t("contextWorkbench.panelError")}</p>
-                          <p className="text-xs text-muted-foreground">
-                            {t("contextWorkbench.panelErrorDescription")}
-                          </p>
-                          <Button type="button" size="sm" variant="outline" onClick={retry}>
-                            <RotateCcwIcon className="size-4" />
-                            {t("contextWorkbench.actions.retry")}
-                          </Button>
-                        </div>
-                      )}
-                    >
-                      {waitingForChatScope ? (
-                        <div className="flex h-full items-center justify-center p-6 text-sm text-muted-foreground">
-                          {t("contextWorkbench.aiLoading")}
-                        </div>
-                      ) : resourceSession ? (
-                        <ChatScopeProvider sessionId={resourceSession.id}>
-                          <Renderer
-                            workbenchInstanceId={workbenchInstanceId}
-                            resource={resource}
-                            active={active}
-                          />
-                        </ChatScopeProvider>
-                      ) : (
-                        <Renderer
-                          workbenchInstanceId={workbenchInstanceId}
-                          resource={resource}
-                          active={active}
-                        />
-                      )}
-                    </PanelErrorBoundary>
+                    {guardedContent}
                   </div>
                 )
                 return panel.retention === "ephemeral" ? (
@@ -1125,5 +1126,25 @@ export function ContextWorkbench({
         ) : null}
       </section>
     </ContextWorkbenchContext.Provider>
+  )
+}
+export function PluginContextPanelSurface({
+  pluginId,
+  panelId,
+  children,
+}: {
+  pluginId: string
+  panelId: string
+  children: React.ReactNode
+}) {
+  return (
+    <PluginSurface
+      pluginId={pluginId}
+      surfaceId={`context-panel:${panelId}`}
+      formFactor="panel"
+      container={false}
+    >
+      {children}
+    </PluginSurface>
   )
 }

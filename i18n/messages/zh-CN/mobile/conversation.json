@@ -20,8 +20,15 @@
   "sidebarCompactHelp": "收紧行间距以容纳更多会话。",
   "sidebarContentSearch": "搜索消息内容",
   "sidebarContentSearchHelp": "不仅匹配标题，也匹配消息正文内容（速度较慢）。",
-  "sidebarGroupByDate": "按日期分组",
-  "sidebarGroupByDateHelp": "将会话分组为今天 / 昨天 / 更早等时间段。",
+  "sidebarGroupBy": "会话分组方式",
+  "sidebarGroupByHelp": "按工作区分组会列出所有工作区的会话；其他模式只显示当前工作区。",
+  "sidebarGroupByOptions": {
+    "agent": "角色",
+    "date": "日期",
+    "none": "不分组",
+    "team": "私信 / 团队",
+    "workspace": "工作区"
+  },
   "sidebarPreview": "消息预览",
   "sidebarPreviewHelp": "在每个会话下方显示一行最新消息预览。",
   "sidebarSection": "会话列表",

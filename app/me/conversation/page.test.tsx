@@ -113,8 +113,8 @@ describe("MobileConversationPage", () => {
   it("renders the conversation-list section with its defaults", () => {
     render(<Page />)
     expect(screen.getByTestId("me-section-conversation-sidebar")).toBeInTheDocument()
-    // Group-by-date + unread default on; compact / preview / content-search off.
-    expect(screen.getByTestId("conversation-sidebar-group-by-date")).toBeChecked()
+    // Workspace grouping + unread default on; compact / preview / content-search off.
+    expect(screen.getByTestId("conversation-sidebar-group-by")).toHaveTextContent("Workspace")
     expect(screen.getByTestId("conversation-sidebar-unread")).toBeChecked()
     expect(screen.getByTestId("conversation-sidebar-compact")).not.toBeChecked()
     expect(screen.getByTestId("conversation-sidebar-preview")).not.toBeChecked()

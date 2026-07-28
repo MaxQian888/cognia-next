@@ -19,6 +19,7 @@ const createSessionMock = jest.fn()
 const deleteSessionMock = jest.fn()
 const bulkDeleteSessionsMock = jest.fn()
 const listSessionsMock = jest.fn()
+const listAllSessionsMock = jest.fn()
 const updateSessionMock = jest.fn()
 const getSessionMock = jest.fn()
 const archiveSessionMock = jest.fn()
@@ -31,6 +32,7 @@ jest.mock("@/lib/db/sessions", () => ({
   deleteSession: (id: string) => deleteSessionMock(id),
   bulkDeleteSessions: (ids: readonly string[]) => bulkDeleteSessionsMock(ids),
   listScopedSessions: (projectId?: string) => listSessionsMock(projectId),
+  listSessions: () => listAllSessionsMock(),
   updateSession: (id: string, p: unknown) => updateSessionMock(id, p),
   getSession: (id: string) => getSessionMock(id),
   archiveSession: (id: string) => archiveSessionMock(id),
@@ -115,6 +117,7 @@ beforeEach(() => {
   deleteSessionMock.mockReset().mockResolvedValue(undefined)
   bulkDeleteSessionsMock.mockReset().mockResolvedValue(undefined)
   listSessionsMock.mockReset().mockResolvedValue([])
+  listAllSessionsMock.mockReset().mockResolvedValue([])
   updateSessionMock.mockReset().mockResolvedValue(undefined)
   getSessionMock.mockReset().mockResolvedValue({ id: "s1" })
   archiveSessionMock.mockReset().mockResolvedValue(undefined)
@@ -157,6 +160,44 @@ describe("useSessions", () => {
     renderHook(() => useSessions())
 
     expect(listSessionsMock).toHaveBeenCalledWith("project-default")
+  })
+
+  it("reads every workspace's sessions in crossWorkspace mode", () => {
+    liveQueryMock.mockImplementation((fn) => fn())
+    mockProjectState.loaded = true
+    mockProjectState.activeProjectId = "project-default"
+
+    renderHook(() => useSessions({ crossWorkspace: true }))
+
+    expect(listAllSessionsMock).toHaveBeenCalled()
+    expect(listSessionsMock).not.toHaveBeenCalled()
+  })
+
+  it("still treats a foreign-workspace active session as absent in crossWorkspace mode", async () => {
+    // "Belongs to another workspace" is what re-points the chat pane after a
+    // workspace switch; a cross-workspace list would otherwise resolve the row
+    // and strand the previous workspace's conversation on screen.
+    mockProjectState.loaded = true
+    mockProjectState.activeProjectId = "project-a"
+    chatStoreState.activeSessionId = "s-foreign"
+    getSessionMock.mockResolvedValue({ id: "s-foreign", projectId: "project-b" })
+    liveQueryMock.mockReturnValue([{ id: "s-foreign", kind: "direct", projectId: "project-b" }])
+
+    const { result } = renderHook(() => useSessions({ crossWorkspace: true }))
+
+    await waitFor(() => expect(result.current.activeSessionState).toBe("absent"))
+    expect(result.current.activeSession).toBeNull()
+  })
+
+  it("resolves an active session from the current workspace in crossWorkspace mode", async () => {
+    mockProjectState.loaded = true
+    mockProjectState.activeProjectId = "project-a"
+    chatStoreState.activeSessionId = "s-local"
+    liveQueryMock.mockReturnValue([{ id: "s-local", kind: "direct", projectId: "project-a" }])
+
+    const { result } = renderHook(() => useSessions({ crossWorkspace: true }))
+
+    await waitFor(() => expect(result.current.activeSessionState).toBe("present"))
   })
 
   it("returns sessions from useLiveQuery (or [] when undefined)", () => {

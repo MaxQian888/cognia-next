@@ -164,6 +164,7 @@ interface ChatStateLike {
   replaceSessionMessages: jest.Mock
   setSessionStatus: jest.Mock
   setSessionError: jest.Mock
+  setSessionDiagnostic: jest.Mock
   enqueueSteer: jest.Mock
   clearSteerQueue: jest.Mock
   pushApproval: jest.Mock
@@ -208,6 +209,13 @@ const chatState: ChatStateLike = {
   setSessionError: jest.fn((id: string, msg: string | null) => {
     void id
     chatState.setError(msg)
+  }),
+  // Mirrors the real store: the structured write also lands the raw technical
+  // text on the legacy field, which is why assertions on the underlying error
+  // message below still hold after the migration.
+  setSessionDiagnostic: jest.fn((id: string, diagnostic: { message?: string } | null) => {
+    void id
+    chatState.setError(diagnostic?.message ?? null)
   }),
   enqueueSteer: jest.fn((id: string, entry: ChatStateLike["steerQueue"][number]) => {
     void id
@@ -309,6 +317,7 @@ beforeEach(() => {
   chatState.replaceSessionMessages.mockClear()
   chatState.setSessionStatus.mockClear()
   chatState.setSessionError.mockClear()
+  chatState.setSessionDiagnostic.mockClear()
   chatState.enqueueSteer.mockClear()
   chatState.clearSteerQueue.mockClear()
   chatState.setActiveSession.mockClear()
@@ -354,7 +363,10 @@ describe("useTeamChat — actions", () => {
     await act(async () => {
       await result.current.send("hi")
     })
-    expect(chatState.setError).toHaveBeenCalledWith("Team session not found")
+    expect(chatState.setSessionDiagnostic).toHaveBeenCalledWith(
+      "team-1",
+      expect.objectContaining({ code: "teamSessionMissing", source: "agent-team" })
+    )
   })
 
   it("send() errors when the team is missing in the database", async () => {
@@ -365,7 +377,10 @@ describe("useTeamChat — actions", () => {
     await act(async () => {
       await result.current.send("hi")
     })
-    expect(chatState.setError).toHaveBeenCalledWith(expect.stringContaining("no longer exists"))
+    expect(chatState.setSessionDiagnostic).toHaveBeenCalledWith(
+      "team-1",
+      expect.objectContaining({ code: "teamMissing", source: "agent-team" })
+    )
   })
 
   it("send() in linear mode with no targets returns idle without sending", async () => {
@@ -411,7 +426,10 @@ describe("useTeamChat — actions", () => {
     await act(async () => {
       await result.current.send("hi")
     })
-    expect(chatState.setError).toHaveBeenCalledWith(expect.stringContaining("Supervisor"))
+    expect(chatState.setSessionDiagnostic).toHaveBeenCalledWith(
+      "team-1",
+      expect.objectContaining({ code: "supervisorMissing", source: "agent-team" })
+    )
   })
 
   it("stop() interrupts active sub-sessions and clears member statuses", async () => {
@@ -1008,7 +1026,10 @@ describe("useTeamChat — send coverage", () => {
       await result.current.send("hi")
     })
 
-    expect(chatState.setError).toHaveBeenCalledWith(expect.stringContaining("not a member"))
+    expect(chatState.setSessionDiagnostic).toHaveBeenCalledWith(
+      "team-1",
+      expect.objectContaining({ code: "supervisorNotMember", source: "agent-team" })
+    )
   })
 
   it("supervisor completes a full round successfully", async () => {

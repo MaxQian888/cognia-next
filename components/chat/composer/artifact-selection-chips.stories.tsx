@@ -4,7 +4,7 @@ import { ArtifactSelectionChips } from "./artifact-selection-chips"
 import { useChatStore } from "@/stores/chat"
 import { resetStore, seedStore } from "@/lib/storybook/seed-stores"
 
-// Reads `artifactSelections` from the chat store and renders one chip per
+// Reads `contextSelections` from the chat store and renders one chip per
 // selected snippet. Returns null when empty, so each story seeds the store.
 const meta = {
   title: "Chat/Composer/ArtifactSelectionChips",
@@ -13,8 +13,9 @@ const meta = {
   beforeEach: () => {
     resetStore(useChatStore)
     seedStore(useChatStore, {
-      artifactSelections: [
+      contextSelections: [
         {
+          kind: "artifact",
           artifactId: "a1",
           title: "pipeline.ts",
           snapshot: "export const stages = ['ingest', 'embed', 'route']",
@@ -22,6 +23,7 @@ const meta = {
           range: { startLine: 12, endLine: 12 },
         },
         {
+          kind: "artifact",
           artifactId: "a2",
           title: "router.ts",
           snapshot: "function route(req) { ... }",
@@ -49,8 +51,9 @@ export const Single: Story = {
   beforeEach: () => {
     resetStore(useChatStore)
     seedStore(useChatStore, {
-      artifactSelections: [
+      contextSelections: [
         {
+          kind: "artifact",
           artifactId: "a1",
           title: "config.json",
           snapshot: '{ "port": 3000 }',

@@ -1468,12 +1468,13 @@ describe("pendingArtifactEditTarget", () => {
   })
 })
 
-describe("artifactSelections", () => {
+describe("contextSelections", () => {
   beforeEach(() => {
     act(() => useChatStore.getState().clear())
   })
 
   const sel = (over = {}) => ({
+    kind: "artifact" as const,
     artifactId: "a1",
     title: "Snippet",
     snapshot: "const x = 1",
@@ -1484,73 +1485,73 @@ describe("artifactSelections", () => {
 
   it("adds, removes by index, and clears selections", () => {
     act(() => {
-      useChatStore.getState().addArtifactSelection(sel({ title: "one" }))
-      useChatStore.getState().addArtifactSelection(sel({ title: "two" }))
+      useChatStore.getState().addContextSelection(sel({ title: "one" }))
+      useChatStore.getState().addContextSelection(sel({ title: "two" }))
     })
-    expect(useChatStore.getState().artifactSelections).toHaveLength(2)
+    expect(useChatStore.getState().contextSelections).toHaveLength(2)
 
-    act(() => useChatStore.getState().removeArtifactSelection(0))
-    expect(useChatStore.getState().artifactSelections).toHaveLength(1)
-    expect(useChatStore.getState().artifactSelections[0].title).toBe("two")
+    act(() => useChatStore.getState().removeContextSelection(0))
+    expect(useChatStore.getState().contextSelections).toHaveLength(1)
+    expect(useChatStore.getState().contextSelections[0].title).toBe("two")
 
-    act(() => useChatStore.getState().clearArtifactSelections())
-    expect(useChatStore.getState().artifactSelections).toHaveLength(0)
+    act(() => useChatStore.getState().clearContextSelections())
+    expect(useChatStore.getState().contextSelections).toHaveLength(0)
   })
 
-  it("removeArtifactSelection ignores out-of-range indices (stable reference)", () => {
-    act(() => useChatStore.getState().addArtifactSelection(sel()))
-    const before = useChatStore.getState().artifactSelections
-    act(() => useChatStore.getState().removeArtifactSelection(5))
-    expect(useChatStore.getState().artifactSelections).toBe(before)
+  it("removeContextSelection ignores out-of-range indices (stable reference)", () => {
+    act(() => useChatStore.getState().addContextSelection(sel()))
+    const before = useChatStore.getState().contextSelections
+    act(() => useChatStore.getState().removeContextSelection(5))
+    expect(useChatStore.getState().contextSelections).toBe(before)
   })
 
-  it("clearArtifactSelections is a no-op when already empty (stable reference)", () => {
-    const before = useChatStore.getState().artifactSelections
-    act(() => useChatStore.getState().clearArtifactSelections())
-    expect(useChatStore.getState().artifactSelections).toBe(before)
+  it("clearContextSelections is a no-op when already empty (stable reference)", () => {
+    const before = useChatStore.getState().contextSelections
+    act(() => useChatStore.getState().clearContextSelections())
+    expect(useChatStore.getState().contextSelections).toBe(before)
   })
 
-  it("promoteArtifactSelection moves a chip to the front without dropping the rest", () => {
+  it("promoteContextSelection moves a chip to the front without dropping the rest", () => {
     act(() => {
-      useChatStore.getState().addArtifactSelection(sel({ title: "one", artifactId: "a1" }))
-      useChatStore.getState().addArtifactSelection(sel({ title: "two", artifactId: "a2" }))
-      useChatStore.getState().addArtifactSelection(sel({ title: "three", artifactId: "a3" }))
+      useChatStore.getState().addContextSelection(sel({ title: "one", artifactId: "a1" }))
+      useChatStore.getState().addContextSelection(sel({ title: "two", artifactId: "a2" }))
+      useChatStore.getState().addContextSelection(sel({ title: "three", artifactId: "a3" }))
     })
 
     // Only the first selection becomes the send's edit target, so promoting is
     // how the user picks which artifact receives the revision proposal.
-    act(() => useChatStore.getState().promoteArtifactSelection(2))
+    act(() => useChatStore.getState().promoteContextSelection(2))
 
-    expect(useChatStore.getState().artifactSelections.map((s) => s.title)).toEqual([
+    expect(useChatStore.getState().contextSelections.map((s) => s.title)).toEqual([
       "three",
       "one",
       "two",
     ])
   })
 
-  it("promoteArtifactSelection is a no-op for index 0 and out-of-range (stable reference)", () => {
+  it("promoteContextSelection is a no-op for index 0 and out-of-range (stable reference)", () => {
     act(() => {
-      useChatStore.getState().addArtifactSelection(sel({ title: "one" }))
-      useChatStore.getState().addArtifactSelection(sel({ title: "two" }))
+      useChatStore.getState().addContextSelection(sel({ title: "one" }))
+      useChatStore.getState().addContextSelection(sel({ title: "two" }))
     })
-    const before = useChatStore.getState().artifactSelections
+    const before = useChatStore.getState().contextSelections
 
-    act(() => useChatStore.getState().promoteArtifactSelection(0))
-    expect(useChatStore.getState().artifactSelections).toBe(before)
+    act(() => useChatStore.getState().promoteContextSelection(0))
+    expect(useChatStore.getState().contextSelections).toBe(before)
 
-    act(() => useChatStore.getState().promoteArtifactSelection(9))
-    expect(useChatStore.getState().artifactSelections).toBe(before)
+    act(() => useChatStore.getState().promoteContextSelection(9))
+    expect(useChatStore.getState().contextSelections).toBe(before)
 
-    act(() => useChatStore.getState().promoteArtifactSelection(-1))
-    expect(useChatStore.getState().artifactSelections).toBe(before)
+    act(() => useChatStore.getState().promoteContextSelection(-1))
+    expect(useChatStore.getState().contextSelections).toBe(before)
   })
 
   it("focus change and clear() reset selections", () => {
     act(() => {
       useChatStore.getState().setActiveSession("s1")
-      useChatStore.getState().addArtifactSelection(sel())
+      useChatStore.getState().addContextSelection(sel())
     })
     act(() => useChatStore.getState().setActiveSession("s2"))
-    expect(useChatStore.getState().artifactSelections).toHaveLength(0)
+    expect(useChatStore.getState().contextSelections).toHaveLength(0)
   })
 })

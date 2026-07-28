@@ -51,7 +51,7 @@ jest.mock("./composer", () => {
 jest.mock("./chat-header", () => ({ ChatHeader: () => null }))
 jest.mock("./character-missing-banner", () => ({ CharacterMissingBanner: () => null }))
 jest.mock("./empty-state", () => ({ EmptyChatState: () => null }))
-jest.mock("./inline-error", () => ({ InlineError: () => null }))
+jest.mock("@/components/error/diagnostic-card", () => ({ InlineError: () => null }))
 jest.mock("./message-list", () => ({ MessageList: () => null }))
 jest.mock("@/components/agent/external-agent/session-panel", () => ({
   ExternalAgentSessionPanel: () => null,
@@ -85,6 +85,7 @@ jest.mock("@/stores/chat", () => ({
   useSessionMessages: () => storeState.messages,
   useSessionStatus: () => storeState.status,
   useSessionErrorMessage: () => storeState.errorMessage,
+  useSessionErrorDiagnostic: () => null,
   useSessionHasMessages: () => storeState.messages.length > 0,
   useSessionMessagesLoading: () => storeState.messagesLoading,
   useSessionMessagesLoadError: () => storeState.messagesLoadError,

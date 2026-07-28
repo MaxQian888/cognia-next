@@ -11,6 +11,14 @@ jest.mock("@/stores/chat", () => ({
   useSessionStatus: (id: string) => statusBySession[id] ?? "idle",
 }))
 
+// Mocked rather than driven through the real store: this file already stubs
+// `@/stores/chat`, and the real hook joins that store with the artifact one.
+const artifactsBySession: Record<string, { openCount: number; pendingReviewCount: number }> = {}
+jest.mock("@/hooks/artifacts/use-session-artifacts", () => ({
+  useSessionArtifactSummary: (id: string) =>
+    artifactsBySession[id] ?? { openCount: 0, pendingReviewCount: 0 },
+}))
+
 const tabs: ChatTabInfo[] = [
   { id: "a", title: "Alpha" },
   { id: "b", title: "Beta" },
@@ -32,6 +40,7 @@ function makeProps(over: Partial<Parameters<typeof ChatTabStrip>[0]> = {}) {
 
 beforeEach(() => {
   for (const k of Object.keys(statusBySession)) delete statusBySession[k]
+  for (const k of Object.keys(artifactsBySession)) delete artifactsBySession[k]
 })
 
 describe("ChatTabStrip", () => {
@@ -112,5 +121,37 @@ describe("ChatTabStrip", () => {
     // splitId forces the strip to render; the split toggle is disabled (canSplit=false).
     expect(getByRole("tablist")).toBeTruthy()
     expect((getByRole("button", { name: "exitSplit" }) as HTMLButtonElement).disabled).toBe(true)
+  })
+
+  // The right rail follows `activeSessionId` alone, so without this an artifact
+  // produced by the split pane is entirely invisible — no tab, no dock, no
+  // attention signal. The badge is the only thing saying "there is something
+  // over there"; selecting the tab is already the way to bring the rail across.
+  describe("artifact badge", () => {
+    it("counts a background conversation's open artifacts", () => {
+      artifactsBySession.b = { openCount: 3, pendingReviewCount: 0 }
+      const { getByTestId } = render(<ChatTabStrip {...makeProps()} />)
+      const badge = getByTestId("chat-tab-artifacts-b")
+      expect(badge.textContent).toContain("3")
+      expect(badge).not.toHaveAttribute("data-pending-review")
+    })
+
+    it("marks a conversation holding a proposal that wants a decision", () => {
+      artifactsBySession.b = { openCount: 2, pendingReviewCount: 1 }
+      const { getByTestId } = render(<ChatTabStrip {...makeProps()} />)
+      expect(getByTestId("chat-tab-artifacts-b")).toHaveAttribute("data-pending-review", "true")
+    })
+
+    // The active tab's artifacts are the ones already on screen in the rail.
+    it("stays off the active tab", () => {
+      artifactsBySession.a = { openCount: 4, pendingReviewCount: 2 }
+      const { queryByTestId } = render(<ChatTabStrip {...makeProps({ activeId: "a" })} />)
+      expect(queryByTestId("chat-tab-artifacts-a")).toBeNull()
+    })
+
+    it("stays off a conversation holding nothing", () => {
+      const { queryByTestId } = render(<ChatTabStrip {...makeProps()} />)
+      expect(queryByTestId("chat-tab-artifacts-b")).toBeNull()
+    })
   })
 })

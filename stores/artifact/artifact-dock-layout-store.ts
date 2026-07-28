@@ -184,7 +184,32 @@ export interface ArtifactDockLayoutState {
     relPath?: string
   }) => void
   clearWorkspaceRevealRequest: (id: string) => void
-  clearWorkspaceContext: () => void
+  /**
+   * Drop every reveal the user navigated away from.
+   *
+   * All three fields are published against whichever conversation was focused
+   * at the time, and none of them expires on its own:
+   *
+   * - `workspaceContext` is *retained* after its request is consumed, by
+   *   design, so the workspace panel keeps showing the revealed file. It
+   *   outranks the session's own root, so left alone it renders conversation
+   *   A's file inside conversation B.
+   * - `workspaceRevealRequest` is a one-shot queue that is only cleared by the
+   *   editor that consumed it; one aimed at a conversation that is no longer
+   *   mounted is never consumed and never cleared.
+   * - `revealIntent` names a panel but no session, and `useDockPanelSync`
+   *   consumes it only if the *mounted* surface owns that panel id — so an
+   *   unclaimed intent waits until some later scope happens to own it, then
+   *   yanks the dock to a panel asked for in a conversation already left.
+   *
+   * Every publisher fires from a card that belongs to the conversation it
+   * names, and none of them switches conversation first, so clearing on the
+   * switch can never race a legitimate reveal.
+   *
+   * Called from the single session-focus seam
+   * (`components/providers/initializers/session-focus-initializer.tsx`).
+   */
+  clearSessionScopedReveals: () => void
   setMobileSheetOpen: (open: boolean) => void
   resetLayout: () => void
 }
@@ -397,7 +422,14 @@ export const useArtifactDockLayoutStore = create<ArtifactDockLayoutState>()(
         set((state) =>
           state.workspaceRevealRequest?.id === id ? { workspaceRevealRequest: null } : state
         ),
-      clearWorkspaceContext: () => set({ workspaceContext: null }),
+      clearSessionScopedReveals: () =>
+        set((state) =>
+          state.revealIntent === null &&
+          state.workspaceRevealRequest === null &&
+          state.workspaceContext === null
+            ? state
+            : { revealIntent: null, workspaceRevealRequest: null, workspaceContext: null }
+        ),
       setMobileSheetOpen: (open) =>
         set(
           open

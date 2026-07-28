@@ -30,6 +30,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { hasWorkspaceFsBackend } from "@/lib/files/workspace-backend"
 import { isRunnableArtifactType } from "@/lib/artifacts/constants"
 import { useChatStore } from "@/stores/chat"
+import { useSessionStore } from "@/stores/chat/session-store"
 import { useChatViewportStore } from "@/stores/chat/chat-viewport-store"
 import {
   DOCK_MODE_WIDTH_PERCENT,
@@ -350,6 +351,7 @@ export function ArtifactContextWorkbench({
           artifact ? (
             <ContextCommentsPanel
               resource={{ kind: "artifact", id: artifactId, projectId: artifact.projectId }}
+              resourceTitle={artifact.title}
               revision={String(artifact.version)}
               anchor={
                 textSelection
@@ -631,8 +633,18 @@ function ArtifactSelectionCommentPanel({
  * changes shape.
  */
 export function SessionContextWorkbench({ mobile }: { mobile?: SheetHost }) {
+  const tWorkbench = useTranslations("contextWorkbench")
   const workbenchInstanceId = useContextWorkbenchInstanceId("artifact")
   const activeSessionId = useChatStore((state) => state.activeSessionId)
+  // The conversation's *record* (model, working dir, timestamps) lives in
+  // `sessionStore`; `chatStore.sessions` is the per-session message slice.
+  const session = useSessionStore((state) =>
+    activeSessionId ? (state.sessions.find((s) => s.id === activeSessionId) ?? null) : null
+  )
+  const messageCount = useChatStore((state) =>
+    activeSessionId ? (state.sessions[activeSessionId]?.messages.length ?? 0) : 0
+  )
+  const unresolvedCommentCount = useContextCommentBadge("session", activeSessionId)
   const setDockCollapsed = useArtifactDockLayoutStore((state) => state.setDockCollapsed)
   const workspaceAvailable = hasWorkspaceFsBackend()
   const workspaceLayout = mobile?.panelMode === "mobile" ? "mobile" : "desktop"
@@ -696,8 +708,76 @@ export function SessionContextWorkbench({ mobile }: { mobile?: SheetHost }) {
             <ContextCapabilityUnavailable capability="workspace" />
           ),
       },
+      {
+        // The conversation can be commented on like any other resource — notes
+        // about a chat had nowhere to live, so they ended up as messages to the
+        // assistant, which is a different thing entirely. `contextComments`
+        // already accepts every `ContextResource` kind, `session` included.
+        id: "comments",
+        activity: "comments",
+        labelKey: "contextWorkbench.comments",
+        icon: MessageSquareIcon,
+        order: 40,
+        appliesTo: (resource) => resource.kind === "session",
+        retention: "stateful",
+        getBadge: () => unresolvedCommentCount,
+        renderer: () =>
+          activeSessionId ? (
+            <ContextCommentsPanel
+              resource={{ kind: "session", id: activeSessionId, projectId: session?.projectId }}
+              resourceTitle={session?.title}
+              revision={String(session?.updatedAt ?? 0)}
+            />
+          ) : null,
+      },
+      {
+        // Fills the `inspect` rail slot, which stood empty on this surface while
+        // both sibling surfaces (artifact, project) offered one. Everything here
+        // was previously reachable only by opening session settings.
+        id: "metadata",
+        activity: "inspect",
+        labelKey: "contextWorkbench.metadata.sessionTitle",
+        icon: InfoIcon,
+        order: 50,
+        appliesTo: (resource) => resource.kind === "session",
+        retention: "stateful",
+        renderer: () =>
+          session ? (
+            <ContextMetadataPanel
+              title={tWorkbench("metadata.sessionTitle")}
+              fields={[
+                {
+                  label: tWorkbench("metadata.model"),
+                  value: session.model ?? tWorkbench("metadata.unknown"),
+                },
+                {
+                  label: tWorkbench("metadata.provider"),
+                  value: session.providerOverride ?? tWorkbench("metadata.unknown"),
+                },
+                {
+                  label: tWorkbench("metadata.workingDir"),
+                  value: session.workingDir ?? tWorkbench("metadata.unknown"),
+                },
+                { label: tWorkbench("metadata.messageCount"), value: messageCount },
+                {
+                  label: tWorkbench("metadata.createdAt"),
+                  value: new Date(session.createdAt).toLocaleString(),
+                },
+                { label: tWorkbench("metadata.sessionId"), value: session.id },
+              ]}
+            />
+          ) : null,
+      },
     ],
-    [activeSessionId, workspaceAvailable, workspaceLayout]
+    [
+      activeSessionId,
+      messageCount,
+      session,
+      tWorkbench,
+      unresolvedCommentCount,
+      workspaceAvailable,
+      workspaceLayout,
+    ]
   )
   useDockPanelSync(
     scopeKey,

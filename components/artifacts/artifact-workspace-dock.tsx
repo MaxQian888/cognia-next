@@ -213,6 +213,20 @@ export function ArtifactWorkspaceDock({ children }: { children: ReactNode }) {
   useDockAttentionSignal()
   const breakpoint = useBreakpoint()
 
+  // Tablet takes the Sheet, not a side-by-side dock, and that is deliberate
+  // rather than an oversight in the breakpoint table.
+  //
+  // A dock is only worth its column if both columns stay usable. At the 24%
+  // narrow preset an 820px-wide tablet gives the dock ~197px — too narrow for
+  // the preview, let alone the activity rail beside it — and the workspace
+  // profile's floor is an absolute 480px, which would claim 59% of the screen
+  // and leave the conversation in the remaining 41%.
+  //
+  // Nothing is lost by the Sheet: it hosts the *same* `ContextWorkbench`, over
+  // the same resource, with the same panel set (see `ArtifactPanel` →
+  // `ArtifactContextWorkbench`), so this is a different shape rather than a
+  // reduced one. Pinned by "renders the narrow host at the tablet breakpoint"
+  // in the test beside this file.
   if (breakpoint !== "desktop") {
     return <ArtifactWorkspaceDockNarrow>{children}</ArtifactWorkspaceDockNarrow>
   }

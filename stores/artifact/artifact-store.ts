@@ -19,6 +19,7 @@ import { getPluginEventHooks } from "@/lib/plugin"
 import { getPluginRateLimiter, RateLimitError } from "@/lib/plugin/security/rate-limiter"
 import { loggers } from "@cognia/logging"
 import { useProjectStore } from "@/stores/project/project-store"
+import { useChatStore } from "@/stores/chat"
 // Pure diff → hunk → apply engine (no `ai`/provider imports — safe for this
 // persisted, widely-imported store). See lib/ai/generation/canvas-review.ts.
 import {
@@ -33,6 +34,17 @@ import {
  */
 function activeProjectId(): string | null {
   return useProjectStore.getState().activeProjectId
+}
+
+/**
+ * The conversation the user is currently looking at. Read lazily for the same
+ * reason as {@link activeProjectId} — this store is persisted and imported
+ * nearly everywhere, so it must not subscribe to the chat store.
+ *
+ * `chatStore` does not import this module, so the dependency is one-way.
+ */
+function focusedSessionId(): string | null {
+  return useChatStore.getState().activeSessionId
 }
 import type { PluginCanvasDocument } from "@/types/plugin/plugin"
 import {
@@ -60,8 +72,40 @@ import type {
   CanvasReviewItemStatus,
   CanvasWorkbenchActionType,
   ArtifactDetectionConfig,
+  ArtifactReviewReceipt,
   DetectedArtifact,
 } from "@/types"
+
+/**
+ * Cap on staged review receipts. A session spent churning through proposals
+ * must not grow the next prompt without bound; the oldest go first.
+ */
+const MAX_REVIEW_RECEIPTS = 10
+
+/**
+ * Stage a review outcome, keeping at most one receipt per artifact.
+ *
+ * Re-diffing and rejecting twice before sending is one thing to tell the
+ * assistant, not two — and the latest verdict is the true one, so the newer
+ * receipt replaces the older rather than queueing behind it.
+ */
+function appendReviewReceipt(
+  receipts: ArtifactReviewReceipt[],
+  next: ArtifactReviewReceipt
+): ArtifactReviewReceipt[] {
+  return [...receipts.filter((r) => r.artifactId !== next.artifactId), next].slice(
+    -MAX_REVIEW_RECEIPTS
+  )
+}
+
+/**
+ * Value identity for a receipt. There is no id — `appendReviewReceipt` keys on
+ * `artifactId` — so consuming one after a committed send compares the verdict
+ * itself, letting a newer verdict for the same artifact survive.
+ */
+function reviewReceiptIdentity(r: ArtifactReviewReceipt): string {
+  return `${r.sessionId}\0${r.artifactId}\0${r.outcome}\0${r.accepted}\0${r.total}`
+}
 
 /** Maximum content size to persist per artifact (100KB) */
 const MAX_PERSISTED_CONTENT_SIZE = 100 * 1024
@@ -512,6 +556,21 @@ interface ArtifactState {
    * `partialize` so a stale-baseline proposal can never survive a reload.
    */
   pendingReviews: Record<string, CanvasPendingReview>
+  /**
+   * What the user did with proposals the assistant made, waiting to be told to
+   * the assistant on the next send.
+   *
+   * The revision round trip used to run one way only: a selection chip aimed a
+   * turn at an artifact, the reply became a per-hunk proposal — and then
+   * rejecting it (or accepting 2 of 5 hunks) just deleted the proposal. The
+   * model was never told, so the next turn could confidently re-propose exactly
+   * what the user had turned down.
+   *
+   * Same lifetime as a staged selection: in-memory, drained on send, never
+   * persisted. Drained by session because a receipt only makes sense in the
+   * conversation that produced the proposal.
+   */
+  reviewReceipts: ArtifactReviewReceipt[]
 
   // Canvas
   canvasDocuments: Record<string, CanvasDocument>
@@ -608,6 +667,19 @@ interface ArtifactActions {
     runtimeFilter?: ArtifactRuntimeHealth | "all"
   }) => void
   setArtifactWorkspaceScope: (scope: ArtifactWorkspaceScope, sessionId?: string | null) => void
+  /**
+   * Re-point the artifact list at a newly focused conversation.
+   *
+   * `artifactWorkspace` is one global blob, so a search term or type filter
+   * typed in one conversation kept narrowing every conversation the user
+   * switched to afterwards — usually down to nothing, with no visible cause.
+   * The *preferences* (`scope`, `recentArtifactIds`) deliberately survive; only
+   * the ad-hoc narrowing resets.
+   *
+   * Called from the single session-focus seam
+   * (`components/providers/initializers/session-focus-initializer.tsx`).
+   */
+  resetSessionScopedWorkspaceFilters: (sessionId: string | null) => void
   setArtifactWorkspaceReturnContext: (context: ArtifactWorkspaceReturnContext | null) => void
   getArtifactsForWorkspace: (options?: { sessionId?: string | null; limit?: number }) => Artifact[]
 
@@ -641,6 +713,24 @@ interface ArtifactActions {
   applyArtifactReview: (id: string, changeDescription?: string) => void
   rejectArtifactReview: (id: string) => void
   getPendingReview: (id: string) => CanvasPendingReview | null
+  /**
+   * This session's pending review outcomes, without consuming them. The
+   * composer reads them while building the prompt, then calls
+   * `consumeReviewReceipts` once the send has actually committed.
+   */
+  peekReviewReceipts: (sessionId: string) => ArtifactReviewReceipt[]
+  /**
+   * Forget exactly the receipts that rode out on a committed message.
+   *
+   * Split from the read on purpose. Draining at build time lost the receipt for
+   * good whenever the send then bailed — an empty payload, a declined oversize
+   * confirm, or a throw inside `onSend` — and the assistant would go on
+   * re-proposing what the user had already turned down. Matching on value
+   * rather than clearing the whole session also protects a *newer* verdict for
+   * the same artifact that landed while the message was in flight: it has not
+   * been told to the assistant yet, so it must survive.
+   */
+  consumeReviewReceipts: (receipts: readonly ArtifactReviewReceipt[]) => void
 
   /**
    * Stage an AI revision of a Canvas document as a pending per-hunk proposal.
@@ -746,6 +836,7 @@ const initialState: ArtifactState = {
   artifactWorkspace: INITIAL_ARTIFACT_WORKSPACE,
   openArtifactIdsBySession: {},
   pendingReviews: {},
+  reviewReceipts: [],
   canvasDocuments: {},
   activeCanvasId: null,
   panelOpen: false,
@@ -1009,9 +1100,18 @@ export const useArtifactStore = create<ArtifactState & ArtifactActions>()(
           .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime()),
 
       setActiveArtifact: (id, sessionId) => {
-        // An id that no longer resolves still names its session through the
-        // caller; a clear names it only through the argument.
-        const clearKey = artifactSessionKey(sessionId)
+        // Which conversation's dock this activation lands in, most specific
+        // first: the caller's explicit argument, then the conversation the user
+        // is actually looking at, then the artifact's own session.
+        //
+        // The artifact's own session used to win outright, which broke every
+        // cross-session open: revealing an artifact from the "recent" scope (or
+        // the artifacts workspace route) while focused on another conversation
+        // wrote the active id into a bucket nothing was reading — the dock
+        // expanded and showed the old content — *and* silently overwrote the
+        // owning conversation's parked artifact.
+        const targetSessionId = sessionId ?? focusedSessionId()
+        const clearKey = artifactSessionKey(targetSessionId)
         const previousId = id ? null : (get().activeArtifactIdBySession[clearKey] ?? null)
         set((state) => {
           if (!id) {
@@ -1024,7 +1124,7 @@ export const useArtifactStore = create<ArtifactState & ArtifactActions>()(
           }
 
           const artifact = state.artifacts[id]
-          const sessionKey = artifactSessionKey(artifact ? artifact.sessionId : sessionId)
+          const sessionKey = artifactSessionKey(targetSessionId ?? artifact?.sessionId)
           if (!artifact) {
             return {
               activeArtifactIdBySession: {
@@ -1056,7 +1156,10 @@ export const useArtifactStore = create<ArtifactState & ArtifactActions>()(
             },
             artifactWorkspace: {
               ...state.artifactWorkspace,
-              sessionId: artifact.sessionId,
+              // The bucket this activation landed in, not the artifact's origin
+              // session — otherwise the list's "session" scope would filter the
+              // focused conversation's dock by another conversation's id.
+              sessionId: targetSessionId ?? artifact.sessionId,
               recentArtifactIds: updateRecentArtifactIds(
                 state.artifactWorkspace.recentArtifactIds,
                 id
@@ -1087,6 +1190,18 @@ export const useArtifactStore = create<ArtifactState & ArtifactActions>()(
             ...state.artifactWorkspace,
             scope,
             sessionId,
+          },
+        }))
+      },
+
+      resetSessionScopedWorkspaceFilters: (sessionId) => {
+        set((state) => ({
+          artifactWorkspace: {
+            ...state.artifactWorkspace,
+            sessionId,
+            searchQuery: "",
+            typeFilter: "all",
+            runtimeFilter: "all",
           },
         }))
       },
@@ -1309,27 +1424,66 @@ export const useArtifactStore = create<ArtifactState & ArtifactActions>()(
         const merged = applyAcceptedCanvasReviewItems(review.originalContent, review.items)
         get().updateArtifact(id, { content: merged })
 
+        const accepted = review.items.filter((item) => item.status === "accepted").length
+
         set((s) => {
           const { [id]: _applied, ...pendingReviews } = s.pendingReviews
-          return { pendingReviews }
+          return {
+            pendingReviews,
+            reviewReceipts: appendReviewReceipt(s.reviewReceipts, {
+              sessionId: artifact.sessionId,
+              artifactId: id,
+              title: artifact.title,
+              outcome: "applied",
+              accepted,
+              total: review.items.length,
+            }),
+          }
         })
 
         loggers.store.info("artifacts.review.apply", {
           artifactId: id,
-          accepted: review.items.filter((item) => item.status === "accepted").length,
+          accepted,
           total: review.items.length,
         })
       },
 
       rejectArtifactReview: (id) => {
         set((state) => {
-          if (!state.pendingReviews[id]) return state
+          const review = state.pendingReviews[id]
+          if (!review) return state
           const { [id]: _rejected, ...pendingReviews } = state.pendingReviews
-          return { pendingReviews }
+          const artifact = state.artifacts[id]
+          // No artifact means it was deleted out from under the proposal —
+          // there is nothing coherent to tell the assistant about, so drop the
+          // proposal quietly rather than staging a receipt naming a ghost.
+          if (!artifact) return { pendingReviews }
+          return {
+            pendingReviews,
+            reviewReceipts: appendReviewReceipt(state.reviewReceipts, {
+              sessionId: artifact.sessionId,
+              artifactId: id,
+              title: artifact.title,
+              outcome: "rejected",
+              accepted: 0,
+              total: review.items.length,
+            }),
+          }
         })
       },
 
       getPendingReview: (id) => get().pendingReviews[id] ?? null,
+
+      peekReviewReceipts: (sessionId) =>
+        get().reviewReceipts.filter((r) => r.sessionId === sessionId),
+
+      consumeReviewReceipts: (receipts) => {
+        if (receipts.length === 0) return
+        const sent = new Set(receipts.map(reviewReceiptIdentity))
+        set((s) => ({
+          reviewReceipts: s.reviewReceipts.filter((r) => !sent.has(reviewReceiptIdentity(r))),
+        }))
+      },
 
       // Canvas AI-revision review (shares the pendingReviews map + engine)
       proposeCanvasReview: (documentId, proposedContent, meta) => {
@@ -2086,6 +2240,9 @@ export const useArtifactStore = create<ArtifactState & ArtifactActions>()(
             artifacts,
             artifactVersions,
             pendingReviews,
+            // A receipt is something to tell *this* conversation; with the
+            // conversation gone there is nobody left to tell.
+            reviewReceipts: state.reviewReceipts.filter((r) => r.sessionId !== sessionId),
             artifactWorkspace: {
               ...state.artifactWorkspace,
               recentArtifactIds: state.artifactWorkspace.recentArtifactIds.filter(
@@ -2121,7 +2278,7 @@ export const useArtifactStore = create<ArtifactState & ArtifactActions>()(
     {
       name: ARTIFACT_STORAGE_KEY,
       storage: persistLocalStorage(),
-      version: 4,
+      version: 5,
       migrate: (persistedState: unknown, version) => {
         const state = persistedState as Record<string, unknown>
         if (!state.canvasDocuments || typeof state.canvasDocuments !== "object") {
@@ -2162,7 +2319,15 @@ export const useArtifactStore = create<ArtifactState & ArtifactActions>()(
           delete state.openArtifactIds
           delete state.activeArtifactId
           state.openArtifactIdsBySession = openArtifactIdsBySession
-          // The active id was never persisted, so there is nothing to re-bucket.
+          // v3's active id was never written to disk, so there is nothing to
+          // re-bucket here. v5 starts persisting it (see `partialize`).
+          state.activeArtifactIdBySession = {}
+        }
+        if (
+          version < 5 &&
+          (!state.activeArtifactIdBySession || typeof state.activeArtifactIdBySession !== "object")
+        ) {
+          // Anything written before v5 has no active-id map on disk at all.
           state.activeArtifactIdBySession = {}
         }
         return state
@@ -2205,10 +2370,28 @@ export const useArtifactStore = create<ArtifactState & ArtifactActions>()(
         return {
           artifacts,
           artifactVersions,
-          artifactWorkspace: state.artifactWorkspace,
+          // Only the durable *preferences* survive a reload. `searchQuery` and
+          // `sessionId` describe the conversation you happened to be in when
+          // the app closed: restoring them boots the artifact list already
+          // filtered by a stale query and a session that may not even be open
+          // (`applyArtifactWorkspaceFilters` uses `sessionId` as the scope
+          // fallback), which reads as "the list is empty".
+          artifactWorkspace: {
+            ...state.artifactWorkspace,
+            searchQuery: "",
+            sessionId: null,
+          },
           // Only tabs whose artifact survived the LRU eviction above.
           openArtifactIdsBySession: pruneSessionTabs(state.openArtifactIdsBySession, (id) =>
             Boolean(artifacts[id])
+          ),
+          // Which artifact each conversation was parked on. Persisted alongside
+          // the tabs so re-opening the app puts the dock back where it was;
+          // keeping only the tabs restored the strip but dropped you onto the
+          // session workbench every time. Same LRU gate as the tabs.
+          activeArtifactIdBySession: pruneSessionActive(
+            state.activeArtifactIdBySession,
+            (_sessionKey, current) => (current && artifacts[current] ? current : null)
           ),
           canvasDocuments: state.canvasDocuments,
         }

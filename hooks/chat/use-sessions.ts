@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useMemo } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 import { listMessages, persistMessages } from "@/lib/db/messages"
 import {
@@ -12,6 +12,7 @@ import {
   deleteSession,
   getSession,
   listScopedSessions,
+  listSessions,
   unarchiveSession,
   updateSession,
 } from "@/lib/db/sessions"
@@ -33,7 +34,33 @@ import { isTauri } from "@/lib/tauri"
 import { emitSystemBusEvent, SystemEvents } from "@/lib/plugin/messaging/message-bus"
 import { filterExposedSessions } from "@/lib/chat/session-exposure"
 
-export function useSessions() {
+/**
+ * How far the active session id has been resolved to a row.
+ *
+ * `"pending"` and `"absent"` are NOT interchangeable: the first means "not
+ * looked up yet", the second means "looked up, and it is not in this
+ * workspace's list". Collapsing them is what made a brand-new conversation look
+ * deleted for a render.
+ */
+export type ActiveSessionState = "pending" | "absent" | "present"
+
+export interface UseSessionsOptions {
+  /**
+   * List conversations from *every* workspace instead of only the active one.
+   *
+   * Only the sidebar's `groupBy: "workspace"` mode wants this — it groups by
+   * workspace, which is meaningless when the list already holds exactly one.
+   * The *active session* stays workspace-scoped either way (see
+   * `activeSessionResolution`): a conversation from another workspace can be
+   * listed and clicked, but selecting it switches the workspace first
+   * (`desktop-chat-workspace.tsx:handleSwitchToSession`), so the rest of the app
+   * — artifacts, terminals, the workspace panel — never disagrees with the
+   * conversation on screen.
+   */
+  crossWorkspace?: boolean
+}
+
+export function useSessions({ crossWorkspace = false }: UseSessionsOptions = {}) {
   const setActiveSession = useChatStore((s) => s.setActiveSession)
   const setMessages = useChatStore((s) => s.setMessages)
   const setMessagesLoadError = useChatStore((s) => s.setMessagesLoadError)
@@ -48,12 +75,81 @@ export function useSessions() {
   const sessions = useLiveQuery<ChatSession[]>(() => {
     if (typeof window === "undefined") return Promise.resolve([])
     if (!projectStoreLoaded || !activeProjectId) return Promise.resolve([])
-    return listScopedSessions(activeProjectId)
-  }, [activeProjectId, projectStoreLoaded])
+    return crossWorkspace ? listSessions() : listScopedSessions(activeProjectId)
+  }, [activeProjectId, projectStoreLoaded, crossWorkspace])
   const exposedSessions = useMemo(
     () => (Array.isArray(sessions) ? filterExposedSessions(sessions, "main-list") : []),
     [sessions]
   )
+
+  // Resolve the active session's ROW, rather than leaving every consumer to
+  // search `sessions` for it.
+  //
+  // `sessions` is a `liveQuery`, so it is eventually consistent: a conversation
+  // that was just created — new chat, `/branch`, fork — is already
+  // `activeSessionId` a full render before the query re-emits carrying its row.
+  // A consumer that resolves the active session by searching the list reads that
+  // window as "this conversation is gone"; the desktop guild reconcile did, and
+  // bounced every freshly-created conversation back to the previous one (the
+  // two rows visibly trading the highlight).
+  //
+  // The list still wins whenever it carries the row, so renames / team changes
+  // stay live — the direct lookup only covers the window where it doesn't.
+  const listedActiveSession = useMemo(() => {
+    if (!activeSessionId) return null
+    const row = exposedSessions.find((s) => s.id === activeSessionId) ?? null
+    // The *active* conversation stays workspace-scoped even when the list is
+    // not. "Belongs to another workspace" is what re-points the chat pane after
+    // a workspace switch (which never touches `activeSessionId`), and a
+    // cross-workspace list would otherwise resolve the row happily and leave
+    // the previous workspace's conversation on screen.
+    if (crossWorkspace && row && row.projectId && row.projectId !== activeProjectId) return null
+    return row
+  }, [exposedSessions, activeSessionId, crossWorkspace, activeProjectId])
+  // `session: null` = looked up and genuinely not part of this workspace's list.
+  const [lookedUpActive, setLookedUpActive] = useState<{
+    id: string
+    session: ChatSession | null
+  } | null>(null)
+  useEffect(() => {
+    if (!activeSessionId || listedActiveSession) return
+    if (!projectStoreLoaded || !activeProjectId) return
+    let cancelled = false
+    const id = activeSessionId
+    void getSession(id)
+      .then((row) => {
+        if (cancelled) return
+        // This list is workspace-scoped, so a row belonging to another workspace
+        // is absent from it too — that is what re-points the chat pane after a
+        // workspace switch, which never touches `activeSessionId` itself.
+        setLookedUpActive({
+          id,
+          session: row && row.projectId === activeProjectId ? row : null,
+        })
+      })
+      .catch((err) => {
+        // A failed read is not evidence of absence — stay pending rather than
+        // let a transient Dexie error redirect the user somewhere else.
+        console.warn("resolve active session failed", err)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [activeSessionId, listedActiveSession, activeProjectId, projectStoreLoaded])
+
+  const activeSessionResolution = useMemo((): {
+    state: ActiveSessionState
+    session: ChatSession | null
+  } => {
+    if (!activeSessionId) return { state: "absent", session: null }
+    if (listedActiveSession) return { state: "present", session: listedActiveSession }
+    if (!lookedUpActive || lookedUpActive.id !== activeSessionId) {
+      return { state: "pending", session: null }
+    }
+    return lookedUpActive.session
+      ? { state: "present", session: lookedUpActive.session }
+      : { state: "absent", session: null }
+  }, [activeSessionId, listedActiveSession, lookedUpActive])
 
   // Live-bind the workspace's conversation folders (conversation-list overhaul).
   const folders = useLiveQuery<SessionFolder[]>(() => {
@@ -212,6 +308,10 @@ export function useSessions() {
     // show a skeleton instead of flashing the empty state on cold start.
     isLoadingSessions: sessions === undefined,
     activeSessionId,
+    /** The active session's row, or null while pending / absent. */
+    activeSession: activeSessionResolution.session,
+    /** See {@link ActiveSessionState} — never treat `"pending"` as `"absent"`. */
+    activeSessionState: activeSessionResolution.state,
     select,
     create,
     remove,

@@ -67,7 +67,7 @@ export function ArtifactTabStrip({ className }: { className?: string }) {
   // composer already renders one chip per ref and folds them into the prompt on
   // send. Only sub-ranges could be referenced before, via the preview's
   // selection button — there was no way to say "this artifact" as a whole.
-  const addArtifactSelection = useChatStore((state) => state.addArtifactSelection)
+  const addContextSelection = useChatStore((state) => state.addContextSelection)
 
   if (tabs.length === 0) return null
 
@@ -156,7 +156,7 @@ export function ArtifactTabStrip({ className }: { className?: string }) {
             <ContextMenuContent>
               <ContextMenuItem
                 data-testid={`artifact-tab-reference-${id}`}
-                onSelect={() => addArtifactSelection(wholeArtifactSelection({ ...artifact, id }))}
+                onSelect={() => addContextSelection(wholeArtifactSelection({ ...artifact, id }))}
               >
                 <MessageSquarePlusIcon className="size-4" />
                 {t("dock.referenceInChat")}

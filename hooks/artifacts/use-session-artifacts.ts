@@ -41,3 +41,29 @@ export function useOpenArtifactIds(): string[] {
   const sessionId = useArtifactSessionId()
   return useArtifactStore((state) => selectOpenArtifactIds(state, sessionId))
 }
+
+/**
+ * How much a *named* conversation is holding in the dock — open artifacts and
+ * proposals awaiting review.
+ *
+ * Takes the session explicitly rather than reading the active one, because the
+ * caller is the chat tab strip asking about conversations that are NOT on
+ * screen. In split view the right rail follows `activeSessionId` alone, so an
+ * artifact produced by the other pane was completely silent: no tab, no badge,
+ * and `useDockAttentionSignal` deliberately ignores background sessions. This
+ * is what makes "there is something over there" visible without moving the
+ * rail's binding.
+ */
+export function useSessionArtifactSummary(sessionId: string): {
+  openCount: number
+  pendingReviewCount: number
+} {
+  const openCount = useArtifactStore((state) => selectOpenArtifactIds(state, sessionId).length)
+  const pendingReviewCount = useArtifactStore(
+    (state) =>
+      Object.keys(state.pendingReviews).filter(
+        (artifactId) => state.artifacts[artifactId]?.sessionId === sessionId
+      ).length
+  )
+  return { openCount, pendingReviewCount }
+}

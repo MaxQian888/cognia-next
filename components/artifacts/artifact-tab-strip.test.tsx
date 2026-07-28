@@ -46,7 +46,7 @@ beforeEach(() => {
       artifactVersions: {},
     })
     useChatViewportStore.setState({ activeTurnMessageIds: [], jumpToMessage: null })
-    useChatStore.setState({ activeSessionId: SESSION, artifactSelections: [] })
+    useChatStore.setState({ activeSessionId: SESSION, contextSelections: [] })
   })
 })
 
@@ -274,8 +274,9 @@ describe("ArtifactTabStrip", () => {
 
       // Reuses the selection pipeline the composer already renders chips for
       // and folds into the prompt — only sub-ranges could be referenced before.
-      expect(useChatStore.getState().artifactSelections).toEqual([
+      expect(useChatStore.getState().contextSelections).toEqual([
         {
+          kind: "artifact",
           artifactId: first.id,
           title: "First",
           snapshot: "line1\nline2",

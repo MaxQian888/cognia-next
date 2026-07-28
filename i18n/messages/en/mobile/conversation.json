@@ -20,8 +20,15 @@
   "sidebarCompactHelp": "Tighten row spacing to fit more conversations.",
   "sidebarContentSearch": "Search message content",
   "sidebarContentSearchHelp": "Also match text inside messages, not just titles (slower).",
-  "sidebarGroupByDate": "Group by date",
-  "sidebarGroupByDateHelp": "Group conversations into Today / Yesterday / Previous buckets.",
+  "sidebarGroupBy": "Group conversations by",
+  "sidebarGroupByHelp": "Grouping by workspace lists conversations from every workspace; the other modes stay inside the current one.",
+  "sidebarGroupByOptions": {
+    "agent": "Agent",
+    "date": "Date",
+    "none": "No grouping",
+    "team": "Direct messages / Team",
+    "workspace": "Workspace"
+  },
   "sidebarPreview": "Message preview",
   "sidebarPreviewHelp": "Show a second line with the latest message under each conversation.",
   "sidebarSection": "Conversation list",

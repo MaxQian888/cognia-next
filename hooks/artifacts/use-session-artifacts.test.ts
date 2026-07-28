@@ -8,6 +8,7 @@ import {
   useActiveArtifactId,
   useArtifactSessionId,
   useOpenArtifactIds,
+  useSessionArtifactSummary,
 } from "./use-session-artifacts"
 import { NO_SESSION_KEY, useArtifactStore } from "@/stores/artifact/artifact-store"
 import { useChatStore } from "@/stores/chat"
@@ -92,5 +93,37 @@ describe("useActiveArtifactId / useOpenArtifactIds", () => {
     // A fresh `[]` per render would re-fire every effect that depends on it.
     expect(first).toEqual([])
     expect(result.current).toBe(first)
+  })
+})
+
+// Takes the session explicitly, because its caller (the chat tab strip) is
+// asking about conversations that are NOT the one on screen — which is exactly
+// the case the split view left invisible.
+describe("useSessionArtifactSummary", () => {
+  it("counts a conversation other than the active one", () => {
+    act(() => useChatStore.setState({ activeSessionId: "s1" }))
+    seed("s2", "Other A")
+    seed("s2", "Other B")
+
+    const { result } = renderHook(() => useSessionArtifactSummary("s2"))
+    expect(result.current.openCount).toBe(2)
+    expect(result.current.pendingReviewCount).toBe(0)
+  })
+
+  it("counts only the named session's pending proposals", () => {
+    const mine = seed("s2", "Mine")
+    const theirs = seed("s3", "Theirs")
+    act(() => {
+      useArtifactStore.getState().proposeArtifactUpdate(mine.id, "changed")
+      useArtifactStore.getState().proposeArtifactUpdate(theirs.id, "changed too")
+    })
+
+    const { result } = renderHook(() => useSessionArtifactSummary("s2"))
+    expect(result.current.pendingReviewCount).toBe(1)
+  })
+
+  it("reports zero for a conversation holding nothing", () => {
+    const { result } = renderHook(() => useSessionArtifactSummary("nobody"))
+    expect(result.current).toEqual({ openCount: 0, pendingReviewCount: 0 })
   })
 })

@@ -8,7 +8,8 @@ import type {
   SendContentBlock,
   SendOptions,
 } from "@cognia/agent-config-types"
-import type { ArtifactSelectionRef } from "@/types/artifact/artifact"
+import type { CogniaDiagnostic } from "@cognia/diagnostics"
+import type { ContextSelectionRef } from "@/types/artifact/artifact"
 import { nextNavEpoch } from "@/lib/ui/nav-epoch"
 import { decodeSubSession } from "@/lib/claude/team-session-id"
 import { getSubagentApprovalRoute } from "@/lib/claude/agents/subagent-approval-routes"
@@ -115,7 +116,20 @@ export interface PendingCommandOverrides {
 export interface SessionChatSlice {
   messages: UIMessage[]
   status: ChatStatus
+  /**
+   * Raw technical failure text. Kept as the log/report artifact and as the
+   * legacy channel; `errorDiagnostic` is the one carrying structure.
+   */
   errorMessage: string | null
+  /**
+   * The structured failure, when the producer emitted one.
+   *
+   * Added alongside `errorMessage` rather than replacing it: the string field
+   * is read by ~10 sites plus an e2e spec, and widening it would have meant a
+   * breaking rewrite for no benefit the parallel field doesn't give. Producers
+   * migrate one at a time; `setSessionDiagnostic` keeps both in lock-step.
+   */
+  errorDiagnostic: CogniaDiagnostic | null
   pendingApprovals: PendingApproval[]
   /** Per-session assistant-branch selection (see `selectVisibleMessages`). */
   activeBranchByGroup: Record<string, string>
@@ -152,6 +166,7 @@ export function makeSessionSlice(loading = false): SessionChatSlice {
     messages: [],
     status: "idle",
     errorMessage: null,
+    errorDiagnostic: null,
     pendingApprovals: [],
     activeBranchByGroup: {},
     messagesLoading: loading,
@@ -178,6 +193,10 @@ type ProjectedField =
   | "messages"
   | "status"
   | "errorMessage"
+  // Must stay in lock-step with `errorMessage` across all three of the slice
+  // type, `projectSlice` and `sliceForId` — a gap in any one of them loses the
+  // diagnostic when the user switches the focused session.
+  | "errorDiagnostic"
   | "pendingApprovals"
   | "activeBranchByGroup"
   | "messagesLoading"
@@ -190,6 +209,7 @@ function projectSlice(slice: SessionChatSlice): Pick<ChatState, ProjectedField> 
     messages: slice.messages,
     status: slice.status,
     errorMessage: slice.errorMessage,
+    errorDiagnostic: slice.errorDiagnostic,
     pendingApprovals: slice.pendingApprovals,
     activeBranchByGroup: slice.activeBranchByGroup,
     messagesLoading: slice.messagesLoading,
@@ -302,6 +322,7 @@ function sliceForId(state: ChatState, id: string): SessionChatSlice {
       messages: state.messages,
       status: state.status,
       errorMessage: state.errorMessage,
+      errorDiagnostic: state.errorDiagnostic,
       pendingApprovals: state.pendingApprovals,
       activeBranchByGroup: state.activeBranchByGroup,
       messagesLoading: state.messagesLoading,
@@ -383,6 +404,8 @@ interface ChatState {
   messages: UIMessage[]
   status: ChatStatus
   errorMessage: string | null
+  /** Active session's structured failure, mirrored from its slice. */
+  errorDiagnostic: CogniaDiagnostic | null
   pendingApprovals: PendingApproval[]
   /**
    * Live mirror of the active session's permissionMode. Cycled by the
@@ -399,10 +422,16 @@ interface ChatState {
    */
   referencedWorkflowElements: WorkflowElementRef[]
   /**
-   * Artifact snippets the user selected + commented on, staged as context chips
-   * for the next send. Cleared on send (like attachments) and on focus change.
+   * Material the user pointed at + commented on, staged as context chips for
+   * the next send. Cleared on send (like attachments) and on focus change.
+   *
+   * Holds four kinds (artifact / file / comment / web) in one array rather than
+   * four parallel ones: they share a chip bar, a formatter and a lifetime, and
+   * splitting them would mean the composer prepending two context blocks and
+   * the chip bar merging two sources. Only the artifact kind can be the send's
+   * edit target — see `promoteContextSelection`.
    */
-  artifactSelections: ArtifactSelectionRef[]
+  contextSelections: ContextSelectionRef[]
   /** Frontmatter overrides from a recently-picked custom command; cleared on send. */
   pendingCommandOverrides: PendingCommandOverrides | null
   /**
@@ -491,7 +520,14 @@ interface ChatState {
   setSessionMessagesLoadError: (id: string, msg: string | null) => void
   requestSessionMessagesReload: (id: string) => void
   setSessionStatus: (id: string, s: ChatStatus) => void
+  /**
+   * @deprecated Emit a `CogniaDiagnostic` and call `setSessionDiagnostic`.
+   * A bare string loses the code, severity, retryability and actions, forcing
+   * the renderer to guess them back from English prose.
+   */
   setSessionError: (id: string, msg: string | null) => void
+  /** Structured failure for a session. Mirrors `message` onto `errorMessage`. */
+  setSessionDiagnostic: (id: string, diagnostic: CogniaDiagnostic | null) => void
   /** Append a steer message to a session's queue (typed while it was busy). */
   enqueueSteer: (id: string, entry: SteerEntry) => void
   /** Remove a single queued steer entry by its id (no-op if absent). */
@@ -522,20 +558,22 @@ interface ChatState {
   addReferencedWorkflowElement: (ref: WorkflowElementRef) => void
   removeReferencedWorkflowElement: (type: "node" | "edge", id: string) => void
   clearReferencedWorkflowElements: () => void
-  /** Stage an artifact selection as a context chip for the next send. */
-  addArtifactSelection: (selection: ArtifactSelectionRef) => void
-  /** Remove a staged artifact selection (by index, since snapshots can repeat). */
-  removeArtifactSelection: (index: number) => void
+  /** Stage a selection (of any kind) as a context chip for the next send. */
+  addContextSelection: (selection: ContextSelectionRef) => void
+  /** Remove a staged selection (by index, since snapshots can repeat). */
+  removeContextSelection: (index: number) => void
   /**
    * Move a staged selection to the front, making it the send's edit target.
    *
-   * Only the first selection becomes `pendingArtifactEditTarget` — the rest
-   * contribute context alone — so with more than one staged, which artifact
-   * receives the AI's per-hunk revision proposal has to be the user's choice
-   * rather than whichever chip happened to be staged first.
+   * Only the first *artifact* selection becomes `pendingArtifactEditTarget` —
+   * the rest contribute context alone — so with more than one staged, which
+   * artifact receives the AI's per-hunk revision proposal has to be the user's
+   * choice rather than whichever chip happened to be staged first. A non-artifact
+   * selection can never hold the target (there is nothing to diff a proposal
+   * against), so the composer skips past those rather than reading index 0.
    */
-  promoteArtifactSelection: (index: number) => void
-  clearArtifactSelections: () => void
+  promoteContextSelection: (index: number) => void
+  clearContextSelections: () => void
   setPendingCommandOverrides: (overrides: PendingCommandOverrides | null) => void
   toggleBookmark: (messageId: string) => void
   setWebSearchOnForNextSend: (v: boolean) => void
@@ -565,11 +603,12 @@ export const useChatStore = create<ChatState>((set) => ({
   messages: [],
   status: "idle",
   errorMessage: null,
+  errorDiagnostic: null,
   pendingApprovals: [],
   permissionMode: null,
   referencedPaths: [],
   referencedWorkflowElements: [],
-  artifactSelections: [],
+  contextSelections: [],
   pendingCommandOverrides: null,
   bookmarkedIds: [],
   webSearchOnForNextSend: false,
@@ -591,7 +630,7 @@ export const useChatStore = create<ChatState>((set) => ({
         permissionMode: null,
         referencedPaths: [],
         referencedWorkflowElements: [],
-        artifactSelections: [],
+        contextSelections: [],
         pendingCommandOverrides: null,
         bookmarkedIds: [],
         webSearchOnForNextSend: false,
@@ -707,7 +746,21 @@ export const useChatStore = create<ChatState>((set) => ({
     set((s) =>
       patchSliceState(s, id, {
         errorMessage: msg,
+        // Clearing the structured half too: a legacy string write must never
+        // leave a stale diagnostic behind describing a different failure.
+        errorDiagnostic: null,
         ...statusPatch(s, id, msg ? "error" : "idle"),
+      })
+    ),
+  setSessionDiagnostic: (id, diagnostic) =>
+    set((s) =>
+      patchSliceState(s, id, {
+        errorDiagnostic: diagnostic,
+        // Mirror the raw text onto the legacy field so subscribers that read
+        // store state directly — `use-session-notifications`, the desktop
+        // workspace toast — keep working untouched during the migration.
+        errorMessage: diagnostic?.message ?? null,
+        ...statusPatch(s, id, diagnostic ? "error" : "idle"),
       })
     ),
   enqueueSteer: (id, entry) =>
@@ -834,24 +887,24 @@ export const useChatStore = create<ChatState>((set) => ({
         ? s
         : { referencedPaths: [...s.referencedPaths, ref] }
     ),
-  addArtifactSelection: (selection) =>
-    set((s) => ({ artifactSelections: [...s.artifactSelections, selection] })),
-  removeArtifactSelection: (index) =>
+  addContextSelection: (selection) =>
+    set((s) => ({ contextSelections: [...s.contextSelections, selection] })),
+  removeContextSelection: (index) =>
     set((s) =>
-      index < 0 || index >= s.artifactSelections.length
+      index < 0 || index >= s.contextSelections.length
         ? s
-        : { artifactSelections: s.artifactSelections.filter((_, i) => i !== index) }
+        : { contextSelections: s.contextSelections.filter((_, i) => i !== index) }
     ),
-  promoteArtifactSelection: (index) =>
+  promoteContextSelection: (index) =>
     set((s) => {
-      if (index <= 0 || index >= s.artifactSelections.length) return s
-      const next = [...s.artifactSelections]
+      if (index <= 0 || index >= s.contextSelections.length) return s
+      const next = [...s.contextSelections]
       const [promoted] = next.splice(index, 1)
       next.unshift(promoted)
-      return { artifactSelections: next }
+      return { contextSelections: next }
     }),
-  clearArtifactSelections: () =>
-    set((s) => (s.artifactSelections.length === 0 ? s : { artifactSelections: [] })),
+  clearContextSelections: () =>
+    set((s) => (s.contextSelections.length === 0 ? s : { contextSelections: [] })),
   removeReferencedPath: (absolute) =>
     set((s) => ({
       referencedPaths: s.referencedPaths.filter((r) => r.absolute !== absolute),
@@ -969,11 +1022,12 @@ export const useChatStore = create<ChatState>((set) => ({
       messages: [],
       status: "idle",
       errorMessage: null,
+      errorDiagnostic: null,
       pendingApprovals: [],
       permissionMode: null,
       referencedPaths: [],
       referencedWorkflowElements: [],
-      artifactSelections: [],
+      contextSelections: [],
       pendingCommandOverrides: null,
       bookmarkedIds: [],
       webSearchOnForNextSend: false,
@@ -1034,6 +1088,9 @@ export function useSessionStatus(sessionId: string | null): ChatStatus {
 }
 export function useSessionErrorMessage(sessionId: string | null): string | null {
   return useChatStore((s) => (sessionId ? (s.sessions[sessionId]?.errorMessage ?? null) : null))
+}
+export function useSessionErrorDiagnostic(sessionId: string | null): CogniaDiagnostic | null {
+  return useChatStore((s) => (sessionId ? (s.sessions[sessionId]?.errorDiagnostic ?? null) : null))
 }
 export function useSessionPendingApprovals(sessionId: string | null): PendingApproval[] {
   return useChatStore((s) =>

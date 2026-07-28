@@ -76,18 +76,78 @@ export interface ArtifactWorkspaceReturnContext {
 }
 
 /**
+ * What every staged context selection carries: the text itself, a label for the
+ * chip, and the user's comment on it.
+ */
+interface ContextSelectionBase {
+  title: string
+  snapshot: string
+  comment: string
+}
+
+/**
  * A snippet selected inside an artifact, staged as a chat context chip. Carries
  * the selected text, the user's comment, and the line range, plus the owning
  * `artifactId` so the assistant's reply can route back into a review proposal
  * against that artifact. See `lib/artifacts/format-selection-context.ts`.
+ *
+ * **The only kind eligible to be the edit target.** A revision proposal needs
+ * an artifact to diff against, so the other kinds below contribute context
+ * only — see `ContextSelectionRef`.
  */
-export interface ArtifactSelectionRef {
+export interface ArtifactSelectionRef extends ContextSelectionBase {
+  kind: "artifact"
   artifactId: string
-  title: string
-  snapshot: string
-  comment: string
   range: { startLine: number; endLine: number }
 }
+
+/** A file (or one diff hunk) handed over from the dock's workspace panel. */
+export interface FileSelectionRef extends ContextSelectionBase {
+  kind: "file"
+  relPath: string
+  /** Absent when the whole file was referenced rather than a range inside it. */
+  range?: { startLine: number; endLine: number }
+}
+
+/** A review comment handed over from the workbench's comments panel. */
+export interface CommentSelectionRef extends ContextSelectionBase {
+  kind: "comment"
+  /** What the comment hangs off, e.g. `"lines 12-18"`, for the prompt's benefit. */
+  anchorLabel?: string
+}
+
+/** A page (or a selection inside one) handed over from the embedded browser. */
+export interface WebSelectionRef extends ContextSelectionBase {
+  kind: "web"
+  url: string
+}
+
+/** Text captured from another desktop application via AX/UIA or clipboard fallback. */
+export interface ExternalSelectionRef extends ContextSelectionBase {
+  kind: "external"
+  /** Native candidate identity used to make event consumption idempotent. */
+  candidateId: string
+  sourceApp: string
+  sourceTitle?: string
+  origin: "accessibility" | "clipboard"
+  truncated: boolean
+}
+
+/**
+ * Anything the user can stage as context for their next message.
+ *
+ * A discriminated union rather than four parallel staging arrays: the composer
+ * already renders one chip per ref, folds them into the prompt on send, and
+ * clears them afterwards — one pipeline, one chip bar, one formatter. The
+ * discriminant is required, so adding a kind is a compile error at every place
+ * that has to care rather than a silent fall-through to the artifact branch.
+ */
+export type ContextSelectionRef =
+  | ArtifactSelectionRef
+  | FileSelectionRef
+  | CommentSelectionRef
+  | WebSelectionRef
+  | ExternalSelectionRef
 
 export interface ArtifactWorkspaceState {
   scope: ArtifactWorkspaceScope
@@ -251,6 +311,26 @@ export interface CanvasPendingReview {
   status: CanvasReviewStatus
   items: CanvasReviewItem[]
   isStale?: boolean
+}
+
+/**
+ * What the user did with an assistant-proposed revision, staged to be told to
+ * the assistant on the next send.
+ *
+ * `accepted`/`total` rather than a bare verdict because partial acceptance is
+ * the interesting case: "I took 2 of your 5 hunks" is a far more useful signal
+ * than "applied", and without it the model cannot tell a wholesale agreement
+ * from a grudging one.
+ */
+export interface ArtifactReviewReceipt {
+  sessionId: string
+  artifactId: string
+  title: string
+  outcome: "applied" | "rejected"
+  /** Hunks the user kept. Always 0 for a rejection. */
+  accepted: number
+  /** Hunks the proposal contained. */
+  total: number
 }
 
 export interface CanvasActionHistoryEntry {

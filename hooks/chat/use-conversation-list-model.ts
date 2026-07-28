@@ -2,12 +2,15 @@ import { useMemo } from "react"
 
 import {
   buildConversationSections,
+  type ConversationGroup,
   type ConversationListModel,
 } from "@/lib/chat/conversation-list-model"
-import type { ChatSession, SessionFolder } from "@cognia/agent-config-types"
+import type { ChatSession, ConversationGroupBy, SessionFolder } from "@cognia/agent-config-types"
 
 const EMPTY_FOLDERS: readonly SessionFolder[] = []
 const EMPTY_COLLAPSED: ReadonlySet<string> = new Set<string>()
+const EMPTY_GROUPS: readonly ConversationGroup[] = []
+const EMPTY_COLLAPSE_OVERRIDES: Readonly<Record<string, boolean>> = {}
 
 // Reading the wall clock is impure, so it lives in a plain module function
 // (not the hook body) to keep the hook render-pure per react-hooks/purity.
@@ -23,8 +26,16 @@ export interface UseConversationListModelParams {
   query: string
   view?: "active" | "archived"
   collapsedFolderIds?: ReadonlySet<string>
-  /** Group loose sessions into date buckets. Defaults to `true`. */
-  groupByDate?: boolean
+  /** Primary grouping axis. Defaults to `"date"` (the model's own default). */
+  groupBy?: ConversationGroupBy
+  /** Workspaces in display order, for `groupBy: "workspace"`. */
+  workspaces?: readonly ConversationGroup[]
+  /** Agents in display order, for `groupBy: "agent"`. */
+  agents?: readonly ConversationGroup[]
+  /** Workspace that sorts first and starts expanded. */
+  activeWorkspaceId?: string | null
+  /** Explicit per-group collapse choices, keyed `workspace:<id>` / `agent:<id>`. */
+  groupCollapseOverrides?: Readonly<Record<string, boolean>>
   /** Session ids whose message content matched the query (title OR content). */
   contentMatchIds?: ReadonlySet<string>
   /** Override the injected clock (tests only); defaults to `Date.now()`. */
@@ -43,7 +54,11 @@ export function useConversationListModel({
   query,
   view = "active",
   collapsedFolderIds = EMPTY_COLLAPSED,
-  groupByDate = true,
+  groupBy = "date",
+  workspaces = EMPTY_GROUPS,
+  agents = EMPTY_GROUPS,
+  activeWorkspaceId = null,
+  groupCollapseOverrides = EMPTY_COLLAPSE_OVERRIDES,
   contentMatchIds,
   now,
 }: UseConversationListModelParams): ConversationListModel {
@@ -54,9 +69,26 @@ export function useConversationListModel({
         view,
         now: resolveNow(now),
         collapsedFolderIds,
-        groupByDate,
+        groupBy,
+        workspaces,
+        agents,
+        activeWorkspaceId,
+        groupCollapseOverrides,
         contentMatchIds,
       }),
-    [sessions, folders, query, view, collapsedFolderIds, groupByDate, contentMatchIds, now]
+    [
+      sessions,
+      folders,
+      query,
+      view,
+      collapsedFolderIds,
+      groupBy,
+      workspaces,
+      agents,
+      activeWorkspaceId,
+      groupCollapseOverrides,
+      contentMatchIds,
+      now,
+    ]
   )
 }

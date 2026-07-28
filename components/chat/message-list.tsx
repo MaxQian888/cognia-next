@@ -19,13 +19,14 @@ import { getDb } from "@/lib/db/schema"
 import { useChatStore } from "@/stores/chat"
 import { useSettingsStore } from "@/stores/settings"
 import { ConversationTimeline } from "./minimap/conversation-timeline"
+import { shouldMountTimeline } from "./minimap/timeline-visibility"
 import { ActiveTurnPublisher } from "./active-turn-publisher"
 import { useChatViewportStore } from "@/stores/chat/chat-viewport-store"
 import { MessageSearchBar } from "./message-search-bar"
 import type { MessageSearchHit } from "@/lib/chat/message-search"
 import { useAppShortcut } from "@/hooks/shortcuts/use-app-shortcut"
 import { usePlatform } from "@/hooks/use-platform"
-import { useMediaQuery } from "@/hooks/ui"
+import { useElementWidth } from "@/hooks/use-element-width"
 import { useTranslations } from "next-intl"
 import { InfoIcon } from "lucide-react"
 import { useCharacters } from "@/lib/data-hooks/context"
@@ -47,14 +48,14 @@ import { PerfBoundary } from "@/lib/perf"
 export const VIRTUALIZE_THRESHOLD = 40
 
 // Below this many messages the conversation is short enough to scan by
-// scrolling, so the right-edge timeline minimap stays unmounted. The parent
-// also gates mounting on the real `lg` media query so a CSS-hidden timeline
-// cannot retain thousands of off-screen nodes.
+// scrolling, so the right-edge timeline minimap stays unmounted. Mounting is
+// also gated on the measured PANE width (see `shouldMountTimeline`) so a
+// CSS-hidden timeline cannot retain thousands of off-screen nodes.
 //
 // 8 messages is ~4 user turns — the point where the first turn has usually
 // scrolled out of view, so anchors start earning their keep. This was 20,
-// which combined with the `lg` breakpoint meant most users never saw the rail
-// at all and had no way to learn it existed.
+// which combined with the old `lg` breakpoint meant most users never saw the
+// rail at all and had no way to learn it existed.
 export const TIMELINE_THRESHOLD = 8
 
 interface Props {
@@ -96,7 +97,11 @@ export function MessageList({
   const ownsShortcuts = paneSessionId == null || paneSessionId === sessionId
   const platform = usePlatform()
   const isMobile = platform === "mobile"
-  const isTimelineViewport = useMediaQuery("(min-width: 1024px)")
+  // Pane width, not viewport width: this list is hosted at 56% of the window in
+  // the Inbox detail pane and at ~50% in split view, and the timeline is
+  // positioned against the pane. See `timeline-visibility.ts`.
+  const paneRef = useRef<HTMLDivElement | null>(null)
+  const paneWidth = useElementWidth(paneRef)
   const tActions = useTranslations("mobile.messageActions")
   // Long-press opens the action sheet on mobile, but there's no hover hint to
   // advertise it. Surface a one-line nudge early in the conversation; it
@@ -462,7 +467,14 @@ export function MessageList({
 
   return (
     <PerfBoundary id="chat:list">
-      <div className="relative flex flex-1 flex-col overflow-hidden">
+      {/* `@container/message-list` scopes the timeline's CSS gate to this pane.
+          Safe as a container: the box is already `position: relative`, its
+          inline size comes from the parent's stretch rather than its content,
+          and every overlay inside it portals to `body`. */}
+      <div
+        ref={paneRef}
+        className="@container/message-list relative flex flex-1 flex-col overflow-hidden"
+      >
         {searchOpen ? (
           <div data-computer-use-pip-obstacle>
             <MessageSearchBar
@@ -504,7 +516,7 @@ export function MessageList({
                           key="thinking"
                           data-index={virtualItem.index}
                           ref={rowVirtualizer.measureElement}
-                          className="px-5"
+                          className="px-3 sm:px-5"
                           style={{
                             position: "absolute",
                             top: 0,
@@ -536,7 +548,7 @@ export function MessageList({
                         data-search-hit={m.id === activeHitId ? "" : undefined}
                         ref={isStreamingMeasureSkip ? undefined : rowVirtualizer.measureElement}
                         className={cn(
-                          "px-5",
+                          "px-3 sm:px-5",
                           m.id === activeHitId &&
                             "rounded-md ring-2 ring-primary/60 ring-offset-2 ring-offset-background"
                         )}
@@ -569,7 +581,7 @@ export function MessageList({
                         data-msg-id={m.id}
                         data-search-hit={m.id === activeHitId ? "" : undefined}
                         className={cn(
-                          "px-5",
+                          "px-3 sm:px-5",
                           m.id === activeHitId &&
                             "rounded-md ring-2 ring-primary/60 ring-offset-2 ring-offset-background"
                         )}
@@ -579,7 +591,7 @@ export function MessageList({
                     )
                   })}
                   {showThinking && (
-                    <div key="thinking" className="px-5">
+                    <div key="thinking" className="px-3 sm:px-5">
                       <ChatThinkingIndicator
                         directCharacter={directCharacter}
                         onPhaseChange={pinToBottom}
@@ -615,18 +627,21 @@ export function MessageList({
               virtualize={virtualize}
             />
           )}
-          {!isMobile &&
-            isTimelineViewport &&
-            timelineEnabled !== false &&
-            messages.length > TIMELINE_THRESHOLD && (
-              <ConversationTimeline
-                messages={timelineMessages}
-                scrollRef={scrollParentRef}
-                virtualizer={rowVirtualizer}
-                virtualize={virtualize}
-                shortcutsEnabled={ownsShortcuts}
-              />
-            )}
+          {shouldMountTimeline({
+            paneWidth,
+            isMobile,
+            enabled: timelineEnabled,
+            messageCount: messages.length,
+            threshold: TIMELINE_THRESHOLD,
+          }) && (
+            <ConversationTimeline
+              messages={timelineMessages}
+              scrollRef={scrollParentRef}
+              virtualizer={rowVirtualizer}
+              virtualize={virtualize}
+              shortcutsEnabled={ownsShortcuts}
+            />
+          )}
         </div>
 
         {isMobile ? (
