@@ -36,7 +36,6 @@ impl RequestObserver for NoopObserver {
 struct UpstreamHit {
     api_key: Option<String>,
     headers: Vec<(String, String)>,
-    body: Value,
 }
 
 #[derive(Clone)]
@@ -65,7 +64,6 @@ async fn upstream_messages(
                 )
             })
             .collect(),
-        body: body.0.clone(),
     };
     state.hits.lock().push(hit);
 
@@ -161,9 +159,11 @@ fn snapshot_json(upstream: SocketAddr, keys: &[&str]) -> Value {
 }
 
 async fn start_gateway(upstream: SocketAddr, pool_keys: &[&str]) -> Gateway {
-    let mut config = GatewayConfig::default();
-    config.port = 0;
-    config.exposed_models = vec![];
+    let config = GatewayConfig {
+        port: 0,
+        exposed_models: vec![],
+        ..GatewayConfig::default()
+    };
     let config = Arc::new(RwLock::new(config));
 
     let secret = format!("sk-cognia-{}", "t".repeat(48));
