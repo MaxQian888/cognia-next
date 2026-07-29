@@ -374,6 +374,8 @@ export class CogniaDB extends Dexie {
   integrationEvents!: Table<IntegrationEventRow, string>
   integrationActionJobs!: Table<IntegrationActionJobRow, string>
   integrationAudit!: Table<IntegrationAuditRow, string>
+  // v128 — Content-addressed chat image store. See `lib/db/message-media.ts`.
+  messageMedia!: Table<import("./message-media").MessageMediaRow, string>
   // v121 — Provider Profile Store (ADR-0090 Phase 1). See `lib/db/provider-profiles.ts`.
   providerProfiles!: Table<ProviderProfile, string>
   deploymentProfiles!: Table<DeploymentProfile, string>
@@ -2802,6 +2804,26 @@ export class CogniaDB extends Dexie {
         "&id, &[accountId+idempotencyKey], [pluginId+integrationId], accountId, status, nextAttemptAt, updatedAt",
       integrationAudit:
         "&id, [pluginId+integrationId], accountId, kind, createdAt, [accountId+createdAt]",
+    })
+
+    // v128 — Content-addressed store for images carried by chat messages.
+    //
+    // Until now every chat image lived as a base64 `data:` URL inlined into
+    // `messages.parts`, so the same bytes were held by the Dexie row, the
+    // Zustand store, the DOM attribute and the decoded bitmap at once. A
+    // session of agent screenshots measured 717MB of base64 for 2.2GB of
+    // renderer heap (`tests/e2e/mobile/chat-render-perf.baseline.json`).
+    // Messages now carry a `ref` and the bytes live here as Blobs, which
+    // IndexedDB stores out-of-line and the renderer can page in on demand.
+    //
+    // Keyed by content hash, so the same screenshot referenced from twenty
+    // turns is stored once. `lastUsedAt` drives orphan collection; there is no
+    // upgrade callback because the migration is lazy and per-session (a
+    // transaction that rewrote every message row would block boot for minutes
+    // on a large profile, and a failure mid-way would roll the whole database
+    // back).
+    this.version(128).stores({
+      messageMedia: "&hash, createdAt, lastUsedAt",
     })
 
     // First full-chain construction under Jest: cache the merged spec so every

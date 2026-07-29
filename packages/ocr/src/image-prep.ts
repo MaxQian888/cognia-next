@@ -258,6 +258,28 @@ export async function downscaleImage(
   }
 }
 
+/**
+ * Intrinsic pixel size of an encoded image, or null when the runtime cannot
+ * decode it (jsdom / node, or an unsupported format).
+ *
+ * Shares `decodeBitmap` with `downscaleImage` rather than re-deriving the
+ * decode-with-fallback dance. Callers that persist an image need the
+ * dimensions to reserve layout space for it before the bytes are fetched;
+ * `downscaleImage` only reports bytes and mime type.
+ */
+export async function measureImage(
+  bytes: Uint8Array,
+  mimeType: string
+): Promise<{ width: number; height: number } | null> {
+  const bitmap = await decodeBitmap(bytes, mimeType)
+  if (!bitmap) return null
+  try {
+    return { width: bitmap.width, height: bitmap.height }
+  } finally {
+    closeBitmap(bitmap)
+  }
+}
+
 interface ImageBitmapLike {
   width: number
   height: number

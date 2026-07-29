@@ -268,6 +268,19 @@ describe("getDb", () => {
     expect(db.integrationAudit.schema.indexes.map((index) => index.name)).toContain("createdAt")
   })
 
+  it("v128 opens the content-addressed chat media store", async () => {
+    const db = getDb()
+    await db.open()
+    expect(db.verno).toBeGreaterThanOrEqual(128)
+    // The content hash IS the primary key — storing the same screenshot from
+    // twenty turns must not store it twenty times.
+    expect(db.messageMedia.schema.primKey.name).toBe("hash")
+    expect(db.messageMedia.schema.primKey.unique).toBe(true)
+    expect(db.messageMedia.schema.indexes.map((index) => index.name)).toEqual(
+      expect.arrayContaining(["createdAt", "lastUsedAt"])
+    )
+  })
+
   it("v125 opens the Feishu unified identity registry tables", async () => {
     const db = getDb()
     await db.open()
