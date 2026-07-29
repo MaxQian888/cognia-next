@@ -46,10 +46,13 @@ import { notifyOverBudgetOnce } from "@/lib/claude/over-budget-toast"
 import { applyPlanModeBridge } from "@/lib/agent/plan-mode-bridge"
 import { steerBlocksOf, steerTextOf, type SteerMessageMeta } from "@/lib/claude/steer"
 import {
+  appendSteerMessage,
   isSessionOpen,
   markPendingSteersFailed,
   maybeDrainSteer,
+  sessionExternalLane,
   sessionStatusOf,
+  setSessionExternalLane,
   setSteerMessageState,
   steerArmed,
 } from "./steer-runtime"
@@ -903,11 +906,7 @@ export function useClaudeChat() {
             ...((optimistic as { metadata?: Record<string, unknown> }).metadata ?? {}),
             steer: steerMeta,
           }
-          {
-            const store = useChatStore.getState()
-            const prior = store.sessions[sessionId]?.messages ?? []
-            store.replaceSessionMessages(sessionId, [...prior, optimistic])
-          }
+          appendSteerMessage(sessionId, optimistic)
 
           // Live steer — the message reaches the model without ending the turn.
           // Two lanes, both best-effort: an external adapter implementing
@@ -917,32 +916,44 @@ export function useClaudeChat() {
           // says "accepted" until the turn settles. Anything else (unsupported
           // provider, input already closed, transport hiccup) falls through to
           // the durable queue below.
-          if (text && st === "streaming") {
-            const rt = useAgentRuntimeStore.getState()
-            if (rt.runtime === "external" && rt.externalAgentId) {
+          //
+          // `awaiting_approval` is included deliberately: a turn paused on a
+          // tool prompt still holds its input open, and it is the moment when
+          // redirecting matters most — the composer stays writable there for
+          // exactly that reason.
+          //
+          // The lane comes from what THIS session dispatched
+          // (`sessionExternalLane`), not the composer's global runtime pick,
+          // which in split view describes whichever pane happens to be focused.
+          const externalAgentId = sessionExternalLane(sessionId)
+          if (externalAgentId) {
+            // Adapter steering carries text only (`turn/steer` takes a string),
+            // so an attachment-only follow-up has to queue on this lane.
+            if (text) {
               try {
                 const { getExternalAgentManager } = await import("@/lib/ai/agent/external/manager")
                 const mgr = getExternalAgentManager()
-                if (mgr.supportsSteering(rt.externalAgentId)) {
-                  await mgr.steerSession(rt.externalAgentId, undefined, text)
+                if (mgr.supportsSteering(externalAgentId)) {
+                  await mgr.steerSession(externalAgentId, undefined, text)
                   setSteerMessageState(sessionId, entryId, "accepted")
                   return
                 }
               } catch (err) {
                 console.warn("live steer failed; queueing instead", err)
               }
-            } else if (rt.runtime !== "external") {
-              // Anthropic streaming input. `steerSession` is PII-gated and
-              // rejects non-Anthropic providers sidecar-side, so a wrong-provider
-              // session simply falls through to the queue.
-              try {
-                const { steerSession } = await import("@/lib/claude/ipc")
-                await steerSession(sessionId, content)
-                setSteerMessageState(sessionId, entryId, "accepted")
-                return
-              } catch (err) {
-                console.warn("live steer failed; queueing instead", err)
-              }
+            }
+          } else {
+            // Anthropic streaming input. `steerSession` is PII-gated and rejects
+            // non-Anthropic providers sidecar-side, so a wrong-provider session
+            // simply falls through to the queue. It takes the whole `content`,
+            // so an attachment-only follow-up goes live here too.
+            try {
+              const { steerSession } = await import("@/lib/claude/ipc")
+              await steerSession(sessionId, content)
+              setSteerMessageState(sessionId, entryId, "accepted")
+              return
+            } catch (err) {
+              console.warn("live steer failed; queueing instead", err)
             }
           }
 
@@ -1353,6 +1364,12 @@ export function useClaudeChat() {
           store.getState().setSessionStatus(sessionId, "idle")
           return
         }
+        // Record the lane this session's turn is actually on, so a follow-up
+        // typed while it runs steers this agent rather than whatever the
+        // composer's global runtime selector happens to say (see
+        // `sessionExternalLane`). Cleared when the turn settles, in
+        // `maybeDrainSteer`.
+        setSessionExternalLane(sessionId, extAgentId)
         // The text sent to the external agent: the PII-filtered prompt when
         // delegated by rule, else the raw composer text.
         const externalSendText = delegation ? delegation.filteredPrompt : providerText
@@ -1526,6 +1543,10 @@ export function useClaudeChat() {
         return
       }
       // ── End external agent branch ──────────────────────────────────────
+
+      // This turn runs on the built-in sidecar, so the session has no external
+      // lane — clear any left by a previous turn before a follow-up reads it.
+      setSessionExternalLane(sessionId, null)
 
       try {
         await persistMessages(sessionId, next)

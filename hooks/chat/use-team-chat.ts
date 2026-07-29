@@ -60,7 +60,13 @@ import { subSessionId, decodeSubSession } from "@/lib/claude/team-session-id"
 import { steerBlocksOf, steerTextOf, type SteerMessageMeta } from "@/lib/claude/steer"
 import { senderIdOf, tagBranchSiblings, teamBranchGroupId } from "@/lib/chat/branch-regen"
 import { mirrorTruncateToDesktop } from "@/lib/chat/mirror-truncate"
-import { isSessionOpen, maybeDrainSteer, sessionStatusOf, steerArmed } from "./steer-runtime"
+import {
+  appendSteerMessage,
+  isSessionOpen,
+  maybeDrainSteer,
+  sessionStatusOf,
+  steerArmed,
+} from "./steer-runtime"
 import { SessionCoalescingRegistry } from "./stream-coalescing"
 import { getExecutionBroker } from "@/lib/execution/broker"
 import { acquireChatLease } from "@/lib/execution/chat-lease"
@@ -81,6 +87,23 @@ export interface TeamSendOptions {
   attachmentManifest?: readonly AttachmentManifestEntry[]
   sessionId?: string
   skipPersistUserTurn?: boolean
+  /**
+   * This turn is the steer queue replaying itself.
+   *
+   * Like `skipPersistUserTurn` it must not write a second user message — each
+   * queued entry is already in the transcript from its optimistic append — but
+   * unlike it, this IS a genuine user turn rather than an internal re-issue.
+   * `maybeDrainSteer` documents that the replay MUST pass this; direct chat
+   * keeps the same distinction as its own flag (`use-claude-chat.ts`) rather
+   * than folding it into `skipUserAppend`, precisely so the behaviours that
+   * belong to a real user turn cannot vanish the next time one is added here.
+   */
+  steerDrain?: boolean
+}
+
+/** Neither a drain nor a regenerate writes the user turn a second time. */
+function skipsUserTurn(opts?: TeamSendOptions): boolean {
+  return Boolean(opts?.skipPersistUserTurn || opts?.steerDrain)
 }
 
 type TeamSendFn = (content: SendContent, opts?: TeamSendOptions) => Promise<void>
@@ -248,6 +271,21 @@ export function useTeamChat() {
   const sendRef = useRef<TeamSendFn | null>(null)
 
   /**
+   * Replay this session's queued follow-ups as one fresh team turn.
+   *
+   * Both drain sites (the settle in `send`'s finally, and `flushSteer` after an
+   * errored settle) go through here so they cannot disagree about the flags the
+   * replay carries — `steerDrain`, which `maybeDrainSteer` requires and which
+   * marks the replay a genuine user turn rather than an internal re-issue.
+   */
+  const drainSteerInto = useCallback((sessionId: string) => {
+    maybeDrainSteer(
+      sessionId,
+      (payload) => void sendRef.current?.(payload, { sessionId, steerDrain: true })
+    )
+  }, [])
+
+  /**
    * Send a user prompt to every member of a team session (the active one by
    * default, or `opts.sessionId` for a background pane), sequenced by
    * `routeTurn`. Returns once every member has either replied or errored.
@@ -255,8 +293,9 @@ export function useTeamChat() {
    * If the session isn't a team session, this is a no-op — the caller should
    * fall back to `useClaudeChat.send`.
    *
-   * `opts.skipPersistUserTurn` is set by internal re-issues (regenerate) so we
-   * don't double up the user message already left on disk.
+   * `opts.skipPersistUserTurn` is set by internal re-issues (regenerate) and
+   * `opts.steerDrain` by the queue's own replay, so neither doubles up the user
+   * message already left on disk.
    */
   const send = useCallback(
     async (content: SendContent, opts?: TeamSendOptions) => {
@@ -280,7 +319,7 @@ export function useTeamChat() {
       // (it re-routes through routeTurn / the supervisor); members later in the
       // current turn's sequence do NOT see it mid-turn — same "no mid-turn
       // injection" constraint as direct chat. Internal re-issues bypass this.
-      if (!opts?.skipPersistUserTurn) {
+      if (!skipsUserTurn(opts)) {
         const st = sessionStatusOf(sessionId)
         if (st === "streaming" || st === "awaiting_approval") {
           const text = steerTextOf(content)
@@ -297,8 +336,7 @@ export function useTeamChat() {
             makeUserMessage(content, undefined, opts?.attachmentManifest),
             { senderKind: "user", steer: steerMeta }
           )
-          const prior = useChatStore.getState().sessions[sessionId]?.messages ?? []
-          useChatStore.getState().replaceSessionMessages(sessionId, [...prior, optimistic])
+          appendSteerMessage(sessionId, optimistic)
           useChatStore.getState().enqueueSteer(sessionId, {
             id: entryId,
             text,
@@ -371,7 +409,7 @@ export function useTeamChat() {
       // Base off this session's own slice — never the focused projection — and
       // fall back to Dexie when no pane has materialised the slice yet.
       let instantPreviewTitle: string | undefined
-      if (!opts?.skipPersistUserTurn) {
+      if (!skipsUserTurn(opts)) {
         const userMsg = withMetadata(
           makeUserMessage(content, undefined, opts?.attachmentManifest),
           {
@@ -549,16 +587,11 @@ export function useTeamChat() {
         useUIStore.getState().clearMemberStatusFor(sessionId)
         useUIStore.getState().clearStopRequestsFor(sessionId)
         if ((!hadError && !wasInterrupted) || steerArmed.has(sessionId)) {
-          maybeDrainSteer(
-            sessionId,
-            // The queued entries are already in the transcript from their optimistic
-            // append, so the replay must not persist a second user turn.
-            (payload) => void sendRef.current?.(payload, { sessionId, skipPersistUserTurn: true })
-          )
+          drainSteerInto(sessionId)
         }
       }
     },
-    [coalescing, tInlineErr]
+    [coalescing, drainSteerInto, tInlineErr]
   )
 
   // Keep the steer drain pointed at the latest `send` without closing over it.
@@ -600,16 +633,14 @@ export function useTeamChat() {
 
   // Replay a session's queued steer NOW, without a turn boundary — used after
   // an errored settle where the queue is preserved but no settle is coming.
-  const flushSteer = useCallback((targetSessionId?: string) => {
-    const sessionId = targetSessionId ?? useChatStore.getState().activeSessionId
-    if (!sessionId) return
-    maybeDrainSteer(
-      sessionId,
-      // The queued entries are already in the transcript from their optimistic
-      // append, so the replay must not persist a second user turn.
-      (payload) => void sendRef.current?.(payload, { sessionId, skipPersistUserTurn: true })
-    )
-  }, [])
+  const flushSteer = useCallback(
+    (targetSessionId?: string) => {
+      const sessionId = targetSessionId ?? useChatStore.getState().activeSessionId
+      if (!sessionId) return
+      drainSteerInto(sessionId)
+    },
+    [drainSteerInto]
+  )
 
   /**
    * Re-issue the most recent user turn for a team session (active by default).

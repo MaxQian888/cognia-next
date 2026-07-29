@@ -2656,9 +2656,18 @@ describe("useTeamChat — direct-chat parity (steer / lease / per-session)", () 
       "team-1",
       expect.objectContaining({ text: "follow-up while busy" })
     )
-    // No second orchestration loop: nothing persisted, session never loaded.
+    // No second orchestration loop: the session is never loaded and no turn
+    // runs. The one write is the optimistic bubble itself — store-only, it
+    // would not survive the restart the feature promises to survive.
     expect(getSessionMock).not.toHaveBeenCalled()
-    expect(persistMessagesMock).not.toHaveBeenCalled()
+    expect(persistMessagesMock).toHaveBeenCalledTimes(1)
+    expect(persistMessagesMock).toHaveBeenCalledWith("team-1", [
+      expect.objectContaining({
+        metadata: expect.objectContaining({
+          steer: expect.objectContaining({ state: "queued" }),
+        }),
+      }),
+    ])
   })
 
   it("send() is blocked at the concurrency cap", async () => {

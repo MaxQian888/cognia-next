@@ -81,6 +81,49 @@ function patchSteerMessages(
   )
 }
 
+/**
+ * Which external agent is driving each session's *live* turn.
+ *
+ * The composer's `useAgentRuntimeStore` cannot answer this: it is one global
+ * selection meaning "what the next turn I start will use". In split view a
+ * follow-up typed into a background pane would consult the focused pane's
+ * choice — steering the wrong agent, or missing the live lane entirely and
+ * queueing a message that could have been delivered. A turn records its own
+ * lane when it dispatches and clears it when it settles, so the steer path asks
+ * what *this* session is actually running.
+ */
+const externalLaneBySession = new Map<string, string>()
+
+/** Record (or clear, with `null`) the external agent driving this session. */
+export function setSessionExternalLane(sessionId: string, externalAgentId: string | null): void {
+  if (externalAgentId) externalLaneBySession.set(sessionId, externalAgentId)
+  else externalLaneBySession.delete(sessionId)
+}
+
+/** The external agent driving this session's live turn, if any. */
+export function sessionExternalLane(sessionId: string): string | null {
+  return externalLaneBySession.get(sessionId) ?? null
+}
+
+/**
+ * Show the optimistic follow-up bubble and write it to Dexie in one step.
+ *
+ * The write is the point. `replaceSessionMessages` is store-only, and a steer
+ * that never leaves `queued` never reaches `patchSteerMessages` either — so a
+ * follow-up typed mid-turn and killed by a restart vanished outright, which is
+ * precisely the case the feature promises to keep and mark "Not delivered".
+ * Best-effort, like every other steer persist: the store stays correct for this
+ * session either way.
+ */
+export function appendSteerMessage(sessionId: string, message: UIMessage): void {
+  const store = useChatStore.getState()
+  const next = [...(store.sessions[sessionId]?.messages ?? []), message]
+  store.replaceSessionMessages(sessionId, next)
+  void persistMessages(sessionId, next).catch((err) =>
+    console.error("steer message persist failed", err)
+  )
+}
+
 /** Move one steer message to a new delivery state (by its queue entry id). */
 export function setSteerMessageState(
   sessionId: string,
@@ -106,6 +149,8 @@ export function promoteAcceptedSteers(sessionId: string): void {
  * mark it `failed` — the bubble then offers retry / discard.
  */
 export function markPendingSteersFailed(sessionId: string, reason?: string): void {
+  // The run is gone, and with it any live lane it held.
+  setSessionExternalLane(sessionId, null)
   patchSteerMessages(sessionId, (meta) => meta.state === "queued" || meta.state === "accepted", {
     state: "failed",
     ...(reason ? { reason } : {}),
@@ -172,6 +217,9 @@ export function discardPendingSteer(sessionId: string, entryId: string): void {
  */
 export function maybeDrainSteer(sessionId: string, replay: (content: SendContent) => void): void {
   steerArmed.delete(sessionId)
+  // The turn is over, so its lane is too. The replay below re-enters `send`,
+  // which records the new turn's lane for itself.
+  setSessionExternalLane(sessionId, null)
   // A live-accepted steer rode along inside the turn that just ended.
   promoteAcceptedSteers(sessionId)
   const queue = useChatStore.getState().sessions[sessionId]?.steerQueue ?? []

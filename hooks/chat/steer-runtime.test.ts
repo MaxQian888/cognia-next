@@ -41,13 +41,16 @@ jest.mock("@/lib/db/messages", () => ({
 }))
 
 import {
+  appendSteerMessage,
   discardPendingSteer,
   editPendingSteer,
   isSessionOpen,
   markPendingSteersFailed,
   maybeDrainSteer,
   promoteAcceptedSteers,
+  sessionExternalLane,
   sessionStatusOf,
+  setSessionExternalLane,
   setSteerMessageState,
   steerArmed,
 } from "./steer-runtime"
@@ -86,6 +89,58 @@ beforeEach(() => {
   state.removeSteerEntry.mockClear()
   mockPersistMessages.mockClear()
   steerArmed.clear()
+  setSessionExternalLane("s1", null)
+  setSessionExternalLane("s2", null)
+})
+
+describe("appendSteerMessage", () => {
+  it("writes the optimistic bubble to Dexie, not just the store", async () => {
+    // A steer that never leaves `queued` never reaches `patchSteerMessages`
+    // either, so a store-only append meant a follow-up typed mid-turn and
+    // killed by a restart vanished — the exact case the feature promises to
+    // keep and mark "Not delivered".
+    state.sessions["s1"] = { steerQueue: [], messages: [] }
+    appendSteerMessage("s1", steerMessage("e1", "queued", "and add tests"))
+
+    expect(statesOf("s1")).toEqual(["queued"])
+    expect(mockPersistMessages).toHaveBeenCalledWith("s1", [
+      expect.objectContaining({ id: "m-e1" }),
+    ])
+  })
+
+  it("appends after the existing transcript rather than replacing it", () => {
+    state.sessions["s1"] = {
+      steerQueue: [],
+      messages: [{ id: "m0", role: "user", parts: [{ type: "text", text: "first" }] } as UIMessage],
+    }
+    appendSteerMessage("s1", steerMessage("e1", "queued"))
+    expect(state.sessions["s1"].messages?.map((m) => m.id)).toEqual(["m0", "m-e1"])
+  })
+})
+
+describe("sessionExternalLane", () => {
+  it("is per session, so a background pane does not read the focused pane's lane", () => {
+    // `useAgentRuntimeStore` is one global "what my next turn will use"
+    // selection; in split view that is whichever pane has focus, not the
+    // session the follow-up was typed into.
+    setSessionExternalLane("s1", "codex-1")
+    expect(sessionExternalLane("s1")).toBe("codex-1")
+    expect(sessionExternalLane("s2")).toBeNull()
+  })
+
+  it("clears when the turn settles, so the next turn is not steered as external", () => {
+    state.sessions["s1"] = { steerQueue: [], messages: [] }
+    setSessionExternalLane("s1", "codex-1")
+    maybeDrainSteer("s1", jest.fn())
+    expect(sessionExternalLane("s1")).toBeNull()
+  })
+
+  it("clears when the run fails, since the lane died with it", () => {
+    state.sessions["s1"] = { steerQueue: [], messages: [] }
+    setSessionExternalLane("s1", "codex-1")
+    markPendingSteersFailed("s1", "boom")
+    expect(sessionExternalLane("s1")).toBeNull()
+  })
 })
 
 describe("sessionStatusOf", () => {

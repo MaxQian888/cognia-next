@@ -1714,17 +1714,32 @@ describe("useClaudeChat — goal loop wiring (ADR-0019)", () => {
     )
   })
 
-  it("queues a steer while awaiting approval without attempting a live steer", async () => {
-    // The composer stays writable during approval on purpose: that is when the
-    // user most wants to redirect. The SDK is blocked on the permission
-    // round-trip, so there is no live lane to try.
+  it("tries the live lane while awaiting approval, which is when redirecting matters most", async () => {
+    // The composer stays writable during approval on purpose. `routeSteer`
+    // (sidecar/agent-host.mjs) does not gate on the permission round-trip: it
+    // pushes into the session's streaming input and answers `input_closed` if
+    // that input has actually gone. So there is a lane worth trying, and the
+    // refusal path below is what handles the case where there is not.
     chatState.status = "awaiting_approval"
+    steerSessionMock.mockResolvedValue({ accepted: true })
     const { result } = renderHook(() => useClaudeChat())
     await flush()
     await act(async () => {
       await result.current.send("don't use that tool")
     })
-    expect(steerSessionMock).not.toHaveBeenCalled()
+    expect(steerSessionMock).toHaveBeenCalledWith("sess-1", "don't use that tool")
+    expect(chatState.enqueueSteer).not.toHaveBeenCalled()
+    expect(sendPromptMock).not.toHaveBeenCalled()
+  })
+
+  it("still queues an approval-time steer the sidecar refuses", async () => {
+    chatState.status = "awaiting_approval"
+    steerSessionMock.mockRejectedValue(new Error("input_closed"))
+    const { result } = renderHook(() => useClaudeChat())
+    await flush()
+    await act(async () => {
+      await result.current.send("don't use that tool")
+    })
     expect(chatState.enqueueSteer).toHaveBeenCalledWith(
       "sess-1",
       expect.objectContaining({ text: "don't use that tool" })
