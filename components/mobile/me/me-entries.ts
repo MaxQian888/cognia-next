@@ -28,6 +28,7 @@ import {
   BookmarkIcon,
   BookOpenIcon,
   BrainIcon,
+  CloudIcon,
   CalendarClockIcon,
   ChartBarIcon,
   DatabaseIcon,
@@ -133,6 +134,14 @@ export const ME_ENTRIES: MeEntry[] = [
     href: "/me/subscription",
     section: "account",
     keywords: ["account", "plan", "anthropic", "订阅", "账号", "套餐"],
+  },
+  {
+    id: "cloud-account",
+    icon: CloudIcon,
+    labelKey: "cloudAccountRow",
+    href: "/me/cloud-account",
+    section: "account",
+    keywords: ["logto", "cloud", "sso", "oidc", "sign in", "云", "登录", "账号"],
   },
   {
     id: "sync",
