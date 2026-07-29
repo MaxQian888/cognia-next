@@ -311,9 +311,12 @@ export function ChatPane({
         onOpenSettings={(tab) => onOpenSettings(tab)}
         onSend={handleSend}
         onStop={() => void onStop()}
-        // Block a new send while this pane awaits approval OR while the
-        // concurrent-stream cap is reached (this pane isn't one of the streamers).
-        disabled={status === "awaiting_approval" || atCapacity}
+        // Only the concurrent-stream cap blocks the composer (this pane isn't
+        // one of the streamers, so there is nothing to steer). Awaiting approval
+        // stays writable on purpose: that is exactly when the user wants to say
+        // "don't use that tool, do it another way", and `send` already routes a
+        // message in that state into the steer queue rather than a new turn.
+        disabled={atCapacity}
         mobileMentionMembers={mobileMentionMembers}
         workflowMention={workflowMention}
       />

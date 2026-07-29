@@ -60,7 +60,7 @@ import { STAGGER_CHILD, STAGGER_CONTAINER } from "@/lib/ui/motion"
 import { BranchDialog } from "@/components/chat/branch-dialog"
 import { BranchNavigator } from "@/components/chat/branch-navigator"
 import { UsageBreakdown } from "@/components/chat/usage-breakdown"
-import { COMPOSER_APPEND_EVENT } from "@/components/chat/composer"
+import { dispatchComposerAppend } from "@/components/chat/composer"
 import type { UsageInfo } from "@/lib/claude/adapter"
 import { useChatStore } from "@/stores/chat"
 import { useSettingsStore } from "@/stores/settings"
@@ -171,9 +171,9 @@ export function MessageActionSheet({
       .split("\n")
       .map((line) => `> ${line}`)
       .join("\n")
-    window.dispatchEvent(
-      new CustomEvent(COMPOSER_APPEND_EVENT, { detail: { text: `${quoted}\n\n` } })
-    )
+    // Addressed to the message's own session so a split pane / sidechat
+    // composer never mirrors the quote.
+    dispatchComposerAppend({ text: `${quoted}\n\n`, sessionId: branchSessionId })
     void selectionFeedback()
     onOpenChange(false)
   }

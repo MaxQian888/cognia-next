@@ -138,9 +138,19 @@ export interface SessionChatSlice {
   messagesReloadNonce: number
   /**
    * Steer queue — follow-up messages the user typed while this session's turn
-   * was still running. Held client-side (true mid-turn injection isn't
-   * available; see `lib/claude/steer.ts`) and replayed as a fresh turn when the
-   * running turn settles. The run-status bar shows the depth + a preview.
+   * was still running, held client-side until they can be delivered.
+   *
+   * This is the FALLBACK lane, not the only one: the Anthropic sidecar accepts
+   * a message straight into the running query's streaming input, and a message
+   * that lands that way never reaches this queue at all. Entries pile up here
+   * when there is no live lane (any non-Anthropic provider, or a team turn) or
+   * when the running query already closed its input, and are replayed as one
+   * fresh framed turn once the turn settles. See `lib/claude/steer.ts` and
+   * `hooks/chat/steer-runtime.ts`.
+   *
+   * Each entry's `id` is mirrored on its transcript message as
+   * `metadata.steer.entryId`, which is what carries the delivery state the
+   * bubble renders. The run panel shows only the pending count.
    */
   steerQueue: SteerEntry[]
   /** Active-work clock for the run-status bar's elapsed timer. */

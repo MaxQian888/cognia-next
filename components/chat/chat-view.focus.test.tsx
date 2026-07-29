@@ -60,7 +60,11 @@ jest.mock("@/components/plugins/plugin-extension-slot", () => ({
   PluginExtensionSlot: () => null,
 }))
 jest.mock("sonner", () => ({ toast: { success: jest.fn() } }))
-jest.mock("@/lib/ui/motion", () => ({ mobileTransition: () => ({}) }))
+jest.mock("@/lib/ui/motion", () => ({
+  mobileTransition: () => ({}),
+  MOBILE_SPRING: {},
+  useReducedMotionTransition: (t: unknown) => t,
+}))
 jest.mock("next-intl", () => ({ useTranslations: () => (k: string) => k }))
 jest.mock("@/lib/data-hooks/context", () => ({ useCharacter: jest.fn(() => undefined) }))
 

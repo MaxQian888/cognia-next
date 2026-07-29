@@ -83,6 +83,7 @@
     "undo": "Undo apply"
   },
   "resourceChat": "AI conversation",
+  "sessionSidechat": "Side chat",
   "unavailable": {
     "comments": {
       "description": "This resource does not currently provide comment threads. Other workbench activities remain available.",

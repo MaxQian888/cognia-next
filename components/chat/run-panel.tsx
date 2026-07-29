@@ -13,12 +13,18 @@
  * that expands to the same sections). The elapsed timer ticks once a second and
  * only while busy, reading the active-work clock so it freezes during approval.
  *
+ * The panel reports on queued follow-ups but does not host them: a steer is a
+ * real message in the transcript from the moment it is typed, and that bubble
+ * is where it is read, edited, and removed. All that lives here is the pending
+ * count (a way back to the first one) and the interrupt-and-send escalation.
+ *
  * Exported as `RunStatusBar` from `./run-status-bar` for an unchanged mount
  * contract in `chat-view.tsx`.
  */
-import { memo, useEffect, useMemo, useRef, useState } from "react"
+import { memo, useEffect, useMemo, useState } from "react"
 import { useShallow } from "zustand/react/shallow"
 import { useTranslations } from "next-intl"
+import { motion } from "motion/react"
 import { usePlatform } from "@/hooks/use-platform"
 import {
   BotIcon,
@@ -27,12 +33,23 @@ import {
   CornerDownRightIcon,
   Loader2,
   MessageSquareIcon,
-  PaperclipIcon,
-  XIcon,
+  ZapIcon,
 } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
+import { MOBILE_SPRING, mobileTransition, useReducedMotionTransition } from "@/lib/ui/motion"
+import { steerMetaOf } from "@/lib/claude/steer"
+import { discardPendingSteer } from "@/hooks/chat/steer-runtime"
 import { cn } from "@/lib/utils"
 import {
   useChatStore,
@@ -42,8 +59,8 @@ import {
   useSessionStatus,
   useSessionSteerQueue,
   useSessionToolTimestamps,
-  type SteerEntry,
 } from "@/stores/chat"
+import { useChatViewportStore } from "@/stores/chat/chat-viewport-store"
 import { useSubagentRuntimeStore } from "@/stores/agent/subagent-runtime-store"
 import {
   activeElapsedMs,
@@ -95,100 +112,62 @@ function SectionHeading({ children }: { children: React.ReactNode }) {
 }
 
 /**
- * One queued steer message in the Run Panel. View mode shows the framing text,
- * an attachment count, and a remove control; clicking the text opens an inline
- * editor (Enter / blur commits, Esc cancels) so the user can tweak or drop a
- * follow-up before it replays.
+ * Pending-steer counter. Each queued follow-up is already a bubble in the
+ * transcript (that is where it is edited and removed), so the panel only
+ * reports how many are still undelivered and offers a way back to the first
+ * one — a long turn easily scrolls them out of view.
+ *
+ * Springs on each change so a follow-up landing in the queue registers even
+ * while the tool lines above it are churning.
  */
-function SteerQueueRow({
-  entry,
-  onCommit,
-  onRemove,
+function SteerQueueChip({
+  count,
+  onLocate,
 }: {
-  entry: SteerEntry
-  onCommit: (text: string) => void
-  onRemove: () => void
+  count: number
+  onLocate: (() => void) | undefined
 }) {
+  const t = useTranslations("chat.runStatus")
   const tp = useTranslations("chat.runPanel")
-  const [editing, setEditing] = useState(false)
-  const [draft, setDraft] = useState(entry.text)
-  // Guard so Enter (which also blurs the input) doesn't commit twice.
-  const committedRef = useRef(false)
-  const attachCount = entry.blocks?.length ?? 0
+  const transition = useReducedMotionTransition(MOBILE_SPRING)
+  const label = t("queued", { count })
 
-  const beginEdit = () => {
-    setDraft(entry.text)
-    committedRef.current = false
-    setEditing(true)
-  }
-  const commit = () => {
-    if (committedRef.current) return
-    committedRef.current = true
-    setEditing(false)
-    const next = draft.trim()
-    if (!next) onRemove()
-    else if (next !== entry.text) onCommit(next)
-  }
-  const cancel = () => {
-    committedRef.current = true
-    setEditing(false)
-  }
+  const body = (
+    <>
+      <MessageSquareIcon className="size-3" aria-hidden />
+      <motion.span
+        key={count}
+        initial={{ scale: 0.72, opacity: 0.4 }}
+        animate={{ scale: 1, opacity: 1 }}
+        transition={transition}
+        className="tabular-nums"
+      >
+        {label}
+      </motion.span>
+    </>
+  )
 
-  if (editing) {
+  if (!onLocate) {
     return (
-      <div className="pl-5">
-        <Input
-          autoFocus
-          value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-          onBlur={commit}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") {
-              e.preventDefault()
-              commit()
-            } else if (e.key === "Escape") {
-              e.preventDefault()
-              cancel()
-            }
-          }}
-          aria-label={tp("ariaEditSteer")}
-          className="h-6 text-[11px]"
-          data-testid="run-panel-steer-edit"
-        />
-      </div>
+      <span
+        className="flex items-center gap-1 text-muted-foreground"
+        data-testid="run-status-steer-chip"
+      >
+        <span className="sr-only">{tp("ariaSteerQueue")}</span>
+        {body}
+      </span>
     )
   }
-
   return (
-    <div
-      className="group flex items-center gap-1 pl-5 text-[11px] text-muted-foreground/80"
-      data-testid="run-panel-steer-row"
+    <button
+      type="button"
+      onClick={onLocate}
+      aria-label={tp("ariaLocateSteer")}
+      className="flex items-center gap-1 rounded text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
+      data-testid="run-status-steer-chip"
     >
-      <button
-        type="button"
-        onClick={beginEdit}
-        aria-label={tp("ariaEditSteer")}
-        className="min-w-0 flex-1 truncate text-left hover:text-foreground"
-      >
-        • {entry.text.replace(/\s+/g, " ").trim() || tp("emptySteer")}
-      </button>
-      {attachCount > 0 && (
-        <span
-          className="flex shrink-0 items-center gap-0.5"
-          aria-label={tp("ariaSteerAttachments", { count: attachCount })}
-        >
-          <PaperclipIcon className="size-3" aria-hidden />×{attachCount}
-        </span>
-      )}
-      <button
-        type="button"
-        onClick={onRemove}
-        aria-label={tp("ariaRemoveSteer")}
-        className="shrink-0 text-muted-foreground/60 opacity-0 transition-opacity hover:text-foreground group-hover:opacity-100 focus-visible:opacity-100"
-      >
-        <XIcon className="size-3" aria-hidden />
-      </button>
-    </div>
+      {body}
+    </button>
   )
 }
 
@@ -269,6 +248,11 @@ function RunPanelImpl({
   const subAgents = useSubagentRuntimeStore((s) => s.subAgents)
   const runBarCfg = useSettingsStore((s) => s.settings?.runStatusBar)
   const resolvedBar = useMemo(() => resolveRunStatusBarSettings(runBarCfg), [runBarCfg])
+  const jumpToMessage = useChatViewportStore((s) => s.jumpToMessage)
+  const steerInterruptConfirmed = useSettingsStore((s) => s.settings?.steerInterruptConfirmed)
+  const saveSettings = useSettingsStore((s) => s.save)
+  const [confirmSteerNow, setConfirmSteerNow] = useState(false)
+  const panelTransition = useReducedMotionTransition(mobileTransition("fast"))
 
   const busy = status === "streaming" || status === "awaiting_approval"
 
@@ -314,6 +298,32 @@ function RunPanelImpl({
     [usageMsgCount, latestUsage, resolvedBar]
   )
 
+  // Scroll back to the oldest still-undelivered follow-up. Queued entries live
+  // in the transcript now, and a long turn scrolls them away; the chip is the
+  // way back. It resolves the message from the queue rather than trusting an
+  // id, so the chip stays inert when no matching bubble is mounted.
+  const queueDepth = steerQueue.length
+  const firstPendingSteerId = (() => {
+    if (queueDepth === 0) return null
+    const pending = new Set(steerQueue.map((entry) => entry.id))
+    const hit = messages.find((message) => {
+      const meta = steerMetaOf(message.metadata)
+      return meta ? pending.has(meta.entryId) : false
+    })
+    return hit?.id ?? null
+  })()
+  const locatePendingSteer =
+    jumpToMessage && firstPendingSteerId ? () => jumpToMessage(firstPendingSteerId) : undefined
+
+  // "Interrupt and send" aborts the running turn's in-flight tool calls to
+  // deliver the queue early — not obvious from a button, so the first use asks
+  // and the answer is remembered. Afterwards it fires straight away.
+  const runSteerNow = () => void onSteerNow?.()
+  const requestSteerNow = () => {
+    if (steerInterruptConfirmed) runSteerNow()
+    else setConfirmSteerNow(true)
+  }
+
   const hasWork =
     record.tools.length > 0 || record.todos.length > 0 || record.subagentParts.length > 0
   const replay = !busy && steerQueue.length === 0 && hasWork
@@ -326,10 +336,17 @@ function RunPanelImpl({
   const toolLines = busy ? selectActiveToolLines(messages, 3) : []
   const subagentChip = busy ? selectRunningSubagentChip(subAgents) : null
   const verb = status === "awaiting_approval" ? t("waitingApproval") : t("working")
-  const queueDepth = steerQueue.length
 
   return (
-    <div
+    // Grows in rather than popping: this bar appears directly above the
+    // composer, and an instant appearance shoves the whole transcript up while
+    // the user is still reading it. Safe to animate height here — the panel
+    // sits outside the virtualized message list.
+    <motion.div
+      initial={{ height: 0, opacity: 0 }}
+      animate={{ height: "auto", opacity: 1 }}
+      transition={panelTransition}
+      style={{ overflow: "hidden" }}
       role="status"
       aria-live="polite"
       aria-atomic="false"
@@ -419,7 +436,14 @@ function RunPanelImpl({
                   variant="ghost"
                   className="h-5 px-2 text-[11px]"
                   aria-label={tp("ariaDiscardQueue")}
-                  onClick={() => sessionId && useChatStore.getState().clearSteerQueue(sessionId)}
+                  // Per-entry rather than `clearSteerQueue`: each queued entry
+                  // also has a bubble in the transcript, and emptying only the
+                  // queue would leave those behind reading "Not delivered" —
+                  // which is not what "Discard" promises.
+                  onClick={() => {
+                    if (!sessionId) return
+                    for (const entry of steerQueue) discardPendingSteer(sessionId, entry.id)
+                  }}
                 >
                   {tp("discardQueue")}
                 </Button>
@@ -449,16 +473,7 @@ function RunPanelImpl({
 
       {(queueDepth > 0 || subagentChip) && (
         <div className="flex flex-wrap items-center gap-2 pl-5 text-[11px]">
-          {queueDepth > 0 && (
-            <span
-              className="flex items-center gap-1 text-muted-foreground"
-              data-testid="run-status-steer-chip"
-            >
-              <MessageSquareIcon className="size-3" aria-hidden />
-              <span className="sr-only">{tp("ariaSteerQueue")}</span>
-              {t("queued", { count: queueDepth })}
-            </span>
-          )}
+          {queueDepth > 0 && <SteerQueueChip count={queueDepth} onLocate={locatePendingSteer} />}
           {subagentChip && (
             <span className="flex items-center gap-1 text-muted-foreground">
               <BotIcon className="size-3" aria-hidden />
@@ -472,28 +487,18 @@ function RunPanelImpl({
               type="button"
               size="sm"
               variant="ghost"
-              className="h-5 px-2 text-[11px]"
+              className="h-5 gap-1 px-2 text-[11px] text-amber-600 hover:bg-amber-500/10 hover:text-amber-700 dark:text-amber-500 dark:hover:text-amber-400"
               aria-label={t("ariaSteerNow")}
-              onClick={() => void onSteerNow()}
+              title={t("steerNowHint")}
+              onClick={requestSteerNow}
+              data-testid="run-panel-steer-now"
             >
+              <ZapIcon className="size-3" aria-hidden />
               {t("steerNow")}
             </Button>
           )}
         </div>
       )}
-
-      {steerQueue.map((entry) => (
-        <SteerQueueRow
-          key={entry.id}
-          entry={entry}
-          onCommit={(text) =>
-            sessionId && useChatStore.getState().updateSteerEntry(sessionId, entry.id, text)
-          }
-          onRemove={() =>
-            sessionId && useChatStore.getState().removeSteerEntry(sessionId, entry.id)
-          }
-        />
-      ))}
 
       {expanded && hasWork && (
         <div
@@ -559,7 +564,30 @@ function RunPanelImpl({
           </section>
         </div>
       )}
-    </div>
+
+      <AlertDialog open={confirmSteerNow} onOpenChange={setConfirmSteerNow}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{tp("steerNowConfirmTitle")}</AlertDialogTitle>
+            <AlertDialogDescription>{tp("steerNowConfirmBody")}</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>{tp("steerNowConfirmCancel")}</AlertDialogCancel>
+            <AlertDialogAction
+              data-testid="run-panel-steer-now-confirm"
+              onClick={() => {
+                // Remember the answer before acting: the interrupt settles the
+                // turn, which unmounts this panel's busy face.
+                void saveSettings({ steerInterruptConfirmed: true })
+                runSteerNow()
+              }}
+            >
+              {tp("steerNowConfirmAccept")}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </motion.div>
   )
 }
 

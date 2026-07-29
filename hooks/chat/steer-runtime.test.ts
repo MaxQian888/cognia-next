@@ -2,9 +2,12 @@
  * @jest-environment jsdom
  */
 
+import type { UIMessage } from "ai"
+
 interface SliceLike {
   status?: string
   steerQueue: Array<{ id: string; text: string; blocks?: unknown[] }>
+  messages?: UIMessage[]
 }
 
 const state = {
@@ -15,13 +18,62 @@ const state = {
   clearSteerQueue: jest.fn((id: string) => {
     if (state.sessions[id]) state.sessions[id].steerQueue = []
   }),
+  replaceSessionMessages: jest.fn((id: string, messages: UIMessage[]) => {
+    if (state.sessions[id]) state.sessions[id].messages = messages
+  }),
+  updateSteerEntry: jest.fn((id: string, entryId: string, text: string) => {
+    const entry = state.sessions[id]?.steerQueue.find((e) => e.id === entryId)
+    if (entry) entry.text = text
+  }),
+  removeSteerEntry: jest.fn((id: string, entryId: string) => {
+    const slice = state.sessions[id]
+    if (slice) slice.steerQueue = slice.steerQueue.filter((e) => e.id !== entryId)
+  }),
 }
 
 jest.mock("@/stores/chat", () => ({
   useChatStore: { getState: () => state },
 }))
 
-import { isSessionOpen, maybeDrainSteer, sessionStatusOf, steerArmed } from "./steer-runtime"
+const mockPersistMessages = jest.fn(() => Promise.resolve())
+jest.mock("@/lib/db/messages", () => ({
+  persistMessages: (...args: unknown[]) => mockPersistMessages(...(args as [])),
+}))
+
+import {
+  discardPendingSteer,
+  editPendingSteer,
+  isSessionOpen,
+  markPendingSteersFailed,
+  maybeDrainSteer,
+  promoteAcceptedSteers,
+  sessionStatusOf,
+  setSteerMessageState,
+  steerArmed,
+} from "./steer-runtime"
+import { steerMetaOf, type SteerState } from "@/lib/claude/steer"
+
+/** A user message carrying steer metadata, as `send`'s optimistic append makes. */
+function steerMessage(entryId: string, stateValue: SteerState, text = entryId): UIMessage {
+  return {
+    id: `m-${entryId}`,
+    role: "user",
+    parts: [{ type: "text", text }],
+    metadata: { steer: { entryId, state: stateValue } },
+  } as UIMessage
+}
+
+/** First text part of a message, or undefined when it has none. */
+function textOf(message: UIMessage | undefined): string | undefined {
+  return (message?.parts.find((p) => p.type === "text") as { text?: string } | undefined)?.text
+}
+
+/** Read back the rendered state of every steer message in a session. */
+function statesOf(sessionId: string): Array<SteerState | null> {
+  return (state.sessions[sessionId]?.messages ?? []).map(
+    (m) => steerMetaOf(m.metadata)?.state ?? null
+  )
+}
 
 beforeEach(() => {
   state.activeSessionId = null
@@ -29,6 +81,10 @@ beforeEach(() => {
   state.sessions = {}
   state.openSessionIds = []
   state.clearSteerQueue.mockClear()
+  state.replaceSessionMessages.mockClear()
+  state.updateSteerEntry.mockClear()
+  state.removeSteerEntry.mockClear()
+  mockPersistMessages.mockClear()
   steerArmed.clear()
 })
 
@@ -57,6 +113,124 @@ describe("isSessionOpen", () => {
   })
 })
 
+describe("setSteerMessageState", () => {
+  it("moves only the addressed entry and persists the change", () => {
+    state.sessions["s1"] = {
+      steerQueue: [],
+      messages: [steerMessage("a", "queued"), steerMessage("b", "queued")],
+    }
+    setSteerMessageState("s1", "a", "accepted")
+    expect(statesOf("s1")).toEqual(["accepted", "queued"])
+    // The delivery state is the only record separating "the model saw this"
+    // from "shown optimistically and never arrived", so it must reach disk.
+    expect(mockPersistMessages).toHaveBeenCalledTimes(1)
+  })
+
+  it("records a reason when one is given", () => {
+    state.sessions["s1"] = { steerQueue: [], messages: [steerMessage("a", "queued")] }
+    setSteerMessageState("s1", "a", "failed", "stream closed")
+    const meta = steerMetaOf(state.sessions["s1"].messages?.[0].metadata)
+    expect(meta?.reason).toBe("stream closed")
+  })
+
+  it("does not rewrite or persist when the state already matches", () => {
+    state.sessions["s1"] = { steerQueue: [], messages: [steerMessage("a", "accepted")] }
+    setSteerMessageState("s1", "a", "accepted")
+    expect(state.replaceSessionMessages).not.toHaveBeenCalled()
+    expect(mockPersistMessages).not.toHaveBeenCalled()
+  })
+
+  it("leaves messages without steer metadata untouched", () => {
+    const plain = { id: "p", role: "user", parts: [] } as unknown as UIMessage
+    state.sessions["s1"] = { steerQueue: [], messages: [plain] }
+    setSteerMessageState("s1", "a", "applied")
+    expect(state.replaceSessionMessages).not.toHaveBeenCalled()
+  })
+
+  it("no-ops on a session with no messages", () => {
+    setSteerMessageState("ghost", "a", "applied")
+    expect(state.replaceSessionMessages).not.toHaveBeenCalled()
+  })
+})
+
+describe("promoteAcceptedSteers", () => {
+  it("promotes accepted to applied and leaves queued waiting", () => {
+    state.sessions["s1"] = {
+      steerQueue: [],
+      messages: [steerMessage("a", "accepted"), steerMessage("b", "queued")],
+    }
+    promoteAcceptedSteers("s1")
+    // `queued` was never handed to the sidecar, so the settled turn did not
+    // carry it — it must keep waiting rather than claim delivery.
+    expect(statesOf("s1")).toEqual(["applied", "queued"])
+  })
+})
+
+describe("markPendingSteersFailed", () => {
+  it("fails both queued and accepted, leaving terminal states alone", () => {
+    state.sessions["s1"] = {
+      steerQueue: [],
+      messages: [
+        steerMessage("a", "queued"),
+        steerMessage("b", "accepted"),
+        steerMessage("c", "applied"),
+      ],
+    }
+    markPendingSteersFailed("s1", "boom")
+    expect(statesOf("s1")).toEqual(["failed", "failed", "applied"])
+  })
+})
+
+describe("editPendingSteer", () => {
+  it("rewrites the queue entry and the bubble together", () => {
+    state.sessions["s1"] = {
+      steerQueue: [{ id: "a", text: "old" }],
+      messages: [steerMessage("a", "queued", "old")],
+    }
+    editPendingSteer("s1", "a", "new")
+    expect(state.updateSteerEntry).toHaveBeenCalledWith("s1", "a", "new")
+    expect(textOf(state.sessions["s1"].messages?.[0])).toBe("new")
+    expect(mockPersistMessages).toHaveBeenCalled()
+  })
+
+  it("adds a text part when the message carried only attachments", () => {
+    const blocksOnly = {
+      id: "m-a",
+      role: "user",
+      parts: [],
+      metadata: { steer: { entryId: "a", state: "queued" } },
+    } as unknown as UIMessage
+    state.sessions["s1"] = { steerQueue: [{ id: "a", text: "" }], messages: [blocksOnly] }
+    editPendingSteer("s1", "a", "describe it")
+    expect(textOf(state.sessions["s1"].messages?.[0])).toBe("describe it")
+  })
+
+  it("still updates the queue when the session has no loaded messages", () => {
+    state.sessions["s1"] = { steerQueue: [{ id: "a", text: "old" }] }
+    editPendingSteer("s1", "a", "new")
+    expect(state.updateSteerEntry).toHaveBeenCalledWith("s1", "a", "new")
+    expect(state.replaceSessionMessages).not.toHaveBeenCalled()
+  })
+})
+
+describe("discardPendingSteer", () => {
+  it("drops the queue entry and its bubble", () => {
+    state.sessions["s1"] = {
+      steerQueue: [{ id: "a", text: "drop me" }],
+      messages: [steerMessage("a", "queued"), steerMessage("b", "queued")],
+    }
+    discardPendingSteer("s1", "a")
+    expect(state.removeSteerEntry).toHaveBeenCalledWith("s1", "a")
+    expect(state.sessions["s1"].messages?.map((m) => m.id)).toEqual(["m-b"])
+  })
+
+  it("does not rewrite the transcript when no bubble matched", () => {
+    state.sessions["s1"] = { steerQueue: [], messages: [steerMessage("b", "queued")] }
+    discardPendingSteer("s1", "a")
+    expect(state.replaceSessionMessages).not.toHaveBeenCalled()
+  })
+})
+
 describe("maybeDrainSteer", () => {
   it("no-ops on an empty queue but always disarms", () => {
     steerArmed.add("s1")
@@ -65,6 +239,12 @@ describe("maybeDrainSteer", () => {
     expect(replay).not.toHaveBeenCalled()
     expect(steerArmed.has("s1")).toBe(false)
     expect(state.clearSteerQueue).not.toHaveBeenCalled()
+  })
+
+  it("promotes accepted steers even when there is nothing queued to drain", () => {
+    state.sessions["s1"] = { steerQueue: [], messages: [steerMessage("a", "accepted")] }
+    maybeDrainSteer("s1", jest.fn())
+    expect(statesOf("s1")).toEqual(["applied"])
   })
 
   it("clears the queue and replays one framed payload", () => {
@@ -82,5 +262,19 @@ describe("maybeDrainSteer", () => {
     const text = typeof payload === "string" ? payload : JSON.stringify(payload)
     expect(text).toContain("first")
     expect(text).toContain("second")
+  })
+
+  it("marks the drained entries applied before dispatching the replay", () => {
+    const seenAtReplay: Array<SteerState | null> = []
+    state.sessions["s1"] = {
+      steerQueue: [{ id: "a", text: "first" }],
+      messages: [steerMessage("a", "queued", "first")],
+    }
+    maybeDrainSteer("s1", () => {
+      // `replay` runs synchronously into `send`, which persists the transcript;
+      // flipping after would race that write.
+      seenAtReplay.push(...statesOf("s1"))
+    })
+    expect(seenAtReplay).toEqual(["applied"])
   })
 })

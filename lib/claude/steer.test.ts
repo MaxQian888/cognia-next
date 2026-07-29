@@ -3,8 +3,12 @@ import {
   buildSteerPayload,
   frameSteer,
   frameSteerQueue,
+  resolveSteerDisplayState,
   steerBlocksOf,
+  steerMetaOf,
   steerTextOf,
+  stripSteerPrefix,
+  type SteerMessageMeta,
 } from "./steer"
 import type { SendContentBlock } from "@cognia/agent-config-types"
 
@@ -80,5 +84,86 @@ describe("buildSteerPayload", () => {
         { text: "second", blocks: [b] },
       ])
     ).toEqual([a, b, { type: "text", text: `${STEER_PREFIX}first\n\nsecond` }])
+  })
+})
+
+describe("stripSteerPrefix", () => {
+  it("removes the model-facing framing so the user reads their own words", () => {
+    expect(stripSteerPrefix(`${STEER_PREFIX}use TypeScript`)).toBe("use TypeScript")
+  })
+
+  it("leaves unframed text alone", () => {
+    expect(stripSteerPrefix("use TypeScript")).toBe("use TypeScript")
+  })
+
+  it("only strips a leading occurrence", () => {
+    expect(stripSteerPrefix(`talk about ${STEER_PREFIX}later`)).toBe(
+      `talk about ${STEER_PREFIX}later`
+    )
+  })
+})
+
+describe("steerMetaOf", () => {
+  it("reads well-formed steer metadata", () => {
+    expect(steerMetaOf({ steer: { entryId: "e1", state: "queued" } })).toEqual({
+      entryId: "e1",
+      state: "queued",
+    })
+  })
+
+  it("returns null for anything that is not steer metadata", () => {
+    expect(steerMetaOf(undefined)).toBeNull()
+    expect(steerMetaOf(null)).toBeNull()
+    expect(steerMetaOf("nope")).toBeNull()
+    expect(steerMetaOf({})).toBeNull()
+    expect(steerMetaOf({ steer: null })).toBeNull()
+    // Partial shapes must not pass — the renderer switches on `state`.
+    expect(steerMetaOf({ steer: { entryId: "e1" } })).toBeNull()
+    expect(steerMetaOf({ steer: { state: "queued" } })).toBeNull()
+  })
+})
+
+describe("resolveSteerDisplayState", () => {
+  const meta = (state: SteerMessageMeta["state"]): SteerMessageMeta => ({ entryId: "e1", state })
+
+  it("passes terminal states through untouched", () => {
+    expect(
+      resolveSteerDisplayState(meta("applied"), { sessionBusy: true, stillQueued: true })
+    ).toBe("applied")
+    expect(resolveSteerDisplayState(meta("failed"), { sessionBusy: true, stillQueued: true })).toBe(
+      "failed"
+    )
+  })
+
+  it("keeps an accepted steer pending only while the turn is still running", () => {
+    expect(
+      resolveSteerDisplayState(meta("accepted"), { sessionBusy: true, stillQueued: false })
+    ).toBe("accepted")
+    // Idle means that turn ended (including via a restart); the sidecar had
+    // taken it, so the model saw it.
+    expect(
+      resolveSteerDisplayState(meta("accepted"), { sessionBusy: false, stillQueued: false })
+    ).toBe("applied")
+  })
+
+  it("keeps a queued steer waiting only while it can still be delivered", () => {
+    expect(resolveSteerDisplayState(meta("queued"), { sessionBusy: true, stillQueued: true })).toBe(
+      "queued"
+    )
+  })
+
+  it("fails a queued steer once no settle can deliver it", () => {
+    // Run ended without draining.
+    expect(
+      resolveSteerDisplayState(meta("queued"), { sessionBusy: false, stillQueued: true })
+    ).toBe("failed")
+    // After a restart the memory-only queue is empty, so nothing is left to
+    // deliver it — this is the reload case.
+    expect(
+      resolveSteerDisplayState(meta("queued"), { sessionBusy: false, stillQueued: false })
+    ).toBe("failed")
+    expect(
+      resolveSteerDisplayState(meta("queued"), { sessionBusy: true, stillQueued: false })
+    ).toBe("failed")
   })
 })

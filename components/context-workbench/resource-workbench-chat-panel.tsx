@@ -11,6 +11,7 @@ import { getDb } from "@/lib/db/schema"
 import { listMessages } from "@/lib/db/messages"
 import { useChatStore } from "@/stores/chat"
 import { useContextWorkbench } from "./context-workbench"
+import { AsideTargetProvider } from "./aside-target"
 import { useSingleExport } from "@/hooks/data/use-single-export"
 import { Button } from "@/components/ui/button"
 import { DownloadIcon } from "lucide-react"
@@ -32,10 +33,16 @@ export function ResourceWorkbenchChatPanel({
   pendingPrompt,
   onPendingPromptConsumed,
   selectionHeader,
+  asideTargetSessionId,
 }: {
   getResourceContext?: () => string | Promise<string>
   pendingPrompt?: string | null
   onPendingPromptConsumed?: () => void
+  /**
+   * Set only by the session-bound sidechat: the MAIN conversation this panel is
+   * an aside to. Enables the per-message "hand back to the main thread" action.
+   */
+  asideTargetSessionId?: string
   /**
    * Host content above the conversation — the artifact surface puts its
    * "comment on the current selection" composer here. It used to be a separate
@@ -143,7 +150,7 @@ export function ResourceWorkbenchChatPanel({
       })
   }, [onPendingPromptConsumed, pendingPrompt, send])
 
-  return (
+  const body = (
     <div className="flex h-full min-h-0 flex-col">
       <div className="flex h-9 shrink-0 items-center justify-end border-b px-2">
         <Button
@@ -185,5 +192,14 @@ export function ResourceWorkbenchChatPanel({
         </Suspense>
       </div>
     </div>
+  )
+
+  // Only a session-bound aside has a "main thread" to hand things back to; for
+  // an artifact / canvas / project-file chat the target is absent and the
+  // message action stays hidden.
+  return asideTargetSessionId ? (
+    <AsideTargetProvider sessionId={asideTargetSessionId}>{body}</AsideTargetProvider>
+  ) : (
+    body
   )
 }

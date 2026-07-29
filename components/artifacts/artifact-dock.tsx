@@ -17,6 +17,7 @@ import {
   History,
   LibraryIcon,
   MessageSquareIcon,
+  MessagesSquareIcon,
   PanelsTopLeftIcon,
   SearchCodeIcon,
   InfoIcon,
@@ -29,6 +30,7 @@ import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 import { hasWorkspaceFsBackend } from "@/lib/files/workspace-backend"
 import { isRunnableArtifactType } from "@/lib/artifacts/constants"
+import { buildAsideContext } from "@/lib/chat/session-aside-context"
 import { useChatStore } from "@/stores/chat"
 import { useSessionStore } from "@/stores/chat/session-store"
 import { useChatViewportStore } from "@/stores/chat/chat-viewport-store"
@@ -335,6 +337,41 @@ export function ArtifactContextWorkbench({
                 onSubmit={setPendingSelectionComment}
               />
             }
+          />
+        ),
+      },
+      {
+        // Sidechat: an aside bound to the conversation itself, for checking
+        // something adjacent without spending turns in — or adding noise to —
+        // the main thread. Shares the `ai` activity with the artifact chat
+        // above; only one of the two ever applies, since a resource is either
+        // an artifact or the session.
+        id: "session-sidechat",
+        activity: "ai",
+        labelKey: "contextWorkbench.sessionSidechat",
+        icon: MessagesSquareIcon,
+        order: 25,
+        appliesTo: (resource) =>
+          resource.kind === "session" &&
+          // No conversation open, or the "conversation" IS an aside — an aside
+          // of an aside has no surface to render and would nest forever.
+          resource.sessionId !== "none" &&
+          !resource.sessionId.startsWith("resource-workbench:"),
+        retention: "stateful",
+        requiresChatScope: true,
+        renderer: () => (
+          <ResourceWorkbenchChatPanel
+            // Re-resolved on every send, so the aside always sees the main
+            // thread as it stands now rather than a snapshot from when the
+            // panel opened.
+            getResourceContext={() =>
+              buildAsideContext(
+                activeSessionId
+                  ? (useChatStore.getState().sessions[activeSessionId]?.messages ?? [])
+                  : []
+              )
+            }
+            asideTargetSessionId={activeSessionId ?? undefined}
           />
         ),
       },

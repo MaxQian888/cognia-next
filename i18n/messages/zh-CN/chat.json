@@ -66,6 +66,7 @@
     "title": "智能体有个问题"
   },
   "branch": {
+    "ariaLineage": "跳到「{title}」中创建这条分支的那条消息",
     "cancel": "取消",
     "confirm": "创建分支",
     "createError": "创建分支失败",
@@ -75,6 +76,8 @@
       "hint": "原样复制到这条消息为止的对话。",
       "label": "直接分支"
     },
+    "lineage": "分叉自 {title}",
+    "lineageUnknownParent": "已删除的对话",
     "summary": {
       "generating": "正在生成摘要……",
       "hint": "总结目前为止的对话并作为分支起点（让上下文更精简）。",
@@ -842,6 +845,9 @@
     "bookmarkTooltip": "收藏",
     "branchLabel": "分支对话",
     "branchTooltip": "从这里分支",
+    "bringBackDone": "已添加到主对话的输入框",
+    "bringBackLabel": "带回主对话",
+    "bringBackTooltip": "引用到主对话",
     "copyDone": "已复制！",
     "copyLabel": "复制消息",
     "copyTooltip": "复制消息",
@@ -1106,15 +1112,12 @@
   },
   "runPanel": {
     "ariaDiscardQueue": "丢弃排队的消息",
-    "ariaEditSteer": "编辑排队的消息",
     "ariaInterrupt": "中断当前回合",
-    "ariaRemoveSteer": "移除排队的消息",
-    "ariaSteerAttachments": "{count} 个附件",
+    "ariaLocateSteer": "跳到第一条未送达的消息",
     "ariaSteerQueue": "待发送消息",
     "ariaSubagent": "子智能体",
     "collapse": "收起运行详情",
     "discardQueue": "丢弃",
-    "emptySteer": "（空）",
     "expand": "展开运行详情",
     "lastRun": "上一轮",
     "lastRunSummary": "{count} 个工具 · {elapsed}",
@@ -1123,6 +1126,10 @@
     "sectionSubagents": "子智能体",
     "sectionSummary": "概要",
     "sectionTools": "工具",
+    "steerNowConfirmAccept": "中断并发送",
+    "steerNowConfirmBody": "这会停止当前回合、取消正在运行的工具调用，并立即发送你排队的消息。已经完成的工作会保留。",
+    "steerNowConfirmCancel": "继续运行",
+    "steerNowConfirmTitle": "要中断这个回合吗？",
     "summarySubagents": "{count} 个子智能体",
     "summaryTodos": "{done}/{total} 项待办",
     "summaryTools": "{count} 个工具"
@@ -1135,7 +1142,8 @@
     "metricSpeed": "{value} tok/s",
     "metricTokens": "{value} tok",
     "queued": "{count} 条待发送",
-    "steerNow": "立即发送",
+    "steerNow": "中断并发送",
+    "steerNowHint": "停止当前回合、取消正在运行的工具，并立即发送你排队的消息",
     "waitingApproval": "等待审批",
     "working": "运行中"
   },
@@ -1200,6 +1208,19 @@
     "styleSamplesHeader": "风格样本（{count}）",
     "usedSources": "{count, plural, =0 {未引用来源} =1 {引用 1 项来源} other {引用 # 项来源}}",
     "viewSource": "查看原文"
+  },
+  "steer": {
+    "accepted": "已送达",
+    "acceptedHint": "已交给正在运行的回合，智能体会在下一步读到",
+    "ariaEdit": "编辑这条补充",
+    "ariaPutBack": "把这条补充放回输入框",
+    "ariaRemove": "移除这条补充",
+    "discard": "删除",
+    "failed": "未送达",
+    "failedHint": "这一轮在它发出前就结束了",
+    "putBack": "放回输入框",
+    "queued": "排队中",
+    "queuedHint": "会在当前回合结束后发送"
   },
   "subagentPart": {
     "abort": "停止子代理",

@@ -6,7 +6,13 @@ import type { UIMessage } from "ai"
 
 import { RunStatusBar } from "./run-status-bar"
 import { useChatStore, makeSessionSlice, type SessionChatSlice } from "@/stores/chat"
+import { useChatViewportStore } from "@/stores/chat/chat-viewport-store"
 import { useSubagentRuntimeStore } from "@/stores/agent/subagent-runtime-store"
+import { useSettingsStore } from "@/stores/settings"
+
+// `save` persists to Dexie; the panel only needs it to record the one-time
+// interrupt confirmation, so stub it and assert the patch.
+const saveSettingsMock = jest.fn(() => Promise.resolve())
 
 // Identity i18n with var echo (so we can assert the `{count}` payload).
 jest.mock("next-intl", () => ({
@@ -46,6 +52,9 @@ function assistantWithRunningTool(): UIMessage {
 beforeEach(() => {
   useChatStore.setState({ activeSessionId: null, sessions: {} })
   useSubagentRuntimeStore.setState({ subAgents: {} })
+  useChatViewportStore.setState({ jumpToMessage: null })
+  saveSettingsMock.mockClear()
+  useSettingsStore.setState({ settings: {} as never, save: saveSettingsMock as never })
 })
 
 describe("RunStatusBar", () => {
@@ -77,69 +86,45 @@ describe("RunStatusBar", () => {
     expect(screen.getByText("Bash: npm test")).toBeInTheDocument()
   })
 
-  it("surfaces the steer queue chip with its depth and a preview", () => {
-    seed({ status: "streaming", steerQueue: [{ id: "e1", text: "fix the   failing test" }] })
+  it("reports the pending-steer depth without restating the messages", () => {
+    seed({ status: "streaming", steerQueue: [{ id: "e1", text: "fix the failing test" }] })
     render(<RunStatusBar sessionId={SID} />)
     // identity mock echoes the count payload
     expect(screen.getByTestId("run-status-steer-chip").textContent).toContain('queued:{"count":1}')
-    expect(screen.getByText("• fix the failing test")).toBeInTheDocument()
+    // The text itself lives on the transcript bubble — duplicating it here
+    // would mean two editable copies of one message.
+    expect(screen.queryByText(/fix the failing test/)).not.toBeInTheDocument()
   })
 
-  it("shows a 📎 attachment count on a queued steer that carries blocks", () => {
+  it("jumps to the first undelivered steer message when the chip is pressed", () => {
+    const jumpToMessage = jest.fn(() => true)
+    useChatViewportStore.setState({ jumpToMessage })
     seed({
       status: "streaming",
-      steerQueue: [
+      steerQueue: [{ id: "e1", text: "later one" }],
+      messages: [
+        { id: "m0", role: "user", parts: [] } as unknown as UIMessage,
         {
-          id: "img",
-          text: "look at this",
-          blocks: [
-            {
-              type: "image",
-              source: { type: "base64", media_type: "image/png", data: "AAAA" },
-            },
-          ],
-        },
+          id: "m-e1",
+          role: "user",
+          parts: [{ type: "text", text: "later one" }],
+          metadata: { steer: { entryId: "e1", state: "queued" } },
+        } as unknown as UIMessage,
       ],
     })
     render(<RunStatusBar sessionId={SID} />)
-    expect(screen.getByText("×1")).toBeInTheDocument()
+    fireEvent.click(screen.getByTestId("run-status-steer-chip"))
+    expect(jumpToMessage).toHaveBeenCalledWith("m-e1")
   })
 
-  it("removes a queued entry via its × control", () => {
-    seed({
-      status: "streaming",
-      steerQueue: [
-        { id: "a", text: "alpha" },
-        { id: "b", text: "beta" },
-      ],
-    })
+  it("stays inert when the queued steer has no reachable message", () => {
+    const jumpToMessage = jest.fn(() => true)
+    useChatViewportStore.setState({ jumpToMessage })
+    seed({ status: "streaming", steerQueue: [{ id: "gone", text: "orphan" }], messages: [] })
     render(<RunStatusBar sessionId={SID} />)
-    expect(screen.getByText("• alpha")).toBeInTheDocument()
-    // ariaRemoveSteer is echoed by the identity i18n mock.
-    fireEvent.click(screen.getAllByLabelText("ariaRemoveSteer")[0])
-    expect(screen.queryByText("• alpha")).not.toBeInTheDocument()
-    expect(screen.getByText("• beta")).toBeInTheDocument()
-  })
-
-  it("inline-edits a queued entry and commits on Enter", () => {
-    seed({ status: "streaming", steerQueue: [{ id: "a", text: "old" }] })
-    render(<RunStatusBar sessionId={SID} />)
-    fireEvent.click(screen.getByText("• old"))
-    const input = screen.getByTestId("run-panel-steer-edit") as HTMLInputElement
-    fireEvent.change(input, { target: { value: "new text" } })
-    fireEvent.keyDown(input, { key: "Enter" })
-    expect(screen.getByText("• new text")).toBeInTheDocument()
-    expect(useChatStore.getState().sessions[SID]?.steerQueue[0]?.text).toBe("new text")
-  })
-
-  it("emptying an entry in the editor removes it", () => {
-    seed({ status: "streaming", steerQueue: [{ id: "a", text: "old" }] })
-    render(<RunStatusBar sessionId={SID} />)
-    fireEvent.click(screen.getByText("• old"))
-    const input = screen.getByTestId("run-panel-steer-edit") as HTMLInputElement
-    fireEvent.change(input, { target: { value: "   " } })
-    fireEvent.keyDown(input, { key: "Enter" })
-    expect(useChatStore.getState().sessions[SID]?.steerQueue).toEqual([])
+    // Rendered as a plain span, not a button — there is nowhere to jump to.
+    fireEvent.click(screen.getByTestId("run-status-steer-chip"))
+    expect(jumpToMessage).not.toHaveBeenCalled()
   })
 
   it("surfaces a stuck-queue header after an errored settle with flush + discard", async () => {
@@ -175,12 +160,28 @@ describe("RunStatusBar", () => {
     }
   })
 
-  it('"Send now" triggers onSteerNow only when a steer is queued and busy', async () => {
+  it("asks before the first interrupt-and-send, then fires it", async () => {
     const onSteerNow = jest.fn()
+    useSettingsStore.setState({ settings: { steerInterruptConfirmed: false } as never })
     seed({ status: "streaming", steerQueue: [{ id: "x", text: "do X" }] })
     render(<RunStatusBar sessionId={SID} onSteerNow={onSteerNow} />)
-    fireEvent.click(screen.getByText("steerNow"))
+    fireEvent.click(screen.getByTestId("run-panel-steer-now"))
+    // Aborting in-flight tool calls is not obvious from the button, so the
+    // first use must not go straight through.
+    expect(onSteerNow).not.toHaveBeenCalled()
+    fireEvent.click(await screen.findByTestId("run-panel-steer-now-confirm"))
     await waitFor(() => expect(onSteerNow).toHaveBeenCalledTimes(1))
+    expect(saveSettingsMock).toHaveBeenCalledWith({ steerInterruptConfirmed: true })
+  })
+
+  it("skips the confirm once the user has already accepted it", async () => {
+    const onSteerNow = jest.fn()
+    useSettingsStore.setState({ settings: { steerInterruptConfirmed: true } as never })
+    seed({ status: "streaming", steerQueue: [{ id: "x", text: "do X" }] })
+    render(<RunStatusBar sessionId={SID} onSteerNow={onSteerNow} />)
+    fireEvent.click(screen.getByTestId("run-panel-steer-now"))
+    await waitFor(() => expect(onSteerNow).toHaveBeenCalledTimes(1))
+    expect(screen.queryByTestId("run-panel-steer-now-confirm")).not.toBeInTheDocument()
   })
 
   it("does not show the busy interrupt-and-send affordance when idle", () => {
@@ -188,8 +189,7 @@ describe("RunStatusBar", () => {
     // shown); without onSteerFlush there is no flush button.
     seed({ status: "idle", steerQueue: [{ id: "o", text: "orphan" }] })
     render(<RunStatusBar sessionId={SID} onSteerNow={jest.fn()} />)
-    expect(screen.queryByText("steerNow")).not.toBeInTheDocument()
-    expect(screen.getByText("• orphan")).toBeInTheDocument()
+    expect(screen.queryByTestId("run-panel-steer-now")).not.toBeInTheDocument()
     expect(screen.getByText("discardQueue")).toBeInTheDocument()
   })
 

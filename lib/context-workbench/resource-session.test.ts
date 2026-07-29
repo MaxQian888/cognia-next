@@ -99,14 +99,37 @@ describe("resource workbench sessions", () => {
     ).toEqual({ kind: "workflow", workflowId: "w" })
   })
 
-  it("returns no binding for a session resource — it is already a chat session", () => {
+  it("binds a session resource so a conversation can own a sidechat", () => {
     expect(
       surfaceBindingForContextResource({
         kind: "session",
         sessionId: "s",
         capabilities: [],
       })
+    ).toEqual({ kind: "session", sessionId: "s" })
+  })
+
+  it("refuses to give an aside its own aside", () => {
+    // Nesting would be unbounded and no surface renders the second level.
+    expect(
+      surfaceBindingForContextResource({
+        kind: "session",
+        sessionId: "resource-workbench:session:s",
+        capabilities: [],
+      })
     ).toBeNull()
+  })
+
+  it("refuses the dock's no-conversation placeholder", () => {
+    expect(
+      surfaceBindingForContextResource({ kind: "session", sessionId: "none", capabilities: [] })
+    ).toBeNull()
+  })
+
+  it("gives a session binding its own id namespace", () => {
+    expect(resourceWorkbenchSessionId({ kind: "session", sessionId: "s1" })).toBe(
+      "resource-workbench:session:s1"
+    )
   })
 
   it("uses stable encoded ids and repairs an older row with the same id", async () => {

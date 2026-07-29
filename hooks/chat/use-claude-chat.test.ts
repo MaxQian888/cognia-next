@@ -30,6 +30,10 @@ const onClaudeMessageMock = jest.fn(async (cb: (evt: unknown) => void) => {
 })
 const sendPromptMock = jest.fn().mockResolvedValue(undefined)
 const interruptSessionMock = jest.fn().mockResolvedValue(undefined)
+// Live mid-turn steer into the Anthropic sidecar's streaming input. Rejecting
+// is the realistic default for most tests: an idle/closed query refuses, and
+// `send` must then fall back to the durable queue.
+const steerSessionMock = jest.fn().mockRejectedValue(new Error("input_closed"))
 const closeSessionIpcMock = jest.fn().mockResolvedValue(undefined)
 const approveToolMock = jest.fn().mockResolvedValue(undefined)
 
@@ -39,6 +43,7 @@ jest.mock("@/lib/claude/ipc", () => ({
   interruptSession: (id: string) => interruptSessionMock(id),
   onClaudeMessage: (cb: (evt: unknown) => void) => onClaudeMessageMock(cb),
   sendPrompt: (...a: unknown[]) => sendPromptMock(...a),
+  steerSession: (...a: unknown[]) => steerSessionMock(...a),
 }))
 
 // Standalone (BYOK) chat — off by default so the sidecar-path suite is
@@ -516,6 +521,7 @@ beforeEach(() => {
   chatState.setStatus.mockClear()
   chatState.setError.mockClear()
   chatState.replaceSessionMessages.mockClear()
+  steerSessionMock.mockClear().mockRejectedValue(new Error("input_closed"))
   chatState.setSessionStatus.mockClear()
   chatState.setSessionError.mockClear()
   chatState.setSessionDiagnostic.mockClear()
@@ -1649,6 +1655,93 @@ describe("useClaudeChat — goal loop wiring (ADR-0019)", () => {
     )
     // Busy-gate returns before dispatch — nothing reaches the sidecar.
     expect(sendPromptMock).not.toHaveBeenCalled()
+  })
+
+  it("shows a steer in the transcript immediately, in the user's own words", async () => {
+    chatState.status = "streaming"
+    const { result } = renderHook(() => useClaudeChat())
+    await flush()
+    await act(async () => {
+      await result.current.send("switch to TypeScript")
+    })
+    const appended = chatState.replaceSessionMessages.mock.calls.at(-1)?.[1] as Array<{
+      role: string
+      parts: Array<{ type: string; text?: string }>
+      metadata?: { steer?: { entryId: string; state: string } }
+    }>
+    const last = appended.at(-1)
+    expect(last?.role).toBe("user")
+    // The model-facing "By the way (steering): " framing is added only on the
+    // replay payload — never on what the user reads back.
+    expect(last?.parts[0]?.text).toBe("switch to TypeScript")
+    expect(last?.metadata?.steer?.state).toBe("queued")
+    // The bubble's entry id is what ties it to the queue entry.
+    expect(last?.metadata?.steer?.entryId).toBe(
+      (chatState.enqueueSteer.mock.calls.at(-1)?.[1] as { id: string }).id
+    )
+  })
+
+  it("delivers a steer live through the Anthropic sidecar and skips the queue", async () => {
+    chatState.status = "streaming"
+    steerSessionMock.mockResolvedValue({ accepted: true })
+    const { result } = renderHook(() => useClaudeChat())
+    await flush()
+    await act(async () => {
+      await result.current.send("actually use Vitest")
+    })
+    expect(steerSessionMock).toHaveBeenCalledWith("sess-1", "actually use Vitest")
+    // Accepted into the running query — nothing to replay later.
+    expect(chatState.enqueueSteer).not.toHaveBeenCalled()
+    const appended = chatState.replaceSessionMessages.mock.calls.at(-1)?.[1] as Array<{
+      metadata?: { steer?: { state: string } }
+    }>
+    expect(appended.at(-1)?.metadata?.steer?.state).toBe("accepted")
+    expect(sendPromptMock).not.toHaveBeenCalled()
+  })
+
+  it("falls back to the queue when the live steer is refused", async () => {
+    chatState.status = "streaming"
+    steerSessionMock.mockRejectedValue(new Error("input_closed"))
+    const { result } = renderHook(() => useClaudeChat())
+    await flush()
+    await act(async () => {
+      await result.current.send("and add tests")
+    })
+    expect(steerSessionMock).toHaveBeenCalled()
+    expect(chatState.enqueueSteer).toHaveBeenCalledWith(
+      "sess-1",
+      expect.objectContaining({ text: "and add tests" })
+    )
+  })
+
+  it("queues a steer while awaiting approval without attempting a live steer", async () => {
+    // The composer stays writable during approval on purpose: that is when the
+    // user most wants to redirect. The SDK is blocked on the permission
+    // round-trip, so there is no live lane to try.
+    chatState.status = "awaiting_approval"
+    const { result } = renderHook(() => useClaudeChat())
+    await flush()
+    await act(async () => {
+      await result.current.send("don't use that tool")
+    })
+    expect(steerSessionMock).not.toHaveBeenCalled()
+    expect(chatState.enqueueSteer).toHaveBeenCalledWith(
+      "sess-1",
+      expect.objectContaining({ text: "don't use that tool" })
+    )
+    expect(sendPromptMock).not.toHaveBeenCalled()
+  })
+
+  it("ignores an empty steer instead of appending a blank bubble", async () => {
+    chatState.status = "streaming"
+    const { result } = renderHook(() => useClaudeChat())
+    await flush()
+    chatState.replaceSessionMessages.mockClear()
+    await act(async () => {
+      await result.current.send("   ")
+    })
+    expect(chatState.enqueueSteer).not.toHaveBeenCalled()
+    expect(chatState.replaceSessionMessages).not.toHaveBeenCalled()
   })
 
   it("flushSteer is a no-op when the queue is empty", async () => {

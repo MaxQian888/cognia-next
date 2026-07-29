@@ -34,6 +34,10 @@ jest.mock("@/components/chat/branch-dialog", () => ({
 jest.mock("@/components/chat/composer", () => ({
   __esModule: true,
   COMPOSER_APPEND_EVENT: "cognia:composer-append",
+  // Real dispatch behavior (it is two lines in the composer module) so the
+  // listener-based assertions below still observe the event and its addressing.
+  dispatchComposerAppend: (detail: unknown) =>
+    window.dispatchEvent(new CustomEvent("cognia:composer-append", { detail })),
 }))
 
 jest.mock("@/lib/capacitor/haptics", () => ({
@@ -335,6 +339,20 @@ describe("MessageActionSheet", () => {
     const detail = (handler.mock.calls[0][0] as CustomEvent<{ text: string }>).detail
     expect(detail.text).toBe("> line one\n> line two\n\n")
     expect(onOpenChange).toHaveBeenCalledWith(false)
+  })
+
+  it("addresses the quote to the message's own session so other panes don't mirror it", () => {
+    const handler = jest.fn()
+    const message = {
+      ...makeMessage("hello"),
+      metadata: { sessionId: "s-owner" },
+    } as UIMessage
+    window.addEventListener("cognia:composer-append", handler)
+    renderSheet(message, jest.fn())
+    fireEvent.click(screen.getByTestId("message-action-quote"))
+    window.removeEventListener("cognia:composer-append", handler)
+    const detail = (handler.mock.calls[0][0] as CustomEvent<{ sessionId?: string }>).detail
+    expect(detail.sessionId).toBe("s-owner")
   })
 
   it("invokes share and closes on shared outcome", async () => {

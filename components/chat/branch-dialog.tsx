@@ -30,6 +30,7 @@ import { getSession } from "@/lib/db/sessions"
 import { buildUtilityLlmClient } from "@/lib/ai/generation/utility-client"
 import { summarizeConversation } from "@/lib/ai/generation/summarizer"
 import { branchSessionAtMessage, type BranchMode } from "@/lib/chat/branch-session"
+import { usePlatform } from "@/hooks/use-platform"
 import { createLogger } from "@cognia/logging"
 
 const log = createLogger("chat-branch")
@@ -46,6 +47,7 @@ interface Props {
 export function BranchDialog({ sessionId, messageId, open, onOpenChange }: Props) {
   const t = useTranslations("chat.branch")
   const locale = useLocale()
+  const isMobile = usePlatform() === "mobile"
   const [mode, setMode] = useState<BranchMode>("direct")
   const [summaryText, setSummaryText] = useState("")
   const [generating, setGenerating] = useState(false)
@@ -115,11 +117,25 @@ export function BranchDialog({ sessionId, messageId, open, onOpenChange }: Props
         mode,
         summaryText: mode === "summary" ? summaryText : undefined,
       })
-      // Link to the active workspace and switch to the new branch — mirrors the
-      // "new conversation" flow (`hooks/chat/use-sessions.ts:create`).
+      // Link to the active workspace — mirrors the "new conversation" flow
+      // (`hooks/chat/use-sessions.ts:create`).
       const { activeProjectId, addSessionToProject } = useProjectStore.getState()
       if (activeProjectId) addSessionToProject(activeProjectId, child.id)
-      useChatStore.getState().setActiveSession(child.id)
+
+      const store = useChatStore.getState()
+      if (isMobile) {
+        // No split view on the Capacitor shell — there is only ever one pane, so
+        // the branch takes it.
+        store.setActiveSession(child.id)
+      } else {
+        // Open the branch BESIDE its parent rather than navigating away: the
+        // point of branching is to try another approach against the original,
+        // and the parent may still be running a turn. `chat-pane-group` only
+        // renders the split pane for a session that is also open, so the order
+        // matters.
+        store.openSession(child.id)
+        store.setSplitSessionId(child.id)
+      }
       toast.success(t("created"))
       handleOpenChange(false)
     } catch (err) {

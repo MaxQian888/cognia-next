@@ -28,6 +28,82 @@ export function frameSteer(text: string): string {
 }
 
 /**
+ * Drop the model-facing framing from a steer payload for display. The prefix
+ * exists so the *model* reads a follow-up as a course-correction; showing it
+ * back to the user means their own transcript reads "By the way (steering):
+ * …" in English regardless of locale. Rendering goes through here; the model
+ * still receives the framed text.
+ */
+export function stripSteerPrefix(text: string): string {
+  return text.startsWith(STEER_PREFIX) ? text.slice(STEER_PREFIX.length) : text
+}
+
+/**
+ * Delivery state of a steer, as shown on its transcript bubble.
+ *
+ *  • `queued`   — held renderer-side; the model has not seen it. Either the
+ *                 provider has no live-input lane, or this session's query had
+ *                 already closed its input (see `scheduleSteerInputClose`).
+ *  • `accepted` — the sidecar took it into the live streaming input. NOT the
+ *                 same as "the model acted on it": the Agent SDK applies the
+ *                 message at its next supported boundary and cannot mutate an
+ *                 HTTP request already in flight (see `ipc.steerSession`).
+ *  • `applied`  — the turn carrying it has settled, so it is now part of the
+ *                 conversation the model reasons over.
+ *  • `failed`   — never delivered and never will be by itself (the run ended
+ *                 without draining, or the app restarted). Offers retry/discard.
+ */
+export type SteerState = "queued" | "accepted" | "applied" | "failed"
+
+/**
+ * `metadata.steer` on a user message that entered as a steer. Persisted with
+ * the message, so a restart can tell a delivered follow-up from one that was
+ * optimistically shown and never reached the model.
+ */
+export interface SteerMessageMeta {
+  /** Matches the `SteerEntry.id` in the store's queue while still pending. */
+  entryId: string
+  state: SteerState
+  /** Why delivery failed / fell back — surfaced in the bubble's tooltip. */
+  reason?: string
+}
+
+/**
+ * The state a steer bubble should actually render, reconciling its persisted
+ * `metadata.steer.state` against live session facts.
+ *
+ * This is a derivation rather than a load-time rewrite because the queue itself
+ * is memory-only: after a restart every pending entry is gone, so a message
+ * persisted as `queued` would otherwise sit on "waiting" forever with nothing
+ * left to deliver it. Deriving keeps that self-correcting and keeps the reload
+ * path free of a mutation pass.
+ *
+ *  • `applied` / `failed` are terminal and pass through.
+ *  • `accepted` while idle means the turn it rode in has ended (including via a
+ *    restart) — the sidecar had taken it, so the model saw it.
+ *  • `queued` only survives while the session is still busy AND the entry is
+ *    still in the live queue; anything else means no settle is coming.
+ */
+export function resolveSteerDisplayState(
+  meta: SteerMessageMeta,
+  ctx: { sessionBusy: boolean; stillQueued: boolean }
+): SteerState {
+  if (meta.state === "applied" || meta.state === "failed") return meta.state
+  if (meta.state === "accepted") return ctx.sessionBusy ? "accepted" : "applied"
+  return ctx.sessionBusy && ctx.stillQueued ? "queued" : "failed"
+}
+
+/** Read `metadata.steer` off a message's metadata bag, if it carries one. */
+export function steerMetaOf(metadata: unknown): SteerMessageMeta | null {
+  if (!metadata || typeof metadata !== "object") return null
+  const steer = (metadata as { steer?: unknown }).steer
+  if (!steer || typeof steer !== "object") return null
+  const { entryId, state } = steer as Partial<SteerMessageMeta>
+  if (typeof entryId !== "string" || typeof state !== "string") return null
+  return steer as SteerMessageMeta
+}
+
+/**
  * Join queued steer entries (most-recent last) into one framed prompt. Blank
  * entries are dropped; an all-blank queue collapses to the bare prefix (callers
  * guard against draining an empty queue).

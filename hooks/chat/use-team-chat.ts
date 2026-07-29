@@ -57,7 +57,7 @@ import type {
   TeamMember,
 } from "@cognia/agent-config-types"
 import { subSessionId, decodeSubSession } from "@/lib/claude/team-session-id"
-import { steerBlocksOf, steerTextOf } from "@/lib/claude/steer"
+import { steerBlocksOf, steerTextOf, type SteerMessageMeta } from "@/lib/claude/steer"
 import { senderIdOf, tagBranchSiblings, teamBranchGroupId } from "@/lib/chat/branch-regen"
 import { mirrorTruncateToDesktop } from "@/lib/chat/mirror-truncate"
 import { isSessionOpen, maybeDrainSteer, sessionStatusOf, steerArmed } from "./steer-runtime"
@@ -285,13 +285,25 @@ export function useTeamChat() {
         if (st === "streaming" || st === "awaiting_approval") {
           const text = steerTextOf(content)
           const blocks = steerBlocksOf(content)
-          if (text || blocks.length > 0) {
-            useChatStore.getState().enqueueSteer(sessionId, {
-              id: crypto.randomUUID(),
-              text,
-              blocks: blocks.length > 0 ? blocks : undefined,
-            })
-          }
+          if (!text && blocks.length === 0) return
+          // Show the follow-up straight away, exactly as direct chat does — the
+          // run panel only carries a count now, so without this the message
+          // would vanish until the turn settles. A team turn has no live-input
+          // lane (the orchestrator is mid-sequence), so it opens as `queued` and
+          // only ever advances on drain.
+          const entryId = crypto.randomUUID()
+          const steerMeta: SteerMessageMeta = { entryId, state: "queued" }
+          const optimistic = withMetadata(
+            makeUserMessage(content, undefined, opts?.attachmentManifest),
+            { senderKind: "user", steer: steerMeta }
+          )
+          const prior = useChatStore.getState().sessions[sessionId]?.messages ?? []
+          useChatStore.getState().replaceSessionMessages(sessionId, [...prior, optimistic])
+          useChatStore.getState().enqueueSteer(sessionId, {
+            id: entryId,
+            text,
+            blocks: blocks.length > 0 ? blocks : undefined,
+          })
           return
         }
       }
@@ -537,7 +549,12 @@ export function useTeamChat() {
         useUIStore.getState().clearMemberStatusFor(sessionId)
         useUIStore.getState().clearStopRequestsFor(sessionId)
         if ((!hadError && !wasInterrupted) || steerArmed.has(sessionId)) {
-          maybeDrainSteer(sessionId, (payload) => void sendRef.current?.(payload, { sessionId }))
+          maybeDrainSteer(
+            sessionId,
+            // The queued entries are already in the transcript from their optimistic
+            // append, so the replay must not persist a second user turn.
+            (payload) => void sendRef.current?.(payload, { sessionId, skipPersistUserTurn: true })
+          )
         }
       }
     },
@@ -586,7 +603,12 @@ export function useTeamChat() {
   const flushSteer = useCallback((targetSessionId?: string) => {
     const sessionId = targetSessionId ?? useChatStore.getState().activeSessionId
     if (!sessionId) return
-    maybeDrainSteer(sessionId, (payload) => void sendRef.current?.(payload, { sessionId }))
+    maybeDrainSteer(
+      sessionId,
+      // The queued entries are already in the transcript from their optimistic
+      // append, so the replay must not persist a second user turn.
+      (payload) => void sendRef.current?.(payload, { sessionId, skipPersistUserTurn: true })
+    )
   }, [])
 
   /**

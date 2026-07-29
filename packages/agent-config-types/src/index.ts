@@ -1388,6 +1388,13 @@ export type SessionSurfaceBinding =
   | { kind: "project-file"; projectId: string; rootId: string; relPath: string }
   | { kind: "artifact"; artifactId: string }
   | { kind: "workflow"; workflowId: string }
+  /**
+   * A side conversation attached to another chat session — the workbench
+   * sidechat. Lets the user ask something adjacent (check a concept, sanity-test
+   * an approach) without spending turns in, or adding noise to, the main
+   * thread. `sessionId` is the MAIN session; the bound row is the aside.
+   */
+  | { kind: "session"; sessionId: string }
 
 export interface ChatSession {
   id: string
@@ -2357,6 +2364,13 @@ export interface AppSettings {
   conversationSidebar?: ConversationSidebarSettings
   /** Which metrics the chat run-status bar surfaces (speed, tokens, cost, …). */
   runStatusBar?: RunStatusBarSettings
+  /**
+   * Set once the user has confirmed the run panel's "interrupt and send"
+   * action. That action aborts the running turn's in-flight tool calls to
+   * deliver a queued follow-up early, which is not obvious from the button, so
+   * the first use asks. Afterwards it fires straight away.
+   */
+  steerInterruptConfirmed?: boolean
   // Tools the user has chosen to always allow for this app (per-tool name).
   alwaysAllowTools: string[]
   /**

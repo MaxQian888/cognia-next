@@ -44,8 +44,15 @@ import { attemptRoutingFallback } from "@/lib/claude/routing-fallback"
 import { notifyDroppedCapabilityOnce } from "@/lib/claude/dropped-capability-toast"
 import { notifyOverBudgetOnce } from "@/lib/claude/over-budget-toast"
 import { applyPlanModeBridge } from "@/lib/agent/plan-mode-bridge"
-import { steerBlocksOf, steerTextOf } from "@/lib/claude/steer"
-import { isSessionOpen, maybeDrainSteer, sessionStatusOf, steerArmed } from "./steer-runtime"
+import { steerBlocksOf, steerTextOf, type SteerMessageMeta } from "@/lib/claude/steer"
+import {
+  isSessionOpen,
+  markPendingSteersFailed,
+  maybeDrainSteer,
+  sessionStatusOf,
+  setSteerMessageState,
+  steerArmed,
+} from "./steer-runtime"
 import {
   maybeDrainBackgroundResults,
   registerBackgroundReplaySend,
@@ -429,7 +436,12 @@ function runMemoryTasks(sessionId: string, messages: UIMessage[]): void {
 type SendFn = (
   content: SendContent,
   opts?: SendOptions,
-  callOptions?: { skipUserAppend?: boolean; bypassDelegation?: boolean; sessionId?: string }
+  callOptions?: {
+    skipUserAppend?: boolean
+    bypassDelegation?: boolean
+    sessionId?: string
+    steerDrain?: boolean
+  }
 ) => Promise<void>
 
 /**
@@ -825,6 +837,14 @@ export function useClaudeChat() {
          *  re-entry so a failed external delegation runs the SDK path without
          *  re-evaluating (and re-matching) the delegation rules. */
         bypassDelegation?: boolean
+        /** This turn is the steer queue replaying itself. Like `skipUserAppend`
+         *  it must not append a user message (each queued entry was already
+         *  shown optimistically when typed), but unlike it this IS a genuine
+         *  user turn: it still pauses a self-driving goal/loop, still counts as
+         *  a sent message, and still goes through delegation routing. Kept as
+         *  its own flag rather than reusing `skipUserAppend` precisely so those
+         *  three behaviors don't silently disappear. */
+        steerDrain?: boolean
         /** Target session — defaults to the focused session. A multi-pane
          *  composer passes its own session id so each pane sends to itself. */
         sessionId?: string
@@ -858,21 +878,45 @@ export function useClaudeChat() {
       }
 
       // Steer instead of restart: a fresh user turn while THIS session is still
-      // streaming / awaiting approval would make the sidecar close-and-restart
-      // the live turn (host `restartReason`), silently dropping its context.
-      // Hold the message as a steer and replay it when the turn settles
-      // (the run-status bar surfaces the queue). Internal re-issues (regenerate
-      // / routing fallback) pass `skipUserAppend` and bypass this.
-      if (!callOptions?.skipUserAppend) {
+      // streaming / awaiting approval must never re-enter the normal send path —
+      // a same-session send during a live turn makes the sidecar
+      // close-and-restart it (host `restartReason`), silently dropping its
+      // context. Internal re-issues (regenerate / routing fallback) pass
+      // `skipUserAppend`, and the queue's own replay passes `steerDrain`; both
+      // bypass this.
+      if (!callOptions?.skipUserAppend && !callOptions?.steerDrain) {
         const st = sessionStatusOf(sessionId)
         if (st === "streaming" || st === "awaiting_approval") {
           const text = steerTextOf(content)
           const blocks = steerBlocksOf(content)
-          // Live steer: an external runtime whose adapter implements
-          // turn/steer (Codex app-server) takes the guidance mid-turn — no
-          // restart, no waiting for settle. Anything else (unsupported
-          // protocol, no active turn, transport hiccup) falls back to the
-          // queue-and-replay path below.
+          if (!text && blocks.length === 0) return
+
+          // Show it immediately, in the user's own words. The model-facing
+          // framing (`STEER_PREFIX`) is added only on the replay payload; the
+          // transcript renders the original text via `stripSteerPrefix`. The
+          // `steer` metadata rides along into Dexie so a restart can tell a
+          // delivered follow-up from one that never arrived.
+          const entryId = crypto.randomUUID()
+          const steerMeta: SteerMessageMeta = { entryId, state: "queued" }
+          const optimistic = makeUserMessage(content)
+          ;(optimistic as { metadata?: Record<string, unknown> }).metadata = {
+            ...((optimistic as { metadata?: Record<string, unknown> }).metadata ?? {}),
+            steer: steerMeta,
+          }
+          {
+            const store = useChatStore.getState()
+            const prior = store.sessions[sessionId]?.messages ?? []
+            store.replaceSessionMessages(sessionId, [...prior, optimistic])
+          }
+
+          // Live steer — the message reaches the model without ending the turn.
+          // Two lanes, both best-effort: an external adapter implementing
+          // turn/steer (Codex app-server), or the Anthropic sidecar's streaming
+          // input. Acceptance means the sidecar queued it into the running
+          // query, NOT that the model has already acted on it, so the bubble
+          // says "accepted" until the turn settles. Anything else (unsupported
+          // provider, input already closed, transport hiccup) falls through to
+          // the durable queue below.
           if (text && st === "streaming") {
             const rt = useAgentRuntimeStore.getState()
             if (rt.runtime === "external" && rt.externalAgentId) {
@@ -881,25 +925,32 @@ export function useClaudeChat() {
                 const mgr = getExternalAgentManager()
                 if (mgr.supportsSteering(rt.externalAgentId)) {
                   await mgr.steerSession(rt.externalAgentId, undefined, text)
-                  // Steered input never replays through send — append it to the
-                  // transcript now so the guidance is visible in the history.
-                  const store = useChatStore.getState()
-                  const prior = store.sessions[sessionId]?.messages ?? []
-                  store.replaceSessionMessages(sessionId, [...prior, makeUserMessage(content)])
+                  setSteerMessageState(sessionId, entryId, "accepted")
                   return
                 }
               } catch (err) {
                 console.warn("live steer failed; queueing instead", err)
               }
+            } else if (rt.runtime !== "external") {
+              // Anthropic streaming input. `steerSession` is PII-gated and
+              // rejects non-Anthropic providers sidecar-side, so a wrong-provider
+              // session simply falls through to the queue.
+              try {
+                const { steerSession } = await import("@/lib/claude/ipc")
+                await steerSession(sessionId, content)
+                setSteerMessageState(sessionId, entryId, "accepted")
+                return
+              } catch (err) {
+                console.warn("live steer failed; queueing instead", err)
+              }
             }
           }
-          if (text || blocks.length > 0) {
-            useChatStore.getState().enqueueSteer(sessionId, {
-              id: crypto.randomUUID(),
-              text,
-              blocks: blocks.length > 0 ? blocks : undefined,
-            })
-          }
+
+          useChatStore.getState().enqueueSteer(sessionId, {
+            id: entryId,
+            text,
+            blocks: blocks.length > 0 ? blocks : undefined,
+          })
           return
         }
       }
@@ -1139,7 +1190,13 @@ export function useClaudeChat() {
           }
         }
       }
-      const next = callOptions?.skipUserAppend ? previousMessages : [...previousMessages, userMsg]
+      // Both flags mean "the user turn is already in the transcript": a
+      // regenerate re-issues an existing one, a steer drain replays entries that
+      // were appended optimistically when typed. Appending again would double
+      // them. They diverge only on the *other* effects of a user turn — see
+      // `steerDrain`'s doc on the option type.
+      const skipAppend = callOptions?.skipUserAppend === true || callOptions?.steerDrain === true
+      const next = skipAppend ? previousMessages : [...previousMessages, userMsg]
       const displayContent = effectiveContent
       const shouldGateWorkbenchPayload =
         callOptions?.resourceContext !== undefined || isEmbeddedSession(session ?? {})
@@ -1158,7 +1215,7 @@ export function useClaudeChat() {
               effectiveContent.find((block) => block.type === "text") as
                 { text?: string } | undefined
             )?.text ?? "")
-      if (!callOptions?.skipUserAppend) {
+      if (!skipAppend) {
         store.getState().replaceSessionMessages(sessionId, next)
       }
       // Register this chat turn with the global execution broker so it counts
@@ -1208,7 +1265,7 @@ export function useClaudeChat() {
         useSettingsStore.getState().settings?.developer?.taskWorkspace === true &&
         sendOptions.cwd
       ) {
-        const anchorMessage = callOptions?.skipUserAppend
+        const anchorMessage = skipAppend
           ? [...previousMessages].reverse().find((message) => message.role === "user")
           : userMsg
         const taskEnvelope = {
@@ -2119,7 +2176,10 @@ function sliceMessages(sessionId: string): UIMessage[] {
 
 /** Drain a session's queued steer through this hook's send (direct replay). */
 function drainSteerVia(sessionId: string, sendRef: React.MutableRefObject<SendFn | null>) {
-  maybeDrainSteer(sessionId, (payload) => void sendRef.current?.(payload, undefined, { sessionId }))
+  maybeDrainSteer(
+    sessionId,
+    (payload) => void sendRef.current?.(payload, undefined, { sessionId, steerDrain: true })
+  )
 }
 
 /**
@@ -2384,6 +2444,11 @@ async function handleEvent(
         // "interrupt & steer" armed it (a natural error keeps the queue).
         if (!evt.error || steerArmed.has(evt.sessionId)) {
           drainSteerVia(evt.sessionId, sendRef)
+        } else {
+          // Errored end with nothing armed: the queue is deliberately preserved,
+          // but no settle is coming to deliver it. Say so on the bubbles so the
+          // user gets retry / discard instead of a message stuck on "queued".
+          markPendingSteersFailed(evt.sessionId, evt.error)
         }
         // Then deliver any settled background-run results. Steer wins: if the
         // steer replay just started a new turn, the idle check inside defers

@@ -4062,6 +4062,7 @@
       "title": "The agent has a question"
     },
     "branch": {
+      "ariaLineage": "Go to the message this branch was created from, in {title}",
       "cancel": "Cancel",
       "confirm": "Create branch",
       "createError": "Failed to create branch",
@@ -4071,6 +4072,8 @@
         "hint": "Copy the conversation up to this message verbatim.",
         "label": "Direct branch"
       },
+      "lineage": "from {title}",
+      "lineageUnknownParent": "a deleted conversation",
       "summary": {
         "generating": "Generating summary…",
         "hint": "Summarize the conversation so far and seed the branch with it (keeps context small).",
@@ -4844,6 +4847,9 @@
       "bookmarkTooltip": "Bookmark",
       "branchLabel": "Branch conversation",
       "branchTooltip": "Branch from here",
+      "bringBackDone": "Added to the main conversation's message box",
+      "bringBackLabel": "Bring back to the main conversation",
+      "bringBackTooltip": "Quote into the main conversation",
       "copyDone": "Copied!",
       "copyLabel": "Copy message",
       "copyLinkDone": "Link copied!",
@@ -5111,15 +5117,12 @@
     },
     "runPanel": {
       "ariaDiscardQueue": "Discard queued messages",
-      "ariaEditSteer": "Edit queued message",
       "ariaInterrupt": "Interrupt the current turn",
-      "ariaRemoveSteer": "Remove queued message",
-      "ariaSteerAttachments": "{count} attachments",
+      "ariaLocateSteer": "Go to the first undelivered message",
       "ariaSteerQueue": "Queued messages",
       "ariaSubagent": "Sub-agent",
       "collapse": "Hide run details",
       "discardQueue": "Discard",
-      "emptySteer": "(empty)",
       "expand": "Show run details",
       "lastRun": "Last run",
       "lastRunSummary": "{count, plural, one {# tool} other {# tools}} · {elapsed}",
@@ -5128,6 +5131,10 @@
       "sectionSubagents": "Sub-agents",
       "sectionSummary": "Summary",
       "sectionTools": "Tools",
+      "steerNowConfirmAccept": "Interrupt and send",
+      "steerNowConfirmBody": "This stops the current turn, cancelling any tool call still running, and sends your queued messages right away. Work already finished is kept.",
+      "steerNowConfirmCancel": "Keep working",
+      "steerNowConfirmTitle": "Interrupt this turn?",
       "summarySubagents": "{count, plural, one {# sub-agent} other {# sub-agents}}",
       "summaryTodos": "{done}/{total} todos",
       "summaryTools": "{count, plural, one {# tool} other {# tools}}"
@@ -5140,7 +5147,8 @@
       "metricSpeed": "{value} tok/s",
       "metricTokens": "{value} tok",
       "queued": "{count} queued",
-      "steerNow": "Send now",
+      "steerNow": "Interrupt & send",
+      "steerNowHint": "Stops the current turn, cancelling any running tool, and sends your queued messages now",
       "waitingApproval": "Waiting for approval",
       "working": "Working"
     },
@@ -5205,6 +5213,19 @@
       "styleSamplesHeader": "Style samples ({count})",
       "usedSources": "{count, plural, =0 {No sources} =1 {Used 1 source} other {Used # sources}}",
       "viewSource": "View source"
+    },
+    "steer": {
+      "accepted": "Delivered",
+      "acceptedHint": "Handed to the running turn — the agent picks it up at its next step",
+      "ariaEdit": "Edit this follow-up",
+      "ariaPutBack": "Put this follow-up back in the message box",
+      "ariaRemove": "Remove this follow-up",
+      "discard": "Discard",
+      "failed": "Not delivered",
+      "failedHint": "The run ended before this could be sent",
+      "putBack": "Put back",
+      "queued": "Queued",
+      "queuedHint": "Will be sent when the current turn finishes"
     },
     "subagentPart": {
       "abort": "Stop sub-agent",
@@ -5481,6 +5502,7 @@
     },
     "proposalReview": "Proposal review",
     "resourceChat": "AI conversation",
+    "sessionSidechat": "Side chat",
     "unavailable": {
       "comments": {
         "description": "This resource does not currently provide comment threads. Other workbench activities remain available.",

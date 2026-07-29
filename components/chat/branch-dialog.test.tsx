@@ -29,6 +29,10 @@ jest.mock("@/stores/settings", () => ({
   __esModule: true,
   useSettingsStore: { getState: () => ({ settings: {} }) },
 }))
+jest.mock("@/hooks/use-platform", () => ({
+  __esModule: true,
+  usePlatform: jest.fn(() => "web"),
+}))
 const addSessionToProject = jest.fn()
 jest.mock("@/stores/project/project-store", () => ({
   __esModule: true,
@@ -40,6 +44,7 @@ import { branchSessionAtMessage } from "@/lib/chat/branch-session"
 import { summarizeConversation } from "@/lib/ai/generation/summarizer"
 import { toast } from "sonner"
 import { useChatStore } from "@/stores/chat/chat-store"
+import { usePlatform } from "@/hooks/use-platform"
 
 const mockBranch = branchSessionAtMessage as jest.Mock
 const mockSummarize = summarizeConversation as jest.Mock
@@ -90,13 +95,15 @@ function renderDialog(onOpenChange = jest.fn()) {
 
 beforeEach(() => {
   jest.clearAllMocks()
+  ;(usePlatform as jest.Mock).mockReturnValue("web")
+  useChatStore.setState({ splitSessionId: null, openSessionIds: [], activeSessionId: "src1" })
   setMessages()
   mockBranch.mockResolvedValue({ id: "child1" })
   mockSummarize.mockResolvedValue("Generated summary")
 })
 
 describe("BranchDialog", () => {
-  it("creates a direct branch and switches to it", async () => {
+  it("creates a direct branch and opens it beside its parent", async () => {
     const onOpenChange = jest.fn()
     renderDialog(onOpenChange)
     fireEvent.click(screen.getByText("Create branch"))
@@ -104,9 +111,26 @@ describe("BranchDialog", () => {
     expect(mockBranch).toHaveBeenCalledWith(
       expect.objectContaining({ sourceId: "src1", messageId: "a1", mode: "direct" })
     )
-    expect(useChatStore.getState().activeSessionId).toBe("child1")
+    const state = useChatStore.getState()
+    // Beside, not instead of: the parent stays focused and may still be running.
+    expect(state.splitSessionId).toBe("child1")
+    // The split pane only renders for a session that is also open.
+    expect(state.openSessionIds).toContain("child1")
+    expect(state.activeSessionId).not.toBe("child1")
     expect(mockToastSuccess).toHaveBeenCalled()
     expect(onOpenChange).toHaveBeenCalledWith(false)
+  })
+
+  it("switches to the branch on mobile, which has no split view", async () => {
+    ;(usePlatform as jest.Mock).mockReturnValue("mobile")
+    try {
+      renderDialog()
+      fireEvent.click(screen.getByText("Create branch"))
+      await waitFor(() => expect(useChatStore.getState().activeSessionId).toBe("child1"))
+      expect(useChatStore.getState().splitSessionId).toBeNull()
+    } finally {
+      ;(usePlatform as jest.Mock).mockReturnValue("web")
+    }
   })
 
   it("auto-generates a summary when switching to summary mode", async () => {

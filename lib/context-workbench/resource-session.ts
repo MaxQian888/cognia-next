@@ -11,9 +11,18 @@ interface ResourceSessionRepository {
 
 /**
  * Maps a workbench resource onto the persisted binding of its embedded chat
- * session. Returns `null` for the `session` resource: it *is* a chat session
- * already, so it never owns a nested resource-workbench session and must not
- * be given a `SessionSurfaceBinding` (that type is a persisted Dexie column).
+ * session.
+ *
+ * A `session` resource maps to a binding too: a conversation can own a
+ * *sidechat*, an aside for checking something without spending turns in the
+ * main thread. The aside is an ordinary `resource-workbench` row like every
+ * other binding — it is the main session that is the "resource" here.
+ *
+ * A `resource-workbench` session is not itself bindable: letting an aside own
+ * an aside would nest without limit, and there is no surface that would render
+ * the second level anyway. Callers pass the resource, so the guard belongs
+ * where the resource is built (`appliesTo`); this function only handles what it
+ * is given.
  */
 export function surfaceBindingForContextResource(
   resource: ContextResource
@@ -33,7 +42,12 @@ export function surfaceBindingForContextResource(
     case "workflow":
       return { kind: "workflow", workflowId: resource.workflowId }
     case "session":
-      return null
+      // "none" is the dock's placeholder while no conversation is open, and a
+      // workbench session's own id carries this prefix — binding to the latter
+      // would make an aside of an aside.
+      return resource.sessionId === "none" || resource.sessionId.startsWith("resource-workbench:")
+        ? null
+        : { kind: "session", sessionId: resource.sessionId }
   }
 }
 
@@ -47,6 +61,8 @@ function bindingParts(binding: SessionSurfaceBinding): string[] {
       return ["artifact", binding.artifactId]
     case "workflow":
       return ["workflow", binding.workflowId]
+    case "session":
+      return ["session", binding.sessionId]
   }
 }
 

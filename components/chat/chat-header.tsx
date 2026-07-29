@@ -14,6 +14,7 @@ import { SessionCostBadgeLive } from "@/components/chat/session-cost-badge-live"
 import { PlanModeTasksSheet } from "@/components/agent/workspace/plan-mode-tasks-sheet"
 import { PluginExtensionSlot } from "@/components/plugins/plugin-extension-slot"
 import { SessionSettingsSheet } from "@/components/chat/session-settings-sheet"
+import { BranchLineageChip } from "@/components/chat/branch-lineage-chip"
 import type { ChatSession } from "@cognia/agent-config-types"
 
 interface Props {
@@ -75,6 +76,8 @@ export function ChatHeader({ session, onOpenSettings }: Props) {
         >
           {session.title || t("untitledSession")}
         </span>
+        {/* Self-hides unless this session was branched from another one. */}
+        <BranchLineageChip session={session} />
         {keyOk === false && (
           <Badge variant="destructive" className="cursor-pointer gap-1" onClick={onOpenSettings}>
             <KeyRoundIcon className="size-3" />

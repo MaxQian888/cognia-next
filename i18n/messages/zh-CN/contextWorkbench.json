@@ -83,6 +83,7 @@
     "undo": "撤销应用"
   },
   "resourceChat": "AI 会话",
+  "sessionSidechat": "侧聊",
   "unavailable": {
     "comments": {
       "description": "此资源暂不提供评论线程，其他工作台功能仍可使用。",

@@ -136,15 +136,33 @@ it("leaves workflow session ownership to the workflow editor", () => {
   expect(get).not.toHaveBeenCalled()
 })
 
-it("never nests a resource session under a session resource", () => {
-  const { result } = renderHook(() =>
+it("gives a conversation its own sidechat session", () => {
+  renderHook(() =>
     useResourceWorkbenchSession(
       {
         kind: "session",
         sessionId: "s",
         capabilities: ["inspect"],
       },
-      // Even with chat scope requested, a session resource has no binding.
+      true,
+      "window-a"
+    )
+  )
+
+  // A conversation CAN own an aside — that is the workbench sidechat.
+  expect(get).toHaveBeenCalledWith("resource-workbench:session:s")
+})
+
+it("never nests an aside under an aside", () => {
+  const { result } = renderHook(() =>
+    useResourceWorkbenchSession(
+      {
+        kind: "session",
+        // A workbench session's own id. Binding to it would nest without limit,
+        // and no surface renders the second level.
+        sessionId: "resource-workbench:session:s",
+        capabilities: ["inspect"],
+      },
       true,
       "window-a"
     )
@@ -153,6 +171,19 @@ it("never nests a resource session under a session resource", () => {
   expect(result.current).toBeNull()
   expect(get).not.toHaveBeenCalled()
   expect(put).not.toHaveBeenCalled()
+})
+
+it("creates no aside while the dock has no conversation open", () => {
+  const { result } = renderHook(() =>
+    useResourceWorkbenchSession(
+      { kind: "session", sessionId: "none", capabilities: ["inspect"] },
+      true,
+      "window-a"
+    )
+  )
+
+  expect(result.current).toBeNull()
+  expect(get).not.toHaveBeenCalled()
 })
 
 it("does not create a session before an AI panel is activated", () => {

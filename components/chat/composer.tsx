@@ -1812,7 +1812,7 @@ function ComposerInner(props: InnerProps) {
           {/* Voice stays outside the menu: it's an input method (speech →
               text), not a way to produce an attachment. */}
           <VoiceTranscriptionBridge disabled={props.disabled} />
-          <ComposerAppendBridge />
+          <ComposerAppendBridge sessionId={props.session?.id} />
         </div>
 
         <div
@@ -2069,24 +2069,49 @@ function VoiceTranscriptionBridge({ disabled }: { disabled?: boolean }) {
 /** Window-event name a chat-message card dispatches to append text to the composer. */
 export const COMPOSER_APPEND_EVENT = "cognia:composer-append"
 
+/** Detail of a {@link COMPOSER_APPEND_EVENT}. */
+export interface ComposerAppendDetail {
+  text?: string
+  /**
+   * Which composer should take the text. More than one composer is mounted at
+   * once — split view has two, and a workbench sidechat adds another — so an
+   * un-addressed event would land in all of them. Omit only when the intent
+   * really is "whichever composer is focused"; `undefined` is treated as
+   * addressed to the active session.
+   */
+  sessionId?: string
+}
+
+/** Append text to one composer's draft. See {@link ComposerAppendDetail}. */
+export function dispatchComposerAppend(detail: ComposerAppendDetail): void {
+  window.dispatchEvent(new CustomEvent(COMPOSER_APPEND_EVENT, { detail }))
+}
+
 /**
  * Lets components outside the PromptInput controller context (e.g. the OCR
- * result card in the message list, gap4) append text to the composer by
- * dispatching `COMPOSER_APPEND_EVENT` on window with `{ detail: { text } }`.
+ * result card in the message list, or a sidechat handing a conclusion back)
+ * append text to the composer by dispatching `COMPOSER_APPEND_EVENT`.
  */
-function ComposerAppendBridge() {
+function ComposerAppendBridge({ sessionId }: { sessionId?: string }) {
   const controller = usePromptInputController()
+  const activeSessionId = useChatStore((s) => s.activeSessionId)
   useEffect(() => {
     const onAppend = (e: Event) => {
-      const text = (e as CustomEvent<{ text?: string }>).detail?.text
+      const detail = (e as CustomEvent<ComposerAppendDetail>).detail
+      const text = detail?.text
       if (!text || !text.trim()) return
+      // Addressed events go to exactly one composer. An un-addressed event is
+      // legacy shorthand for "the active session", which keeps the single-pane
+      // callers working without making every composer echo it.
+      const target = detail?.sessionId ?? activeSessionId
+      if (target && sessionId && target !== sessionId) return
       const cur = controller.textInput.value
       const sep = cur && !cur.endsWith(" ") ? " " : ""
       controller.textInput.setInput(`${cur}${sep}${text}`)
     }
     window.addEventListener(COMPOSER_APPEND_EVENT, onAppend)
     return () => window.removeEventListener(COMPOSER_APPEND_EVENT, onAppend)
-  }, [controller.textInput])
+  }, [controller.textInput, activeSessionId, sessionId])
   return null
 }
 
