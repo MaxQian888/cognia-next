@@ -202,4 +202,44 @@ describe("<PairedDevicesCard />", () => {
     const rows = await listPairedDevices()
     expect(rows[0]?.pausedAt).toBeUndefined()
   })
+
+  it("grants agent control through its own switch and Rust command", async () => {
+    // R4 was blocked because a paired device could only ever hold a device
+    // JWT and these arms were service-token-only. This switch is the grant
+    // that unblocks it — and it is separate from remote control on purpose.
+    const user = userEvent.setup()
+    await addPairedDevice({
+      deviceId: "dev-ac1",
+      label: "Laptop",
+      platform: "web",
+      pubkey: "k",
+      appVersion: "0.1.0",
+      nowMs: Date.now(),
+    })
+
+    const calls: Array<{ name: string; args: unknown }> = []
+    callSpy.mockImplementation(async (name: string, args?: unknown) => {
+      calls.push({ name, args })
+      return undefined as unknown as never
+    })
+
+    render(<PairedDevicesCard />)
+    const toggle = await screen.findByRole("switch", {
+      name: /Toggle agent control for Laptop/i,
+    })
+    await user.click(toggle)
+
+    await waitFor(() => {
+      expect(calls).toContainEqual({
+        name: "companion_set_agent_control",
+        args: { deviceId: "dev-ac1", allowed: true },
+      })
+    })
+    // Enabling it must not have touched the remote-control grant.
+    expect(calls.some((c) => c.name === "companion_set_remote_control")).toBe(false)
+    const { getPairedDevice } = await import("@/lib/db/paired-devices")
+    const row = await getPairedDevice("dev-ac1")
+    expect(row?.allowAgentControl).toBe(true)
+    expect(row?.allowRemoteControl).toBeUndefined()
+  })
 })

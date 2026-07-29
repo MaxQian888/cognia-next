@@ -78,6 +78,21 @@ export interface PairedDeviceRow {
   allowRemoteControl?: boolean
 
   /**
+   * Whether this device may **start and drive external agents** on this
+   * desktop (`spawn_external_agent` and friends). Defaults to absent/`false`.
+   *
+   * Separate from {@link allowRemoteControl} on purpose: remote control steers
+   * work this host already chose to run, while this launches new processes.
+   * One combined switch would mean enabling remote control so a phone can
+   * approve a prompt also handed out process execution.
+   *
+   * Additive, non-indexed column — no Dexie version bump, same as
+   * `capabilities` (ADR-0061). The Rust `agent_control_global()` allow list
+   * mirrors it so the gate in `rpc.rs` stays an O(1) lookup.
+   */
+  allowAgentControl?: boolean
+
+  /**
    * Phone app version reported in the pair payload — surfaced in the
    * paired-devices table so the owner can spot stale clients.
    */

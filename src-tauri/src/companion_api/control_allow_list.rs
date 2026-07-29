@@ -40,6 +40,23 @@ pub fn global() -> &'static Arc<ControlAllowList> {
     &CONTROL_ALLOW_LIST
 }
 
+/// Devices permitted to start and drive *external agents* on this host.
+///
+/// Deliberately a second list rather than a flag on the first. Remote control
+/// means steering sessions this host already decided to run; starting an agent
+/// means launching a new process. Both are elevated, but granting someone the
+/// ability to write files should not silently also grant process execution, and
+/// a single toggle labelled "remote control" would do exactly that.
+///
+/// Same shape as the control list, so it inherits its behaviour and tests.
+static AGENT_CONTROL_ALLOW_LIST: Lazy<Arc<ControlAllowList>> =
+    Lazy::new(|| Arc::new(ControlAllowList::new()));
+
+/// Accessor for the process-global agent-control allow list.
+pub fn agent_control_global() -> &'static Arc<ControlAllowList> {
+    &AGENT_CONTROL_ALLOW_LIST
+}
+
 /// Thread-safe set of device IDs permitted to issue remote-control RPCs.
 pub struct ControlAllowList {
     inner: RwLock<HashSet<String>>,

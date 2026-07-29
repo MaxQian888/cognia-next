@@ -224,3 +224,21 @@ export async function setRemoteControlAllowed(
   })
   return updated > 0
 }
+
+/**
+ * Persist the **agent-control** grant: may this device start and drive external
+ * agents on this desktop.
+ *
+ * Same storage contract as {@link setRemoteControlAllowed} — an explicit
+ * boolean, re-seeded into the Rust mirror on the next boot — but a separate
+ * column, because process execution is a bigger grant than session steering
+ * and the owner should be choosing them independently.
+ *
+ * @returns true if a row was found and updated; false if the deviceId is unknown.
+ */
+export async function setAgentControlAllowed(deviceId: string, allowed: boolean): Promise<boolean> {
+  const updated = await getDb().pairedDevices.update(deviceId, {
+    allowAgentControl: allowed,
+  })
+  return updated > 0
+}

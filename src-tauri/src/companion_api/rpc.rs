@@ -1096,10 +1096,6 @@ fn inject_caller_device_id(name: &str, mut args: Value, device_id: &str) -> Valu
 /// every decision is also written to the audit log. R12 adds the
 /// `connectors_*` management arms.
 const SERVICE_ONLY_COMMANDS: &[&str] = &[
-    "spawn_external_agent",
-    "send_to_external_agent",
-    "kill_external_agent",
-    "get_external_agent_status",
     // ADR-0059 R12 — the brain manages the public webhook ingress registry.
     "connectors_register",
     "connectors_unregister",
@@ -1201,6 +1197,53 @@ static SERVICE_ONLY_COMMANDS_SET: once_cell::sync::Lazy<HashSet<&'static str>> =
 /// True when `name` may be invoked only with a `"service"`-scope JWT.
 fn is_service_only_command(name: &str) -> bool {
     SERVICE_ONLY_COMMANDS_SET.contains(name)
+}
+
+/// Commands that start or drive an external agent on this host — remote code
+/// execution by construction (ADR-0097 D-agent-control).
+///
+/// These were `SERVICE_ONLY`, which made them reachable only by the co-located
+/// brain and left ADR-0082's R4 ("drive a remote host's agents") with no path at
+/// all: pairing yields a *device* JWT, and no amount of granting could turn one
+/// into a service token.
+///
+/// They are not folded into `CONTROL_COMMANDS` either. Remote control means
+/// steering work this host already chose to run; this means launching a new
+/// process. A user enabling "remote control" to let their phone approve a
+/// prompt should not thereby be handing out process execution, so the grant is
+/// a separate, separately-labelled one — see
+/// [`super::control_allow_list::agent_control_global`].
+///
+/// The safety floor does not move: every spawn still has to clear the
+/// `SpawnPolicy` preset allowlist (bare binary from a fixed list, cwd under the
+/// workspaces root, default-deny env) and every allow/deny is audited. That
+/// check runs on the value, not on the caller, so it applies identically to the
+/// service token and to a granted device.
+const AGENT_CONTROL_COMMANDS: &[&str] = &[
+    "spawn_external_agent",
+    "send_to_external_agent",
+    "kill_external_agent",
+    "get_external_agent_status",
+];
+
+static AGENT_CONTROL_COMMANDS_SET: once_cell::sync::Lazy<HashSet<&'static str>> =
+    once_cell::sync::Lazy::new(|| AGENT_CONTROL_COMMANDS.iter().copied().collect());
+
+/// True when `name` needs the agent-control grant (or a service token).
+fn is_agent_control_command(name: &str) -> bool {
+    AGENT_CONTROL_COMMANDS_SET.contains(name)
+}
+
+/// Whether this caller may run agents on this host.
+///
+/// The brain keeps its existing access through the service scope; a paired
+/// device needs an explicit grant, which on a desktop host comes from the
+/// paired-devices toggle and on a headless host from
+/// `cognia-server devices grant --agent-control`.
+fn is_agent_control_authorized(name: &str, device_id: &str, scope: Option<&str>) -> bool {
+    !is_agent_control_command(name)
+        || scope == Some("service")
+        || super::control_allow_list::agent_control_global().is_allowed(device_id)
 }
 
 /// Public read-only accessor for the remote-control command set. Used by
@@ -1377,6 +1420,14 @@ pub async fn rpc_handler(
     if is_service_only_command(&name) && ctx.scope != "service" {
         return Err(RpcError::forbidden(
             "this command requires the headless service token",
+        ));
+    }
+
+    // Agent-control gate. Mirrored at the top of `dispatch` for the WebRTC
+    // path, exactly like the two gates above.
+    if !is_agent_control_authorized(&name, &ctx.device_id, Some(ctx.scope.as_str())) {
+        return Err(RpcError::forbidden(
+            "this device is not authorized to run agents on this host; grant it from the host's paired-devices settings, or with `cognia-server devices grant --agent-control <device-id>`",
         ));
     }
 
@@ -1679,6 +1730,15 @@ pub(super) async fn dispatch(
     if is_service_only_command(name) && scope != Some("service") {
         return Err(RpcError::forbidden(
             "this command requires the headless service token",
+        ));
+    }
+
+    // Agent-control gate, mirrored from `rpc_handler`. The WebRTC path passes
+    // `scope: None`, so a DataChannel caller needs the same explicit grant an
+    // HTTP one does — the transport must not be a way around it.
+    if !is_agent_control_authorized(name, device_id, scope) {
+        return Err(RpcError::forbidden(
+            "this device is not authorized to run agents on this host; grant it from the host's paired-devices settings, or with `cognia-server devices grant --agent-control <device-id>`",
         ));
     }
 
@@ -6033,27 +6093,86 @@ mod tests {
 
     // ── External-agent arms: scope + policy + audit (ADR-0059 R11) ──────────
 
-    /// A device JWT must never reach the RCE-grade arms — the HTTP handler
-    /// rejects with 403 before dispatch.
+    /// An UNGRANTED device JWT must never reach the RCE-grade arms — the HTTP
+    /// handler rejects with 403 before dispatch. Denial is the default: these
+    /// commands used to be service-token-only, and relaxing them to "grantable"
+    /// must not relax them to "reachable".
     #[tokio::test]
-    async fn device_scope_cannot_reach_the_external_agent_arms() {
+    async fn ungranted_device_cannot_reach_the_external_agent_arms() {
+        super::super::control_allow_list::agent_control_global().clear();
         let state = test_state();
         let router = build_router(state);
         let jwt = device_jwt("phone-1");
-        for name in [
-            "spawn_external_agent",
-            "send_to_external_agent",
-            "kill_external_agent",
-            "get_external_agent_status",
-        ] {
+        for name in AGENT_CONTROL_COMMANDS {
             let resp = rpc_post(router.clone(), name, json!({}), &jwt, None).await;
-            assert_eq!(resp.status().as_u16(), 403, "{name} must be scope-gated");
+            assert_eq!(resp.status().as_u16(), 403, "{name} must be grant-gated");
         }
     }
 
-    /// The mirrored in-dispatch gate covers the WebRTC path (`scope: None`).
+    /// The grant is what R4 was blocked on: a paired desktop only ever gets a
+    /// *device* JWT, so while these arms were service-token-only there was no
+    /// credential anywhere that could reach them.
     #[tokio::test]
-    async fn dispatch_without_service_scope_rejects_service_only_commands() {
+    async fn a_granted_device_gets_past_the_agent_control_gate() {
+        let acl = super::super::control_allow_list::agent_control_global();
+        acl.clear();
+        acl.allow("phone-granted".to_string());
+        let state = test_state();
+        let router = build_router(state);
+        let jwt = device_jwt("phone-granted");
+
+        let resp = rpc_post(router, "get_external_agent_status", json!({}), &jwt, None).await;
+        // Past the gate. What it hits next is the headless-services check —
+        // any status but 403 proves authorization no longer rejects it.
+        assert_ne!(resp.status().as_u16(), 403);
+        acl.clear();
+    }
+
+    /// Remote control and agent control are separate grants on purpose: letting
+    /// a phone approve prompts must not also let it start processes.
+    #[tokio::test]
+    async fn the_remote_control_grant_does_not_confer_agent_control() {
+        super::super::control_allow_list::agent_control_global().clear();
+        let control = super::super::control_allow_list::global();
+        control.allow("phone-control-only".to_string());
+        let state = test_state();
+        let router = build_router(state);
+        let jwt = device_jwt("phone-control-only");
+
+        let resp = rpc_post(router, "spawn_external_agent", json!({}), &jwt, None).await;
+        assert_eq!(resp.status().as_u16(), 403);
+        control.disallow("phone-control-only");
+    }
+
+    /// The agent arms must not have leaked into the remote-control tier while
+    /// moving out of the service-only one.
+    #[test]
+    fn agent_control_commands_are_their_own_tier() {
+        for name in AGENT_CONTROL_COMMANDS {
+            assert!(
+                is_agent_control_command(name),
+                "{name} must be in the agent-control tier"
+            );
+            assert!(
+                !is_service_only_command(name),
+                "{name} must no longer be service-token-only"
+            );
+            assert!(
+                !is_control_command(name),
+                "{name} must not ride the remote-control grant"
+            );
+            assert!(
+                KNOWN_COMMANDS_SET.contains(name),
+                "{name} must stay allowlisted"
+            );
+        }
+    }
+
+    /// The mirrored in-dispatch gate covers the WebRTC path (`scope: None`), so
+    /// the DataChannel cannot be used to skip the grant the HTTP path enforces.
+    #[tokio::test]
+    async fn dispatch_without_a_grant_rejects_the_agent_arms() {
+        super::super::control_allow_list::agent_control_global().clear();
         let state = test_state();
         let err = dispatch(
             "spawn_external_agent",
@@ -6065,7 +6184,7 @@ mod tests {
             None, // the DataChannel path
         )
         .await
-        .expect_err("device-scoped channel must be rejected");
+        .expect_err("ungranted device-scoped channel must be rejected");
         assert_eq!(err.0, StatusCode::FORBIDDEN);
     }
 
@@ -6322,11 +6441,11 @@ mod tests {
 
     #[test]
     fn service_only_commands_are_known_and_not_control_gated() {
+        // The four external-agent arms used to head this list. They moved to
+        // the agent-control tier so a paired device can be granted them; see
+        // `agent_control_commands_are_their_own_tier`, which pins that they
+        // left this one rather than joining the remote-control grant.
         for name in [
-            "spawn_external_agent",
-            "send_to_external_agent",
-            "kill_external_agent",
-            "get_external_agent_status",
             "connectors_register",
             "connectors_unregister",
             "connectors_list_adapters",
@@ -8300,7 +8419,13 @@ rl.on("line", (line) => {
     #[test]
     fn mobile_allowlist_keeps_baseline_keys() {
         // Don't accidentally drop a baseline key while editing this list.
-        for key in ["theme", "fontScale", "language", "reduceMotion", "defaultModel"] {
+        for key in [
+            "theme",
+            "fontScale",
+            "language",
+            "reduceMotion",
+            "defaultModel",
+        ] {
             assert!(
                 APP_SETTINGS_MOBILE_ALLOWED_KEYS.contains(&key),
                 "baseline key '{key}' must stay in the mobile allowlist"

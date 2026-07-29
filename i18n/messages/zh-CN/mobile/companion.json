@@ -1,4 +1,14 @@
 {
+  "agentControl": {
+    "blocked": "未启用运行 Agent 权限（{reason}）。",
+    "col": "运行 Agent",
+    "description": "允许此设备在本桌面上启动和停止外部 Agent 进程。启动策略仍会限制可运行的程序、工作目录和环境变量——但在这些限制内由该设备决定运行什么。远程控制是另一项独立且更小的授权。",
+    "disabledToast": "已为 {label} 关闭运行 Agent 权限。",
+    "enabledToast": "已为 {label} 启用运行 Agent 权限。",
+    "reason": "确认允许 {label} 在本桌面运行 Agent",
+    "title": "允许运行 Agent",
+    "toggleAria": "切换 {label} 的运行 Agent 权限"
+  },
   "channels": {
     "blocked": {
       "loopbackOnly": "仅绑定到本机——请把服务器改为局域网绑定。",

@@ -1,4 +1,14 @@
 {
+  "agentControl": {
+    "blocked": "Agent control not enabled ({reason}).",
+    "col": "Run agents",
+    "description": "Lets this device start and stop external agent processes on this desktop. The spawn policy still limits which programs may run, from which folder, and with which environment — but within those limits the device chooses. Remote control is a separate, lesser grant.",
+    "disabledToast": "Agent control disabled for {label}.",
+    "enabledToast": "Agent control enabled for {label}.",
+    "reason": "Confirm letting {label} run agents on this desktop",
+    "title": "Allow running agents",
+    "toggleAria": "Toggle agent control for {label}"
+  },
   "channels": {
     "blocked": {
       "loopbackOnly": "Bound to this machine only — switch the server to LAN.",

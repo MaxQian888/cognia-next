@@ -114,10 +114,16 @@ async function seedRemoteControlAllowList(): Promise<void> {
   if (!isTauri()) return
   try {
     const devices = await listPairedDevices()
-    const allowed = devices
-      .filter((d) => d.allowRemoteControl === true && d.revokedAt === undefined)
-      .map((d) => d.deviceId)
-    await transport.call<void>("companion_seed_remote_control", { deviceIds: allowed })
+    const live = devices.filter((d) => d.revokedAt === undefined)
+    await transport.call<void>("companion_seed_remote_control", {
+      deviceIds: live.filter((d) => d.allowRemoteControl === true).map((d) => d.deviceId),
+    })
+    // Seeded from its own column, not derived from remote control: the two are
+    // independent grants, and inferring one from the other would quietly widen
+    // whichever the user actually chose.
+    await transport.call<void>("companion_seed_agent_control", {
+      deviceIds: live.filter((d) => d.allowAgentControl === true).map((d) => d.deviceId),
+    })
   } catch (err) {
     console.warn("seedRemoteControlAllowList failed", err)
   }

@@ -2997,15 +2997,18 @@ paths:
     post:
       operationId: rpcSpawnExternalAgent
       tags: [rpc-control]
-      summary: Spawn an external agent process on the headless server (service scope only).
+      summary: Spawn an external agent process on the host (agent-control grant required).
       description: |
-        ADR-0059 R11. RCE-grade by construction, so the arm is triple-gated:
-        the JWT must carry the headless brain's `service` scope (loopback-
-        minted; a device JWT gets 403), the spawn request must clear the
-        preset-only SpawnPolicy allowlist (agent-CLI binaries, allowlisted
-        npx packages, workspace-rooted cwd, default-deny env), and every
-        decision — allow AND deny — is appended to the server audit log.
-        Unavailable on desktop installs.
+        ADR-0059 R11, ADR-0097. RCE-grade by construction, so the arm is
+        triple-gated: the caller must present either the headless brain's
+        `service` scope (loopback-minted) or a device JWT whose device holds
+        the **agent-control** grant — an explicit, separate grant from
+        remote control, made from the host's paired-devices settings or with
+        `cognia-server devices grant --agent-control <device-id>`; the spawn
+        request must clear the preset-only SpawnPolicy allowlist (agent-CLI
+        binaries, allowlisted npx packages, workspace-rooted cwd, default-deny
+        env); and every decision — allow AND deny — is appended to the server
+        audit log. An ungranted device gets 403. Requires headless services.
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
@@ -3047,10 +3050,11 @@ paths:
     post:
       operationId: rpcSendToExternalAgent
       tags: [rpc-control]
-      summary: Write one line to a spawned external agent's stdin (service scope only).
+      summary: Write one line to a spawned external agent's stdin (agent-control grant required).
       description: |
-        ADR-0059 R11. Service-scope companion of `spawn_external_agent`;
-        audited. Unavailable on desktop installs.
+        ADR-0059 R11, ADR-0097. Same gate as `spawn_external_agent` — service
+        scope or an agent-control-granted device; audited. Requires headless
+        services.
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
@@ -3085,10 +3089,11 @@ paths:
     post:
       operationId: rpcKillExternalAgent
       tags: [rpc-control]
-      summary: Kill a spawned external agent process (service scope only).
+      summary: Kill a spawned external agent process (agent-control grant required).
       description: |
-        ADR-0059 R11. Service-scope companion of `spawn_external_agent`;
-        audited. The exit event is emitted by the process supervisor.
+        ADR-0059 R11, ADR-0097. Same gate as `spawn_external_agent` — service
+        scope or an agent-control-granted device; audited. The exit event is
+        emitted by the process supervisor.
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
@@ -3122,11 +3127,12 @@ paths:
     post:
       operationId: rpcGetExternalAgentStatus
       tags: [rpc-control]
-      summary: Read a spawned external agent's process state (service scope only).
+      summary: Read a spawned external agent's process state (agent-control grant required).
       description: |
-        ADR-0059 R11. Read-only (skips the idempotency cache); reports the
-        exec backend's process state (Starting/Running/Stopping/Stopped/
-        Failed).
+        ADR-0059 R11, ADR-0097. Read-only (skips the idempotency cache);
+        reports the exec backend's process state (Starting/Running/Stopping/
+        Stopped/Failed). Gated like the other agent arms: knowing what is
+        running on a host is not public to every paired device.
       requestBody:
         required: true
         content:

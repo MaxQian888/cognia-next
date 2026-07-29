@@ -31,6 +31,11 @@ function encodeContentContext(context: ManagedIdeContentContext): string {
 
 const READ_ONLY_COMMANDS: ReadonlySet<string> = new Set([
   "claude_sidecar_status",
+  // Rust has had this in its read-only set all along, but the mirror never
+  // needed it while the command was service-token-only and thus unreachable
+  // from any client. It is grantable now (ADR-0097), so the two lists have to
+  // agree or a client sends an idempotency key the server discards.
+  "get_external_agent_status",
   "claude_has_api_key",
   "claude_has_oauth_bearer",
   "skills_load_registry",

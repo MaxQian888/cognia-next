@@ -35,6 +35,7 @@ use app_lib::companion_api::{
     deny_list::DenyList,
     desktop_messages_bridge::DesktopMessagesBridge,
     desktop_writes_bridge::DesktopWritesBridge,
+    device_grants::{self, DeviceGrantStore, FileDeviceGrantStore, GrantKind},
     event_bus::EventBus,
     idempotency::IdempotencyCache,
     pair_code_lru::PairCodeLru,
@@ -126,6 +127,48 @@ enum CliCommand {
     Gateway {
         #[command(subcommand)]
         command: GatewayCommand,
+    },
+    /// Per-device capability grants (ADR-0097).
+    ///
+    /// A paired device gets read-only sync and baseline chat for free.
+    /// Everything elevated is granted per device, and on the desktop that
+    /// happens through the paired-devices toggles. A headless host has no
+    /// renderer, so before this existed nothing could populate the allow list
+    /// and every elevated command was unreachable here no matter what.
+    ///
+    /// Grants take effect at the next `serve`.
+    Devices {
+        #[command(subcommand)]
+        command: DevicesCommand,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum DevicesCommand {
+    /// Print the current grants.
+    Grants,
+    /// Grant a device an elevated capability. Pass at least one of the flags.
+    Grant {
+        /// Device id from the pair response (`cognia-server devices grants`
+        /// shows the ones already granted).
+        device_id: String,
+        /// Steer sessions, write files, commit and push.
+        #[arg(long)]
+        control: bool,
+        /// Start and drive external agents on this host. This is process
+        /// execution: the spawn policy still restricts which binaries, which
+        /// working directories and which environment variables are allowed,
+        /// but within that the device chooses what runs.
+        #[arg(long = "agent-control")]
+        agent_control: bool,
+    },
+    /// Revoke an elevated capability.
+    Revoke {
+        device_id: String,
+        #[arg(long)]
+        control: bool,
+        #[arg(long = "agent-control")]
+        agent_control: bool,
     },
 }
 
@@ -271,6 +314,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         CliCommand::Profiles { command } => run_profiles(&dir, command),
         CliCommand::Gateway { command } => run_gateway_admin(command),
+        CliCommand::Devices { command } => run_devices_admin(command),
         CliCommand::RotateMasterKey { .. } => unreachable!("handled above"),
     }
 }
@@ -278,6 +322,73 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 /// `cognia-server gateway status|key-create|key-list|key-revoke` — gateway
 /// admin without a renderer. Keys persist through the same encrypted secret
 /// store the desktop uses (strict headless init already ran).
+/// Selected capabilities, or an error when the operator named none — silently
+/// doing nothing would read as success and leave them believing a device is
+/// granted.
+fn selected_kinds(control: bool, agent_control: bool) -> Result<Vec<GrantKind>, String> {
+    let mut kinds = Vec::new();
+    if control {
+        kinds.push(GrantKind::Control);
+    }
+    if agent_control {
+        kinds.push(GrantKind::AgentControl);
+    }
+    if kinds.is_empty() {
+        return Err("pass --control and/or --agent-control".to_string());
+    }
+    Ok(kinds)
+}
+
+fn run_devices_admin(command: DevicesCommand) -> Result<(), Box<dyn std::error::Error>> {
+    let store = FileDeviceGrantStore::new(&store_data_dir());
+    match command {
+        DevicesCommand::Grants => {
+            println!("{}", serde_json::to_string_pretty(&store.load()?)?);
+            Ok(())
+        }
+        DevicesCommand::Grant {
+            device_id,
+            control,
+            agent_control,
+        } => {
+            for kind in selected_kinds(control, agent_control)? {
+                let changed = device_grants::grant(store.as_ref(), &device_id, kind)?;
+                println!(
+                    "{} {} for {device_id}",
+                    if changed {
+                        "granted"
+                    } else {
+                        "already granted"
+                    },
+                    kind.as_str()
+                );
+            }
+            println!("Takes effect at the next `cognia-server serve`.");
+            Ok(())
+        }
+        DevicesCommand::Revoke {
+            device_id,
+            control,
+            agent_control,
+        } => {
+            for kind in selected_kinds(control, agent_control)? {
+                let changed = device_grants::revoke(store.as_ref(), &device_id, kind)?;
+                println!(
+                    "{} {} for {device_id}",
+                    if changed {
+                        "revoked"
+                    } else {
+                        "was not granted"
+                    },
+                    kind.as_str()
+                );
+            }
+            println!("Takes effect at the next `cognia-server serve`.");
+            Ok(())
+        }
+    }
+}
+
 fn run_gateway_admin(command: GatewayCommand) -> Result<(), Box<dyn std::error::Error>> {
     let state = app_lib::gateway::GatewayState::new();
     match command {
@@ -454,6 +565,22 @@ async fn run_serve(
     push_creds::install(FilePushCredStore::new(&data_dir));
     if let Err(err) = push_creds::reinstall_persisted_dispatchers() {
         eprintln!("[cognia-server] push-creds reinstall: {err}");
+    }
+
+    // Project the persisted per-device grants onto the in-memory allow lists
+    // the RPC gates read. The desktop does this from Dexie in its renderer;
+    // without the equivalent here every elevated command was unreachable on a
+    // headless host, whatever the operator intended.
+    //
+    // A corrupt grants file is fatal rather than logged-and-ignored: booting
+    // with "nothing granted" would look like a working server that silently
+    // refuses every elevated call, and the operator would have no way to tell
+    // that from a genuinely empty grant list.
+    match device_grants::seed_allow_lists(FileDeviceGrantStore::new(&data_dir).as_ref()) {
+        Ok((control, agent)) => {
+            println!("[cognia-server] device grants: {control} control, {agent} agent-control");
+        }
+        Err(err) => return Err(format!("device grants: {err}").into()),
     }
 
     // Publish the TLS fingerprint for the whoami handler (P0.3).

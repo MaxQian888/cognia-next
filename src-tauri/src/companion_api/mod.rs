@@ -39,6 +39,7 @@ pub mod data_plane;
 pub mod deny_list;
 pub mod desktop_messages_bridge;
 pub mod desktop_writes_bridge;
+pub mod device_grants;
 pub mod dispatch_host;
 pub mod dispatchers;
 pub mod event_bus;

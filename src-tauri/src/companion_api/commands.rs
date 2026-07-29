@@ -318,6 +318,33 @@ pub async fn companion_seed_remote_control(device_ids: Vec<String>) -> Result<()
     Ok(())
 }
 
+/// Grant or revoke a device's **agent-control** capability: starting and
+/// driving external agents on this desktop.
+///
+/// A separate grant from remote control on purpose. Remote control steers work
+/// this host already chose to run; this launches new processes. Folding them
+/// into one switch would mean a user enabling remote control so their phone can
+/// approve a prompt had also handed out process execution.
+#[tauri::command]
+pub async fn companion_set_agent_control(device_id: String, allowed: bool) -> Result<(), String> {
+    let acl = super::control_allow_list::agent_control_global();
+    if allowed {
+        acl.allow(device_id);
+    } else {
+        acl.disallow(&device_id);
+    }
+    Ok(())
+}
+
+/// Re-seed the agent-control allow list at desktop boot from the persisted
+/// Dexie rows where `allowAgentControl === true`. Replace semantics, matching
+/// [`companion_seed_remote_control`].
+#[tauri::command]
+pub async fn companion_seed_agent_control(device_ids: Vec<String>) -> Result<(), String> {
+    super::control_allow_list::agent_control_global().reseed(device_ids);
+    Ok(())
+}
+
 // ---------------------------------------------------------------------------
 // Event-channel registration (M2.6)
 // ---------------------------------------------------------------------------

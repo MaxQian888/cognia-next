@@ -162,6 +162,41 @@ it for Logto, so a sign-in on a phone would have completed the whole browser
 round-trip and failed while persisting the token. `session-store.ts` now
 provisions that key the way `lib/plugin/api/secrets-api.ts` does.
 
+### D10 — Elevated capabilities are grantable on every host, and agents are their own grant
+
+Two problems, one shape.
+
+`control_allow_list` is an in-memory set whose only writer was a Tauri command
+called from the desktop renderer at boot. A headless `cognia-server` has no
+renderer, so the list was empty for the process lifetime and **every CONTROL-tier
+RPC was unreachable with a device JWT on a cloud host** — you could pair a
+desktop to one, read the capability boundary ADR-0082 documents, and find no
+mechanism anywhere that could grant it. `device_grants.rs` adds the missing
+half: a JSON file beside the other headless credential files, read at boot to
+seed the allow lists, written by `cognia-server devices grant|revoke|grants`.
+Grants apply at the next `serve`, which the CLI states, matching
+`rotate-master-key`.
+
+Separately, the four external-agent arms were `SERVICE_ONLY`, so ADR-0082's R4
+was blocked by construction: pairing yields a *device* JWT and nothing could
+turn one into a service token. They move to a fourth tier,
+`AGENT_CONTROL_COMMANDS`, gated on service scope **or** an explicit
+agent-control grant, enforced at both the HTTP handler and the `dispatch`
+mirror so the WebRTC path is not a way around it.
+
+Agent control is a **separate grant from remote control**, not a flag on it.
+Remote control steers work the host already chose to run; this starts new
+processes. One switch would mean a user enabling remote control so their phone
+could approve a prompt had also handed out process execution. Both are exposed
+as independent per-device toggles, both biometric-gated on the enabling
+direction.
+
+The safety floor does not move: every spawn still clears the `SpawnPolicy`
+preset allowlist (bare binary from a fixed list, workspace-rooted cwd,
+default-deny env) and every allow *and* deny is audited with the caller's
+device id and scope. That check runs on the request, not the caller, so a
+granted device gets exactly the same treatment as the brain.
+
 ## Consequences
 
 - The Rust constant and the OpenAPI enum are generated artifacts. Editing them
