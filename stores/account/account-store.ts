@@ -134,7 +134,13 @@ export function createAccountStore(
       ...DEFAULT_STATE,
 
       load: async () => {
-        if (get().loaded || get().loading) return
+        // `loaded` means the boot read has SETTLED, not that it succeeded — the
+        // gate keys its loading shell off it, so a failure must flip it too or
+        // the app hangs on "Loading accounts…" forever. The `!error` term is
+        // what keeps that from making a transient registry failure permanent:
+        // a settled-but-failed load can still be retried.
+        if (get().loading) return
+        if (get().loaded && !get().error) return
         set({ loading: true, error: null })
         try {
           const [accounts, registryState] = await Promise.all([
@@ -171,6 +177,7 @@ export function createAccountStore(
               : state.accountRevision,
           }))
         } catch (error) {
+          set({ loaded: true })
           throw setFailure(error)
         }
       },

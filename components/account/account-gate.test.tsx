@@ -120,6 +120,21 @@ describe("AccountGate", () => {
     expect(screen.queryByText("child")).not.toBeInTheDocument()
   })
 
+  it("shows a failed registry read instead of an endless loading shell", () => {
+    // A settled-but-failed boot load: the store clears `loading` and records
+    // the error. If the gate still keyed on `loaded === false` here, the user
+    // would sit on "Loading accounts…" indefinitely and the cause would only
+    // reach a console warning.
+    setGateState({ loaded: true, loading: false, accounts: [], error: "registry offline" })
+    render(
+      <AccountGate>
+        <div>child</div>
+      </AccountGate>
+    )
+    expect(screen.queryByText("loading")).not.toBeInTheDocument()
+    expect(screen.getByText("registry offline")).toBeInTheDocument()
+  })
+
   it("passes through to children off Tauri instead of the create-account form", () => {
     mockIsTauri = false
     setGateState({ accounts: [] })

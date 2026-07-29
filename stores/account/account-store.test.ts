@@ -197,6 +197,36 @@ describe("account store load", () => {
     expect(store.getState().loading).toBe(false)
     expect(store.getState().error).toBe("registry offline")
   })
+
+  it("settles the boot load even when it fails, so the gate can render the error", async () => {
+    // `loaded` means "the boot read has finished", not "it succeeded". The
+    // gate renders its loading shell while `!loaded`, and its error text only
+    // after that early return — so leaving `loaded` false on failure turns a
+    // registry error into a permanent "Loading accounts…" with the cause
+    // visible only in a console warning.
+    mockListAccounts.mockRejectedValueOnce(new Error("registry offline"))
+    const store = makeStore()
+
+    await expect(store.getState().load()).rejects.toThrow(/registry offline/)
+
+    expect(store.getState().loaded).toBe(true)
+  })
+
+  it("lets a retry re-run the boot load after a failure", async () => {
+    // `load()` early-returns when `loaded` is true. Settling on failure must
+    // not make the failure permanent for the session.
+    const alpha = account("acct_alpha", "Alpha")
+    mockListAccounts.mockRejectedValueOnce(new Error("registry offline"))
+    const store = makeStore()
+    await expect(store.getState().load()).rejects.toThrow(/registry offline/)
+
+    mockListAccounts.mockResolvedValue([alpha])
+    mockGetState.mockResolvedValue({ activeAccountId: "acct_alpha" })
+    await store.getState().load()
+
+    expect(store.getState().accounts).toEqual([alpha])
+    expect(store.getState().error).toBeNull()
+  })
 })
 
 describe("account store create and unlock", () => {
