@@ -156,8 +156,7 @@ describe("isPluginContextPanelVisible", () => {
 describe("published panels", () => {
   const SESSION = {
     kind: "session" as const,
-    id: "s-1",
-    title: "S",
+    sessionId: "s-1",
     capabilities: [],
   }
   const PANELS = [
@@ -191,7 +190,7 @@ describe("published panels", () => {
     // and can fire in either order; a re-register must not blank the list.
     setActiveContextForHost("dock", SESSION)
     publishActiveContextPanels("dock", PANELS)
-    setActiveContextForHost("dock", { ...SESSION, id: "s-2" })
+    setActiveContextForHost("dock", { ...SESSION, sessionId: "s-2" })
     expect(getActiveWorkbenchPanels().map((p) => p.id)).toEqual(["preview", "workspace"])
   })
 
@@ -204,7 +203,7 @@ describe("published panels", () => {
 })
 
 describe("revealing a panel by id or activity", () => {
-  const SESSION = { kind: "session" as const, id: "s-1", title: "S", capabilities: [] }
+  const SESSION = { kind: "session" as const, sessionId: "s-1", capabilities: [] }
   const PANELS = [
     { id: "preview", activity: "preview-run", labelKey: "p" },
     { id: "workspace", activity: "workspace", labelKey: "w", preferredMode: "wide" as const },
@@ -252,7 +251,7 @@ describe("revealing a panel by id or activity", () => {
 })
 
 describe("subscriber and plugin-owned layout controls", () => {
-  const SESSION = { kind: "session" as const, id: "s-1", title: "S", capabilities: [] }
+  const SESSION = { kind: "session" as const, sessionId: "s-1", capabilities: [] }
 
   it("keeps notifying after one listener throws", () => {
     // A plugin listener must not be able to stop the host's own subscribers.
