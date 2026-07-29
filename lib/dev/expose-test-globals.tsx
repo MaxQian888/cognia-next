@@ -44,6 +44,16 @@ declare global {
       systemPrompt?: string
     }) => Promise<string>
     __cogniaSeedTeam?: (draft: { name: string; description?: string }) => Promise<string>
+    /**
+     * Seed a conversation of `turns` user/assistant pairs and return its id.
+     * Long enough to exercise the virtualized path and the timeline minimap,
+     * which is what the conversation-anchor specs need and what no amount of
+     * jsdom can produce (it has no layout).
+     */
+    __cogniaSeedConversation?: (draft: {
+      turns: number
+      title?: string
+    }) => Promise<{ sessionId: string; messageIds: string[] }>
     __cogniaSeedSkill?: (draft: {
       name: string
       trigger?: string
@@ -271,6 +281,36 @@ export function ExposeTestGlobals(): null {
         return c.id
       }
 
+      window.__cogniaSeedConversation = async (draft) => {
+        const { createSession } = await import("@/lib/db/sessions")
+        const { persistMessages } = await import("@/lib/db/messages")
+        const session = await createSession({ title: draft.title ?? "Anchors spec" })
+        const messages = []
+        for (let turn = 0; turn < draft.turns; turn++) {
+          messages.push({
+            id: `seed-u-${turn}`,
+            role: "user" as const,
+            parts: [{ type: "text" as const, text: `Question number ${turn}` }],
+            metadata: { sessionId: session.id, createdAt: Date.now() + turn * 2 },
+          })
+          messages.push({
+            id: `seed-a-${turn}`,
+            role: "assistant" as const,
+            parts: [
+              {
+                type: "text" as const,
+                // Long enough that a handful of turns overflow the viewport,
+                // which is the precondition for anything scroll-related.
+                text: `Answer number ${turn}. ${"filler ".repeat(40)}`,
+              },
+            ],
+            metadata: { sessionId: session.id, createdAt: Date.now() + turn * 2 + 1 },
+          })
+        }
+        await persistMessages(session.id, messages as never)
+        return { sessionId: session.id, messageIds: messages.map((m) => m.id) }
+      }
+
       window.__cogniaSeedTeam = async (draft) => {
         const { createTeam } = await import("@/lib/db/teams")
         const t = await createTeam({
@@ -488,6 +528,7 @@ export function ExposeTestGlobals(): null {
       delete window.__cogniaResetDb
       delete window.__cogniaSeedWorkflow
       delete window.__cogniaSeedCharacter
+      delete window.__cogniaSeedConversation
       delete window.__cogniaSeedTeam
       delete window.__cogniaSeedSkill
       delete window.__cogniaSeedConnectorDraft

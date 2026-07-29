@@ -75,6 +75,19 @@ export interface TerminalSessionRow {
   agentTrusted: boolean
   /** Identity of the agent (chat session) that spawned this tab. `null` when user-spawned. Set by `lib/terminal/dock-tool-handler.ts` when the agent calls `terminal_dock_spawn`; reads filter the agent-only dock view. */
   agentSpawner: string | null
+  /**
+   * The assistant message the spawning tool call was streaming into, so
+   * "Locate in conversation" can land on the exact turn rather than merely
+   * opening the session at its end. ADR-0033 deferred this for want of a
+   * scroll-to-message seam; that seam now exists (`chatViewportStore`).
+   *
+   * Inferred renderer-side at spawn time — the plugin-tool wire carries only a
+   * session id — so it can be a message out in pathological cases (a replay, or
+   * a second turn racing the first). That degrades to landing near the right
+   * place, never to failing. Optional: rows persisted before this field existed
+   * simply lack it.
+   */
+  agentSpawnerMessageId?: string | null
   /** OSC 633 prompt boundaries — newest last, capped to last 32. */
   promptBoundaries: TerminalPromptBoundary[]
   /** Recent commands ring, newest last, capped to {@link TERMINAL_HISTORY_RING_SIZE}. */
@@ -163,7 +176,10 @@ export interface TerminalStoreState {
   /** Snap to full height (or restore the pre-maximize height). No-op semantics live in the impl. */
   toggleMaximized: () => void
 
-  registerSession: (info: SessionInfo, opts?: { title?: string; agentSpawner?: string }) => void
+  registerSession: (
+    info: SessionInfo,
+    opts?: { title?: string; agentSpawner?: string; agentSpawnerMessageId?: string }
+  ) => void
   removeSession: (id: string) => void
   setSessionStatus: (id: string, status: TerminalTabStatus) => void
   setSessionExit: (id: string, exitCode: number | null) => void
@@ -373,6 +389,7 @@ export const useTerminalStore = create<TerminalStoreState>()(
           createdAt: Date.now(),
           agentTrusted: false,
           agentSpawner: opts.agentSpawner ?? null,
+          agentSpawnerMessageId: opts.agentSpawnerMessageId ?? null,
           promptBoundaries: [],
           lastCommands: [],
           historyOpen: false,

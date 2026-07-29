@@ -69,14 +69,15 @@
     "ariaLineage": "Go to the message this branch was created from, in {title}",
     "cancel": "Cancel",
     "confirm": "Create branch",
-    "createError": "Failed to create branch",
     "created": "Branch created",
+    "createError": "Failed to create branch",
     "description": "Fork this conversation into a new, independent session. The original is left unchanged.",
     "direct": {
       "hint": "Copy the conversation up to this message verbatim.",
       "label": "Direct branch"
     },
     "lineage": "from {title}",
+    "lineageAnchorMissing": "That branch point is no longer in the conversation.",
     "lineageUnknownParent": "a deleted conversation",
     "summary": {
       "generating": "Generating summary…",
@@ -719,6 +720,12 @@
     "title": "Failed to send",
     "unflushedEditorBuffers": "{count, plural, one {# open file could not be saved} other {# open files could not be saved}} before this turn, so the agent may read an out-of-date copy: {files}"
   },
+  "jump": {
+    "back": "Back to where you were",
+    "newMessages": "{count, plural, one {# new message} other {# new messages}}",
+    "notFound": "That message is no longer in this conversation.",
+    "toBottom": "Jump to latest"
+  },
   "list": {
     "clear": "Clear",
     "clearAction": "Delete messages",
@@ -850,6 +857,9 @@
     "bringBackTooltip": "Quote into the main conversation",
     "copyDone": "Copied!",
     "copyLabel": "Copy message",
+    "copyLinkDone": "Link copied!",
+    "copyLinkLabel": "Copy link to message",
+    "copyLinkTooltip": "Copy link to this message",
     "copyTooltip": "Copy message",
     "editLabel": "Edit and resend",
     "editTooltip": "Edit & resend",
@@ -1265,7 +1275,9 @@
     "replyCount": "{count} replies",
     "showAll": "Show all turns",
     "showBookmarked": "Show only bookmarked turns",
+    "starredReply": "Starred reply",
     "title": "Timeline",
+    "today": "Today",
     "yesterday": "Yesterday"
   },
   "toolApproval": {

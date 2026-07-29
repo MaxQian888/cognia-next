@@ -33,7 +33,7 @@ export interface TerminalHistoryPanelProps {
   sessionId: string
   className?: string
   /** Jump to the chat session that spawned this terminal. Shown only for agent-spawned tabs. */
-  onLocateInChat?: (chatSessionId: string) => void
+  onLocateInChat?: (chatSessionId: string, messageId?: string | null) => void
 }
 
 function relativeTime(endedAt: number, now: number): string {
@@ -52,6 +52,8 @@ export function TerminalHistoryPanel({
   const lastCommands = useTerminalStore((s) => s.sessions[sessionId]?.lastCommands)
   const open = useTerminalStore((s) => s.sessions[sessionId]?.historyOpen) ?? false
   const agentSpawner = useTerminalStore((s) => s.sessions[sessionId]?.agentSpawner) ?? null
+  const agentSpawnerMessageId =
+    useTerminalStore((s) => s.sessions[sessionId]?.agentSpawnerMessageId) ?? null
   const setHistoryOpen = useTerminalStore((s) => s.setHistoryOpen)
   // Tick `now` once per minute so relative timestamps stay fresh without
   // calling Date.now() in render (react-hooks/purity).
@@ -113,7 +115,7 @@ export function TerminalHistoryPanel({
                   size="icon"
                   variant="ghost"
                   className="h-6 w-6"
-                  onClick={() => onLocateInChat(agentSpawner)}
+                  onClick={() => onLocateInChat(agentSpawner, agentSpawnerMessageId)}
                   aria-label={t("locateInChat")}
                   data-testid="terminal-history-locate"
                 >

@@ -5,6 +5,8 @@
   "branchVariants": "Reply variants",
   "copy": "Copy text",
   "copyFailed": "Copy failed: {message}",
+  "copyLink": "Copy link to message",
+  "copyLinkSuccess": "Message link copied.",
   "copySuccess": "Copied to clipboard.",
   "delete": "Delete message",
   "deleteConfirm": "Delete",

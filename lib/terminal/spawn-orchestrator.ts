@@ -42,7 +42,7 @@ export interface TerminalStoreLike {
       origin: "local" | "remote"
       shell: string
     },
-    opts?: { title?: string; agentSpawner?: string }
+    opts?: { title?: string; agentSpawner?: string; agentSpawnerMessageId?: string }
   ): void
   removeSession(id: string): void
   setSessionStatus(id: string, status: "idle" | "running" | "exited"): void
@@ -81,6 +81,13 @@ export interface SpawnFromDockInput {
    * agent visibility by this key so the agent only sees its own tabs.
    */
   agentSpawner?: string
+  /**
+   * The assistant message the spawning tool call belongs to, so the tab's
+   * "Locate in conversation" can land on that turn rather than at the end of
+   * the session. Ignored without `agentSpawner` — a user-spawned tab has no
+   * originating message.
+   */
+  agentSpawnerMessageId?: string
 }
 
 /**
@@ -171,7 +178,14 @@ export async function spawnFromDock(input: SpawnFromDockInput): Promise<SpawnOut
       origin: session.info.origin,
       shell: session.info.shell,
     },
-    input.agentSpawner ? { agentSpawner: input.agentSpawner } : undefined
+    input.agentSpawner
+      ? {
+          agentSpawner: input.agentSpawner,
+          ...(input.agentSpawnerMessageId
+            ? { agentSpawnerMessageId: input.agentSpawnerMessageId }
+            : {}),
+        }
+      : undefined
   )
 
   // 4-5. Command capture + integration/exit → store wiring. Shared with

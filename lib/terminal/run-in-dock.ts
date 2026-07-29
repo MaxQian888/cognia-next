@@ -30,6 +30,7 @@ import { useProjectStore } from "@/stores/project/project-store"
 import { useSettingsStore } from "@/stores/settings"
 import { useTerminalStore } from "@/stores/terminal/terminal-store"
 import type { SpawnRequest } from "./types"
+import { spawnerMessage } from "./spawner-message-arg"
 
 export interface RunInDockInput {
   /** Identifier of the chat session driving this — scopes the trust grant. */
@@ -93,6 +94,7 @@ export async function runInDockTab(input: RunInDockInput): Promise<RunInDockOutc
       },
       store,
       agentSpawner: input.chatSessionId,
+      ...spawnerMessage(input.chatSessionId),
     })
     if (outcome.kind !== "spawned") {
       return outcome.kind === "denied"
@@ -215,6 +217,7 @@ export async function runInTerminalDock(
     },
     store,
     agentSpawner: chatSessionId || undefined,
+    ...spawnerMessage(chatSessionId),
   })
   if (outcome.kind !== "spawned") {
     throw new Error(

@@ -28,6 +28,7 @@ import { useTerminalStore } from "@/stores/terminal/terminal-store"
 import type { TerminalDockAction } from "@/lib/plugin/bridge/terminal-dock-schemas"
 
 import { getLiveSession } from "./session-registry"
+import { spawnerMessage } from "./spawner-message-arg"
 
 export interface RunTerminalDockActionInput {
   /** One of "spawn" | "write" | "read_recent" | "wait_for_exit". */
@@ -151,6 +152,7 @@ async function runSpawn(input: RunTerminalDockActionInput): Promise<DockActionRe
     },
     store,
     agentSpawner: chatSessionId,
+    ...spawnerMessage(chatSessionId),
   })
   if (result.kind === "spawned") {
     return { ok: true, sessionId: result.sessionId }

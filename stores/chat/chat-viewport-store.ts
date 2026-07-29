@@ -28,6 +28,8 @@
 
 import { create } from "zustand"
 
+import type { JumpAlign } from "@/lib/chat/message-anchor"
+
 const EMPTY_IDS: readonly string[] = []
 
 function sameIds(left: readonly string[], right: readonly string[]): boolean {
@@ -46,12 +48,29 @@ export interface ChatViewportState {
   setActiveTurnMessageIds: (ids: readonly string[]) => void
   /**
    * Registered by the primary message list; null when none is mounted.
+   *
    * `index` is an optional fast path for callers that already know the row
    * (the minimap and the find bar do); everything else looks it up by id.
+   *
+   * `align` is the caller's intent, not a style: a timeline anchor is the
+   * user's own question and wants to rest at the TOP so the reply reads
+   * downwards from it, while a search hit or an artifact's source message is a
+   * point of interest and wants to be centred. Defaults to `center`.
+   *
+   * Returns whether the jump resolved a row. A message can be absent — it was
+   * compacted away, it belongs to another session, or the id is stale — and
+   * that used to be a silent no-op, so callers could offer "go to source" on
+   * something they could not reach. Callers must surface `false`.
    */
-  jumpToMessage: ((messageId: string, index?: number) => void) | null
-  registerJumpToMessage: (jump: ((messageId: string, index?: number) => void) | null) => void
+  jumpToMessage: JumpToMessage | null
+  registerJumpToMessage: (jump: JumpToMessage | null) => void
 }
+
+export type JumpToMessage = (
+  messageId: string,
+  index?: number,
+  opts?: { align?: JumpAlign }
+) => boolean
 
 export const useChatViewportStore = create<ChatViewportState>()((set, get) => ({
   activeTurnMessageIds: EMPTY_IDS,

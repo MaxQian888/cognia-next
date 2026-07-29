@@ -19,11 +19,12 @@
 import { useTranslations } from "next-intl"
 import { useLiveQuery } from "dexie-react-hooks"
 import { GitBranchIcon } from "lucide-react"
+import { toast } from "sonner"
 
 import type { ChatSession } from "@cognia/agent-config-types"
 import { getSession } from "@/lib/db/sessions"
+import { jumpToSessionMessage } from "@/lib/chat/cross-session-jump"
 import { useChatStore } from "@/stores/chat"
-import { useChatViewportStore } from "@/stores/chat/chat-viewport-store"
 import { cn } from "@/lib/utils"
 
 export function BranchLineageChip({
@@ -35,7 +36,6 @@ export function BranchLineageChip({
 }) {
   const t = useTranslations("chat.branch")
   const parentId = session.parentSessionId ?? null
-  const jumpToMessage = useChatViewportStore((s) => s.jumpToMessage)
   const parent = useLiveQuery(
     async () => (parentId ? ((await getSession(parentId)) ?? null) : null),
     [parentId]
@@ -43,21 +43,27 @@ export function BranchLineageChip({
 
   if (!parentId) return null
 
-  const label = t("lineage", { title: parent?.title || t("lineageUnknownParent") })
+  // One resolved title for both the visible label and the accessible name —
+  // reading `parent?.title ?? ""` separately let the aria-label degrade to
+  // "…created from, in " for a deleted parent while the label read correctly.
+  const parentTitle = parent?.title || t("lineageUnknownParent")
+  const label = t("lineage", { title: parentTitle })
 
   const onJump = () => {
-    const store = useChatStore.getState()
-    store.setActiveSession(parentId)
     const anchor = session.branchedFromMessageId
-    if (!anchor) return
-    // The parent pane mounts its own message list, which is what registers
-    // `jumpToMessage`. Defer so the jump runs against the parent's list rather
-    // than the one being torn down.
-    requestAnimationFrame(() => {
-      const jump = useChatViewportStore.getState().jumpToMessage ?? jumpToMessage
-      // A branch point that was compacted away or truncated by an edit simply
-      // doesn't move the viewport; the jump API reports no outcome to surface.
-      jump?.(anchor)
+    if (!anchor) {
+      useChatStore.getState().setActiveSession(parentId)
+      return
+    }
+    // Crossing into the parent means waiting for ITS history, not for one
+    // animation frame: unless that pane was already open and hydrated, a single
+    // `requestAnimationFrame` reported "branch point missing" for a message
+    // that exists and is about to render. ADR-0094 requires the wait, and
+    // `jumpToSessionMessage` owns it.
+    void jumpToSessionMessage(parentId, anchor, { align: "center" }).then((landed) => {
+      // A branch point compacted away or truncated by an edit genuinely is not
+      // there any more — say so rather than leaving the click looking ignored.
+      if (!landed) toast.error(t("lineageAnchorMissing"))
     })
   }
 
@@ -66,7 +72,7 @@ export function BranchLineageChip({
       type="button"
       onClick={onJump}
       title={label}
-      aria-label={t("ariaLineage", { title: parent?.title ?? "" })}
+      aria-label={t("ariaLineage", { title: parentTitle })}
       data-testid="branch-lineage-chip"
       className={cn(
         "flex min-w-0 shrink items-center gap-1 rounded px-1 text-[11px] text-muted-foreground underline-offset-2 hover:text-foreground hover:underline",

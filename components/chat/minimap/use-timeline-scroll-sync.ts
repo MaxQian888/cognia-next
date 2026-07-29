@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react"
 import type { Virtualizer } from "@tanstack/react-virtual"
+import { findMessageAnchor } from "@/lib/chat/message-anchor"
 import type { TimelineTurn } from "./use-timeline-turns"
 
 /** Geometry the minimap renders from — all positions are fractions in [0,1]. */
@@ -87,14 +88,6 @@ function computeViewportGeometry(params: {
   }
 }
 
-function selectorForId(id: string): string {
-  const escaped =
-    typeof CSS !== "undefined" && typeof CSS.escape === "function"
-      ? CSS.escape(id)
-      : id.replace(/["\\]/g, "\\$&")
-  return `[data-msg-id="${escaped}"]`
-}
-
 export interface UseScrollSyncArgs {
   scrollRef: React.RefObject<HTMLDivElement | null>
   virtualizer: Virtualizer<HTMLDivElement, Element> | null
@@ -143,7 +136,7 @@ export function useTimelineScrollSync({
       }
       const cRect = el.getBoundingClientRect()
       return turns.map((turn) => {
-        const node = el.querySelector<HTMLElement>(selectorForId(turn.id))
+        const node = findMessageAnchor(el, turn.id)
         if (node) return node.getBoundingClientRect().top - cRect.top + el.scrollTop
         return 0
       })

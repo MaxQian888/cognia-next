@@ -69,14 +69,15 @@
     "ariaLineage": "跳到「{title}」中创建这条分支的那条消息",
     "cancel": "取消",
     "confirm": "创建分支",
-    "createError": "创建分支失败",
     "created": "分支已创建",
+    "createError": "创建分支失败",
     "description": "将此对话派生为一个新的独立会话，原会话保持不变。",
     "direct": {
       "hint": "原样复制到这条消息为止的对话。",
       "label": "直接分支"
     },
     "lineage": "分叉自 {title}",
+    "lineageAnchorMissing": "该分叉点已不在这个对话里。",
     "lineageUnknownParent": "已删除的对话",
     "summary": {
       "generating": "正在生成摘要……",
@@ -719,6 +720,12 @@
     "title": "发送失败",
     "unflushedEditorBuffers": "本回合开始前有 {count} 个打开的文件未能保存，agent 可能读到过期内容：{files}"
   },
+  "jump": {
+    "back": "返回原处",
+    "newMessages": "{count} 条新消息",
+    "notFound": "该消息已不在此对话中。",
+    "toBottom": "回到最新"
+  },
   "list": {
     "clear": "清空",
     "clearAction": "删除消息",
@@ -850,6 +857,9 @@
     "bringBackTooltip": "引用到主对话",
     "copyDone": "已复制！",
     "copyLabel": "复制消息",
+    "copyLinkDone": "链接已复制！",
+    "copyLinkLabel": "复制消息链接",
+    "copyLinkTooltip": "复制指向这条消息的链接",
     "copyTooltip": "复制消息",
     "editLabel": "编辑并重发",
     "editTooltip": "编辑并重发",
@@ -1265,7 +1275,9 @@
     "replyCount": "{count} 条回复",
     "showAll": "显示全部轮次",
     "showBookmarked": "只看已收藏的对话轮次",
+    "starredReply": "已收藏的回复",
     "title": "时间线",
+    "today": "今天",
     "yesterday": "昨天"
   },
   "toolApproval": {

@@ -4073,6 +4073,7 @@
         "label": "Direct branch"
       },
       "lineage": "from {title}",
+      "lineageAnchorMissing": "That branch point is no longer in the conversation.",
       "lineageUnknownParent": "a deleted conversation",
       "summary": {
         "generating": "Generating summary…",

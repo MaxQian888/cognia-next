@@ -18,10 +18,21 @@ jest.mock("@/components/ai-elements/shimmer", () => {
 // isolated from its timers and motion wiring. The stub echoes `compact` so the
 // tests below can tell the two modes apart.
 jest.mock("./thinking-indicator", () => ({
-  ChatThinkingIndicator: ({ compact }: { compact?: boolean }) =>
+  ChatThinkingIndicator: ({
+    compact,
+    onPhaseChange,
+  }: {
+    compact?: boolean
+    onPhaseChange?: () => void
+  }) =>
     ReactForMocks.createElement(
       "span",
-      null,
+      {
+        // The real indicator calls this when its skeleton/tips reveal grows the
+        // row; exposing it as a click lets a test drive the re-pin.
+        "data-test": "thinking-phase",
+        onClick: () => onPhaseChange?.(),
+      },
       compact ? "Claude is working…" : "Claude is thinking…"
     ),
 }))
@@ -33,33 +44,51 @@ jest.mock("./thinking-indicator", () => ({
 const useVirtualizerCalls: Array<{ count: number; estimateSize: (i: number) => number }> = []
 const measureSpy = jest.fn()
 const scrollToIndexSpy = jest.fn()
+// One identity for the lifetime of the suite, mutated in place. The real
+// `useVirtualizer` hands back a stable instance; a fresh object per render would
+// re-run every effect that lists the virtualizer as a dependency, and the
+// cleanup of the finalise re-pin effect would cancel its own rAF before the
+// frame ever arrived — i.e. the mock would hide the behaviour under test.
+const virtualizerMock = {
+  count: 0,
+  getVirtualItems: () =>
+    Array.from({ length: virtualizerMock.count }, (_, i) => ({
+      index: i,
+      key: String(i),
+      start: i * 120,
+      size: 120,
+      lane: 0,
+    })),
+  getTotalSize: () => virtualizerMock.count * 120,
+  measureElement: () => {},
+  measure: measureSpy,
+  scrollToIndex: scrollToIndexSpy,
+  // Read by the timeline scroll-sync that `ActiveTurnPublisher` runs, to
+  // place off-screen turns from the virtualizer's own cache.
+  options: { count: 0 },
+  measurementsCache: [] as unknown[],
+}
 jest.mock("@tanstack/react-virtual", () => ({
   useVirtualizer: ({
     count,
     estimateSize,
+    getScrollElement,
+    measureElement,
   }: {
     count: number
     estimateSize: (i: number) => number
+    getScrollElement: () => Element | null
+    measureElement: (el: Element | undefined) => number
   }) => {
     useVirtualizerCalls.push({ count, estimateSize })
-    return {
-      getVirtualItems: () =>
-        Array.from({ length: count }, (_, i) => ({
-          index: i,
-          key: String(i),
-          start: i * 120,
-          size: 120,
-          lane: 0,
-        })),
-      getTotalSize: () => count * 120,
-      measureElement: () => {},
-      measure: measureSpy,
-      scrollToIndex: scrollToIndexSpy,
-      // Read by the timeline scroll-sync that `ActiveTurnPublisher` runs, to
-      // place off-screen turns from the virtualizer's own cache.
-      options: { count },
-      measurementsCache: [],
-    }
+    virtualizerMock.count = count
+    virtualizerMock.options.count = count
+    // The real virtualizer calls these; a mock that only stores them would
+    // leave the list's own scroll-element resolution and pixel-rounding
+    // untested purely as an artefact of being mocked.
+    getScrollElement()
+    measureElement(undefined)
+    return virtualizerMock
   },
 }))
 
@@ -127,11 +156,13 @@ jest.mock("@/components/mobile/chat/message-action-sheet", () => ({
     onRegenerate,
     onDelete,
     onEditResend,
+    onOpenChange,
   }: {
     message: unknown
     onRegenerate?: () => void
     onDelete?: (m: unknown) => void
     onEditResend?: (m: unknown, newText: string) => void
+    onOpenChange?: (next: boolean) => void
   }) =>
     ReactForMocks.createElement(
       "div",
@@ -141,12 +172,27 @@ jest.mock("@/components/mobile/chat/message-action-sheet", () => ({
         "data-can-regenerate": String(Boolean(onRegenerate)),
         "data-can-edit": String(Boolean(onEditResend)),
       },
-      message && onDelete
-        ? ReactForMocks.createElement("button", {
-            "data-test": "sheet-delete",
-            onClick: () => onDelete(message),
-          })
-        : null
+      [
+        message && onDelete
+          ? ReactForMocks.createElement("button", {
+              key: "delete",
+              "data-test": "sheet-delete",
+              onClick: () => onDelete(message),
+            })
+          : null,
+        ReactForMocks.createElement("button", {
+          key: "dismiss",
+          "data-test": "sheet-dismiss",
+          onClick: () => onOpenChange?.(false),
+        }),
+        message && onEditResend
+          ? ReactForMocks.createElement("button", {
+              key: "edit",
+              "data-test": "sheet-edit",
+              onClick: () => onEditResend(message, "edited text"),
+            })
+          : null,
+      ]
     ),
 }))
 
@@ -176,6 +222,7 @@ import { getAppShortcutDescriptor } from "@/lib/shortcuts/app-catalog"
 import { DataAdapterProvider } from "@/lib/data-hooks/context"
 import type { DataAdapter } from "@/lib/data-hooks/types"
 import { useChatStore } from "@/stores/chat"
+import { useChatViewportStore } from "@/stores/chat/chat-viewport-store"
 import { useSettingsStore } from "@/stores/settings"
 import { usePlatform } from "@/hooks/use-platform"
 import { selectionFeedback } from "@/lib/capacitor/haptics"
@@ -628,11 +675,11 @@ describe("MessageList", () => {
         scrollTop = v
       },
     })
-    // Scroll up in session 1 → the scroll-to-bottom button appears.
+    // Scroll up in session 1 → the jump pill appears.
     await act(async () => {
       fireEvent.scroll(scrollEl)
     })
-    expect(scrollEl.querySelector('button[type="button"]')).toBeTruthy()
+    expect(screen.getByTestId("conversation-jump-pill")).toBeInTheDocument()
 
     // Switching sessions must reset to the latest message and re-arm
     // stick-to-bottom (isAtBottom), not inherit the old scroll state.
@@ -641,7 +688,7 @@ describe("MessageList", () => {
       await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)))
     })
     expect(scrollTop).toBe(1000)
-    expect(scrollEl.querySelector('button[type="button"]')).toBeFalsy()
+    expect(screen.queryByTestId("conversation-jump-pill")).not.toBeInTheDocument()
     act(() => {
       useChatStore.getState().setActiveSession("ses_1")
     })
@@ -703,9 +750,15 @@ describe("MessageList", () => {
       fireEvent.scroll(scrollEl)
     })
     // scrollHeight(1000) - scrollTop(0) - clientHeight(200) = 800 >= 32 → not at bottom
-    const btn = scrollEl.querySelector('button[type="button"]')
-    expect(btn).toBeTruthy()
-    fireEvent.click(btn!)
+    const btn = screen.getByTestId("conversation-jump-pill")
+    // The pill must live OUTSIDE the scroll container. As a child of the
+    // scroller it is part of the scrollable content, so it is positioned
+    // against the unscrolled box and scrolls away with the messages — i.e. it
+    // vanishes exactly when `!isAtBottom` makes it render. jsdom has no layout,
+    // so this containment check is the only unit-level guard; the e2e spec
+    // pins the visual result.
+    expect(scrollEl.contains(btn)).toBe(false)
+    fireEvent.click(btn)
     expect(scrollTo).toHaveBeenCalledWith({ top: 1000, behavior: "smooth" })
   })
 
@@ -979,8 +1032,8 @@ describe("MessageList — content-resize follow (deferred markdown growth)", () 
     await act(async () => {
       fireEvent.scroll(scrollEl)
     })
-    // The scroll-to-bottom button proves isAtBottom flipped to false.
-    expect(scrollEl.querySelector('button[type="button"]')).toBeTruthy()
+    // The jump pill proves isAtBottom flipped to false.
+    expect(screen.getByTestId("conversation-jump-pill")).toBeInTheDocument()
     fireResize()
     expect(scroll.scrollTop).toBe(0)
   })
@@ -1342,5 +1395,602 @@ describe("MessageList — timeline signature pinning", () => {
       </Wrapper>
     )
     expect((timelineMock.mock.calls.at(-1)![0] as { messages: unknown }).messages).toBe(grown)
+  })
+})
+
+describe("MessageList — the published jumpToMessage contract", () => {
+  const jump = () => useChatViewportStore.getState().jumpToMessage!
+
+  const renderMessages = (messages: UIMessage[]) => {
+    const Wrapper = withAdapter(makeAdapter())
+    return render(
+      <Wrapper>
+        <MessageList messages={messages} status="idle" />
+      </Wrapper>
+    )
+  }
+
+  beforeEach(() => {
+    scrollToIndexSpy.mockClear()
+  })
+
+  it("tags virtualized rows with data-msg-id, not just data-index", () => {
+    // The DOM anchor used to exist on the document-flow branch only, so every
+    // id-based jump went silent the moment a conversation crossed the
+    // virtualization threshold.
+    const { container } = renderMessages(manyMsgs(VIRTUALIZE_THRESHOLD + 2))
+    const rows = container.querySelectorAll("[data-index][data-msg-id]")
+    expect(rows.length).toBeGreaterThan(0)
+    expect(container.querySelector('[data-msg-id="vm-3"]')).not.toBeNull()
+  })
+
+  it("passes the caller's align through to the virtualizer", () => {
+    renderMessages(manyMsgs(VIRTUALIZE_THRESHOLD + 2))
+    // A timeline anchor is the user's own question: it must land at the top so
+    // the reply reads downwards from it.
+    act(() => {
+      expect(jump()("vm-5", 5, { align: "start" })).toBe(true)
+    })
+    expect(scrollToIndexSpy).toHaveBeenCalledWith(5, { align: "start" })
+  })
+
+  it("defaults to centring when the caller states no intent", () => {
+    renderMessages(manyMsgs(VIRTUALIZE_THRESHOLD + 2))
+    act(() => {
+      jump()("vm-5", 5)
+    })
+    expect(scrollToIndexSpy).toHaveBeenCalledWith(5, { align: "center" })
+  })
+
+  it("resolves the row index by id when the caller has none", () => {
+    renderMessages(manyMsgs(VIRTUALIZE_THRESHOLD + 2))
+    act(() => {
+      expect(jump()("vm-7")).toBe(true)
+    })
+    expect(scrollToIndexSpy).toHaveBeenCalledWith(7, { align: "center" })
+  })
+
+  it("reports failure for a message that is not in this conversation", () => {
+    // Compacted away, or owned by another session. This was a silent no-op, so
+    // "go to source" looked broken rather than inapplicable.
+    renderMessages(manyMsgs(VIRTUALIZE_THRESHOLD + 2))
+    act(() => {
+      expect(jump()("no-such-message")).toBe(false)
+    })
+    expect(scrollToIndexSpy).not.toHaveBeenCalled()
+  })
+
+  it("scrolls the real node on a document-flow list", () => {
+    const { container } = renderMessages([userMsg("vm-0", "a"), userMsg("vm-1", "b")])
+    const node = container.querySelector<HTMLElement>('[data-msg-id="vm-1"]')!
+    const scrollIntoView = jest.fn()
+    node.scrollIntoView = scrollIntoView
+
+    act(() => {
+      expect(jump()("vm-1", undefined, { align: "start" })).toBe(true)
+    })
+    expect(scrollIntoView).toHaveBeenCalledWith({ behavior: "smooth", block: "start" })
+    // Short lists never virtualize, so the virtualizer must stay out of it.
+    expect(scrollToIndexSpy).not.toHaveBeenCalled()
+  })
+
+  it("reports failure on a document-flow list when the id is unknown", () => {
+    renderMessages([userMsg("vm-0", "a")])
+    act(() => {
+      expect(jump()("ghost")).toBe(false)
+    })
+  })
+
+  it("marks the row it landed on", () => {
+    // Scrolling with no landing mark is indistinguishable from scrolling to the
+    // wrong place, which is the failure mode a long, repetitive conversation
+    // makes most likely.
+    const { container } = renderMessages(manyMsgs(VIRTUALIZE_THRESHOLD + 2))
+    expect(container.querySelector('[data-testid="jump-flash"]')).toBeNull()
+
+    act(() => {
+      jump()("vm-5", 5, { align: "start" })
+    })
+    const row = container.querySelector('[data-msg-id="vm-5"]')!
+    expect(row.querySelector('[data-testid="jump-flash"]')).not.toBeNull()
+    // Exactly one row is ever marked.
+    expect(container.querySelectorAll('[data-testid="jump-flash"]')).toHaveLength(1)
+  })
+
+  it("moves the mark when a second jump lands elsewhere", () => {
+    const { container } = renderMessages(manyMsgs(VIRTUALIZE_THRESHOLD + 2))
+    act(() => {
+      jump()("vm-5", 5)
+    })
+    act(() => {
+      jump()("vm-9", 9)
+    })
+    expect(
+      container.querySelector('[data-msg-id="vm-5"]')!.querySelector('[data-testid="jump-flash"]')
+    ).toBeNull()
+    expect(
+      container.querySelector('[data-msg-id="vm-9"]')!.querySelector('[data-testid="jump-flash"]')
+    ).not.toBeNull()
+  })
+
+  it("does not mark anything when the jump failed", () => {
+    const { container } = renderMessages(manyMsgs(VIRTUALIZE_THRESHOLD + 2))
+    act(() => {
+      jump()("no-such-message")
+    })
+    expect(container.querySelector('[data-testid="jump-flash"]')).toBeNull()
+  })
+
+  it("re-marks the same row on a repeat jump", () => {
+    const { container } = renderMessages(manyMsgs(VIRTUALIZE_THRESHOLD + 2))
+    act(() => {
+      jump()("vm-5", 5)
+    })
+    const first = container
+      .querySelector('[data-testid="jump-flash"]')!
+      .getAttribute("data-jump-flash-nonce")
+
+    act(() => {
+      jump()("vm-5", 5)
+    })
+    // Same id, so only the nonce can tell the second jump apart — and without
+    // it the repeat (which is what a user does when unsure it worked) is silent.
+    expect(
+      container.querySelector('[data-testid="jump-flash"]')!.getAttribute("data-jump-flash-nonce")
+    ).not.toBe(first)
+  })
+})
+
+describe("MessageList — the floating jump offer", () => {
+  /** Give the scroll container measurable geometry jsdom otherwise lacks. */
+  function primeScroller(el: Element, opts: { scrollHeight?: number; clientHeight?: number } = {}) {
+    Object.defineProperty(el, "scrollHeight", {
+      value: opts.scrollHeight ?? 1000,
+      configurable: true,
+    })
+    Object.defineProperty(el, "clientHeight", {
+      value: opts.clientHeight ?? 200,
+      configurable: true,
+    })
+    const box = { top: 0 }
+    Object.defineProperty(el, "scrollTop", {
+      configurable: true,
+      get: () => box.top,
+      set: (v: number) => {
+        box.top = v
+      },
+    })
+    const scrollTo = jest.fn((arg: { top: number }) => {
+      box.top = arg.top
+    })
+    ;(el as HTMLElement).scrollTo = scrollTo as unknown as HTMLElement["scrollTo"]
+    return { box, scrollTo }
+  }
+
+  const renderMessages = (messages: UIMessage[]) => {
+    const Wrapper = withAdapter(makeAdapter())
+    const view = render(
+      <Wrapper>
+        <MessageList messages={messages} status="idle" />
+      </Wrapper>
+    )
+    return { ...view, Wrapper }
+  }
+
+  const mode = () => screen.queryByTestId("conversation-jump-pill")?.getAttribute("data-mode")
+
+  it("offers the way back after a jump, and returns to the exact offset", async () => {
+    const { container } = renderMessages(manyMsgs(VIRTUALIZE_THRESHOLD + 2))
+    const scrollEl = container.querySelector('[role="log"]')!
+    const { box, scrollTo } = primeScroller(scrollEl)
+
+    // The user is reading at 640px in.
+    box.top = 640
+    await act(async () => {
+      fireEvent.scroll(scrollEl)
+    })
+    expect(mode()).toBe("toBottom")
+
+    act(() => {
+      useChatViewportStore.getState().jumpToMessage!("vm-2", 2, { align: "start" })
+    })
+    expect(mode()).toBe("return")
+
+    fireEvent.click(screen.getByTestId("conversation-jump-pill"))
+    expect(scrollTo).toHaveBeenCalledWith({ top: 640, behavior: "smooth" })
+    // Single-use: having gone back, there is nothing left to go back to.
+    expect(mode()).not.toBe("return")
+  })
+
+  it("withdraws the return offer once the user scrolls under their own steam", async () => {
+    // Choosing a new place to be is a decision; the old place stops mattering.
+    const nowSpy = jest.spyOn(Date, "now")
+    try {
+      nowSpy.mockReturnValue(1_000_000)
+      const { container } = renderMessages(manyMsgs(VIRTUALIZE_THRESHOLD + 2))
+      const scrollEl = container.querySelector('[role="log"]')!
+      const { box } = primeScroller(scrollEl)
+      box.top = 500
+      await act(async () => {
+        fireEvent.scroll(scrollEl)
+      })
+
+      act(() => {
+        useChatViewportStore.getState().jumpToMessage!("vm-2", 2)
+      })
+      expect(mode()).toBe("return")
+
+      // The jump's own smooth scroll and the virtualizer's re-target passes
+      // emit scroll events too, so they are fenced off by time.
+      await act(async () => {
+        fireEvent.scroll(scrollEl)
+      })
+      expect(mode()).toBe("return")
+
+      nowSpy.mockReturnValue(1_000_000 + 5000)
+      await act(async () => {
+        fireEvent.scroll(scrollEl)
+      })
+      expect(mode()).toBe("toBottom")
+    } finally {
+      nowSpy.mockRestore()
+    }
+  })
+
+  it("counts replies that landed while the user was reading further up", async () => {
+    const initial = manyMsgs(VIRTUALIZE_THRESHOLD + 2)
+    const Wrapper = withAdapter(makeAdapter())
+    const { container, rerender } = render(
+      <Wrapper>
+        <MessageList messages={initial} status="idle" />
+      </Wrapper>
+    )
+    const scrollEl = container.querySelector('[role="log"]')!
+    const { box } = primeScroller(scrollEl)
+
+    box.top = 300
+    await act(async () => {
+      fireEvent.scroll(scrollEl)
+    })
+    expect(mode()).toBe("toBottom")
+
+    const grown = [...initial, userMsg("vm-new-1", "one"), userMsg("vm-new-2", "two")]
+    await act(async () => {
+      rerender(
+        <Wrapper>
+          <MessageList messages={grown} status="idle" />
+        </Wrapper>
+      )
+    })
+    expect(mode()).toBe("newMessages")
+    // Real next-intl in this suite, so this also pins the ICU plural.
+    expect(screen.getByTestId("conversation-jump-pill")).toHaveAttribute(
+      "aria-label",
+      "2 new messages"
+    )
+
+    // Returning to the bottom means they have been seen.
+    box.top = 800
+    await act(async () => {
+      fireEvent.scroll(scrollEl)
+    })
+    expect(mode()).toBeUndefined()
+  })
+
+  it("does not count messages that arrived before the user scrolled up", async () => {
+    // The baseline is taken when they leave the bottom, not at mount — the
+    // whole backlog is not "new".
+    const initial = manyMsgs(VIRTUALIZE_THRESHOLD + 2)
+    const { container } = renderMessages(initial)
+    const scrollEl = container.querySelector('[role="log"]')!
+    const { box } = primeScroller(scrollEl)
+
+    box.top = 300
+    await act(async () => {
+      fireEvent.scroll(scrollEl)
+    })
+    expect(mode()).toBe("toBottom")
+  })
+})
+
+describe("MessageList — best-effort paths that must not surface as failures", () => {
+  const msgs = [userMsg("m1", "hello"), userMsg("m2", "world")]
+
+  const renderMobile = () => {
+    ;(usePlatform as jest.Mock).mockReturnValue("mobile")
+    const Wrapper = withAdapter(makeAdapter())
+    act(() => {
+      useChatStore.getState().setSessionMessages("ses_1", msgs)
+    })
+    return render(
+      <Wrapper>
+        <MessageList messages={msgs} status="idle" />
+      </Wrapper>
+    )
+  }
+
+  afterEach(() => {
+    ;(usePlatform as jest.Mock).mockReturnValue("desktop")
+  })
+
+  it("still removes the message when the local Dexie mirror rejects", async () => {
+    // The row may never have been persisted. The store removal above it has
+    // already updated what the user sees, so a mirror miss is not a failure.
+    dbDeleteMock.mockRejectedValueOnce(new Error("no such row"))
+    desktopDeleteMock.mockClear()
+    renderMobile()
+
+    fireEvent.click(document.querySelector("[data-test='long-press']")!)
+    fireEvent.click(document.querySelector("[data-test='sheet-delete']")!)
+    await act(async () => {})
+
+    expect(useChatStore.getState().sessions["ses_1"]!.messages.map((m) => m.id)).toEqual(["m2"])
+    // The desktop leg still runs — one failing leg must not short-circuit the fan-out.
+    expect(desktopDeleteMock).toHaveBeenCalledWith("ses_1", "m1")
+  })
+
+  it("still removes the message when the desktop is unreachable", async () => {
+    // Standalone mode / offline phone. Sync-down reconciles the missed delete
+    // later; blocking the local removal on it would strand the user.
+    desktopDeleteMock.mockRejectedValueOnce(new Error("no desktop"))
+    renderMobile()
+
+    fireEvent.click(document.querySelector("[data-test='long-press']")!)
+    fireEvent.click(document.querySelector("[data-test='sheet-delete']")!)
+    await act(async () => {})
+
+    expect(useChatStore.getState().sessions["ses_1"]!.messages.map((m) => m.id)).toEqual(["m2"])
+  })
+
+  it("disarms the action sheet when it is dismissed", () => {
+    renderMobile()
+    fireEvent.click(document.querySelector("[data-test='long-press']")!)
+    expect(document.querySelector("[data-test='action-sheet']")).toHaveAttribute(
+      "data-message",
+      "open"
+    )
+
+    fireEvent.click(document.querySelector("[data-test='sheet-dismiss']")!)
+    expect(document.querySelector("[data-test='action-sheet']")).toHaveAttribute(
+      "data-message",
+      "closed"
+    )
+  })
+})
+
+describe("MessageList — re-pinning for the thinking indicator's own growth", () => {
+  function renderStreaming() {
+    const Wrapper = withAdapter(makeAdapter())
+    const view = render(
+      <Wrapper>
+        <MessageList messages={[userMsg("m1", "hi")]} status="streaming" />
+      </Wrapper>
+    )
+    const scrollEl = view.container.querySelector('[role="log"]')!
+    Object.defineProperty(scrollEl, "scrollHeight", { value: 1000, configurable: true })
+    Object.defineProperty(scrollEl, "clientHeight", { value: 200, configurable: true })
+    const box = { top: 0 }
+    Object.defineProperty(scrollEl, "scrollTop", {
+      configurable: true,
+      get: () => box.top,
+      set: (v: number) => {
+        box.top = v
+      },
+    })
+    return { scrollEl, box }
+  }
+
+  it("re-pins when the indicator's skeleton reveals", () => {
+    // The stick-to-bottom effect only reacts to `messages`/`status`, so it
+    // cannot see this row growing on its own internal timer.
+    const { box } = renderStreaming()
+    box.top = 0
+    fireEvent.click(document.querySelector("[data-test='thinking-phase']")!)
+    expect(box.top).toBe(1000)
+  })
+
+  it("does not re-pin once the user has scrolled up", () => {
+    const { scrollEl, box } = renderStreaming()
+    act(() => {
+      fireEvent.scroll(scrollEl)
+    })
+    box.top = 400
+    fireEvent.click(document.querySelector("[data-test='thinking-phase']")!)
+    expect(box.top).toBe(400)
+  })
+
+  it("does not re-pin when auto-scroll is switched off", () => {
+    useSettingsStore.setState({
+      settings: { composerBehavior: { autoScrollOnStream: false } } as never,
+    })
+    const { box } = renderStreaming()
+    box.top = 0
+    fireEvent.click(document.querySelector("[data-test='thinking-phase']")!)
+    expect(box.top).toBe(0)
+    useSettingsStore.setState({ settings: {} as never })
+  })
+})
+
+describe("MessageList — closing the find bar from the bar itself", () => {
+  const toggleSearch = () =>
+    (useAppShortcut as jest.Mock).mock.calls.findLast((c) => c[0] === "chat.search.toggle")?.[1] as
+      ((event: KeyboardEvent) => void) | undefined
+
+  it("drops the ring when the bar closes itself", () => {
+    // The chord path toggles; this is the bar's own close button, which is a
+    // separate callback and the one a mouse user actually reaches.
+    const Wrapper = withAdapter(makeAdapter())
+    const { container } = render(
+      <Wrapper>
+        <MessageList messages={[userMsg("vm-0", "deploy the worker")]} status="idle" />
+      </Wrapper>
+    )
+    act(() => toggleSearch()!(new KeyboardEvent("keydown")))
+    fireEvent.change(screen.getByTestId("message-search-bar").querySelector("input")!, {
+      target: { value: "deploy" },
+    })
+    expect(container.querySelector("[data-search-hit]")).not.toBeNull()
+
+    fireEvent.click(screen.getByRole("button", { name: "Close search" }))
+    expect(screen.queryByTestId("message-search-bar")).not.toBeInTheDocument()
+    expect(container.querySelector("[data-search-hit]")).toBeNull()
+  })
+})
+
+describe("MessageList — system rows render as markers, not as messages", () => {
+  const systemRow = (id: string, type: string, extra: Record<string, unknown> = {}) =>
+    ({ id, role: "system", parts: [{ type, ...extra }] }) as unknown as UIMessage
+
+  const renderRows = (messages: UIMessage[]) => {
+    const Wrapper = withAdapter(makeAdapter())
+    return render(
+      <Wrapper>
+        <MessageList messages={messages} status="idle" />
+      </Wrapper>
+    )
+  }
+
+  it("renders a compaction boundary as its own marker", () => {
+    // These carry no author and no body; putting them through MessageRenderer
+    // would draw an empty avatarised bubble.
+    const { container } = renderRows([
+      userMsg("m1", "before"),
+      systemRow("cb1", "compact-boundary", { at: 1_700_000_000_000 }),
+      userMsg("m2", "after"),
+    ])
+    expect(container.querySelector("[data-test='msg-cb1']")).toBeNull()
+    expect(container.querySelector("[data-test='msg-m1']")).not.toBeNull()
+  })
+
+  it("renders a session notice as its own marker", () => {
+    const { container } = renderRows([
+      systemRow("sn1", "session-notice", { kind: "resumed" }),
+      userMsg("m1", "after"),
+    ])
+    expect(container.querySelector("[data-test='msg-sn1']")).toBeNull()
+    expect(container.querySelector("[data-test='msg-m1']")).not.toBeNull()
+  })
+})
+
+describe("MessageList — the streaming row's height projection", () => {
+  it("counts reasoning text, not just visible text", () => {
+    // A long reasoning block is real height on screen. Ignoring it would let the
+    // projection undershoot badly and jerk the scroll position on every token.
+    const Wrapper = withAdapter(makeAdapter())
+    const fillers = manyMsgs(VIRTUALIZE_THRESHOLD)
+    const streaming = {
+      id: "a-stream",
+      role: "assistant",
+      parts: [{ type: "reasoning", text: "r".repeat(1000) }],
+    } as unknown as UIMessage
+    render(
+      <Wrapper>
+        <MessageList messages={[...fillers, streaming]} status="streaming" />
+      </Wrapper>
+    )
+
+    const estimate = useVirtualizerCalls.at(-1)!.estimateSize(fillers.length)
+    // 1000 chars * 0.55 + 220 = 770.
+    expect(estimate).toBeGreaterThan(700)
+    expect(estimate).toBeLessThan(900)
+  })
+
+  it("ignores parts that carry no text", () => {
+    const Wrapper = withAdapter(makeAdapter())
+    const fillers = manyMsgs(VIRTUALIZE_THRESHOLD)
+    const streaming = {
+      id: "a-stream",
+      role: "assistant",
+      parts: [{ type: "tool-bash" }, { type: "reasoning" }],
+    } as unknown as UIMessage
+    render(
+      <Wrapper>
+        <MessageList messages={[...fillers, streaming]} status="streaming" />
+      </Wrapper>
+    )
+    // Floor only — the projection must never drop below it, or rows overlap.
+    expect(useVirtualizerCalls.at(-1)!.estimateSize(fillers.length)).toBe(220)
+  })
+})
+
+describe("MessageList — edit & resend from the touch action sheet", () => {
+  it("unwraps the sheet's message into the id-based callback the parent expects", () => {
+    // The pencil in the hover footer is unreachable on touch, so this sheet
+    // entry is the only edit path on a phone.
+    ;(usePlatform as jest.Mock).mockReturnValue("mobile")
+    const onEditResend = jest.fn()
+    const Wrapper = withAdapter(makeAdapter())
+    render(
+      <Wrapper>
+        <MessageList
+          messages={[userMsg("m1", "hello")]}
+          status="idle"
+          onEditResend={onEditResend}
+        />
+      </Wrapper>
+    )
+
+    fireEvent.click(document.querySelector("[data-test='long-press']")!)
+    fireEvent.click(document.querySelector("[data-test='sheet-edit']")!)
+    expect(onEditResend).toHaveBeenCalledWith("m1", "edited text")
+    ;(usePlatform as jest.Mock).mockReturnValue("desktop")
+  })
+})
+
+describe("MessageList — deleting a message that belongs to another session", () => {
+  it("routes the delete by the message's own sessionId, not the focused pane's", async () => {
+    // Messages carry their owning session in metadata. A background session can
+    // be visible (split view, the dock's per-resource pane), and routing its
+    // delete to the focused session would remove the wrong row and leave the
+    // real one on disk.
+    ;(usePlatform as jest.Mock).mockReturnValue("mobile")
+    dbDeleteMock.mockClear()
+    desktopDeleteMock.mockClear()
+
+    const owned = {
+      id: "bg1",
+      role: "user",
+      parts: [{ type: "text", text: "from the background thread" }],
+      metadata: { sessionId: "ses_bg" },
+    } as unknown as UIMessage
+    act(() => {
+      useChatStore.getState().setActiveSession("ses_1")
+      useChatStore.getState().setSessionMessages("ses_bg", [owned, userMsg("bg2", "keep me")])
+    })
+
+    const Wrapper = withAdapter(makeAdapter())
+    render(
+      <Wrapper>
+        <MessageList messages={[owned]} status="idle" />
+      </Wrapper>
+    )
+    fireEvent.click(document.querySelector("[data-test='long-press']")!)
+    fireEvent.click(document.querySelector("[data-test='sheet-delete']")!)
+    await act(async () => {})
+
+    expect(useChatStore.getState().sessions["ses_bg"]!.messages.map((m) => m.id)).toEqual(["bg2"])
+    expect(desktopDeleteMock).toHaveBeenCalledWith("ses_bg", "bg1")
+    ;(usePlatform as jest.Mock).mockReturnValue("desktop")
+  })
+})
+
+describe("MessageList — a paused turn is still the streaming row", () => {
+  it("treats awaiting_approval as live so the row keeps its streaming treatment", () => {
+    // The turn is paused on a permission prompt, not finished. Dropping the
+    // streaming flag there would re-measure and re-render the row mid-turn.
+    const Wrapper = withAdapter(makeAdapter())
+    const fillers = manyMsgs(VIRTUALIZE_THRESHOLD)
+    const assistant = {
+      id: "a-paused",
+      role: "assistant",
+      parts: [{ type: "text", text: "waiting on you" }],
+    } as unknown as UIMessage
+    const { container } = render(
+      <Wrapper>
+        <MessageList messages={[...fillers, assistant]} status="awaiting_approval" />
+      </Wrapper>
+    )
+    // Rendered through the virtualized branch, and still anchored.
+    expect(container.querySelector('[data-msg-id="a-paused"]')).not.toBeNull()
   })
 })

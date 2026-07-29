@@ -26,6 +26,7 @@ import {
 } from "lucide-react"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useTranslations } from "next-intl"
+import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 import { hasWorkspaceFsBackend } from "@/lib/files/workspace-backend"
@@ -607,6 +608,7 @@ export function ArtifactContextWorkbench({
  */
 function ArtifactSourceMessageLink({ messageId }: { messageId: string }) {
   const t = useTranslations("contextWorkbench.metadata")
+  const tJump = useTranslations("chat.jump")
   const jumpToMessage = useChatViewportStore((state) => state.jumpToMessage)
   if (!jumpToMessage) return null
   return (
@@ -616,7 +618,14 @@ function ArtifactSourceMessageLink({ messageId }: { messageId: string }) {
       size="sm"
       className="w-full"
       data-testid="artifact-source-message-link"
-      onClick={() => jumpToMessage(messageId)}
+      // A mounted list is not a reachable message: the source can have been
+      // compacted away or belong to another session. Say so instead of
+      // swallowing the click.
+      onClick={() => {
+        if (!jumpToMessage(messageId, undefined, { align: "center" })) {
+          toast.error(tJump("notFound"))
+        }
+      }}
     >
       <CornerUpLeftIcon className="size-4" />
       {t("goToSource")}

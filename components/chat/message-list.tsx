@@ -1,9 +1,7 @@
 "use client"
 
 import { ChatThinkingIndicator } from "@/components/chat/thinking-indicator"
-import { Button } from "@/components/ui/button"
 import type { UIMessage } from "ai"
-import { ArrowDownIcon } from "lucide-react"
 import { MessageRenderer } from "./message-renderer"
 import {
   CompactBoundaryMarker,
@@ -21,14 +19,20 @@ import { useSettingsStore } from "@/stores/settings"
 import { ConversationTimeline } from "./minimap/conversation-timeline"
 import { shouldMountTimeline } from "./minimap/timeline-visibility"
 import { ActiveTurnPublisher } from "./active-turn-publisher"
-import { useChatViewportStore } from "@/stores/chat/chat-viewport-store"
+import { useChatViewportStore, type JumpToMessage } from "@/stores/chat/chat-viewport-store"
 import { MessageSearchBar } from "./message-search-bar"
 import type { MessageSearchHit } from "@/lib/chat/message-search"
+import { findMessageAnchor } from "@/lib/chat/message-anchor"
+import { useJumpFlash } from "@/hooks/chat/use-jump-flash"
+import { useJumpHistory } from "@/hooks/chat/use-jump-history"
+import { JumpFlash } from "./jump-flash"
+import { ConversationJumpPill, resolveJumpPillMode } from "./conversation-jump-pill"
 import { useAppShortcut } from "@/hooks/shortcuts/use-app-shortcut"
 import { usePlatform } from "@/hooks/use-platform"
 import { useElementWidth } from "@/hooks/use-element-width"
 import { useTranslations } from "next-intl"
 import { InfoIcon } from "lucide-react"
+import { toast } from "sonner"
 import { useCharacters } from "@/lib/data-hooks/context"
 import { useStableCharacterById } from "@/hooks/data/use-stable-character-by-id"
 import { useChatAutoPlayTTS } from "@/hooks/media/use-chat-auto-play-tts"
@@ -57,6 +61,11 @@ export const VIRTUALIZE_THRESHOLD = 40
 // which combined with the old `lg` breakpoint meant most users never saw the
 // rail at all and had no way to learn it existed.
 export const TIMELINE_THRESHOLD = 8
+
+// How long after a jump the list stops reading scroll events as the user's own.
+// Covers the smooth scroll plus the virtualizer's re-target passes, which are
+// what make a jump emit scroll events for several frames after the call.
+const PROGRAMMATIC_SCROLL_MS = 700
 
 interface Props {
   messages: UIMessage[]
@@ -103,6 +112,7 @@ export function MessageList({
   const paneRef = useRef<HTMLDivElement | null>(null)
   const paneWidth = useElementWidth(paneRef)
   const tActions = useTranslations("mobile.messageActions")
+  const tJump = useTranslations("chat.jump")
   // Long-press opens the action sheet on mobile, but there's no hover hint to
   // advertise it. Surface a one-line nudge early in the conversation; it
   // self-retires once the thread grows past a couple of messages, so it never
@@ -340,11 +350,47 @@ export function MessageList({
     return () => ro.disconnect()
   }, [])
 
+  // ── The one floating offer at the foot of the pane ──────────────────────
+  const {
+    canReturn,
+    remember: rememberReturn,
+    takeReturn,
+    forget: forgetReturn,
+  } = useJumpHistory(sessionId)
+  // A jump's own scrolling is indistinguishable from the user's at the event
+  // level, so it is fenced off by time instead. Overshooting the settle just
+  // keeps the offer a moment longer than needed; undershooting drops it, which
+  // is the safe direction (the offer disappears, nothing goes wrong).
+  const programmaticScrollUntilRef = useRef(0)
+
   const handleScroll = useCallback(() => {
     const el = scrollParentRef.current
     if (!el) return
     setIsAtBottom(el.scrollHeight - el.scrollTop - el.clientHeight < 32)
-  }, [])
+    // Scrolling by hand IS choosing a new place to be, which retires the offer
+    // to go back to the old one. Guarded inside the hook so this costs no
+    // re-render on the frames where nothing is on offer.
+    if (Date.now() < programmaticScrollUntilRef.current) return
+    forgetReturn()
+  }, [forgetReturn])
+
+  // New replies that landed while the user was reading further up. Reset the
+  // moment they return to the bottom — they have seen them.
+  const [newSinceScrollUp, setNewSinceScrollUp] = useState(0)
+  const unreadBaselineRef = useRef<number | null>(null)
+  useEffect(() => {
+    if (isAtBottom) {
+      unreadBaselineRef.current = null
+      setNewSinceScrollUp((prev) => (prev === 0 ? prev : 0))
+      return
+    }
+    if (unreadBaselineRef.current == null) {
+      unreadBaselineRef.current = messages.length
+      return
+    }
+    const next = Math.max(0, messages.length - unreadBaselineRef.current)
+    setNewSinceScrollUp((prev) => (prev === next ? prev : next))
+  }, [isAtBottom, messages.length])
 
   const scrollToBottom = useCallback(() => {
     const el = scrollParentRef.current
@@ -352,25 +398,58 @@ export function MessageList({
     el.scrollTo({ top: el.scrollHeight, behavior: "smooth" })
   }, [])
 
+  const returnToPreviousPosition = useCallback(() => {
+    const offset = takeReturn()
+    if (offset == null) return
+    scrollParentRef.current?.scrollTo({ top: offset, behavior: "smooth" })
+  }, [takeReturn])
+
+  // One-shot "you landed here" mark. Distinct from the find bar's `activeHitId`
+  // ring, which persists until the user steps to the next match — both can be
+  // on the same row.
+  const { flashId, flashNonce, holdMs: flashHoldMs, flash } = useJumpFlash()
+
   // ── Jump to a message ───────────────────────────────────────────────────
   // The list owns this because jumping needs the scroll container and the
   // virtualizer. It had been written twice — once here for the find bar, once
   // in the timeline minimap — and exposed nowhere, so "go to the message that
   // produced this artifact" had nothing to call. One implementation now, and
   // it is published on `chatViewportStore` for surfaces outside the list.
-  const jumpToMessage = useCallback(
-    (messageId: string, index?: number) => {
+  //
+  // No landing-position correction loop here on purpose: `virtual-core`
+  // (3.17.6, pulled in by react-virtual 3.14.8) already runs its own
+  // `scheduleScrollReconcile` rAF loop that re-targets every frame until the
+  // offset is stable. A second corrector would read the library's in-flight
+  // scroll as drift and fight it.
+  const jumpToMessage = useCallback<JumpToMessage>(
+    (messageId, index, opts) => {
+      const align = opts?.align ?? "center"
       const resolvedIndex = index ?? messages.findIndex((message) => message.id === messageId)
-      if (virtualize && resolvedIndex >= 0) {
-        rowVirtualizer.scrollToIndex(resolvedIndex, { align: "center" })
-        return
+      const from = scrollParentRef.current?.scrollTop ?? 0
+
+      // Everything the jump then does emits scroll events. `handleScroll` reads
+      // those as the user choosing a new place and drops the return offer we
+      // are about to make, so suppress that for the settle window.
+      const arriveFrom = () => {
+        programmaticScrollUntilRef.current = Date.now() + PROGRAMMATIC_SCROLL_MS
+        rememberReturn(from)
+        flash(messageId)
       }
-      const selector = `[data-msg-id="${messageId.replace(/["\\]/g, "\\$&")}"]`
-      scrollParentRef.current
-        ?.querySelector<HTMLElement>(selector)
-        ?.scrollIntoView({ behavior: "smooth", block: "center" })
+
+      if (virtualize && resolvedIndex >= 0) {
+        arriveFrom()
+        rowVirtualizer.scrollToIndex(resolvedIndex, { align })
+        return true
+      }
+      // Document-flow lists, and the virtualized case where the id resolved to
+      // no row at all (compacted away / another session's message).
+      const node = findMessageAnchor(scrollParentRef.current, messageId)
+      if (!node) return false
+      arriveFrom()
+      node.scrollIntoView({ behavior: "smooth", block: align })
+      return true
     },
-    [messages, virtualize, rowVirtualizer]
+    [messages, virtualize, rowVirtualizer, flash, rememberReturn]
   )
 
   // Only the primary list publishes: the dock hosts its own per-resource chat
@@ -386,9 +465,17 @@ export function MessageList({
   const [searchOpen, setSearchOpen] = useState(false)
   const [activeHitId, setActiveHitId] = useState<string | null>(null)
 
+  // A search hit is a point of interest, not a reading start — centre it.
+  // A hit comes from the rendered set so it normally resolves, but the index
+  // can go stale between the search and the click (a streaming turn, a
+  // compaction) — and the store's contract is that callers surface `false`.
   const jumpToHit = useCallback(
-    (hit: MessageSearchHit) => jumpToMessage(hit.id, hit.index),
-    [jumpToMessage]
+    (hit: MessageSearchHit) => {
+      const landed = jumpToMessage(hit.id, hit.index, { align: "center" })
+      if (!landed) toast.error(tJump("notFound"))
+      return landed
+    },
+    [jumpToMessage, tJump]
   )
 
   const closeSearch = useCallback(() => {
@@ -495,28 +582,72 @@ export function MessageList({
           </div>
         ) : null}
         <div className="relative flex flex-1 overflow-hidden">
-          <div
-            ref={scrollParentRef}
-            className="relative flex-1 overflow-y-auto overscroll-contain"
-            role="log"
-            onScroll={handleScroll}
-          >
+          {/* The message lane. The timeline rail is a sibling of THIS, not of
+              the scroller, so the jump pill centres over the reading column
+              rather than over the column plus a 256px expanded panel. */}
+          <div className="relative flex min-w-0 flex-1">
             <div
-              ref={contentRef}
-              className="mx-auto w-full max-w-[52rem] py-5 sm:py-7"
-              data-slot="conversation-reading-column"
+              ref={scrollParentRef}
+              className="relative flex-1 overflow-y-auto overscroll-contain"
+              role="log"
+              onScroll={handleScroll}
             >
-              {virtualize ? (
-                <div style={{ height: totalSize, position: "relative" }}>
-                  {virtualItems.map((virtualItem) => {
-                    const isThinkingRow = virtualItem.index === messages.length
-                    if (isThinkingRow) {
+              <div
+                ref={contentRef}
+                className="mx-auto w-full max-w-[52rem] py-5 sm:py-7"
+                data-slot="conversation-reading-column"
+              >
+                {virtualize ? (
+                  <div style={{ height: totalSize, position: "relative" }}>
+                    {virtualItems.map((virtualItem) => {
+                      const isThinkingRow = virtualItem.index === messages.length
+                      if (isThinkingRow) {
+                        return (
+                          <div
+                            key="thinking"
+                            data-index={virtualItem.index}
+                            ref={rowVirtualizer.measureElement}
+                            className="px-3 sm:px-5"
+                            style={{
+                              position: "absolute",
+                              top: 0,
+                              left: 0,
+                              width: "100%",
+                              transform: `translateY(${virtualItem.start}px)`,
+                            }}
+                          >
+                            <ChatThinkingIndicator
+                              directCharacter={directCharacter}
+                              onPhaseChange={pinToBottom}
+                              compact={thinking === "compact"}
+                            />
+                          </div>
+                        )
+                      }
+
+                      const m = messages[virtualItem.index]!
+                      const isStreaming =
+                        virtualItem.index === lastIndex &&
+                        m.role === "assistant" &&
+                        (status === "streaming" || status === "awaiting_approval")
+                      const isStreamingMeasureSkip = virtualItem.index === streamingRowIndex
+
                       return (
                         <div
-                          key="thinking"
+                          key={m.id}
                           data-index={virtualItem.index}
-                          ref={rowVirtualizer.measureElement}
-                          className="px-3 sm:px-5"
+                          // Same anchor attribute the document-flow branch emits.
+                          // Without it, every DOM-path jump (and the timeline's
+                          // own fallback) silently resolved to nothing as soon as
+                          // the list crossed VIRTUALIZE_THRESHOLD.
+                          data-msg-id={m.id}
+                          data-search-hit={m.id === activeHitId ? "" : undefined}
+                          ref={isStreamingMeasureSkip ? undefined : rowVirtualizer.measureElement}
+                          className={cn(
+                            "px-3 sm:px-5",
+                            m.id === activeHitId &&
+                              "rounded-md ring-2 ring-primary/60 ring-offset-2 ring-offset-background"
+                          )}
                           style={{
                             position: "absolute",
                             top: 0,
@@ -525,95 +656,69 @@ export function MessageList({
                             transform: `translateY(${virtualItem.start}px)`,
                           }}
                         >
-                          <ChatThinkingIndicator
-                            directCharacter={directCharacter}
-                            onPhaseChange={pinToBottom}
-                            compact={thinking === "compact"}
-                          />
+                          {m.id === flashId && (
+                            <JumpFlash nonce={flashNonce} holdMs={flashHoldMs} />
+                          )}
+                          {renderRow(m, isStreaming)}
                         </div>
                       )
-                    }
-
-                    const m = messages[virtualItem.index]!
-                    const isStreaming =
-                      virtualItem.index === lastIndex &&
-                      m.role === "assistant" &&
-                      (status === "streaming" || status === "awaiting_approval")
-                    const isStreamingMeasureSkip = virtualItem.index === streamingRowIndex
-
-                    return (
-                      <div
-                        key={m.id}
-                        data-index={virtualItem.index}
-                        data-search-hit={m.id === activeHitId ? "" : undefined}
-                        ref={isStreamingMeasureSkip ? undefined : rowVirtualizer.measureElement}
-                        className={cn(
-                          "px-3 sm:px-5",
-                          m.id === activeHitId &&
-                            "rounded-md ring-2 ring-primary/60 ring-offset-2 ring-offset-background"
-                        )}
-                        style={{
-                          position: "absolute",
-                          top: 0,
-                          left: 0,
-                          width: "100%",
-                          transform: `translateY(${virtualItem.start}px)`,
-                        }}
-                      >
-                        {renderRow(m, isStreaming)}
+                    })}
+                  </div>
+                ) : (
+                  // Document-flow path for short lists: intrinsic heights, no
+                  // absolute positioning, no measureElement ref (zero ResizeObservers),
+                  // no remount-on-scroll.
+                  <div>
+                    {messages.map((m, index) => {
+                      const isStreaming =
+                        index === lastIndex &&
+                        m.role === "assistant" &&
+                        (status === "streaming" || status === "awaiting_approval")
+                      return (
+                        <div
+                          key={m.id}
+                          data-msg-id={m.id}
+                          data-search-hit={m.id === activeHitId ? "" : undefined}
+                          className={cn(
+                            // `relative` so the landing mark can overlay this row.
+                            // The virtualized branch is already a containing block
+                            // via its inline `position: absolute`.
+                            "relative px-3 sm:px-5",
+                            m.id === activeHitId &&
+                              "rounded-md ring-2 ring-primary/60 ring-offset-2 ring-offset-background"
+                          )}
+                        >
+                          {m.id === flashId && (
+                            <JumpFlash nonce={flashNonce} holdMs={flashHoldMs} />
+                          )}
+                          {renderRow(m, isStreaming)}
+                        </div>
+                      )
+                    })}
+                    {showThinking && (
+                      <div key="thinking" className="px-3 sm:px-5">
+                        <ChatThinkingIndicator
+                          directCharacter={directCharacter}
+                          onPhaseChange={pinToBottom}
+                          compact={thinking === "compact"}
+                        />
                       </div>
-                    )
-                  })}
-                </div>
-              ) : (
-                // Document-flow path for short lists: intrinsic heights, no
-                // absolute positioning, no measureElement ref (zero ResizeObservers),
-                // no remount-on-scroll.
-                <div>
-                  {messages.map((m, index) => {
-                    const isStreaming =
-                      index === lastIndex &&
-                      m.role === "assistant" &&
-                      (status === "streaming" || status === "awaiting_approval")
-                    return (
-                      <div
-                        key={m.id}
-                        data-msg-id={m.id}
-                        data-search-hit={m.id === activeHitId ? "" : undefined}
-                        className={cn(
-                          "px-3 sm:px-5",
-                          m.id === activeHitId &&
-                            "rounded-md ring-2 ring-primary/60 ring-offset-2 ring-offset-background"
-                        )}
-                      >
-                        {renderRow(m, isStreaming)}
-                      </div>
-                    )
-                  })}
-                  {showThinking && (
-                    <div key="thinking" className="px-3 sm:px-5">
-                      <ChatThinkingIndicator
-                        directCharacter={directCharacter}
-                        onPhaseChange={pinToBottom}
-                        compact={thinking === "compact"}
-                      />
-                    </div>
-                  )}
-                </div>
-              )}
+                    )}
+                  </div>
+                )}
+              </div>
             </div>
-
-            {!isAtBottom && (
-              <Button
-                className="absolute bottom-4 left-1/2 -translate-x-1/2 rounded-full dark:bg-background dark:hover:bg-muted"
-                onClick={scrollToBottom}
-                size="icon"
-                type="button"
-                variant="outline"
-              >
-                <ArrowDownIcon className="size-4" />
-              </Button>
-            )}
+            {/* Outside the scroller on purpose — see ConversationJumpPill. */}
+            <ConversationJumpPill
+              mode={resolveJumpPillMode({
+                atBottom: isAtBottom,
+                canReturn,
+                newMessageCount: newSinceScrollUp,
+              })}
+              newMessageCount={newSinceScrollUp}
+              onReturn={returnToPreviousPosition}
+              onToBottom={scrollToBottom}
+            />
           </div>
           {/* Renders nothing — it exists to absorb the per-frame scroll sync
               and publish only the turn changes. Unconditional (unlike the

@@ -5,6 +5,8 @@
   "branchVariants": "回复版本",
   "copy": "复制文本",
   "copyFailed": "复制失败：{message}",
+  "copyLink": "复制消息链接",
+  "copyLinkSuccess": "消息链接已复制。",
   "copySuccess": "已复制到剪贴板。",
   "delete": "删除消息",
   "deleteConfirm": "删除",

@@ -6,7 +6,19 @@ import type { Virtualizer } from "@tanstack/react-virtual"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { useAppShortcut } from "@/hooks/shortcuts/use-app-shortcut"
 import { getAppShortcutDescriptor } from "@/lib/shortcuts/app-catalog"
-import { ConversationTimeline, nearestTurnIndex } from "./conversation-timeline"
+import { useChatViewportStore } from "@/stores/chat/chat-viewport-store"
+import { ConversationTimeline, nearestTurnIndex, scrollTopForThumb } from "./conversation-timeline"
+
+/**
+ * Move the pointer over `el`. jsdom implements no `PointerEvent`, so
+ * `fireEvent.pointerMove` falls back to a bare `Event` and silently drops
+ * `clientY` — the one field the rail reads. A `MouseEvent` carrying the right
+ * type gives React's `onPointerMove` everything it needs. (Leave events need no
+ * coordinates, so those still go through `fireEvent` directly.)
+ */
+function firePointer(el: Element, clientY: number) {
+  fireEvent(el, new MouseEvent("pointermove", { clientY, bubbles: true }))
+}
 
 /** The handler the component registered for `id`, or undefined if it didn't. */
 function shortcutHandler(id: string): ((event: KeyboardEvent) => void) | undefined {
@@ -18,6 +30,8 @@ jest.mock("next-intl", () => ({
   useTranslations: () => (key: string, vars?: Record<string, unknown>) =>
     vars ? `${key}:${JSON.stringify(vars)}` : key,
 }))
+
+jest.mock("sonner", () => ({ toast: { error: jest.fn(), success: jest.fn() } }))
 
 let mockSettings: Record<string, unknown> | null
 const mockSave = jest.fn()
@@ -105,6 +119,7 @@ function mockRailRect(top = 0, height = 200) {
 
 beforeEach(() => {
   mockSave.mockClear()
+  jest.requireMock("sonner").toast.error.mockClear()
   mockSettings = { conversationTimeline: { expanded: false } }
   mockBookmarkedIds = []
 })
@@ -125,13 +140,15 @@ describe("ConversationTimeline", () => {
     expect(screen.queryByLabelText("collapse")).not.toBeInTheDocument()
   })
 
-  // The collapsed rail is 16px and lives in the scrollbar gutter, so it has
-  // nothing to displace and stays overlaid.
-  it("overlays the collapsed rail, gated on the pane container query", () => {
+  // The collapsed rail used to be `absolute right-0`, which parked it directly
+  // on top of the message list's native scrollbar — so on any platform with
+  // classic (non-overlay) scrollbars it swallowed every scrollbar drag. It now
+  // takes its own 16px lane, which costs the reading column almost nothing.
+  it("gives the collapsed rail its own lane instead of overlaying the scrollbar", () => {
     renderTimeline()
     const root = screen.getByTestId("conversation-timeline")
-    expect(root).toHaveClass("absolute", "@4xl/message-list:flex")
-    expect(root).not.toHaveClass("shrink-0")
+    expect(root).toHaveClass("relative", "shrink-0", "w-4", "@4xl/message-list:flex")
+    expect(root).not.toHaveClass("absolute")
   })
 
   // The expanded panel is 256px. Overlaid, it simply covered the message text
@@ -231,7 +248,7 @@ describe("ConversationTimeline", () => {
     renderTimeline()
     const rail = mockRailRect()
     // Bottom of the rail → nearest the second user turn.
-    fireEvent.mouseMove(rail, { clientY: 200 })
+    firePointer(rail, 200)
     const card = screen.getByTestId("timeline-scrub-card")
     expect(card).toHaveTextContent("Second follow up")
     // Still collapsed: no expanded chrome, no jump buttons.
@@ -243,7 +260,7 @@ describe("ConversationTimeline", () => {
   it("scrub card resolves the top turn (with its time) near the rail top", () => {
     renderTimeline()
     const rail = mockRailRect()
-    fireEvent.mouseMove(rail, { clientY: 0 })
+    firePointer(rail, 0)
     const card = screen.getByTestId("timeline-scrub-card")
     // u1 carries a 2023 createdAt → cross-year date prefix is shown.
     expect(card).toHaveTextContent("First question about the build")
@@ -253,13 +270,13 @@ describe("ConversationTimeline", () => {
   it("leaving the rail clears the scrub card; a zero-size rail shows none", () => {
     renderTimeline()
     const rail = mockRailRect()
-    fireEvent.mouseMove(rail, { clientY: 100 })
+    firePointer(rail, 100)
     expect(screen.getByTestId("timeline-scrub-card")).toBeInTheDocument()
-    fireEvent.mouseLeave(rail)
+    fireEvent.pointerLeave(rail)
     expect(screen.queryByTestId("timeline-scrub-card")).not.toBeInTheDocument()
     // A zero-height rail (un-laid-out) → handler bails, no card.
     rail.getBoundingClientRect = (() => ({ top: 0, height: 0 })) as never
-    fireEvent.mouseMove(rail, { clientY: 100 })
+    firePointer(rail, 100)
     expect(screen.queryByTestId("timeline-scrub-card")).not.toBeInTheDocument()
   })
 
@@ -378,7 +395,7 @@ describe("ConversationTimeline", () => {
     const scrollToIndex = jest.fn()
     renderTimeline({ virtualize: true, virtualizer: makeVirtualizer(scrollToIndex) })
     const rail = mockRailRect()
-    fireEvent.mouseMove(rail, { clientY: 200 })
+    firePointer(rail, 200)
     fireEvent.click(rail)
     // Second user turn is at message index 2.
     expect(scrollToIndex).toHaveBeenCalledWith(2, { align: "start" })
@@ -405,7 +422,7 @@ describe("ConversationTimeline", () => {
       </TooltipProvider>
     )
     const rail = mockRailRect()
-    fireEvent.mouseMove(rail, { clientY: 0 })
+    firePointer(rail, 0)
     fireEvent.click(rail)
     expect(scrollIntoView).toHaveBeenCalledWith({ behavior: "smooth", block: "start" })
   })
@@ -459,5 +476,312 @@ describe("nearestTurnIndex", () => {
 
     expect(nearestTurnIndex(0.61, positions, positions.length)).toBeCloseTo(2_498, -1)
     expect(reads).toBeLessThan(30)
+  })
+})
+
+describe("scrollTopForThumb", () => {
+  const base = { railHeight: 200, totalSize: 1000, maxScrollTop: 800 }
+
+  it("maps the rail onto the scrollable range, the inverse of how the thumb is placed", () => {
+    expect(scrollTopForThumb({ ...base, thumbTop: 0 })).toBe(0)
+    expect(scrollTopForThumb({ ...base, thumbTop: 100 })).toBe(500)
+  })
+
+  it("clamps to the real scroll ceiling rather than the content height", () => {
+    // The last viewport-height of content cannot be scrolled past. Without this
+    // the bottom of the rail maps to an offset the container silently refuses
+    // and the thumb sticks short of where the pointer is.
+    expect(scrollTopForThumb({ ...base, thumbTop: 200 })).toBe(800)
+    expect(scrollTopForThumb({ ...base, thumbTop: 5000 })).toBe(800)
+  })
+
+  it("clamps a pointer dragged above the rail to the top", () => {
+    expect(scrollTopForThumb({ ...base, thumbTop: -50 })).toBe(0)
+  })
+
+  it("returns 0 rather than NaN before anything has been laid out", () => {
+    expect(scrollTopForThumb({ ...base, thumbTop: 100, railHeight: 0 })).toBe(0)
+    expect(scrollTopForThumb({ ...base, thumbTop: 100, totalSize: 0 })).toBe(0)
+  })
+
+  it("never returns a negative offset even with a nonsense ceiling", () => {
+    expect(scrollTopForThumb({ ...base, thumbTop: 100, maxScrollTop: -10 })).toBe(0)
+  })
+})
+
+describe("ConversationTimeline — dragging the viewport thumb", () => {
+  /** A real scroll container so the drag has something to move. */
+  function renderWithScroller(opts?: { virtualize?: boolean }) {
+    const scroller = document.createElement("div")
+    Object.defineProperty(scroller, "scrollHeight", { value: 1000, configurable: true })
+    Object.defineProperty(scroller, "clientHeight", { value: 200, configurable: true })
+    let top = 0
+    Object.defineProperty(scroller, "scrollTop", {
+      configurable: true,
+      get: () => top,
+      set: (v: number) => {
+        top = v
+      },
+    })
+    document.body.append(scroller)
+
+    render(
+      <TooltipProvider>
+        <ConversationTimeline
+          messages={[
+            msg("u1", "user", "First question"),
+            msg("a1", "assistant", "answer one"),
+            msg("u2", "user", "Second follow up"),
+            msg("a2", "assistant", "answer two"),
+          ]}
+          scrollRef={{ current: scroller as HTMLDivElement }}
+          virtualizer={makeVirtualizer()}
+          virtualize={opts?.virtualize ?? false}
+        />
+      </TooltipProvider>
+    )
+    return {
+      scroller,
+      get scrollTop() {
+        return top
+      },
+    }
+  }
+
+  function grabThumb(clientY: number) {
+    const thumb = screen.getByTestId("timeline-viewport-thumb")
+    thumb.getBoundingClientRect = (() => ({
+      top: 0,
+      height: 40,
+      bottom: 40,
+      left: 0,
+      right: 16,
+      width: 16,
+      x: 0,
+      y: 0,
+      toJSON() {},
+    })) as () => DOMRect
+    fireEvent(thumb, new MouseEvent("pointerdown", { clientY, bubbles: true }))
+    return thumb
+  }
+
+  const dragTo = (thumb: Element, clientY: number) =>
+    fireEvent(thumb, new MouseEvent("pointermove", { clientY, bubbles: true }))
+
+  it("scrolls the conversation as the thumb is dragged", () => {
+    const view = renderWithScroller()
+    mockRailRect(0, 200)
+    const thumb = grabThumb(0)
+
+    dragTo(thumb, 100)
+    // Half way down a 200px rail over 1000px of content.
+    expect(view.scrollTop).toBe(500)
+
+    dragTo(thumb, 40)
+    expect(view.scrollTop).toBe(200)
+  })
+
+  it("keeps the grab point under the pointer instead of snapping the thumb", () => {
+    // Grabbing 30px into the thumb and moving to y=130 should put the thumb TOP
+    // at 100, not 130 — otherwise the content lurches on mousedown.
+    const view = renderWithScroller()
+    mockRailRect(0, 200)
+    const thumb = grabThumb(30)
+
+    dragTo(thumb, 130)
+    expect(view.scrollTop).toBe(500)
+  })
+
+  it("ignores pointer movement when the thumb was never grabbed", () => {
+    const view = renderWithScroller()
+    mockRailRect(0, 200)
+    const thumb = screen.getByTestId("timeline-viewport-thumb")
+    dragTo(thumb, 100)
+    expect(view.scrollTop).toBe(0)
+  })
+
+  it("stops scrolling once the pointer is released", () => {
+    const view = renderWithScroller()
+    mockRailRect(0, 200)
+    const thumb = grabThumb(0)
+    dragTo(thumb, 100)
+    fireEvent(thumb, new MouseEvent("pointerup", { clientY: 100, bubbles: true }))
+
+    dragTo(thumb, 20)
+    expect(view.scrollTop).toBe(500)
+  })
+
+  it("suppresses the scrub card while dragging", () => {
+    // The card would otherwise chase the pointer on top of the drag it is
+    // sitting on.
+    renderWithScroller()
+    const rail = mockRailRect(0, 200)
+    const thumb = grabThumb(0)
+    dragTo(thumb, 100)
+
+    firePointer(rail, 100)
+    expect(screen.queryByTestId("timeline-scrub-card")).not.toBeInTheDocument()
+  })
+
+  it("does not jump to a turn on the click that ends a drag", () => {
+    // A drag finishes with a click on the rail; treating it as click-to-jump
+    // would undo the drag the user just performed.
+    const virtualizer = makeVirtualizer()
+    const scroller = document.createElement("div")
+    Object.defineProperty(scroller, "scrollHeight", { value: 1000, configurable: true })
+    Object.defineProperty(scroller, "clientHeight", { value: 200, configurable: true })
+    document.body.append(scroller)
+    render(
+      <TooltipProvider>
+        <ConversationTimeline
+          messages={[msg("u1", "user", "First"), msg("u2", "user", "Second")]}
+          scrollRef={{ current: scroller as HTMLDivElement }}
+          virtualizer={virtualizer}
+          virtualize
+        />
+      </TooltipProvider>
+    )
+    const rail = mockRailRect(0, 200)
+    const thumb = grabThumb(0)
+    dragTo(thumb, 100)
+    fireEvent.click(rail)
+
+    expect(virtualizer.scrollToIndex).not.toHaveBeenCalled()
+  })
+})
+
+describe("ConversationTimeline — the expanded panel", () => {
+  /** A real scroll container, so the scroll-sync produces a real active turn. */
+  function renderExpanded(messages: UIMessage[]) {
+    const scroller = document.createElement("div")
+    Object.defineProperty(scroller, "scrollHeight", { value: 1000, configurable: true })
+    Object.defineProperty(scroller, "clientHeight", { value: 200, configurable: true })
+    document.body.append(scroller)
+    mockSettings = { conversationTimeline: { expanded: true } }
+    render(
+      <TooltipProvider>
+        <ConversationTimeline
+          messages={messages}
+          scrollRef={{ current: scroller as HTMLDivElement }}
+          virtualizer={makeVirtualizer()}
+          virtualize={false}
+        />
+      </TooltipProvider>
+    )
+    return scroller
+  }
+
+  const dayMs = (day: number, hour = 12) => new Date(2024, 5, day, hour).getTime()
+
+  it("marks where each calendar day starts", () => {
+    // A hundred rows of bare clock times say nothing about when anything
+    // happened in a conversation resumed across days.
+    renderExpanded([
+      msg("u1", "user", "Monday morning", { metadata: { createdAt: dayMs(17, 9) } }),
+      msg("a1", "assistant", "reply"),
+      msg("u2", "user", "Monday evening", { metadata: { createdAt: dayMs(17, 20) } }),
+      msg("a2", "assistant", "reply"),
+      msg("u3", "user", "Tuesday", { metadata: { createdAt: dayMs(18, 9) } }),
+    ])
+    // Two days → two headers, not one per row.
+    expect(screen.getAllByTestId("timeline-date-header")).toHaveLength(2)
+  })
+
+  it("renders no headers when nothing carries a timestamp", () => {
+    renderExpanded([msg("u1", "user", "no time"), msg("a1", "assistant", "reply")])
+    expect(screen.queryAllByTestId("timeline-date-header")).toHaveLength(0)
+  })
+
+  it("centres the turn the reader is on instead of opening at turn one", () => {
+    // Opening a 200-turn panel at turn 1 is useless: the one thing the reader
+    // already knows is where they are, and that is what the panel should show.
+    const original = Element.prototype.scrollIntoView
+    const scrollIntoView = jest.fn()
+    Element.prototype.scrollIntoView = scrollIntoView
+    try {
+      renderExpanded([
+        msg("u1", "user", "first"),
+        msg("a1", "assistant", "reply"),
+        msg("u2", "user", "second"),
+        msg("a2", "assistant", "reply"),
+      ])
+      expect(scrollIntoView).toHaveBeenCalledWith({ block: "center" })
+    } finally {
+      Element.prototype.scrollIntoView = original
+    }
+  })
+
+  it("jumps to the starred reply, not to the question above it", () => {
+    // Starring an assistant reply is how you mark an ANSWER worth returning to.
+    // The panel only ever jumped to the question that opened the turn, so the
+    // one thing you bookmarked was the one thing the bookmark could not reach.
+    mockBookmarkedIds = ["a1"]
+    const jump = jest.fn(() => true)
+    useChatViewportStore.setState({ jumpToMessage: jump })
+    try {
+      renderExpanded([
+        msg("u1", "user", "the question"),
+        msg("a1", "assistant", "the answer worth keeping"),
+      ])
+      fireEvent.click(screen.getByRole("button", { name: /^jumpTo:/ }))
+      expect(jump).toHaveBeenCalledWith("a1", undefined, { align: "start" })
+    } finally {
+      useChatViewportStore.setState({ jumpToMessage: null })
+    }
+  })
+
+  it("labels the row so the star is explained rather than just coloured", () => {
+    mockBookmarkedIds = ["a1"]
+    renderExpanded([
+      msg("u1", "user", "the question"),
+      msg("a1", "assistant", "the answer worth keeping"),
+    ])
+    expect(screen.getByTestId("timeline-starred-reply")).toBeInTheDocument()
+  })
+
+  it("still jumps to the question when the star is on the question itself", () => {
+    mockBookmarkedIds = ["u1"]
+    const jump = jest.fn(() => true)
+    useChatViewportStore.setState({ jumpToMessage: jump })
+    try {
+      renderExpanded([msg("u1", "user", "the question"), msg("a1", "assistant", "reply")])
+      fireEvent.click(screen.getByRole("button", { name: /^jumpTo:/ }))
+      // Index fast-path retained: the turn's own anchor knows its row.
+      expect(jump).toHaveBeenCalledWith("u1", 0, { align: "start" })
+      expect(screen.queryByTestId("timeline-starred-reply")).not.toBeInTheDocument()
+    } finally {
+      useChatViewportStore.setState({ jumpToMessage: null })
+    }
+  })
+
+  it("reports a jump that cannot resolve instead of looking inert", () => {
+    // `jumpToMessage` returns false for a row it cannot reach, and the store
+    // documents that callers must surface it. The starred-reply branch passes
+    // `index: undefined` — the case that has to resolve by id and can miss — so
+    // swallowing it made the rail look dead on exactly the rows it exists for.
+    const { toast } = jest.requireMock("sonner")
+    mockBookmarkedIds = ["a1"]
+    const jump = jest.fn(() => false)
+    useChatViewportStore.setState({ jumpToMessage: jump })
+    try {
+      renderExpanded([msg("u1", "user", "the question"), msg("a1", "assistant", "the answer")])
+      fireEvent.click(screen.getByRole("button", { name: /^jumpTo:/ }))
+      expect(toast.error).toHaveBeenCalledWith("notFound")
+    } finally {
+      useChatViewportStore.setState({ jumpToMessage: null })
+    }
+  })
+
+  it("stays quiet when the jump lands", () => {
+    const { toast } = jest.requireMock("sonner")
+    const jump = jest.fn(() => true)
+    useChatViewportStore.setState({ jumpToMessage: jump })
+    try {
+      renderExpanded([msg("u1", "user", "the question"), msg("a1", "assistant", "reply")])
+      fireEvent.click(screen.getByRole("button", { name: /^jumpTo:/ }))
+      expect(toast.error).not.toHaveBeenCalled()
+    } finally {
+      useChatViewportStore.setState({ jumpToMessage: null })
+    }
   })
 })

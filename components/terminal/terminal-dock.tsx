@@ -57,6 +57,7 @@ import { TerminalShellPicker } from "./terminal-shell-picker"
 import { TerminalTabContextMenu } from "./terminal-tab-context-menu"
 import { TerminalTabStrip } from "./terminal-tab-strip"
 import { PluginExtensionSlot } from "@/components/plugins/plugin-extension-slot"
+import { messagePermalinkQuery } from "@/lib/chat/message-permalink"
 
 export function TerminalDock() {
   const t = useTranslations("terminal.dock")
@@ -362,11 +363,18 @@ export function TerminalDock() {
   // Locate the chat session that spawned an agent-driven terminal tab.
   // The dock is global across routes, so switch the active chat session
   // AND navigate to the chat view (root route).
+  //
+  // With a spawning message recorded, route through the message permalink
+  // instead: the chat page consumes it and scrolls to that turn. ADR-0033
+  // deferred exactly this for want of a scroll-to-message seam. Falling back to
+  // the plain route keeps tabs spawned before the field existed working.
   const router = useRouter()
   const handleLocateInChat = useCallback(
-    (chatSessionId: string) => {
+    (chatSessionId: string, messageId?: string | null) => {
       useChatStore.getState().setActiveSession(chatSessionId)
-      router.push("/")
+      router.push(
+        messageId ? `/${messagePermalinkQuery({ sessionId: chatSessionId, messageId })}` : "/"
+      )
     },
     [router]
   )

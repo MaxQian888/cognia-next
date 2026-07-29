@@ -28,9 +28,19 @@ jest.mock("dexie-react-hooks", () => ({
   },
 }))
 
+// The cross-session wait has its own suite (`lib/chat/cross-session-jump.test.ts`);
+// here we only care that the chip delegates to it and reports a miss.
+const jumpToSessionMessageMock = jest.fn(async () => true)
+jest.mock("@/lib/chat/cross-session-jump", () => ({
+  __esModule: true,
+  jumpToSessionMessage: (...args: unknown[]) => jumpToSessionMessageMock(...(args as [])),
+}))
+
+const toastErrorMock = jest.fn()
+jest.mock("sonner", () => ({ toast: { error: (...args: unknown[]) => toastErrorMock(...args) } }))
+
 import { BranchLineageChip } from "./branch-lineage-chip"
 import { useChatStore } from "@/stores/chat"
-import { useChatViewportStore } from "@/stores/chat/chat-viewport-store"
 
 function session(extra: Partial<ChatSession> = {}): ChatSession {
   return {
@@ -44,8 +54,8 @@ function session(extra: Partial<ChatSession> = {}): ChatSession {
 
 beforeEach(() => {
   jest.clearAllMocks()
+  jumpToSessionMessageMock.mockResolvedValue(true)
   useChatStore.setState({ activeSessionId: "child" })
-  useChatViewportStore.setState({ jumpToMessage: null })
 })
 
 describe("BranchLineageChip", () => {
@@ -65,27 +75,47 @@ describe("BranchLineageChip", () => {
     expect(await screen.findByText('lineage:{"title":"lineageUnknownParent"}')).toBeInTheDocument()
   })
 
-  it("activates the parent and lands on the branch point", async () => {
-    const jumpToMessage = jest.fn(() => true)
-    useChatViewportStore.setState({ jumpToMessage })
+  it("lands on the branch point through the hydration-aware jump", async () => {
+    // Not one animation frame: the parent's history may not have loaded, and a
+    // jump fired before it does reports a miss for a message that exists.
     render(
       <BranchLineageChip
         session={session({ parentSessionId: "parent", branchedFromMessageId: "m7" })}
       />
     )
     fireEvent.click(screen.getByTestId("branch-lineage-chip"))
-    expect(useChatStore.getState().activeSessionId).toBe("parent")
-    // The jump is deferred to the next frame so it runs against the parent's
-    // freshly-mounted message list.
-    await waitFor(() => expect(jumpToMessage).toHaveBeenCalledWith("m7"))
+    await waitFor(() =>
+      expect(jumpToSessionMessageMock).toHaveBeenCalledWith("parent", "m7", { align: "center" })
+    )
+    expect(toastErrorMock).not.toHaveBeenCalled()
+  })
+
+  it("says so when the branch point is no longer in the parent", async () => {
+    jumpToSessionMessageMock.mockResolvedValue(false)
+    render(
+      <BranchLineageChip
+        session={session({ parentSessionId: "parent", branchedFromMessageId: "m7" })}
+      />
+    )
+    fireEvent.click(screen.getByTestId("branch-lineage-chip"))
+    await waitFor(() => expect(toastErrorMock).toHaveBeenCalledWith("lineageAnchorMissing"))
   })
 
   it("still switches sessions when the branch point was never recorded", async () => {
-    const jumpToMessage = jest.fn(() => true)
-    useChatViewportStore.setState({ jumpToMessage })
     render(<BranchLineageChip session={session({ parentSessionId: "parent" })} />)
     fireEvent.click(screen.getByTestId("branch-lineage-chip"))
     expect(useChatStore.getState().activeSessionId).toBe("parent")
-    await waitFor(() => expect(jumpToMessage).not.toHaveBeenCalled())
+    await waitFor(() => expect(jumpToSessionMessageMock).not.toHaveBeenCalled())
+  })
+
+  it("names a deleted parent in the accessible name too, not only the label", () => {
+    // The visible label fell back correctly while the aria-label degraded to
+    // "…created from, in " — one resolved title now feeds both.
+    getSessionMock.mockResolvedValue(null as never)
+    render(<BranchLineageChip session={session({ parentSessionId: "parent" })} />)
+    expect(screen.getByTestId("branch-lineage-chip")).toHaveAttribute(
+      "aria-label",
+      'ariaLineage:{"title":"lineageUnknownParent"}'
+    )
   })
 })

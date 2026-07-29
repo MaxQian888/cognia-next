@@ -106,9 +106,21 @@ describe("TerminalTabContextMenu", () => {
 
   it("shows Locate in conversation for agent tabs and fires onLocateInChat", () => {
     const onLocateInChat = jest.fn()
+    renderMenu({
+      row: row({ agentSpawner: "chat-9", agentSpawnerMessageId: "msg-4" }),
+      onLocateInChat,
+    })
+    fireEvent.click(screen.getByTestId("terminal-tab-menu-locate"))
+    // The spawning message travels with the session id, so the chat can land on
+    // the turn that opened this tab rather than at the end of the thread.
+    expect(onLocateInChat).toHaveBeenCalledWith("chat-9", "msg-4")
+  })
+
+  it("still locates a tab spawned before the message id was recorded", () => {
+    const onLocateInChat = jest.fn()
     renderMenu({ row: row({ agentSpawner: "chat-9" }), onLocateInChat })
     fireEvent.click(screen.getByTestId("terminal-tab-menu-locate"))
-    expect(onLocateInChat).toHaveBeenCalledWith("chat-9")
+    expect(onLocateInChat).toHaveBeenCalledWith("chat-9", undefined)
   })
 
   it("omits the edit group when no clipboard handlers are passed", () => {

@@ -6,6 +6,8 @@ import { render, screen, fireEvent, act } from "@testing-library/react"
 
 let workspaceAvailable = true
 
+jest.mock("sonner", () => ({ toast: { error: jest.fn(), success: jest.fn() } }))
+
 jest.mock("next-intl", () => ({
   useTranslations: () => (key: string) => key,
 }))
@@ -92,13 +94,14 @@ jest.mock("./artifact-list", () => ({
 
 // `sessions` is the per-session message slice map, always initialised in the
 // real store — the session surface's metadata panel reads a message count off it.
+let mockActiveSessionId: string | null = "sess-1"
 jest.mock("@/stores/chat", () => ({
   useChatStore: (
     selector: (s: {
       activeSessionId: string | null
       sessions: Record<string, { messages: unknown[] }>
     }) => unknown
-  ) => selector({ activeSessionId: "sess-1", sessions: { "sess-1": { messages: [] } } }),
+  ) => selector({ activeSessionId: mockActiveSessionId, sessions: { "sess-1": { messages: [] } } }),
 }))
 
 // The conversation record behind the metadata panel. Absent by default; tests
@@ -109,6 +112,7 @@ jest.mock("@/stores/chat/session-store", () => ({
     selector({ sessions: mockSessionRecord ? [mockSessionRecord] : [] }),
 }))
 
+import { toast } from "sonner"
 import { ArtifactContextWorkbench, ArtifactDock, SessionContextWorkbench } from "./artifact-dock"
 import {
   DOCK_MODE_WIDTH_PERCENT,
@@ -145,6 +149,8 @@ function activateArtifact(version = 1) {
 }
 
 beforeEach(() => {
+  jest.clearAllMocks()
+  mockActiveSessionId = "sess-1"
   localStorage.clear()
   workspaceAvailable = true
   artifactListProps.length = 0
@@ -670,14 +676,31 @@ describe("ArtifactDock — converged workbench shell", () => {
 
   it("offers a jump back to the message an artifact came out of", () => {
     activateArtifact()
-    const jump = jest.fn()
+    const jump = jest.fn(() => true)
     act(() => useChatViewportStore.getState().registerJumpToMessage(jump))
     render(<ArtifactDock />)
 
     fireEvent.click(screen.getByRole("button", { name: "contextWorkbench.metadata.artifactTitle" }))
     fireEvent.click(screen.getByTestId("artifact-source-message-link"))
 
-    expect(jump).toHaveBeenCalledWith("message-1")
+    // Centred: an artifact's source is a point of interest to look at, not a
+    // place to start reading downwards from.
+    expect(jump).toHaveBeenCalledWith("message-1", undefined, { align: "center" })
+    expect(toast.error).not.toHaveBeenCalled()
+  })
+
+  it("says so when the source message is no longer reachable", () => {
+    activateArtifact()
+    // A list is mounted, but this artifact's message is not in it — compacted
+    // away, or owned by a session that is no longer open. Swallowing the click
+    // made the button look broken rather than inapplicable.
+    act(() => useChatViewportStore.getState().registerJumpToMessage(() => false))
+    render(<ArtifactDock />)
+
+    fireEvent.click(screen.getByRole("button", { name: "contextWorkbench.metadata.artifactTitle" }))
+    fireEvent.click(screen.getByTestId("artifact-source-message-link"))
+
+    expect(toast.error).toHaveBeenCalledWith("notFound")
   })
 
   it("hides the source jump when no conversation is mounted to jump within", () => {
@@ -826,5 +849,105 @@ describe("ArtifactDock — converged workbench shell", () => {
     expect(screen.getByTestId("resource-workbench-chat")).toHaveTextContent(
       "Rewrite this selection"
     )
+  })
+})
+
+describe("ArtifactDock — with no conversation open", () => {
+  it("renders the session surface without a session rather than crashing", () => {
+    // Reachable on a cold start, and after closing the last tab. Everything the
+    // surface reads off the active session has to tolerate its absence: the
+    // workbench scope key, the conversation record, the message count, and the
+    // sessionId handed to the embedded panels.
+    mockActiveSessionId = null
+    expect(() => render(<SessionContextWorkbench />)).not.toThrow()
+  })
+})
+
+describe("ArtifactDock — the header tab strip", () => {
+  it("appears once a second artifact is open, and not before", () => {
+    // The strip is the only way back to an artifact you left open, so its
+    // presence is load-bearing rather than decoration — and it deliberately
+    // stays hidden for a single artifact, where it would say nothing.
+    activateArtifact()
+    act(() => {
+      useArtifactStore.setState({ openArtifactIdsBySession: { "sess-1": ["artifact-1"] } })
+    })
+    const single = render(<ArtifactDock />)
+    expect(single.queryByTestId("artifact-tab-strip")).not.toBeInTheDocument()
+    single.unmount()
+
+    act(() => {
+      useArtifactStore.setState((s) => ({
+        artifacts: {
+          ...s.artifacts,
+          "artifact-2": { ...s.artifacts["artifact-1"]!, id: "artifact-2", title: "Second" },
+        },
+        openArtifactIdsBySession: { "sess-1": ["artifact-1", "artifact-2"] },
+      }))
+    })
+    render(<ArtifactDock />)
+    expect(screen.getByTestId("artifact-tab-strip")).toBeInTheDocument()
+  })
+
+  it("carries the strip onto the mobile Sheet host too", () => {
+    // Desktop and mobile pass `headerLeading` from separate call sites, so the
+    // strip going missing on the phone would not show up in the desktop test.
+    activateArtifact()
+    act(() => {
+      useArtifactStore.setState((s) => ({
+        artifacts: {
+          ...s.artifacts,
+          "artifact-2": { ...s.artifacts["artifact-1"]!, id: "artifact-2", title: "Second" },
+        },
+        openArtifactIdsBySession: { "sess-1": ["artifact-1", "artifact-2"] },
+      }))
+    })
+
+    render(
+      <ArtifactContextWorkbench
+        artifactId="artifact-1"
+        mobile={{ open: true, onOpenChange: jest.fn(), panelMode: "mobile" }}
+      />
+    )
+    expect(screen.getByTestId("artifact-tab-strip")).toBeInTheDocument()
+  })
+
+  it("carries the strip onto the session surface's mobile host", () => {
+    act(() => {
+      useArtifactStore.setState({
+        artifacts: {
+          a1: {
+            id: "a1",
+            sessionId: "sess-1",
+            messageId: "m1",
+            type: "document",
+            title: "One",
+            content: "x",
+            version: 1,
+            createdAt: new Date(0),
+            updatedAt: new Date(0),
+          },
+          a2: {
+            id: "a2",
+            sessionId: "sess-1",
+            messageId: "m1",
+            type: "document",
+            title: "Two",
+            content: "y",
+            version: 1,
+            createdAt: new Date(0),
+            updatedAt: new Date(0),
+          },
+        },
+        openArtifactIdsBySession: { "sess-1": ["a1", "a2"] },
+      })
+    })
+
+    render(
+      <SessionContextWorkbench
+        mobile={{ open: true, onOpenChange: jest.fn(), panelMode: "mobile" }}
+      />
+    )
+    expect(screen.getByTestId("artifact-tab-strip")).toBeInTheDocument()
   })
 })

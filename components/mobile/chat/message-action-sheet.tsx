@@ -21,6 +21,7 @@ import {
   PencilIcon,
   QuoteIcon,
   RefreshCcwIcon,
+  LinkIcon,
   Share2Icon,
   SquareIcon,
   Trash2Icon,
@@ -53,6 +54,7 @@ import { useBackDismiss } from "@/hooks/ui/use-back-dismiss"
 import { useReadAloudStatus } from "@/hooks/media/use-read-aloud-status"
 import { share } from "@/lib/capacitor/share"
 import { notify, selectionFeedback } from "@/lib/capacitor/haptics"
+import { buildMessagePermalink } from "@/lib/chat/message-permalink"
 import { writeClipboardText } from "@/lib/tauri/clipboard"
 import { speakChatMessage } from "@/lib/tts/speak-chat-message"
 import { ttsOrchestrator } from "@/lib/tts/tts-orchestrator"
@@ -153,6 +155,28 @@ export function MessageActionSheet({
       await writeClipboardText(text)
       void notify("success")
       toast.success(t("copySuccess"))
+      onOpenChange(false)
+    } catch (err) {
+      void notify("error")
+      toast.error(t("copyFailed", { message: err instanceof Error ? err.message : String(err) }))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  /**
+   * A permalink back into THIS app, not a published share link — the row below
+   * sits next to "Share…" and the two must not be confused.
+   */
+  const onCopyLink = async () => {
+    if (!message || !branchSessionId) return
+    setBusy(true)
+    try {
+      await writeClipboardText(
+        buildMessagePermalink({ sessionId: branchSessionId, messageId: message.id })
+      )
+      void notify("success")
+      toast.success(t("copyLinkSuccess"))
       onOpenChange(false)
     } catch (err) {
       void notify("error")
@@ -329,6 +353,13 @@ export function MessageActionSheet({
             onClick={onShare}
             disabled={busy || !text}
             testid="message-action-share"
+          />
+          <Row
+            icon={<LinkIcon className="size-4" />}
+            label={t("copyLink")}
+            onClick={onCopyLink}
+            disabled={busy || !message || !branchSessionId}
+            testid="message-action-copy-link"
           />
           <Row
             icon={

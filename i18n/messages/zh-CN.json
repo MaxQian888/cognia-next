@@ -4073,6 +4073,7 @@
         "label": "直接分支"
       },
       "lineage": "分叉自 {title}",
+      "lineageAnchorMissing": "该分叉点已不在这个对话里。",
       "lineageUnknownParent": "已删除的对话",
       "summary": {
         "generating": "正在生成摘要……",
