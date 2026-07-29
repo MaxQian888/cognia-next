@@ -355,6 +355,7 @@ describe("call() — idempotency key", () => {
       "codeserver_list_proxies",
       "read_agent_config",
       "session_list",
+      "message_get_by_session",
       "companion_can_control",
       // Wave 4.1 reads.
       "git_is_repo",

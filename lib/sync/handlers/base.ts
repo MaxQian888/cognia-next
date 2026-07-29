@@ -41,9 +41,9 @@ const MAX_PAGES = 100
  * Run a sync-pull + Dexie apply, draining all pages.
  *
  * Most tables return a single delta with no `has_more`, so this does exactly
- * one round-trip. Paged tables (messages) set `has_more` when a page filled
- * to capacity; this loop keeps pulling with the advanced cursor until the
- * server stops setting it, so a long history mirrors in full.
+ * one round-trip. Incremental message pulls and other paged tables set
+ * `has_more` when a page filled to capacity; this loop keeps pulling with the
+ * advanced cursor until the server stops setting it.
  *
  * Returns `{ ok: true, result }` on success, `{ ok: false, failure }`
  * otherwise. Never throws — the caller fans out across tables and renders

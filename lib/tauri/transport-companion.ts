@@ -42,6 +42,7 @@ const READ_ONLY_COMMANDS: ReadonlySet<string> = new Set([
   "codeserver_list_proxies",
   "read_agent_config",
   "session_list",
+  "message_get_by_session",
   "companion_can_control",
   // Channel inventory (LAN / tunnel base URLs + TLS fingerprint) — polled on
   // connect by the endpoint refresher, so it must not be served from the

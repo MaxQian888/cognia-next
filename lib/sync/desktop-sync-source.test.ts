@@ -99,9 +99,9 @@ describe("readDexieDelta", () => {
     )
   })
 
-  it("pages messages by [createdAt+id], ascending, under the page size", async () => {
+  it("folds a cold-start message sync to the newest bounded page", async () => {
     const db = getDb()
-    const rows = Array.from({ length: 250 }, (_, i) => ({
+    const rows = Array.from({ length: 750 }, (_, i) => ({
       id: `m${String(i).padStart(4, "0")}`,
       sessionId: "s",
       createdAt: i + 1,
@@ -110,12 +110,14 @@ describe("readDexieDelta", () => {
     await db.messages.bulkPut(rows)
 
     const delta = await readDexieDelta("messages", 0)
-    // Full history (250 < page size 500) now syncs — no global 200 cap.
-    expect(delta.rows).toHaveLength(250)
+    expect(delta.rows).toHaveLength(500)
     const first = delta.rows[0] as { createdAt: number }
     const last = delta.rows[delta.rows.length - 1] as { createdAt: number }
-    expect(last.createdAt - first.createdAt).toBeGreaterThan(0)
-    expect(delta.next_since).toBe(250)
+    expect(first.createdAt).toBe(251)
+    expect(last.createdAt).toBe(750)
+    expect(delta.next_since).toBe(750)
+    // Older rows are folded behind per-session on-demand hydration rather
+    // than making the generic sync handler drain the whole database at boot.
     expect(delta.has_more).toBe(false)
   })
 
@@ -133,9 +135,9 @@ describe("readDexieDelta", () => {
     expect(delta.next_since).toBe(75)
   })
 
-  it("sets has_more when a page fills to capacity", async () => {
+  it("sets has_more for a full incremental page", async () => {
     const db = getDb()
-    const rows = Array.from({ length: 500 }, (_, i) => ({
+    const rows = Array.from({ length: 600 }, (_, i) => ({
       id: `m${String(i).padStart(4, "0")}`,
       sessionId: "s",
       createdAt: i + 1,
@@ -143,7 +145,7 @@ describe("readDexieDelta", () => {
     })) as never[]
     await db.messages.bulkPut(rows)
 
-    const delta = await readDexieDelta("messages", 0)
+    const delta = await readDexieDelta("messages", 50)
     expect(delta.rows).toHaveLength(500)
     expect(delta.has_more).toBe(true)
   })

@@ -18,6 +18,7 @@ import type {
   SendContent,
   SendOptions,
   SessionControlMethod,
+  StoredMessage,
 } from "@cognia/agent-config-types"
 import {
   isControlResponseEvent,
@@ -268,13 +269,29 @@ export async function steerSession(
 
 /**
  * Page of sessions returned by `session_list`. Sorted desktop-side by
- * `updatedAt` descending. `next_offset` is set when more rows remain
- * after `offset + rows.length`.
+ * `updatedAt` descending. Rows are lightweight list projections rather than
+ * full execution configuration. `next_offset`/`has_more` are set when more
+ * rows remain; direct/degraded stores may additionally return `total`.
  */
 export interface SessionListPage {
-  rows: ChatSession[]
-  total: number
+  rows: Array<
+    Pick<
+      ChatSession,
+      | "id"
+      | "title"
+      | "kind"
+      | "projectId"
+      | "characterId"
+      | "teamId"
+      | "lastMessagePreview"
+      | "lastMessageAt"
+      | "createdAt"
+      | "updatedAt"
+    >
+  >
+  total?: number
   next_offset?: number
+  has_more?: boolean
 }
 
 /**
@@ -317,14 +334,15 @@ export async function listSessions(opts: {
  * Paginated read of one session's messages. Used by the mobile companion to
  * hydrate a chat history without taking ownership of the desktop's Dexie
  * snapshot. Round-trips through `_rpc/message_get_by_session` → desktop
- * Tauri command → `messageRepository.list`.
+ * Tauri command → an indexed raw `StoredMessage` page.
  *
  * Returns rows sorted by `createdAt` ascending so the mobile client can
  * append them to its scrollback in order.
  */
 export interface MobileMessagesPage {
-  rows: UIMessage[]
-  total: number
+  rows: StoredMessage[]
+  /** Present on legacy/direct-store responses; omitted by the indexed bridge. */
+  total?: number
   next_offset?: number
 }
 

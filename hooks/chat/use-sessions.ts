@@ -33,6 +33,9 @@ import type { ChatSession, SessionFolder } from "@cognia/agent-config-types"
 import { isTauri } from "@/lib/tauri"
 import { emitSystemBusEvent, SystemEvents } from "@/lib/plugin/messaging/message-bus"
 import { filterExposedSessions } from "@/lib/chat/session-exposure"
+import { isCapacitor } from "@/lib/platform/detect"
+import { hasWebCompanionTarget } from "@/lib/platform/web-companion"
+import { hydrateSessionHistory } from "@/lib/sync/session-history"
 
 /**
  * How far the active session id has been resolved to a row.
@@ -166,7 +169,27 @@ export function useSessions({ crossWorkspace = false }: UseSessionsOptions = {})
   useEffect(() => {
     if (!activeSessionId) return
     let cancelled = false
-    listMessages(activeSessionId)
+    const loadMessages = async () => {
+      const local = await listMessages(activeSessionId)
+      if (isTauri() || isCapacitor() || !hasWebCompanionTarget()) return local
+      try {
+        await hydrateSessionHistory(
+          (await import("@/lib/tauri/transport-instance")).transport,
+          activeSessionId
+        )
+        return listMessages(activeSessionId)
+      } catch (error) {
+        // Backward-compatible with older companion servers: keep a usable
+        // recent tail when the lazy-history RPC is unavailable, but do not
+        // hide a genuinely empty history failure.
+        if (local.length > 0) {
+          console.warn("remote session history hydration failed; using synced tail", error)
+          return local
+        }
+        throw error
+      }
+    }
+    loadMessages()
       .then(async (msgs) => {
         if (cancelled) return
         if (msgs.length === 0) {

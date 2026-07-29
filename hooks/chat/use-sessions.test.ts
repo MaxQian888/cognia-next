@@ -87,6 +87,29 @@ jest.mock("@/lib/tauri", () => ({
   isTauri: () => isTauriMock(),
 }))
 
+const isCapacitorMock = jest.fn().mockReturnValue(false)
+jest.mock("@/lib/platform/detect", () => ({
+  isCapacitor: () => isCapacitorMock(),
+}))
+
+const hasWebCompanionTargetMock = jest.fn().mockReturnValue(false)
+jest.mock("@/lib/platform/web-companion", () => ({
+  hasWebCompanionTarget: () => hasWebCompanionTargetMock(),
+}))
+
+const hydrateSessionHistoryMock = jest.fn()
+jest.mock("@/lib/sync/session-history", () => ({
+  hydrateSessionHistory: (...args: unknown[]) => hydrateSessionHistoryMock(...args),
+}))
+
+const companionTransportMock = {
+  call: jest.fn(),
+  subscribe: jest.fn(),
+}
+jest.mock("@/lib/tauri/transport-instance", () => ({
+  transport: companionTransportMock,
+}))
+
 const mockProjectState = {
   activeProjectId: null as string | null,
   loaded: false,
@@ -135,6 +158,9 @@ beforeEach(() => {
   chatStoreState.setMessages.mockClear()
   chatStoreState.activeSessionId = null
   isTauriMock.mockReset().mockReturnValue(true)
+  isCapacitorMock.mockReset().mockReturnValue(false)
+  hasWebCompanionTargetMock.mockReset().mockReturnValue(false)
+  hydrateSessionHistoryMock.mockReset().mockResolvedValue({ applied: 0, total: 0 })
   mockProjectState.activeProjectId = null
   mockProjectState.loaded = false
   mockProjectState.addSessionToProject.mockReset()
@@ -240,6 +266,46 @@ describe("useSessions", () => {
     renderHook(() => useSessions())
     await waitFor(() => expect(chatStoreState.setMessages).toHaveBeenCalledWith([{ id: "m1" }]))
   })
+
+  it("unfolds complete cloud history before publishing the active session", async () => {
+    chatStoreState.activeSessionId = "s1"
+    isTauriMock.mockReturnValue(false)
+    hasWebCompanionTargetMock.mockReturnValue(true)
+    listMessagesMock
+      .mockResolvedValueOnce([{ id: "recent-tail" }])
+      .mockResolvedValueOnce([{ id: "old" }, { id: "recent-tail" }])
+
+    renderHook(() => useSessions())
+
+    await waitFor(() =>
+      expect(chatStoreState.setMessages).toHaveBeenCalledWith([
+        { id: "old" },
+        { id: "recent-tail" },
+      ])
+    )
+    expect(hydrateSessionHistoryMock).toHaveBeenCalledWith(companionTransportMock, "s1")
+  })
+
+  it.each([
+    { platform: "Tauri", tauri: true, capacitor: false },
+    { platform: "Capacitor", tauri: false, capacitor: true },
+  ])(
+    "does not unfold cloud history through the wrong transport on $platform",
+    async ({ tauri, capacitor }) => {
+      chatStoreState.activeSessionId = "s1"
+      isTauriMock.mockReturnValue(tauri)
+      isCapacitorMock.mockReturnValue(capacitor)
+      hasWebCompanionTargetMock.mockReturnValue(true)
+      listMessagesMock.mockResolvedValueOnce([{ id: "local" }])
+
+      renderHook(() => useSessions())
+
+      await waitFor(() =>
+        expect(chatStoreState.setMessages).toHaveBeenCalledWith([{ id: "local" }])
+      )
+      expect(hydrateSessionHistoryMock).not.toHaveBeenCalled()
+    }
+  )
 
   it("does not hydrate when activeSessionId is null", () => {
     chatStoreState.activeSessionId = null

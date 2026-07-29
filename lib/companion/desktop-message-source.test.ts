@@ -4,6 +4,7 @@
 
 import "fake-indexeddb/auto"
 
+import { messageRepository } from "@/lib/db"
 import { getDb } from "@/lib/db/schema"
 
 import {
@@ -21,7 +22,7 @@ describe("readSessionPage", () => {
     await getDb().messages.clear()
   })
 
-  it("returns sessions ordered by updatedAt desc with a total count", async () => {
+  it("returns sessions ordered by updatedAt desc without an unbounded total scan", async () => {
     const db = getDb()
     await db.sessions.bulkPut([
       { id: "s1", title: "old", kind: "direct", createdAt: 0, updatedAt: 1 } as never,
@@ -30,8 +31,40 @@ describe("readSessionPage", () => {
     ])
     const page = await readSessionPage(10, 0)
     expect(page.rows.map((r) => r.id)).toEqual(["s3", "s2", "s1"])
-    expect(page.total).toBe(3)
+    expect(page.total).toBeUndefined()
+    expect(page.has_more).toBe(false)
     expect(page.next_offset).toBeUndefined()
+  })
+
+  it("projects transport rows without heavyweight execution-only session fields", async () => {
+    const db = getDb()
+    await db.sessions.put({
+      id: "s-heavy",
+      title: "Heavy",
+      kind: "direct",
+      projectId: "p1",
+      characterId: "c1",
+      systemPrompt: "x".repeat(64 * 1024),
+      scratchpad: "y".repeat(64 * 1024),
+      branchSeed: { kind: "transcript", content: "z".repeat(64 * 1024) },
+      createdAt: 1,
+      updatedAt: 2,
+    } as never)
+
+    const page = await readSessionPage(10, 0)
+
+    expect(page.rows).toEqual([
+      {
+        id: "s-heavy",
+        title: "Heavy",
+        kind: "direct",
+        projectId: "p1",
+        characterId: "c1",
+        createdAt: 1,
+        updatedAt: 2,
+      },
+    ])
+    expect(JSON.stringify(page).length).toBeLessThan(1024)
   })
 
   it("does not expose embedded resource sessions to the companion connector", async () => {
@@ -50,7 +83,7 @@ describe("readSessionPage", () => {
 
     const page = await readSessionPage(10, 0)
     expect(page.rows.map((row) => row.id)).toEqual(["visible"])
-    expect(page.total).toBe(1)
+    expect(page.has_more).toBe(false)
   })
 
   it("paginates with limit + offset and reports next_offset", async () => {
@@ -77,6 +110,25 @@ describe("readSessionPage", () => {
     expect(page3.next_offset).toBeUndefined()
   })
 
+  it("caps an oversized page request", async () => {
+    const db = getDb()
+    await db.sessions.bulkPut(
+      Array.from({ length: 205 }, (_, i) => ({
+        id: `s${i}`,
+        title: `t${i}`,
+        kind: "direct",
+        createdAt: 0,
+        updatedAt: i,
+      })) as never[]
+    )
+
+    const page = await readSessionPage(10_000, 0)
+
+    expect(page.rows).toHaveLength(200)
+    expect(page.has_more).toBe(true)
+    expect(page.next_offset).toBe(200)
+  })
+
   it("filters by before cursor", async () => {
     const db = getDb()
     await db.sessions.bulkPut([
@@ -86,7 +138,7 @@ describe("readSessionPage", () => {
     ])
     const page = await readSessionPage(10, 0, 5)
     expect(page.rows.map((r) => r.id)).toEqual(["old"])
-    expect(page.total).toBe(1)
+    expect(page.has_more).toBe(false)
   })
 
   it("rejects a non-positive limit", async () => {
@@ -312,7 +364,7 @@ describe("installDesktopMessageSource — session_list", () => {
       requestId: "rid-l",
       result: expect.objectContaining({
         rows: expect.arrayContaining([expect.objectContaining({ id: "s2" })]),
-        total: 2,
+        has_more: false,
       }),
       error: null,
     })
@@ -441,7 +493,7 @@ describe("readMessagesPage", () => {
 
     const page = await readMessagesPage("s1")
     expect(page.rows.map((r) => r.id)).toEqual(["m1", "m2", "m3"])
-    expect(page.total).toBe(3)
+    expect(page.total).toBeUndefined()
     expect(page.next_offset).toBeUndefined()
   })
 
@@ -469,10 +521,38 @@ describe("readMessagesPage", () => {
     expect(page3.next_offset).toBeUndefined()
   })
 
+  it("uses a bounded indexed query instead of materializing the full session history", async () => {
+    const db = getDb()
+    await db.messages.bulkPut(
+      Array.from({ length: 10 }, (_, i) => ({
+        id: `m${i}`,
+        sessionId: "s1",
+        role: "user",
+        parts: [{ type: "text", text: String(i) }],
+        createdAt: i + 1,
+      })) as never[]
+    )
+    const fullMaterialization = jest
+      .spyOn(messageRepository, "getBySessionId")
+      .mockRejectedValue(new Error("full materialization must not run"))
+
+    try {
+      const page = await readMessagesPage("s1", 2, 0)
+
+      expect(fullMaterialization).not.toHaveBeenCalled()
+      expect(page.rows).toHaveLength(2)
+      expect(page.rows[0]).toEqual(
+        expect.objectContaining({ id: "m0", sessionId: "s1", createdAt: 1 })
+      )
+    } finally {
+      fullMaterialization.mockRestore()
+    }
+  })
+
   it("returns an empty page for a session with no messages", async () => {
     const page = await readMessagesPage("ghost")
     expect(page.rows).toEqual([])
-    expect(page.total).toBe(0)
+    expect(page.total).toBeUndefined()
     expect(page.next_offset).toBeUndefined()
   })
 })

@@ -552,9 +552,23 @@ describe("deleteMessage", () => {
 
 describe("listSessions", () => {
   it("forwards limit/offset/before and returns the SessionListPage", async () => {
-    callSpy.mockResolvedValueOnce({ rows: [], total: 0 })
+    const response = {
+      rows: [
+        {
+          id: "s1",
+          title: "Cloud session",
+          kind: "direct",
+          createdAt: 1,
+          updatedAt: 2,
+        },
+      ],
+      next_offset: 20,
+      has_more: true,
+    }
+    callSpy.mockResolvedValueOnce(response)
     const page = await listSessions({ limit: 20, offset: 0, before: 1700000000000 })
-    expect(page).toEqual({ rows: [], total: 0 })
+    expect(page).toEqual(response)
+    expect(page.total).toBeUndefined()
     expect(callSpy).toHaveBeenCalledWith("session_list", {
       limit: 20,
       offset: 0,
@@ -570,11 +584,27 @@ describe("listSessions", () => {
 })
 
 describe("getMessagesBySession", () => {
-  it("forwards session_id and the optional pagination args", async () => {
-    callSpy.mockResolvedValueOnce({ rows: [], total: 0 })
+  it("forwards session_id and returns raw StoredMessage rows", async () => {
+    const response = {
+      rows: [
+        {
+          id: "m1",
+          sessionId: "s1",
+          role: "user" as const,
+          parts: [{ type: "text" as const, text: "hello" }],
+          createdAt: 1,
+        },
+      ],
+      total: 101,
+      next_offset: 150,
+    }
+    callSpy.mockResolvedValueOnce(response)
     const { getMessagesBySession } = require("./ipc") as typeof import("./ipc")
     const page = await getMessagesBySession("s1", 50, 100)
-    expect(page).toEqual({ rows: [], total: 0 })
+    expect(page).toEqual(response)
+    expect(page.rows[0]).toEqual(
+      expect.objectContaining({ id: "m1", sessionId: "s1", createdAt: 1 })
+    )
     expect(callSpy).toHaveBeenCalledWith("message_get_by_session", {
       session_id: "s1",
       limit: 50,

@@ -26,7 +26,7 @@ import type { ChatSession, StoredMessage } from "@cognia/agent-config-types"
 import type { UIMessage } from "@/types"
 import { listen } from "@tauri-apps/api/event"
 import { invoke } from "@tauri-apps/api/core"
-import { filterExposedSessions } from "@/lib/chat/session-exposure"
+import { isSessionExposed } from "@/lib/chat/session-exposure"
 
 const UPDATE_EVENT = "companion://message-update-request"
 const DELETE_EVENT = "companion://message-delete-request"
@@ -34,6 +34,7 @@ const LIST_EVENT = "companion://session-list-request"
 const GET_BY_SESSION_EVENT = "companion://message-get-by-session-request"
 const SEND_EVENT = "companion://message-send-request"
 const RESPONSE_COMMAND = "companion_message_response"
+const MAX_SESSION_LIST_PAGE_SIZE = 200
 
 interface UpdateRequestEvent {
   requestId: string
@@ -225,10 +226,26 @@ async function respondSendMessage(
   }
 }
 
+export type SessionListItem = Pick<
+  ChatSession,
+  | "id"
+  | "title"
+  | "kind"
+  | "projectId"
+  | "characterId"
+  | "teamId"
+  | "lastMessagePreview"
+  | "lastMessageAt"
+  | "createdAt"
+  | "updatedAt"
+>
+
 export interface SessionListPage {
-  rows: ChatSession[]
-  total: number
+  rows: SessionListItem[]
+  /** Present on legacy/direct-store responses; omitted by the indexed bridge. */
+  total?: number
   next_offset?: number
+  has_more?: boolean
 }
 
 /** Exposed for tests — production callers use the listener installed above. */
@@ -244,52 +261,81 @@ export async function readSessionPage(
     throw new Error("offset must be a non-negative number")
   }
 
+  const pageSize = Math.min(limit, MAX_SESSION_LIST_PAGE_SIZE)
   const db = getDb()
-  const all = await db.sessions.toArray()
-
-  const exposed = filterExposedSessions(all, "external-connector")
-  const filtered =
-    typeof before === "number" ? exposed.filter((s) => Number(s.updatedAt ?? 0) < before) : exposed
-  filtered.sort((a, b) => Number(b.updatedAt ?? 0) - Number(a.updatedAt ?? 0))
-
-  const total = filtered.length
-  const rows = filtered.slice(offset, offset + limit)
-  const nextOffset = offset + rows.length < total ? offset + rows.length : undefined
+  // Use the updatedAt index and stop after one extra visible row. The previous
+  // `toArray → filter → sort → slice` path materialized every session,
+  // including large system prompts and branch seeds, for a 50-row list.
+  const ordered =
+    typeof before === "number"
+      ? db.sessions.where("updatedAt").below(before).reverse()
+      : db.sessions.orderBy("updatedAt").reverse()
+  const candidates = await ordered
+    .filter((session) => isSessionExposed(session, "external-connector"))
+    .offset(offset)
+    .limit(pageSize + 1)
+    .toArray()
+  const hasMore = candidates.length > pageSize
+  const rows = candidates.slice(0, pageSize).map(projectSessionListItem)
+  const nextOffset = hasMore ? offset + rows.length : undefined
 
   return {
     rows,
-    total,
     next_offset: nextOffset,
+    has_more: hasMore,
+  }
+}
+
+function projectSessionListItem(session: ChatSession): SessionListItem {
+  return {
+    id: session.id,
+    title: session.title,
+    ...(session.kind !== undefined ? { kind: session.kind } : {}),
+    ...(session.projectId !== undefined ? { projectId: session.projectId } : {}),
+    ...(session.characterId !== undefined ? { characterId: session.characterId } : {}),
+    ...(session.teamId !== undefined ? { teamId: session.teamId } : {}),
+    ...(session.lastMessagePreview !== undefined
+      ? { lastMessagePreview: session.lastMessagePreview }
+      : {}),
+    ...(session.lastMessageAt !== undefined ? { lastMessageAt: session.lastMessageAt } : {}),
+    createdAt: session.createdAt,
+    updatedAt: session.updatedAt,
   }
 }
 
 export interface MessagesPage {
-  rows: UIMessage[]
-  total: number
+  rows: StoredMessage[]
+  /** Present on legacy/direct-store responses; omitted by the indexed bridge. */
+  total?: number
   next_offset?: number
 }
 
 /**
  * Exposed for tests — production callers use the listener installed above.
  *
- * Reads messages for a single session via `messageRepository.getBySessionId`
- * (defined in `lib/plugin/api/session-api.ts`) and applies the same
- * offset/limit pagination the mobile UI expects.
+ * Reads a bounded page directly through the `[sessionId+createdAt]` index.
+ * Returning raw `StoredMessage` rows lets the cloud client bulk-apply them
+ * without a UIMessage conversion round-trip.
  */
 export async function readMessagesPage(
   sessionId: string,
   limit?: number,
   offset?: number
 ): Promise<MessagesPage> {
-  const all = await messageRepository.getBySessionId(sessionId)
-  const total = all.length
   const start = typeof offset === "number" && offset > 0 ? offset : 0
-  const end = typeof limit === "number" && limit > 0 ? Math.min(start + limit, total) : total
-  const rows = all.slice(start, end)
+  const pageSize = Math.min(typeof limit === "number" && limit > 0 ? limit : 200, 500)
+  const collection = getDb().messages.where("[sessionId+createdAt]")
+  const candidates = await collection
+    .between([sessionId, 0], [sessionId, Number.MAX_SAFE_INTEGER])
+    .offset(start)
+    .limit(pageSize + 1)
+    .toArray()
+  const hasMore = candidates.length > pageSize
+  const rows = candidates.slice(0, pageSize)
+  const end = start + rows.length
   return {
     rows,
-    total,
-    next_offset: end < total ? end : undefined,
+    next_offset: hasMore ? end : undefined,
   }
 }
 

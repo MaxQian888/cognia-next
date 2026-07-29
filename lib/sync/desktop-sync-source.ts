@@ -182,11 +182,21 @@ async function readSessionsDelta(since: number): Promise<SyncDelta<ChatSession>>
 }
 
 async function readMessagesDelta(since: number): Promise<SyncDelta<StoredMessage>> {
-  // Page chat history by creation order via the v61 `[createdAt+id]` index
-  // (no more full-table scan, no global newest-200 cap). One pull returns
-  // up to MESSAGES_PAGE_SIZE rows past the cursor; the mobile handler keeps
-  // pulling while the cursor advances, so a long conversation's full history
-  // streams across several round-trips instead of being truncated.
+  const index = getDb().messages.orderBy("[createdAt+id]")
+
+  if (since === 0) {
+    // Cold-start fold: transfer only the newest global tail. The session rows
+    // already carry list previews, and opening a conversation hydrates its
+    // complete transcript through `message_get_by_session`. This bounds boot
+    // payload/round-trips independently of account age while retaining full
+    // history on demand.
+    const newest = await index.reverse().limit(MESSAGES_PAGE_SIZE).toArray()
+    newest.sort((a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id))
+    return finalizeDelta("messages", newest, since, false)
+  }
+
+  // Incremental pulls still drain every newly-created row after the durable
+  // cursor, in ascending order, so live/offline changes are never folded away.
   const page = await getDb()
     .messages.where("[createdAt+id]")
     .above([since, ""])
