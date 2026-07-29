@@ -80,6 +80,18 @@ pub struct NativeOcrResult {
 pub trait NativeBackend: Send + Sync {
     fn id(&self) -> &'static str;
     fn extract(&self, payload: &NativeOcrInvokePayload) -> Result<NativeOcrResult, NativeOcrError>;
+
+    /// Whether this backend can actually do work.
+    ///
+    /// `list_ids()` cannot answer this: `install_platform_backends` registers a
+    /// `PlaceholderBackend` under *every* id precisely so the dispatch table
+    /// stays dense, which means the id set looks identical whether or not any
+    /// real engine is linked. A caller deciding whether to offer an
+    /// OCR-dependent feature at all needs to know the difference before it
+    /// builds a request — not after it gets `MissingBinding` back.
+    fn is_available(&self) -> bool {
+        true
+    }
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -123,6 +135,21 @@ impl NativeOcrRegistry {
     pub async fn list_ids(&self) -> Vec<&'static str> {
         let guard = self.inner.lock().await;
         guard.backends.iter().map(|b| b.id()).collect()
+    }
+
+    /// Ids that will actually produce text, placeholders excluded.
+    ///
+    /// Empty means this build has no working OCR engine — on a default
+    /// Windows build that is the norm, since every `ocr-*` feature is opt-in
+    /// and `ocr-windows` additionally needs MSIX package identity at runtime.
+    pub async fn available_ids(&self) -> Vec<&'static str> {
+        let guard = self.inner.lock().await;
+        guard
+            .backends
+            .iter()
+            .filter(|b| b.is_available())
+            .map(|b| b.id())
+            .collect()
     }
 
     pub async fn dispatch(

@@ -31,8 +31,10 @@ use accessibility::{AXUIElement, AXUIElementAttributes};
 use accessibility_sys::{
     kAXErrorSuccess, kAXTrustedCheckOptionPrompt, kAXValueTypeCFRange, kAXValueTypeCGPoint,
     kAXValueTypeCGRect, kAXValueTypeCGSize, AXIsProcessTrusted, AXIsProcessTrustedWithOptions,
-    AXUIElementCopyAttributeValue, AXUIElementCopyParameterizedAttributeValue, AXUIElementRef,
-    AXUIElementSetAttributeValue, AXValueCreate, AXValueGetValue, AXValueRef,
+    AXUIElementCopyAttributeValue, AXUIElementCopyElementAtPosition,
+    AXUIElementCopyParameterizedAttributeValue, AXUIElementCreateSystemWide, AXUIElementGetPid,
+    AXUIElementRef, AXUIElementSetAttributeValue, AXUIElementSetMessagingTimeout, AXValueCreate,
+    AXValueGetValue, AXValueRef,
 };
 use core_foundation_0_9 as cf_ax;
 use core_foundation_sys::base::{CFRange, CFRelease, CFTypeRef};
@@ -109,6 +111,130 @@ fn copy_element_attr(el: &AXUIElement, name: &str) -> Option<AXUIElement> {
 
 pub fn focused_ui_element(app: &AXUIElement) -> Option<AXUIElement> {
     copy_element_attr(app, "AXFocusedUIElement")
+}
+
+/// The system-wide AX element — the root for global queries.
+fn system_wide() -> AXUIElement {
+    unsafe { AXUIElement::wrap_under_create_rule(AXUIElementCreateSystemWide()) }
+}
+
+/// The pid of the frontmost application, via AX rather than AppKit.
+///
+/// The obvious implementation is `NSWorkspace.frontmostApplication`, but this
+/// crate deliberately carries no `objc2-app-kit`, and the other obvious one
+/// (`osascript`) forks a process. `AXFocusedApplication` on the system-wide
+/// element is a single mach round-trip and needs only the Accessibility grant
+/// we already hold.
+pub fn system_wide_focused_pid() -> Option<u32> {
+    let focused = copy_element_attr(&system_wide(), "AXFocusedApplication")?;
+    element_pid(&focused)
+}
+
+/// Owning process of an element.
+pub fn element_pid(element: &AXUIElement) -> Option<u32> {
+    let mut pid: i32 = 0;
+    let err = unsafe { AXUIElementGetPid(el_ref(element), &mut pid) };
+    (err == kAXErrorSuccess && pid > 0).then_some(pid as u32)
+}
+
+/// Cap how long a single AX message may block.
+///
+/// The observer run loop services every application on the desktop; one hung
+/// or hostile app must not be able to wedge it. macOS has no global default
+/// here, so this has to be set per application element we talk to.
+pub fn set_messaging_timeout(element: &AXUIElement, seconds: f32) {
+    unsafe {
+        AXUIElementSetMessagingTimeout(el_ref(element), seconds);
+    }
+}
+
+/// Length of the selected text range, in characters.
+///
+/// `Some(0)` genuinely means "the selection is now empty" and is distinct from
+/// `None`, which means the element exposes no selection at all.
+pub fn selected_text_range_length(element: &AXUIElement) -> Option<i64> {
+    let attr = cfstr("AXSelectedTextRange");
+    let mut out: CFTypeRef = std::ptr::null();
+    let err = unsafe {
+        AXUIElementCopyAttributeValue(el_ref(element), attr.as_concrete_TypeRef(), &mut out)
+    };
+    if err != kAXErrorSuccess || out.is_null() {
+        return None;
+    }
+    let value = unsafe { cf_ax::base::CFType::wrap_under_create_rule(out) };
+    let mut range = CFRange::init(0, 0);
+    let ok = unsafe {
+        AXValueGetValue(
+            value.as_CFTypeRef() as AXValueRef,
+            kAXValueTypeCFRange,
+            (&mut range as *mut CFRange).cast::<c_void>(),
+        )
+    };
+    ok.then_some(range.length as i64)
+}
+
+/// True hit-test: the deepest element at a screen point.
+///
+/// Screen coordinates with a top-left origin — the same space `CGEvent`
+/// reports mouse locations in, so a click position can be passed straight
+/// through.
+pub fn element_at_position(x: f32, y: f32) -> Option<AXUIElement> {
+    let mut out: AXUIElementRef = std::ptr::null_mut();
+    let err = unsafe {
+        AXUIElementCopyElementAtPosition(
+            el_ref(&system_wide()),
+            x,
+            y,
+            &mut out as *mut AXUIElementRef,
+        )
+    };
+    if err != kAXErrorSuccess || out.is_null() {
+        return None;
+    }
+    Some(unsafe { AXUIElement::wrap_under_create_rule(out) })
+}
+
+/// How far up the AX ancestor chain `web_area_url` will walk. Deep enough to
+/// escape a nested editor, shallow enough that a pathological tree cannot turn
+/// one selection into hundreds of cross-process messages.
+const WEB_AREA_ANCESTOR_LIMIT: usize = 12;
+
+/// The document URL of the web area containing this element, if any.
+///
+/// AX only — deliberately NOT AppleScript. `tell application "Google Chrome"
+/// to get URL` triggers the Apple Events (Automation) TCC prompt *once per
+/// target application*, so a user selecting text in three browsers would be
+/// asked for three new permissions. Reading `AXURL` off the `AXWebArea` needs
+/// nothing beyond the Accessibility grant the feature already requires.
+pub fn web_area_url(element: &AXUIElement) -> Option<String> {
+    let mut current = element.clone();
+    for _ in 0..WEB_AREA_ANCESTOR_LIMIT {
+        if current.role().ok().is_some_and(|role| role == "AXWebArea") {
+            return read_url_string(&current);
+        }
+        current = copy_element_attr(&current, "AXParent")?;
+    }
+    None
+}
+
+/// `AXURL` is a CFURL on Chromium and WebKit, but a few hosts hand back a
+/// plain string — accept either rather than silently losing the page context.
+fn read_url_string(el: &AXUIElement) -> Option<String> {
+    let attr = cfstr("AXURL");
+    let mut out: CFTypeRef = std::ptr::null();
+    let err =
+        unsafe { AXUIElementCopyAttributeValue(el_ref(el), attr.as_concrete_TypeRef(), &mut out) };
+    if err != kAXErrorSuccess || out.is_null() {
+        return None;
+    }
+    let value = unsafe { cf_ax::base::CFType::wrap_under_create_rule(out) };
+    if let Some(url) = value.downcast::<cf_ax::url::CFURL>() {
+        return Some(url.get_string().to_string()).filter(|s| !s.is_empty());
+    }
+    value
+        .downcast::<CFString>()
+        .map(|s| s.to_string())
+        .filter(|s| !s.is_empty())
 }
 
 /// Resolve the window `read_tree` should root at: the focused window, then the

@@ -1,9 +1,18 @@
 [[permission]]
 identifier = "allow-selection-toolbar-app-commands"
-description = "Allows the least-privilege selection toolbar webview to read and act on its current in-memory candidate."
+description = "Allows the least-privilege selection toolbar webview to read and act on its current in-memory candidate, size its own window, and read the user's shortcut chords."
+# Every command the overlay window invokes must be listed here. The generated
+# `all-app-commands.toml` grant does NOT cover it: that permission is attached to
+# the `default` capability, which is scoped `windows: ["main"]`, so anything
+# missing below is rejected at runtime with "Command not found" rather than
+# failing to compile.
 commands.allow = [
   "selection_toolbar_current_candidate",
   "selection_toolbar_execute",
+  "selection_toolbar_finish",
   "selection_toolbar_reveal",
+  "selection_toolbar_resize",
   "selection_toolbar_set_interactive",
+  "selection_toolbar_set_keep_alive",
+  "shortcut_list",
 ]

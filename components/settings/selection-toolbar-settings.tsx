@@ -1,12 +1,19 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import { useTranslations } from "next-intl"
+import { useLocale, useTranslations } from "next-intl"
 import { toast } from "sonner"
 import { ScanTextIcon } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import { Switch } from "@/components/ui/switch"
 import { Textarea } from "@/components/ui/textarea"
 import {
@@ -15,6 +22,12 @@ import {
   startSelectionToolbar,
   stopSelectionToolbar,
 } from "@/lib/tauri/selection-toolbar"
+import {
+  SELECTION_TRANSLATE_LOCALE_PREF,
+  TARGET_LOCALES,
+  initialTargetLocale,
+  type TargetLocale,
+} from "@/components/selection-toolbar/selection-toolbar-actions"
 import { getPref, setPref } from "@/lib/tauri/store"
 
 function normalizeDisabledApps(value: string): string[] {
@@ -30,8 +43,13 @@ function normalizeDisabledApps(value: string): string[] {
 
 export function SelectionToolbarSettings() {
   const t = useTranslations("settings.desktop.selectionToolbar")
+  const tToolbar = useTranslations("selectionToolbar")
+  const locale = useLocale()
   const [enabled, setEnabled] = useState(false)
   const [disabledAppsText, setDisabledAppsText] = useState("")
+  const [translateLocale, setTranslateLocale] = useState<TargetLocale>(() =>
+    initialTargetLocale(locale)
+  )
   const [loaded, setLoaded] = useState(false)
 
   useEffect(() => {
@@ -39,16 +57,25 @@ export function SelectionToolbarSettings() {
     void Promise.all([
       getPref<boolean>(SELECTION_TOOLBAR_ENABLED_PREF),
       getPref<string[]>(SELECTION_TOOLBAR_DISABLED_APPS_PREF),
-    ]).then(([savedEnabled, disabledApps]) => {
+      getPref<string>(SELECTION_TRANSLATE_LOCALE_PREF),
+    ]).then(([savedEnabled, disabledApps, savedTranslateLocale]) => {
       if (!alive) return
       setEnabled(savedEnabled === true)
       setDisabledAppsText((disabledApps ?? []).join("\n"))
+      if (TARGET_LOCALES.includes(savedTranslateLocale as TargetLocale)) {
+        setTranslateLocale(savedTranslateLocale as TargetLocale)
+      }
       setLoaded(true)
     })
     return () => {
       alive = false
     }
   }, [])
+
+  const chooseTranslateLocale = async (next: TargetLocale) => {
+    setTranslateLocale(next)
+    await setPref(SELECTION_TRANSLATE_LOCALE_PREF, next)
+  }
 
   const handleToggle = async (next: boolean) => {
     const disabledApps = normalizeDisabledApps(disabledAppsText)
@@ -97,6 +124,32 @@ export function SelectionToolbarSettings() {
           onCheckedChange={(next) => void handleToggle(next)}
           aria-label={t("toggle")}
         />
+      </div>
+      {/*
+        The toolbar itself persists this pref, but until now the only way to
+        change it was the floating capsule — which disappears after ten seconds.
+      */}
+      <div className="space-y-2 border-t pt-3">
+        <Label htmlFor="selection-toolbar-translate-locale" className="text-xs">
+          {t("translateLanguage")}
+        </Label>
+        <Select
+          value={translateLocale}
+          disabled={!loaded}
+          onValueChange={(next) => void chooseTranslateLocale(next as TargetLocale)}
+        >
+          <SelectTrigger id="selection-toolbar-translate-locale" size="sm" className="w-56">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {TARGET_LOCALES.map((target) => (
+              <SelectItem key={target} value={target}>
+                {tToolbar(`languages.${target}` as never)}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <p className="text-xs text-muted-foreground">{t("translateLanguageHint")}</p>
       </div>
       <div className="space-y-2 border-t pt-3">
         <Label htmlFor="selection-toolbar-disabled-apps" className="text-xs">

@@ -22,8 +22,62 @@ const BUILT_IN_DEFAULTS: Array<{ id: string; chord: Chord; label: string }> = [
   { id: "tray.show", chord: "ctrl+shift+space", label: "Show / hide window" },
   { id: "tray.open-logs", chord: "ctrl+shift+l", label: "Open log panel" },
   { id: "tray.automation-kill", chord: "ctrl+alt+k", label: "Automation kill switch" },
-  { id: "selection.captureClipboard", chord: "alt+shift+c", label: "" },
 ]
+
+/**
+ * The selection-toolbar chords: the clipboard capture that starts it, plus the
+ * six action chords mirroring `SELECTION_ACTION_SHORTCUTS` in
+ * `src-tauri/src/selection_toolbar.rs`.
+ *
+ * The six actions are bound only while the toolbar is running, and
+ * `bind_action_shortcuts` deliberately leaves alone any chord the user has
+ * already re-bound (ADR-0093 §8). That defence is only reachable if the user
+ * has somewhere to re-bind them — which is here.
+ */
+const SELECTION_SHORTCUT_DEFAULTS = [
+  {
+    id: "selection.captureClipboard",
+    chord: "alt+shift+c",
+    labelKey: "selectionCaptureClipboard",
+    fallback: "Capture copied selection",
+  },
+  {
+    id: "selection.copy",
+    chord: "alt+shift+1",
+    labelKey: "selectionCopy",
+    fallback: "Selection toolbar: copy",
+  },
+  {
+    id: "selection.explain",
+    chord: "alt+shift+2",
+    labelKey: "selectionExplain",
+    fallback: "Selection toolbar: explain",
+  },
+  {
+    id: "selection.translate",
+    chord: "alt+shift+3",
+    labelKey: "selectionTranslate",
+    fallback: "Selection toolbar: translate",
+  },
+  {
+    id: "selection.ask",
+    chord: "alt+shift+4",
+    labelKey: "selectionAsk",
+    fallback: "Selection toolbar: ask",
+  },
+  {
+    id: "selection.remember",
+    chord: "alt+shift+5",
+    labelKey: "selectionRemember",
+    fallback: "Selection toolbar: add to memory",
+  },
+  {
+    id: "selection.speak",
+    chord: "alt+shift+6",
+    labelKey: "selectionSpeak",
+    fallback: "Selection toolbar: read aloud",
+  },
+] as const satisfies ReadonlyArray<{ id: string; chord: Chord; labelKey: string; fallback: string }>
 
 /**
  * Ids with no built-in OS-level default (unlike `BUILT_IN_DEFAULTS`, Rust
@@ -110,7 +164,9 @@ export function ShortcutsSection() {
   }
 
   async function resetRow(id: string) {
-    const def = BUILT_IN_DEFAULTS.find((b) => b.id === id)
+    const def =
+      BUILT_IN_DEFAULTS.find((b) => b.id === id) ??
+      SELECTION_SHORTCUT_DEFAULTS.find((b) => b.id === id)
     if (!def) {
       await unbind(id)
       return
@@ -149,10 +205,13 @@ export function ShortcutsSection() {
   const rows: Array<{ id: string; label: string; chord: Chord | null; hasDefault: boolean }> = [
     ...BUILT_IN_DEFAULTS.map((def) => ({
       id: def.id,
-      label:
-        def.id === "selection.captureClipboard"
-          ? t("selectionCaptureClipboard", { fallback: "Capture copied selection" })
-          : def.label,
+      label: def.label,
+      chord: bindings[def.id] ?? def.chord,
+      hasDefault: true,
+    })),
+    ...SELECTION_SHORTCUT_DEFAULTS.map((def) => ({
+      id: def.id,
+      label: t(def.labelKey, { fallback: def.fallback }),
       chord: bindings[def.id] ?? def.chord,
       hasDefault: true,
     })),

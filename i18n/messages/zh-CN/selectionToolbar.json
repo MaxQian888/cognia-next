@@ -1,7 +1,13 @@
 {
   "ask": "提问",
   "chooseLanguage": "选择翻译语言",
+  "composeEmail": "发邮件",
+  "convertUnit": "换算",
   "copy": "复制",
+  "errors": {
+    "generic": "该操作未能完成",
+    "piiBlocked": "含敏感信息，未存入记忆"
+  },
   "explain": "解释",
   "languages": {
     "de": "德语",
@@ -12,10 +18,17 @@
     "ko": "韩语",
     "zh-CN": "简体中文"
   },
+  "openLink": "打开链接",
   "prompts": {
+    "convertUnit": "请把这个数值换算成我常用的单位。",
     "explain": "请解释这段内容。",
+    "explainCode": "请解释这段代码。",
     "translate": "请将这段内容翻译成{language}。"
   },
+  "remember": "记忆",
+  "searchWeb": "搜索",
+  "speak": "朗读",
+  "stopSpeaking": "停止朗读",
   "translate": "翻译",
   "truncated": "已截断",
   "truncatedHint": "选区超过 20,000 个字符，已截断。"

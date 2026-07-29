@@ -12,6 +12,7 @@
     "core:window:allow-set-focus",
     "core:window:allow-set-size",
     "allow-selection-toolbar-app-commands",
+    "store:allow-load",
     "store:allow-get",
     "store:allow-set",
     "store:allow-save"

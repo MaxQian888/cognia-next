@@ -114,6 +114,10 @@ pub(crate) fn cg_keycode_to_vk(keycode: i64) -> u32 {
         0x31 => 0x20,
         0x30 => 0x09,
         0x24 => 0x0D,
+        // Escape → VK_ESCAPE. Not a recorder concern (`vk_to_char` drops it),
+        // but the selection toolbar dismisses on it, and folding it into the
+        // unmapped `0` bucket made that check unreachable on macOS.
+        0x35 => 0x1B,
         _ => 0,
     }
 }
@@ -334,8 +338,9 @@ mod tests {
         assert_eq!(cg_keycode_to_vk(0x24), 0x0D); // Return
         assert_eq!(cg_keycode_to_vk(0x30), 0x09); // Tab
         assert_eq!(cg_keycode_to_vk(0x31), 0x20); // Space
-                                                  // Unmapped (e.g. Escape 0x35, Left Shift 0x38) → 0 (reducer ignores).
-        assert_eq!(cg_keycode_to_vk(0x35), 0);
+                                                  // Escape is mapped: the selection toolbar keys its dismiss off it.
+        assert_eq!(cg_keycode_to_vk(0x35), 0x1B); // Escape
+                                                  // Unmapped (e.g. Left Shift 0x38) → 0 (reducer ignores).
         assert_eq!(cg_keycode_to_vk(0x38), 0);
     }
 
@@ -407,9 +412,21 @@ mod tests {
     fn key_signal_carries_translated_vk_for_unmapped_keys() {
         // An unmapped key still emits a Key signal (vk 0) — the reducer buffers
         // it and `keys_to_hint` drops it, exactly like a Windows modifier.
+        // 0x3F is the Fn key: no VK equivalent, so it lands in the 0 bucket.
+        assert!(matches!(
+            to_signal(CGEventType::KeyDown, 0, 0, 0, 0x3F, 0),
+            Some(InputEvent::KeyDown { vk: 0, .. })
+        ));
+    }
+
+    #[test]
+    fn escape_translates_to_vk_escape_not_the_unmapped_bucket() {
+        // The selection toolbar keys its dismiss off VK_ESCAPE. Escape used to
+        // fall through to `0`, which is also every unmapped key — so the check
+        // could never fire on macOS.
         assert!(matches!(
             to_signal(CGEventType::KeyDown, 0, 0, 0, 0x35, 0),
-            Some(InputEvent::KeyDown { vk: 0, .. })
+            Some(InputEvent::KeyDown { vk: 0x1B, .. })
         ));
     }
 

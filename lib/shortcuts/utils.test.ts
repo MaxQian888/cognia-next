@@ -95,4 +95,27 @@ describe("formatKeybinding", () => {
       expect(formatted).not.toContain("+")
     })
   })
+
+  it("takes an explicit platform, for callers that do not sniff navigator", () => {
+    // The selection-toolbar overlay renders in a window with none of the app
+    // stores hydrated and resolves the platform itself. It used to carry its
+    // own formatter, which rendered `ctrl` as `⌃` while Settings rendered the
+    // same stored chord as `⌘`.
+    withPlatform("Win32", () => {
+      expect(formatKeybinding("alt+shift+1", true)).toBe("⌥⇧1")
+      expect(formatKeybinding("ctrl+shift+space", true)).toBe("⌘⇧space")
+    })
+    withPlatform("MacIntel", () => {
+      expect(formatKeybinding("alt+shift+1", false)).toBe("Alt+Shift+1")
+    })
+  })
+
+  it("upper-cases single-character keys and leaves named keys alone", () => {
+    expect(formatKeybinding("alt+c", false)).toBe("Alt+C")
+    expect(formatKeybinding("alt+enter", false)).toBe("Alt+enter")
+  })
+
+  it("tolerates whitespace and odd casing from a user-edited binding", () => {
+    expect(formatKeybinding("Alt + Shift + 5", true)).toBe("⌥⇧5")
+  })
 })

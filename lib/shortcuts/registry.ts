@@ -20,6 +20,7 @@ import { isTauri } from "@/lib/tauri"
 import { getPref, setPref } from "@/lib/tauri/store"
 
 import { findConflicts } from "./conflict"
+import { listGlobalShortcuts } from "./ipc"
 import { normalizeKeyCombo } from "./utils"
 import type { Chord, ShortcutBinding } from "./types"
 
@@ -77,9 +78,9 @@ export const useShortcutStore = create<ShortcutRegistryState>((set, get) => ({
       return
     }
     try {
-      const list = await invoke<Array<{ id: string; chord: string }>>("shortcut_list")
+      const list = await listGlobalShortcuts()
       const bindings: Record<string, Chord> = {}
-      for (const { id, chord } of list ?? []) {
+      for (const { id, chord } of list) {
         bindings[id] = chord
       }
       // Rust only re-seeds the 3 built-ins on boot — re-apply whatever custom

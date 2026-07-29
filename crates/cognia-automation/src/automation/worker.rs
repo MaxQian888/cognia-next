@@ -134,6 +134,9 @@ enum Request {
     ReadTextSelection {
         reply: oneshot::Sender<Result<Option<TextSelectionSnapshot>>>,
     },
+    SelectionPreflight {
+        reply: oneshot::Sender<Result<crate::automation::backend::SelectionPreflight>>,
+    },
     Shutdown,
 }
 
@@ -354,6 +357,9 @@ fn dispatch(backend: &dyn AutomationBackend, req: Request) -> DispatchControl {
         Request::ReadTextSelection { reply } => {
             let _ = reply.send(backend.read_text_selection());
         }
+        Request::SelectionPreflight { reply } => {
+            let _ = reply.send(backend.selection_preflight());
+        }
         Request::Shutdown => return DispatchControl::Stop,
     }
     DispatchControl::Continue
@@ -507,6 +513,14 @@ impl AutomationHandle {
 
     pub async fn read_text_selection(&self) -> Result<Option<TextSelectionSnapshot>> {
         round_trip(&self.tx, |reply| Request::ReadTextSelection { reply }).await
+    }
+
+    /// Who has focus, and may we read from it — without reading anything.
+    /// Callers use this to skip a selection read entirely for blocked apps.
+    pub async fn selection_preflight(
+        &self,
+    ) -> Result<crate::automation::backend::SelectionPreflight> {
+        round_trip(&self.tx, |reply| Request::SelectionPreflight { reply }).await
     }
 
     /// Best-effort shutdown — the worker drains in-flight requests and then

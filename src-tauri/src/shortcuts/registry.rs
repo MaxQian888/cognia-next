@@ -188,6 +188,12 @@ impl ShortcutRegistry {
             "selection.captureClipboard" => {
                 crate::selection_toolbar::spawn_clipboard_capture(app);
             }
+            // The six selection-toolbar action chords. Bound only while the
+            // feature is running (see `selection_toolbar::bind_action_shortcuts`),
+            // and a no-op unless a selection is currently on offer.
+            other if other.starts_with("selection.") => {
+                crate::selection_toolbar::dispatch_shortcut(app, other);
+            }
             _ => {}
         }
 

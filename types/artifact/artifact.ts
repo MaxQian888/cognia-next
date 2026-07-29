@@ -122,14 +122,20 @@ export interface WebSelectionRef extends ContextSelectionBase {
   url: string
 }
 
-/** Text captured from another desktop application via AX/UIA or clipboard fallback. */
+/** Text captured from another desktop application via AX/UIA, OCR or clipboard fallback. */
 export interface ExternalSelectionRef extends ContextSelectionBase {
   kind: "external"
   /** Native candidate identity used to make event consumption idempotent. */
   candidateId: string
   sourceApp: string
   sourceTitle?: string
-  origin: "accessibility" | "clipboard"
+  /**
+   * How the text was obtained, and therefore how much to trust it. `ocr` means
+   * it was read off the screen because the accessibility API exposed none, so
+   * recognition errors are possible — the LLM context heading says so, and the
+   * composer chip shows it.
+   */
+  origin: "accessibility" | "clipboard" | "ocr"
   truncated: boolean
 }
 

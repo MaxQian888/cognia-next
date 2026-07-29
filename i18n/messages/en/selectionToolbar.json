@@ -1,7 +1,13 @@
 {
   "ask": "Ask",
   "chooseLanguage": "Choose translation language",
+  "composeEmail": "Email",
+  "convertUnit": "Convert",
   "copy": "Copy",
+  "errors": {
+    "generic": "That action could not be completed",
+    "piiBlocked": "Contains sensitive data — not saved to memory"
+  },
   "explain": "Explain",
   "languages": {
     "de": "German",
@@ -12,10 +18,17 @@
     "ko": "Korean",
     "zh-CN": "Simplified Chinese"
   },
+  "openLink": "Open link",
   "prompts": {
+    "convertUnit": "Please convert this measurement to the units I usually use.",
     "explain": "Please explain this selection.",
+    "explainCode": "Please explain this code.",
     "translate": "Please translate this selection into {language}."
   },
+  "remember": "Remember",
+  "searchWeb": "Search",
+  "speak": "Read aloud",
+  "stopSpeaking": "Stop reading",
   "translate": "Translate",
   "truncated": "Truncated",
   "truncatedHint": "The selection exceeded 20,000 characters and was truncated."

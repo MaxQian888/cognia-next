@@ -79,6 +79,106 @@ pub fn capture_primary(opts: &ScreenshotOpts) -> Result<Screenshot> {
     })
 }
 
+/// Capture a region given in GLOBAL LOGICAL coordinates.
+///
+/// `capture_primary`'s `ScreenshotOpts.region` is monitor-local *physical*
+/// pixels, which is the right contract for Computer Use (the model is looking
+/// at a captured image and points at it). Callers that start from desktop
+/// coordinates — a mouse drag, an AX element rect — have neither of those
+/// properties, and passing such a rect straight through silently crops the
+/// wrong area: doubly wrong on a Retina display, and wrong in origin as well
+/// on any monitor that is not at the desktop origin.
+///
+/// So this is a separate entry point rather than a change to
+/// `ScreenshotOpts`, which would have broken the Computer Use contract.
+pub fn capture_global_region(region: Rect, format: ImageFormat) -> Result<Screenshot> {
+    let monitors = Monitor::all().map_err(|e| AutomationError::BackendError {
+        message: format!("xcap enumerate monitors failed: {e}"),
+    })?;
+    let infos = list_monitors();
+    let (index, info) = infos
+        .iter()
+        .enumerate()
+        .find(|(_, info)| monitor_contains_center(info, region))
+        .ok_or_else(|| AutomationError::BackendError {
+            message: "capture region falls outside every monitor".into(),
+        })?;
+    let local = global_rect_to_monitor_pixels(region, info).ok_or_else(|| {
+        AutomationError::BackendError {
+            message: "capture region does not intersect its monitor".into(),
+        }
+    })?;
+    let monitor = monitors
+        .get(index)
+        .ok_or_else(|| AutomationError::BackendError {
+            message: "monitor list changed during capture".into(),
+        })?;
+
+    let image = monitor
+        .capture_image()
+        .map_err(|e| AutomationError::BackendError {
+            message: format!("monitor capture_image failed: {e}"),
+        })?;
+    let (x, y, w, h) = clamp_crop_region(local, image.width(), image.height());
+    if w == 0 || h == 0 {
+        return Err(AutomationError::BackendError {
+            message: "capture region is empty after clamping".into(),
+        });
+    }
+    let cropped = image::imageops::crop_imm(&image, x, y, w, h).to_image();
+    let mut out = Vec::with_capacity((w * h * 4) as usize);
+    encode(&cropped, format, &mut out)?;
+
+    Ok(Screenshot {
+        bytes: general_purpose::STANDARD.encode(&out),
+        width: w,
+        height: h,
+        captured_at: chrono::Utc::now().timestamp_millis(),
+        format,
+        source_width: None,
+        source_height: None,
+    })
+}
+
+/// Whether the region's centre lies on this monitor. Centre rather than origin
+/// so a selection that overhangs a screen edge still resolves to the monitor
+/// the user is actually looking at.
+fn monitor_contains_center(info: &MonitorInfo, region: Rect) -> bool {
+    let cx = region.x + region.width / 2;
+    let cy = region.y + region.height / 2;
+    cx >= info.x
+        && cy >= info.y
+        && cx < info.x.saturating_add(info.width as i32)
+        && cy < info.y.saturating_add(info.height as i32)
+}
+
+/// Global logical points → monitor-local physical pixels.
+///
+/// `xcap` reports monitor bounds in logical points (`CGDisplayBounds`) but
+/// captures at `scale_factor` — so this both re-origins to the monitor and
+/// scales to pixels. Pure, because it is the single place the whole OCR
+/// fallback can silently read the wrong part of the screen.
+pub(crate) fn global_rect_to_monitor_pixels(region: Rect, info: &MonitorInfo) -> Option<Rect> {
+    let scale = if info.scale_factor.is_finite() && info.scale_factor > 0.0 {
+        f64::from(info.scale_factor)
+    } else {
+        1.0
+    };
+    let local_x = f64::from(region.x - info.x) * scale;
+    let local_y = f64::from(region.y - info.y) * scale;
+    let width = f64::from(region.width) * scale;
+    let height = f64::from(region.height) * scale;
+    if width < 1.0 || height < 1.0 {
+        return None;
+    }
+    Some(Rect {
+        x: local_x.round() as i32,
+        y: local_y.round() as i32,
+        width: width.round() as i32,
+        height: height.round() as i32,
+    })
+}
+
 /// Enumerate monitors for `Capabilities.monitors`. Failure → empty vec —
 /// capabilities is a probe and must never error the whole call.
 pub fn list_monitors() -> Vec<MonitorInfo> {
@@ -308,6 +408,121 @@ mod tests {
             source_height: None,
         };
         assert!(downscale_encoded(bad, 100, 100).is_err());
+    }
+
+    fn monitor(x: i32, y: i32, w: u32, h: u32, scale: f32) -> MonitorInfo {
+        MonitorInfo {
+            id: "1".into(),
+            name: "Display".into(),
+            x,
+            y,
+            width: w,
+            height: h,
+            is_primary: x == 0 && y == 0,
+            scale_factor: scale,
+        }
+    }
+
+    /// The single highest-value test here: without this conversion the OCR
+    /// fallback crops the wrong rectangle on every Retina display, and the
+    /// wrong origin on every non-primary monitor — and because it still
+    /// returns *an* image, the failure is silent.
+    #[test]
+    fn a_global_region_maps_onto_a_retina_secondary_monitor() {
+        // Secondary display starting at logical x=1512, captured at 2×.
+        let info = monitor(1512, 0, 1512, 982, 2.0);
+        let region = Rect {
+            x: 1612,
+            y: 100,
+            width: 200,
+            height: 40,
+        };
+        assert_eq!(
+            global_rect_to_monitor_pixels(region, &info),
+            Some(Rect {
+                x: 200,
+                y: 200,
+                width: 400,
+                height: 80
+            })
+        );
+    }
+
+    #[test]
+    fn a_non_retina_primary_monitor_is_a_pure_reorigin() {
+        let info = monitor(0, 0, 1920, 1080, 1.0);
+        let region = Rect {
+            x: 40,
+            y: 60,
+            width: 100,
+            height: 20,
+        };
+        assert_eq!(global_rect_to_monitor_pixels(region, &info), Some(region));
+    }
+
+    #[test]
+    fn a_degenerate_or_bogus_scale_never_produces_a_zero_sized_crop() {
+        let info = monitor(0, 0, 1920, 1080, 2.0);
+        // Zero-area selection: nothing to OCR.
+        assert_eq!(
+            global_rect_to_monitor_pixels(
+                Rect {
+                    x: 10,
+                    y: 10,
+                    width: 0,
+                    height: 5
+                },
+                &info
+            ),
+            None
+        );
+        // A monitor reporting a nonsense scale must fall back to 1×, not
+        // multiply the region by zero.
+        let broken = monitor(0, 0, 1920, 1080, 0.0);
+        assert_eq!(
+            global_rect_to_monitor_pixels(
+                Rect {
+                    x: 10,
+                    y: 10,
+                    width: 30,
+                    height: 8
+                },
+                &broken
+            ),
+            Some(Rect {
+                x: 10,
+                y: 10,
+                width: 30,
+                height: 8
+            })
+        );
+    }
+
+    #[test]
+    fn a_region_is_assigned_to_the_monitor_under_its_centre() {
+        let left = monitor(0, 0, 1512, 982, 2.0);
+        let right = monitor(1512, 0, 1920, 1080, 1.0);
+        // Straddles the seam but mostly on the right-hand display.
+        let region = Rect {
+            x: 1480,
+            y: 20,
+            width: 200,
+            height: 30,
+        };
+        assert!(!monitor_contains_center(&left, region));
+        assert!(monitor_contains_center(&right, region));
+    }
+
+    #[test]
+    fn a_region_off_every_monitor_belongs_to_none() {
+        let only = monitor(0, 0, 1920, 1080, 1.0);
+        let region = Rect {
+            x: 5000,
+            y: 5000,
+            width: 10,
+            height: 10,
+        };
+        assert!(!monitor_contains_center(&only, region));
     }
 
     #[test]

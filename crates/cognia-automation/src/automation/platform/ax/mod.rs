@@ -41,8 +41,11 @@
 //! by ref) remain unsupported: a stable, re-resolvable element ref is the harder
 //! follow-on.
 
+mod observer;
 mod raw;
 
+use std::collections::HashMap;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
@@ -50,18 +53,34 @@ use accessibility::{AXUIElement, AXUIElementAttributes};
 use enigo::{Direction, Enigo, Keyboard, Mouse, Settings};
 use once_cell::sync::Lazy;
 
-use crate::automation::backend::AutomationBackend;
+use crate::automation::backend::{AutomationBackend, SelectionPreflight};
 use crate::automation::platform::shared::keymap::{parse_chord, KeyToken, Modifier, NamedKey};
 use crate::automation::platform::shared::screenshot;
 use crate::automation::platform::shared::tree_shape::{self, TreeBudget};
 use crate::automation::selection::{build_text_selection, TextSelectionSnapshot};
 use crate::automation::types::*;
 
-pub struct AxBackend;
+#[derive(Default)]
+pub struct AxBackend {
+    /// The one observer thread, started on the first subscription and stopped
+    /// when the last one goes away. Interior mutability because the trait takes
+    /// `&self`; nothing here awaits, so no guard ever crosses a suspend point.
+    events: Mutex<Option<observer::AxObserverHandle>>,
+    subscriptions: Mutex<HashMap<u64, EventFilter>>,
+    next_subscription: AtomicU64,
+}
 
 impl AxBackend {
     pub fn new() -> std::result::Result<Self, String> {
-        Ok(Self)
+        Ok(Self::default())
+    }
+}
+
+impl Drop for AxBackend {
+    fn drop(&mut self) {
+        // The worker rebuilds its backend after a panic. Without this, every
+        // panic would strand another live observer thread.
+        let _ = self.events.lock().map(|mut slot| slot.take());
     }
 }
 
@@ -72,7 +91,8 @@ impl AutomationBackend for AxBackend {
             has_uia: false,
             has_input_sim: true,
             has_screenshot: true,
-            has_events: false,
+            // AXObserver-backed selection/focus notifications (see `observer.rs`).
+            has_events: true,
             has_a11y_tree: true, // bounded AX subtree via read_tree/find (ADR-0020 subset).
             monitors: screenshot::list_monitors(),
         }
@@ -204,12 +224,43 @@ impl AutomationBackend for AxBackend {
         Err(AutomationError::UnsupportedPlatform)
     }
 
-    fn subscribe_events(&self, _f: EventFilter) -> Result<SubscriptionId> {
-        Err(AutomationError::UnsupportedPlatform)
+    fn subscribe_events(&self, f: EventFilter) -> Result<SubscriptionId> {
+        if f.kinds.as_ref().is_some_and(Vec::is_empty) {
+            return Err(AutomationError::BackendError {
+                message: "subscribe_events: kinds must not be empty".into(),
+            });
+        }
+        let id = self.next_subscription.fetch_add(1, Ordering::Relaxed) + 1;
+        let mut events = self.events.lock().map_err(|error| poisoned(error))?;
+        if events.is_none() {
+            *events = Some(
+                observer::AxObserverHandle::install(id)
+                    .map_err(|message| AutomationError::BackendError { message })?,
+            );
+        }
+        drop(events);
+        self.subscriptions
+            .lock()
+            .map_err(|error| poisoned(error))?
+            .insert(id, f);
+        Ok(SubscriptionId(id))
     }
 
-    fn unsubscribe(&self, _s: SubscriptionId) -> Result<()> {
-        Err(AutomationError::UnsupportedPlatform)
+    fn unsubscribe(&self, s: SubscriptionId) -> Result<()> {
+        let mut subscriptions = self.subscriptions.lock().map_err(|error| poisoned(error))?;
+        if subscriptions.remove(&s.0).is_none() {
+            return Err(AutomationError::BackendError {
+                message: format!("unsubscribe: unknown subscription id {}", s.0),
+            });
+        }
+        let empty = subscriptions.is_empty();
+        drop(subscriptions);
+        if empty {
+            // Last one out stops the thread; an idle observer would keep
+            // re-targeting on every app switch for nobody.
+            self.events.lock().map_err(|error| poisoned(error))?.take();
+        }
+        Ok(())
     }
 
     fn mouse_move(&self, point: Point) -> Result<()> {
@@ -279,15 +330,34 @@ impl AutomationBackend for AxBackend {
         Ok(Point { x, y })
     }
 
-    fn pick_at_point(&self, _point: Point) -> Result<ElementInfo> {
-        // macOS minimum-viable: `pick_at_point` resolves to whichever
-        // element System Events identifies as the frontmost app's
-        // window. Cursor-coordinate-based hit-testing requires
-        // AXUIElementCopyElementAtPosition; out of scope for W2 but the
-        // Inspector still gets a useful result (the focused window's
-        // metadata) so the affordance isn't a no-op.
-        let snap = read_focused_window()?;
-        Ok(focused_to_element_info(&snap))
+    /// True coordinate hit-test via `AXUIElementCopyElementAtPosition`.
+    ///
+    /// This used to return the frontmost *window's* metadata regardless of the
+    /// point, which made it impossible to tell what kind of control the cursor
+    /// was actually over — a code editor, a browser address bar, a read-only
+    /// document. The old behaviour is kept as the fallback rather than
+    /// erroring: a miss (over the desktop, or an app that refuses hit-testing)
+    /// should not regress the Inspector's pick affordance to a failure.
+    fn pick_at_point(&self, point: Point) -> Result<ElementInfo> {
+        if !raw::is_trusted() {
+            return Err(AutomationError::PermissionDenied {
+                reason: "macOS Accessibility permission not granted".into(),
+            });
+        }
+        let Some(element) = raw::element_at_position(point.x as f32, point.y as f32) else {
+            let snap = read_focused_window()?;
+            return Ok(focused_to_element_info(&snap));
+        };
+        let pid = raw::element_pid(&element);
+        // The cached focused-window snapshot already knows the frontmost
+        // process's name; borrow it when the hit landed in that same process
+        // (the overwhelmingly common case) rather than paying for another look-up.
+        let focused = read_focused_window().ok();
+        let process_name = focused
+            .as_ref()
+            .filter(|snap| pid.is_some() && snap.pid == pid)
+            .and_then(|snap| snap.process_name.as_deref());
+        Ok(ax_element_to_info(&element, pid, process_name))
     }
 
     fn read_text_selection(&self) -> Result<Option<TextSelectionSnapshot>> {
@@ -322,7 +392,58 @@ impl AutomationBackend for AxBackend {
             raw::selected_text_bounds(&element),
         ))
     }
+
+    /// Answered entirely through AX — no `osascript`.
+    ///
+    /// This runs on every gated pointer release, so the old
+    /// `read_focused_window()` path (which shells out and caches for 250ms)
+    /// would fork a process whenever the cache missed. `AXFocusedApplication`
+    /// off the system-wide element is one mach round-trip and needs only the
+    /// grant this backend already requires.
+    fn selection_preflight(&self) -> Result<SelectionPreflight> {
+        let trusted = raw::is_trusted();
+        if !trusted {
+            return Ok(SelectionPreflight {
+                trusted: false,
+                ..Default::default()
+            });
+        }
+        let Some(pid) = raw::system_wide_focused_pid() else {
+            return Ok(SelectionPreflight {
+                trusted: true,
+                ..Default::default()
+            });
+        };
+        let app = AXUIElement::application(pid as i32);
+        raw::set_messaging_timeout(&app, PREFLIGHT_TIMEOUT_SECONDS);
+        let focused = raw::focused_ui_element(&app);
+        let secure_field = focused
+            .as_ref()
+            .and_then(|element| element.subrole().ok())
+            .is_some_and(|subrole| subrole == "AXSecureTextField");
+        Ok(SelectionPreflight {
+            pid: Some(pid),
+            process_name: str_attr(app.title()),
+            window_title: raw::resolve_window_root(&app).title().ok().and_then(|t| {
+                let title = t.to_string();
+                (!title.is_empty()).then_some(title)
+            }),
+            // Rides the round-trip we are already making — the focused element
+            // is in hand, so walking to its web area costs no extra hop. Never
+            // read for a password field.
+            source_url: focused
+                .as_ref()
+                .filter(|_| !secure_field)
+                .and_then(raw::web_area_url),
+            secure_field,
+            trusted: true,
+        })
+    }
 }
+
+/// The preflight sits on the pointer-release path, so a wedged app must cost
+/// a fraction of a frame rather than the AX default of 6 seconds.
+const PREFLIGHT_TIMEOUT_SECONDS: f32 = 0.25;
 
 fn enigo_new() -> Result<Enigo> {
     Enigo::new(&Settings::default()).map_err(|e| AutomationError::BackendError {
@@ -569,6 +690,15 @@ fn snap_to_element_ref(snap: &FocusedSnapshot) -> ElementRef {
 ///
 /// All reads are best-effort; absent attributes fall back to sane defaults. The
 /// ref is an observability string, not a re-resolvable handle.
+/// A poisoned lock here means another thread panicked while holding backend
+/// state. Report it rather than propagating the panic — the worker rebuilds
+/// the backend on the next request.
+fn poisoned<T>(error: std::sync::PoisonError<T>) -> AutomationError {
+    AutomationError::BackendError {
+        message: format!("ax backend lock poisoned: {error}"),
+    }
+}
+
 fn ax_element_to_info(el: &AXUIElement, pid: Option<u32>, proc_name: Option<&str>) -> ElementInfo {
     let role = str_attr(el.role());
     let subrole = str_attr(el.subrole());

@@ -142,6 +142,39 @@ mod tests {
         assert_eq!(ids.len(), 5, "expected exactly five backend slots");
     }
 
+    /// `list_ids` is deliberately dense — every id gets a slot so dispatch
+    /// always finds one. That makes it useless for deciding whether an
+    /// OCR-dependent feature can run at all, which is what `available_ids`
+    /// is for. This is the seam that lets the selection toolbar's OCR
+    /// fallback switch itself off on a default Windows build (every feature
+    /// opt-in ⇒ every backend a placeholder) with no `cfg` at the call site.
+    #[tokio::test]
+    async fn available_ids_excludes_placeholders_that_list_ids_still_reports() {
+        let registry = NativeOcrRegistry::new();
+        install_platform_backends(&registry).await;
+        let all = registry.list_ids().await;
+        let available = registry.available_ids().await;
+
+        assert_eq!(all.len(), 5);
+        assert!(available.len() <= all.len());
+        for id in &available {
+            assert!(all.contains(id));
+        }
+        // A placeholder is never available, whatever it is standing in for.
+        assert!(
+            !available.contains(&"windows-media-ocr"),
+            "windows-media-ocr needs MSIX package identity and is a placeholder here"
+        );
+
+        // On macOS, Apple Vision is bound unconditionally — so the fallback
+        // has a real engine and must report itself usable.
+        #[cfg(target_os = "macos")]
+        assert!(
+            available.contains(&"apple-vision"),
+            "apple-vision is in-process on macOS and needs no feature flag"
+        );
+    }
+
     #[tokio::test]
     async fn placeholder_dispatch_reports_missing_binding() {
         let registry = NativeOcrRegistry::new();

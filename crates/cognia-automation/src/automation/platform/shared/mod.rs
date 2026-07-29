@@ -16,6 +16,7 @@ pub mod credential_window;
 // excluding the module from the test binary.
 #[cfg(any(target_os = "macos", target_os = "linux", test))]
 pub mod keymap;
+pub mod screen_capture;
 pub mod screenshot;
 // ADR-0020 cross-platform bounded subset — depth/node-capped tree walk, the
 // Locator matcher, and rect-center math shared by the macOS (AX) and Linux

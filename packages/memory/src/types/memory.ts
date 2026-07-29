@@ -56,8 +56,22 @@ export type MemoryStatus = "active" | "invalidated"
  */
 export type MemoryProvenance = "user" | "explicit" | "inbound" | "system" | "external"
 
-/** Which API surface wrote an `external`-provenance memory. */
-export type MemorySourceChannel = "plugin" | "mcp" | "rpc"
+/**
+ * Which API surface wrote an `external`-provenance memory. Purely a provenance
+ * tag — stored on `Memory.sourceChannel`, never branched on.
+ *
+ * `selection` is the system-wide selection toolbar: text the user highlighted
+ * in some other application entirely, which is worth distinguishing from a
+ * plugin or an RPC caller when auditing where a memory came from.
+ */
+export const MEMORY_SOURCE_CHANNELS = ["plugin", "mcp", "rpc", "selection"] as const
+
+export type MemorySourceChannel = (typeof MEMORY_SOURCE_CHANNELS)[number]
+
+/** Narrowing guard for untrusted input — backup imports, RPC payloads. */
+export function isMemorySourceChannel(value: unknown): value is MemorySourceChannel {
+  return MEMORY_SOURCE_CHANNELS.includes(value as MemorySourceChannel)
+}
 
 export interface Memory {
   /** `mem_<ts>_<rand>`. */

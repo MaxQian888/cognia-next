@@ -29,7 +29,7 @@ import type {
   PluginRow,
 } from "@/lib/db/plugin-types"
 import type { TwinChunk, TwinDraft, TwinJob, TwinProfile, TwinSource } from "@/types/twin"
-import type { Memory } from "@/types/memory/memory"
+import { isMemorySourceChannel, type Memory } from "@/types/memory/memory"
 import type { MemoryAuditEvent, MemoryEvidence, MemoryJob } from "@/types/memory/governance"
 import { hasNoLeakingPii, redactText } from "@cognia/redact"
 import {
@@ -864,11 +864,9 @@ function sanitizeImportedMemory(value: unknown): Memory | undefined {
     const safe = optionalIdentifier(value[field])
     if (safe) row[field] = safe
   }
-  if (
-    value.sourceChannel === "plugin" ||
-    value.sourceChannel === "mcp" ||
-    value.sourceChannel === "rpc"
-  ) {
+  // Guard rather than a literal union so a new channel cannot silently be
+  // dropped on import again — `selection` was, for exactly that reason.
+  if (isMemorySourceChannel(value.sourceChannel)) {
     row.sourceChannel = value.sourceChannel
   }
   if (value.evidenceState === "legacy" || value.evidenceState === "supported") {

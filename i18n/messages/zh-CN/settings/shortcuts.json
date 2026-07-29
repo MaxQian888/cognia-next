@@ -53,7 +53,13 @@
   "reservedWarning": "可能与系统的 {feature} 快捷键冲突",
   "resetItem": "恢复默认",
   "save": "保存",
+  "selectionAsk": "划词工具栏：追问",
   "selectionCaptureClipboard": "捕获已复制的选区",
+  "selectionCopy": "划词工具栏：复制",
+  "selectionExplain": "划词工具栏：解释",
+  "selectionRemember": "划词工具栏：存入记忆",
+  "selectionSpeak": "划词工具栏：朗读",
+  "selectionTranslate": "划词工具栏：翻译",
   "title": "全局快捷键",
   "unified": {
     "description": "在一个页面查看并重新绑定所有快捷键。点击录制后按下你想要的键位组合。",

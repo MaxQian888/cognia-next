@@ -35,8 +35,16 @@ pub(crate) use surfaces::enumerate_scaled_candidates;
 // floating level). Alias rather than move — pet call sites stay untouched.
 pub(crate) use macos_panel::{
     apply_pet_panel_behavior as apply_overlay_panel_behavior,
+    begin_panel_open as begin_overlay_panel_open,
+    cancel_panel_reveal as cancel_overlay_panel_reveal,
+    // The AWAITED conversion. `apply_overlay_panel_behavior` only enqueues, and
+    // `run_on_appkit_thread`'s docblock spells out why a caller has to wait:
+    // a reveal can otherwise overtake the conversion and briefly show an
+    // ordinary — activating — NSWindow.
+    configure_pet_panel as configure_overlay_panel,
     current_panel_generation as current_overlay_panel_generation,
-    reveal_pet_panel as reveal_overlay_panel, PetPanelRole as OverlayPanelRole,
+    reveal_pet_panel as reveal_overlay_panel, set_panel_key as set_overlay_panel_key,
+    PetPanelRole as OverlayPanelRole,
 };
 
 /// Default overlay size used when the tray opens the pet with no renderer

@@ -53,7 +53,13 @@
   "reservedWarning": "May conflict with the system {feature} shortcut",
   "resetItem": "Reset to default",
   "save": "Save",
+  "selectionAsk": "Selection toolbar: ask",
   "selectionCaptureClipboard": "Capture copied selection",
+  "selectionCopy": "Selection toolbar: copy",
+  "selectionExplain": "Selection toolbar: explain",
+  "selectionRemember": "Selection toolbar: add to memory",
+  "selectionSpeak": "Selection toolbar: read aloud",
+  "selectionTranslate": "Selection toolbar: translate",
   "title": "Global shortcuts",
   "unified": {
     "description": "View and rebind every shortcut in one place. Recording captures the next key combo you press.",

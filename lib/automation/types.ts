@@ -225,7 +225,14 @@ export type WindowOp =
   | { kind: "restore" }
   | { kind: "resize"; rect: Rect }
 
-export type EventKind = "focus-changed" | "structure-changed" | "property-changed"
+/**
+ * Mirrors the Rust `EventKind` in
+ * `crates/cognia-automation/src/automation/types.rs`. `text-selection-changed`
+ * is opt-in only: it fires on every caret move in every text control, so it is
+ * never part of the default filter.
+ */
+export type EventKind =
+  "focus-changed" | "structure-changed" | "property-changed" | "text-selection-changed"
 
 export interface EventFilter {
   kinds?: EventKind[]

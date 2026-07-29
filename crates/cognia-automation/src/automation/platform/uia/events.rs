@@ -14,8 +14,8 @@ use std::time::Duration;
 
 use parking_lot::Mutex;
 use uiautomation::events::{
-    CustomFocusChangedEventHandlerFn, CustomPropertyChangedEventHandlerFn,
-    CustomStructureChangedEventHandlerFn, UIFocusChangedEventHandler,
+    CustomEventHandlerFn, CustomFocusChangedEventHandlerFn, CustomPropertyChangedEventHandlerFn,
+    CustomStructureChangedEventHandlerFn, UIEventHandler, UIEventType, UIFocusChangedEventHandler,
     UIPropertyChangedEventHandler, UIStructureChangeEventHandler,
 };
 use uiautomation::types::{StructureChangeType, TreeScope, UIProperty};
@@ -23,6 +23,7 @@ use uiautomation::variants::Variant;
 use uiautomation::{UIAutomation, UIElement, UITreeWalker};
 
 use crate::automation::events::{emit_uia_event, UiaEventPayload};
+use crate::automation::selection_events::{self, SelectionSignal, SelectionSignalKind};
 use crate::automation::types::{AutomationError, EventFilter, EventKind, Result, SubscriptionId};
 
 const COMMAND_TIMEOUT: Duration = Duration::from_secs(5);
@@ -44,6 +45,13 @@ pub fn validate_filter(filter: &EventFilter) -> Result<()> {
     Ok(())
 }
 
+/// The kinds a filter of `None` means.
+///
+/// `TextSelectionChanged` is deliberately EXCLUDED. It fires on every caret
+/// move in every text control, so folding it into the default set would make
+/// every pre-existing subscription — including the workflow desktop-event
+/// trigger — silently start registering a subtree-scoped 20014 handler and
+/// paying for it. Callers that want it must name it.
 fn requested_kinds(filter: &EventFilter) -> Vec<EventKind> {
     filter.kinds.clone().unwrap_or_else(|| {
         vec![
@@ -73,6 +81,7 @@ struct RegisteredHandlers {
     focus: Option<UIFocusChangedEventHandler>,
     property: Option<UIPropertyChangedEventHandler>,
     structure: Option<UIStructureChangeEventHandler>,
+    text_selection: Option<UIEventHandler>,
 }
 
 impl RegisteredHandlers {
@@ -82,10 +91,20 @@ impl RegisteredHandlers {
             focus: None,
             property: None,
             structure: None,
+            text_selection: None,
         }
     }
 
     fn unregister(&self, automation: &UIAutomation) {
+        if let Some(handler) = &self.text_selection {
+            if let Err(err) = automation.remove_automation_event_handler(
+                UIEventType::Text_TextSelectionChanged,
+                &self.root,
+                handler,
+            ) {
+                log::warn!("remove text-selection-changed handler failed: {err}");
+            }
+        }
         if let Some(handler) = &self.focus {
             if let Err(err) = automation.remove_focus_changed_event_handler(handler) {
                 log::warn!("remove focus-changed handler failed: {err}");
@@ -286,6 +305,39 @@ fn register_handlers(
         registered.focus = Some(handler);
     }
 
+    if kinds.contains(&EventKind::TextSelectionChanged) {
+        // Two consumers, one registration: the Tauri event bus (so the workflow
+        // desktop-event trigger can fire on it) and the in-process selection
+        // bus (so the selection toolbar can stop polling on every click).
+        //
+        // `selected_len` is -1 because UIA hands the callback only the element;
+        // asking it for a text range here would mean a cross-process COM call
+        // on every caret move. Consumers that care about size re-check after
+        // they read the text.
+        let callback: Box<CustomEventHandlerFn> = Box::new(move |sender, _event_type| {
+            emit_element_event(id, "text-selection-changed", sender, None, None, None);
+            selection_events::publish(SelectionSignal {
+                kind: SelectionSignalKind::SelectionChanged,
+                pid: sender.get_process_id().ok(),
+                selected_len: -1,
+                at_ms: now_ms(),
+            });
+            Ok(())
+        });
+        let handler: UIEventHandler = callback.into();
+        if let Err(err) = automation.add_automation_event_handler(
+            UIEventType::Text_TextSelectionChanged,
+            &root,
+            TreeScope::Subtree,
+            None,
+            &handler,
+        ) {
+            registered.unregister(automation);
+            return Err(format!("register text-selection-changed handler: {err}"));
+        }
+        registered.text_selection = Some(handler);
+    }
+
     if kinds.contains(&EventKind::PropertyChanged) {
         let callback: Box<CustomPropertyChangedEventHandlerFn> =
             Box::new(move |sender, property: UIProperty, _value: Variant| {
@@ -372,6 +424,15 @@ fn element_is_in_scope(
     false
 }
 
+/// Same clock the selection bus and the input monitor stamp with, so a
+/// consumer can compare a selection signal against a mouse or key event.
+fn now_ms() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_millis() as i64)
+        .unwrap_or(0)
+}
+
 fn emit_element_event(
     subscription_id: u64,
     kind: &str,
@@ -429,6 +490,7 @@ mod tests {
         assert!(validate_filter(&filter(Some(vec![EventKind::FocusChanged]))).is_ok());
         assert!(validate_filter(&filter(Some(vec![EventKind::StructureChanged]))).is_ok());
         assert!(validate_filter(&filter(Some(vec![EventKind::PropertyChanged]))).is_ok());
+        assert!(validate_filter(&filter(Some(vec![EventKind::TextSelectionChanged]))).is_ok());
         assert!(validate_filter(&filter(Some(vec![]))).is_err());
     }
 
@@ -441,6 +503,19 @@ mod tests {
                 EventKind::StructureChanged,
                 EventKind::PropertyChanged,
             ]
+        );
+    }
+
+    /// Text-selection events fire on every caret move in every text control.
+    /// If `None` ever started to include them, every pre-existing subscription
+    /// — notably the workflow desktop-event trigger — would silently begin
+    /// registering a subtree-scoped 20014 handler and paying for it.
+    #[test]
+    fn text_selection_is_opt_in_and_never_part_of_the_default_set() {
+        assert!(!requested_kinds(&filter(None)).contains(&EventKind::TextSelectionChanged));
+        assert_eq!(
+            requested_kinds(&filter(Some(vec![EventKind::TextSelectionChanged]))),
+            vec![EventKind::TextSelectionChanged]
         );
     }
 

@@ -18029,6 +18029,8 @@
   "selectionToolbar": {
     "ask": "Ask",
     "chooseLanguage": "Choose translation language",
+    "composeEmail": "Email",
+    "convertUnit": "Convert",
     "copy": "Copy",
     "errors": {
       "generic": "That action could not be completed",
@@ -18044,11 +18046,15 @@
       "ko": "Korean",
       "zh-CN": "Simplified Chinese"
     },
+    "openLink": "Open link",
     "prompts": {
+      "convertUnit": "Please convert this measurement to the units I usually use.",
       "explain": "Please explain this selection.",
+      "explainCode": "Please explain this code.",
       "translate": "Please translate this selection into {language}."
     },
     "remember": "Remember",
+    "searchWeb": "Search",
     "speak": "Read aloud",
     "stopSpeaking": "Stop reading",
     "translate": "Translate",
@@ -24675,7 +24681,13 @@
       "reservedWarning": "May conflict with the system {feature} shortcut",
       "resetItem": "Reset to default",
       "save": "Save",
+      "selectionAsk": "Selection toolbar: ask",
       "selectionCaptureClipboard": "Capture copied selection",
+      "selectionCopy": "Selection toolbar: copy",
+      "selectionExplain": "Selection toolbar: explain",
+      "selectionRemember": "Selection toolbar: add to memory",
+      "selectionSpeak": "Selection toolbar: read aloud",
+      "selectionTranslate": "Selection toolbar: translate",
       "title": "Global shortcuts",
       "unified": {
         "description": "View and rebind every shortcut in one place. Recording captures the next key combo you press.",

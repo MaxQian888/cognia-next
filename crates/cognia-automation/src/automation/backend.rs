@@ -77,6 +77,37 @@ pub trait AutomationBackend {
     fn read_text_selection(&self) -> Result<Option<TextSelectionSnapshot>> {
         Err(AutomationError::UnsupportedPlatform)
     }
+
+    /// Cheap "who has focus, and may we read from it" probe.
+    ///
+    /// Exists so a caller can decide whether a selection read is worth doing
+    /// *before* paying for one. The selection toolbar used to read the
+    /// selection first and only then check the app against its blocklist,
+    /// which meant password managers and disabled apps still cost a full AX
+    /// round-trip — and, on macOS, an `osascript` fork — on every click.
+    ///
+    /// Backends that cannot answer return `UnsupportedPlatform`; callers must
+    /// treat that as "no opinion" and fall back to their existing checks
+    /// rather than as a refusal.
+    fn selection_preflight(&self) -> Result<SelectionPreflight> {
+        Err(AutomationError::UnsupportedPlatform)
+    }
+}
+
+/// What the focused UI element is, without reading any of its content.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct SelectionPreflight {
+    pub pid: Option<u32>,
+    pub process_name: Option<String>,
+    pub window_title: Option<String>,
+    /// Document URL of the web area containing the focused element, when the
+    /// application exposes one. Read from AX, never AppleScript — the latter
+    /// triggers an Apple Events permission prompt per target application.
+    pub source_url: Option<String>,
+    /// The focused control is a password field. Never read from it.
+    pub secure_field: bool,
+    /// Whether the platform's accessibility permission is currently granted.
+    pub trusted: bool,
 }
 
 /// A back-end that fails every call with `UnsupportedPlatform`. macOS and
@@ -180,6 +211,14 @@ mod tests {
         ));
         assert!(matches!(
             b.screenshot(ScreenshotOpts::default()),
+            Err(AutomationError::UnsupportedPlatform)
+        ));
+        // A backend with no opinion must say so rather than answering
+        // `Default::default()`, which would read as "nothing is focused and
+        // nothing is a password field" — and silently unblock a selection read
+        // the caller meant to gate.
+        assert!(matches!(
+            b.selection_preflight(),
             Err(AutomationError::UnsupportedPlatform)
         ));
     }

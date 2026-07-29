@@ -43,14 +43,25 @@ pub(crate) enum PetPanelRole {
     /// edge of the screen, and at the pet's floating level (3) the menu bar
     /// (level 24) would draw over it on every non-fullscreen Space.
     Island,
+    /// The system-wide selection toolbar (ADR-0093). Key-capable, because the
+    /// inline language list implements roving tabindex and genuinely takes the
+    /// keyboard while it is open.
+    ///
+    /// It needs its own role rather than borrowing `Popup` because the
+    /// generation / open-intent / lifecycle statics below are keyed BY ROLE:
+    /// sharing `Popup` would make closing the pet popup cancel an in-flight
+    /// selection-toolbar reveal, and vice versa.
+    SelectionToolbar,
 }
 
 static SPRITE_PANEL_GENERATION: AtomicU64 = AtomicU64::new(0);
 static POPUP_PANEL_GENERATION: AtomicU64 = AtomicU64::new(0);
 static ISLAND_PANEL_GENERATION: AtomicU64 = AtomicU64::new(0);
+static SELECTION_TOOLBAR_PANEL_GENERATION: AtomicU64 = AtomicU64::new(0);
 static SPRITE_PANEL_OPEN: AtomicBool = AtomicBool::new(false);
 static POPUP_PANEL_OPEN: AtomicBool = AtomicBool::new(false);
 static ISLAND_PANEL_OPEN: AtomicBool = AtomicBool::new(false);
+static SELECTION_TOOLBAR_PANEL_OPEN: AtomicBool = AtomicBool::new(false);
 
 #[derive(Debug)]
 struct PanelLifecycle {
@@ -70,12 +81,17 @@ static ISLAND_PANEL_LIFECYCLE: Mutex<PanelLifecycle> = Mutex::new(PanelLifecycle
     destroying: false,
     in_flight_builds: 0,
 });
+static SELECTION_TOOLBAR_PANEL_LIFECYCLE: Mutex<PanelLifecycle> = Mutex::new(PanelLifecycle {
+    destroying: false,
+    in_flight_builds: 0,
+});
 
 fn panel_generation(role: PetPanelRole) -> &'static AtomicU64 {
     match role {
         PetPanelRole::Sprite => &SPRITE_PANEL_GENERATION,
         PetPanelRole::Popup => &POPUP_PANEL_GENERATION,
         PetPanelRole::Island => &ISLAND_PANEL_GENERATION,
+        PetPanelRole::SelectionToolbar => &SELECTION_TOOLBAR_PANEL_GENERATION,
     }
 }
 
@@ -84,6 +100,7 @@ fn panel_open_intent(role: PetPanelRole) -> &'static AtomicBool {
         PetPanelRole::Sprite => &SPRITE_PANEL_OPEN,
         PetPanelRole::Popup => &POPUP_PANEL_OPEN,
         PetPanelRole::Island => &ISLAND_PANEL_OPEN,
+        PetPanelRole::SelectionToolbar => &SELECTION_TOOLBAR_PANEL_OPEN,
     }
 }
 
@@ -92,6 +109,7 @@ fn panel_lifecycle(role: PetPanelRole) -> &'static Mutex<PanelLifecycle> {
         PetPanelRole::Sprite => &SPRITE_PANEL_LIFECYCLE,
         PetPanelRole::Popup => &POPUP_PANEL_LIFECYCLE,
         PetPanelRole::Island => &ISLAND_PANEL_LIFECYCLE,
+        PetPanelRole::SelectionToolbar => &SELECTION_TOOLBAR_PANEL_LIFECYCLE,
     }
 }
 
@@ -187,7 +205,10 @@ impl PetPanelRole {
     /// only displays); the popup and island must, or their text inputs can't
     /// be typed into.
     pub(crate) fn can_become_key(self) -> bool {
-        matches!(self, PetPanelRole::Popup | PetPanelRole::Island)
+        matches!(
+            self,
+            PetPanelRole::Popup | PetPanelRole::Island | PetPanelRole::SelectionToolbar
+        )
     }
 
     /// NSWindow level for this role. Pure so the constants are pinned by
@@ -196,7 +217,9 @@ impl PetPanelRole {
     pub(crate) fn window_level(self) -> i64 {
         match self {
             // `NSFloatingWindowLevel` — above normal windows, below the menu bar.
-            PetPanelRole::Sprite | PetPanelRole::Popup => 3,
+            // The selection toolbar anchors to a text selection inside another
+            // app's window, so it has no reason to cover the menu bar.
+            PetPanelRole::Sprite | PetPanelRole::Popup | PetPanelRole::SelectionToolbar => 3,
             // `NSStatusWindowLevel` (25) — one above `NSMainMenuWindowLevel`
             // (24) so the top-hugging island draws over the menu bar instead
             // of hiding behind it.
@@ -331,9 +354,9 @@ pub(crate) fn apply_pet_panel_behavior<R: Runtime>(
                 .to_panel::<PetSpritePanel<R>>()
                 .map_err(|e| format!("pet sprite to_panel failed: {e:?}"))?
         }
-        // The island shares the popup's panel class (key-capable,
-        // non-activating); only its window level differs.
-        PetPanelRole::Popup | PetPanelRole::Island => {
+        // The island and the selection toolbar share the popup's panel class
+        // (key-capable, non-activating); only their window level differs.
+        PetPanelRole::Popup | PetPanelRole::Island | PetPanelRole::SelectionToolbar => {
             debug_assert!(role.can_become_key());
             let panel = window
                 .to_panel::<PetPopupPanel<R>>()
@@ -410,6 +433,50 @@ pub(crate) fn reveal_pet_panel<R: Runtime>(
         }
         Ok(())
     })
+}
+
+/// Take or surrender key-window status WITHOUT activating the application.
+///
+/// This is the whole reason the selection toolbar exists as a panel. Tauri's
+/// `WebviewWindow::set_focus` goes through tao, which calls
+/// `NSApp.activateIgnoringOtherApps` — so the source application loses focus,
+/// its selection highlight greys out, and the user's keystrokes stop reaching
+/// it. `NSPanel::show_and_make_key` on a non-activating panel takes the
+/// keyboard without touching application activation, which is exactly what a
+/// pop-over-someone-else's-document toolbar needs.
+///
+/// Awaited (`run_on_appkit_thread`) so callers can fail rather than report
+/// success while the toggle is still queued.
+#[cfg(target_os = "macos")]
+pub(crate) fn set_panel_key<R: Runtime>(
+    window: &WebviewWindow<R>,
+    key: bool,
+) -> Result<(), String> {
+    use tauri_nspanel::ManagerExt;
+
+    let app = window.app_handle().clone();
+    let label = window.label().to_string();
+    run_on_appkit_thread(window, "panel key toggle", move || {
+        let panel = app
+            .get_webview_panel(&label)
+            .map_err(|error| format!("panel key toggle: native panel missing: {error:?}"))?;
+        if key {
+            panel.show_and_make_key();
+        } else {
+            panel.resign_key_window();
+        }
+        Ok(())
+    })
+}
+
+/// Off macOS the builder flags (and, on Windows, `WS_EX_NOACTIVATE`) already
+/// give the desired behavior — the caller keeps its own platform path.
+#[cfg(not(target_os = "macos"))]
+pub(crate) fn set_panel_key<R: Runtime>(
+    _window: &WebviewWindow<R>,
+    _key: bool,
+) -> Result<(), String> {
+    Ok(())
 }
 
 /// Remove the retained tauri-nspanel manager entry and restore the original
@@ -500,6 +567,16 @@ mod tests {
         assert!(!PetPanelRole::Sprite.can_become_key());
         assert!(PetPanelRole::Popup.can_become_key());
         assert!(PetPanelRole::Island.can_become_key());
+        // The selection toolbar's inline language list implements roving
+        // tabindex and genuinely takes the keyboard while it is open.
+        assert!(PetPanelRole::SelectionToolbar.can_become_key());
+    }
+
+    #[test]
+    fn selection_toolbar_floats_without_covering_the_menu_bar() {
+        // It anchors to a selection inside someone else's window, so unlike the
+        // island it has no reason to draw over the menu bar.
+        assert_eq!(PetPanelRole::SelectionToolbar.window_level(), 3);
     }
 
     #[test]
@@ -508,10 +585,32 @@ mod tests {
             PetPanelRole::Sprite,
             PetPanelRole::Popup,
             PetPanelRole::Island,
+            PetPanelRole::SelectionToolbar,
         ] {
             assert!(!role.hides_on_deactivate());
             assert!(role.works_when_modal());
         }
+    }
+
+    /// This test IS the reason `SelectionToolbar` is its own role rather than
+    /// borrowing `Popup`. The generation / open-intent / lifecycle statics are
+    /// keyed by role, so a shared role would make closing the pet popup cancel
+    /// an in-flight selection-toolbar reveal — and the toolbar would silently
+    /// stop appearing whenever the pet was in use.
+    #[test]
+    fn selection_toolbar_has_its_own_reveal_generation() {
+        let toolbar = begin_panel_open(PetPanelRole::SelectionToolbar);
+        let popup = begin_panel_open(PetPanelRole::Popup);
+
+        cancel_panel_reveal(PetPanelRole::Popup);
+
+        assert!(!panel_generation_is_current(PetPanelRole::Popup, popup));
+        assert!(panel_generation_is_current(
+            PetPanelRole::SelectionToolbar,
+            toolbar
+        ));
+
+        cancel_panel_reveal(PetPanelRole::SelectionToolbar);
     }
 
     #[test]

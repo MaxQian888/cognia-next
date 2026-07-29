@@ -6,15 +6,15 @@
   "closeBehaviorHint": "Choose what happens when you click the window's close button. The tray menu's Quit always exits.",
   "closeBehaviorQuit": "Quit Cognia",
   "closeBehaviorTray": "Minimize to tray",
-  "copyDebug": "Copy debug info",
-  "copyDebugFailed": "Copy failed: {error}",
-  "copyDebugSuccess": "Debug info copied to clipboard.",
   "cookieImport": {
     "description": "Allow the embedded browser to read cookies from a selected local Chromium profile after explicit consent. Cookie values stay on this device.",
     "platformHint": "Available on macOS only. Windows App-Bound Encryption and Linux credential stores are not accessed.",
     "title": "Reuse Chromium sign-in",
     "toggle": "Toggle Chromium cookie import"
   },
+  "copyDebug": "Copy debug info",
+  "copyDebugFailed": "Copy failed: {error}",
+  "copyDebugSuccess": "Debug info copied to clipboard.",
   "dataDir": "Data dir",
   "family": "Family",
   "launchAtLogin": "Launch at login",
@@ -45,7 +45,9 @@
     "permissionHint": "macOS requires Accessibility and Input Monitoring permission. Cognia does not request Screen Recording.",
     "saveDisabledApps": "Save app list",
     "title": "System text-selection toolbar",
-    "toggle": "Toggle system text-selection toolbar"
+    "toggle": "Toggle system text-selection toolbar",
+    "translateLanguage": "Default translation language",
+    "translateLanguageHint": "Used by the toolbar's Translate button and its ⌥⇧3 shortcut."
   },
   "subtitle": "Settings that only apply when running as the native desktop app.",
   "system": "System",

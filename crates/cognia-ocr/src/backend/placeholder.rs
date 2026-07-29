@@ -30,6 +30,11 @@ impl NativeBackend for PlaceholderBackend {
     ) -> Result<NativeOcrResult, NativeOcrError> {
         Err(NativeOcrError::MissingBinding(self.id))
     }
+
+    /// The whole point of this type: it occupies an id it cannot serve.
+    fn is_available(&self) -> bool {
+        false
+    }
 }
 
 #[cfg(test)]

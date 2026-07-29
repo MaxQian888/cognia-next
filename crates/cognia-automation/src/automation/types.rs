@@ -94,7 +94,7 @@ pub struct ElementInfo {
     pub children: Option<Vec<ElementInfo>>,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Rect {
     pub x: i32,
@@ -306,6 +306,11 @@ pub enum EventKind {
     FocusChanged,
     StructureChanged,
     PropertyChanged,
+    /// The selected-text range changed somewhere on the desktop.
+    ///
+    /// Deliberately NOT part of any default filter: it fires on every keystroke
+    /// in every text field, so a subscriber has to ask for it explicitly.
+    TextSelectionChanged,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -642,6 +647,23 @@ mod tests {
     fn roundtrip<T: Serialize + for<'de> Deserialize<'de> + std::fmt::Debug>(value: &T) -> T {
         let json = serde_json::to_string(value).expect("serialize");
         serde_json::from_str(&json).expect("deserialize")
+    }
+
+    /// The wire values are a cross-language contract: `lib/automation/types.ts`
+    /// and the zod `DesktopEventKind` in `lib/workflow/nodes/params-schemas.ts`
+    /// hold the matching literals, and a workflow desktop-event trigger rejects
+    /// any kind it does not recognize.
+    #[test]
+    fn event_kinds_use_kebab_case_wire_values() {
+        for (kind, wire) in [
+            (EventKind::FocusChanged, "\"focus-changed\""),
+            (EventKind::StructureChanged, "\"structure-changed\""),
+            (EventKind::PropertyChanged, "\"property-changed\""),
+            (EventKind::TextSelectionChanged, "\"text-selection-changed\""),
+        ] {
+            assert_eq!(serde_json::to_string(&kind).unwrap(), wire);
+            assert_eq!(roundtrip(&kind), kind);
+        }
     }
 
     #[test]
