@@ -64,6 +64,7 @@
     "0089-topic-scoped-connector-runtime",
     "0090-unified-agent-execution-and-gateway-compatibility",
     "0092-official-website-workspace",
+    "0094-conversation-anchors-and-jump",
     "---仅提供英文版---",
     "[ADR 0021 — WebRTC DataChannel WAN transport](/en/docs/adr/0021-webrtc-datachannel-wan-transport)",
     "[ADR 0022 — Agent Team runtime hardening](/en/docs/adr/0022-agent-team-runtime-hardening)",
@@ -94,6 +95,8 @@
     "[ADR-0069 — Long-term memory subsystem & external API surfaces](/en/docs/adr/0069-long-term-memory-external-api-surfaces)",
     "[0070 — Risk→Ceremony Policy Layer](/en/docs/adr/0070-risk-ceremony-policy-layer)",
     "[0071 — Blocking Lead Task Review](/en/docs/adr/0071-blocking-lead-task-review)",
-    "[0091 — Lark Unified Identity and Dual-Entry Surfaces](/en/docs/adr/0091-lark-unified-identity-dual-entry)"
+    "[0091 — Lark Unified Identity and Dual-Entry Surfaces](/en/docs/adr/0091-lark-unified-identity-dual-entry)",
+    "[ADR 0093 — Selection Toolbar: Content-Hugging Overlay and Six-Action Contract](/en/docs/adr/0093-selection-toolbar-content-hugging-window)",
+    "[ADR 0095 — Desktop Selection Perception](/en/docs/adr/0095-desktop-selection-perception)"
   ]
 }
