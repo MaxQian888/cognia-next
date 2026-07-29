@@ -124,6 +124,8 @@ tags:
     description: Terminal session listing/kill + one-shot command execution.
   - name: rpc-plugin
     description: Plugin install / uninstall / list + plugin backup.
+  - name: rpc-ide
+    description: Managed code-server lifecycle, proxy extension artifacts, and the agent↔IDE broker (ADR-0088).
   - name: rpc-workflow-crud
     description: Workflow definition CRUD, schedule pause/resume, run listing + cancel.
   - name: rpc-twin
@@ -8687,6 +8689,130 @@ paths:
             content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
           }
 
+  /api/v1/_rpc/plugin_stage_version:
+    post:
+      operationId: rpcPluginStageVersion
+      tags: [rpc-plugin]
+      summary: Download and stage a plugin version without activating it. Requires allowRemoteControl.
+      description: Stages the update in a transaction; the returned transactionId is required by the commit / finalize / discard calls. Signature verification is enforced when requireSignature is set or the plugin already carries a trusted key.
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [pluginId, version, downloadUrl]
+              properties:
+                pluginId: { type: string }
+                version: { type: string }
+                downloadUrl: { type: string, format: uri }
+                checksum: { type: string }
+                signatureHex: { type: string }
+                publicKeyHex: { type: string }
+                requireSignature: { type: boolean }
+      responses:
+        "200":
+          {
+            description: Staged update descriptor,
+            including its transactionId.,
+            content: { application/json: { schema: { type: object, additionalProperties: true } } },
+          }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "403": { $ref: "#/components/responses/RemoteControlForbidden" }
+        "500":
+          {
+            description: error,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
+  /api/v1/_rpc/plugin_commit_staged_update:
+    post:
+      operationId: rpcPluginCommitStagedUpdate
+      tags: [rpc-plugin]
+      summary: Swap a staged plugin version into place. Requires allowRemoteControl.
+      description: Second phase of the staged update. The previous version is retained so finalize or discard can still be called.
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [pluginId, transactionId]
+              properties:
+                pluginId: { type: string }
+                transactionId: { type: string }
+      responses:
+        "200":
+          {
+            description: Committed plugin runtime snapshot.,
+            content: { application/json: { schema: { type: object, additionalProperties: true } } },
+          }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "403": { $ref: "#/components/responses/RemoteControlForbidden" }
+        "500":
+          {
+            description: error,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
+  /api/v1/_rpc/plugin_finalize_staged_update:
+    post:
+      operationId: rpcPluginFinalizeStagedUpdate
+      tags: [rpc-plugin]
+      summary: Drop the retained previous version after a successful commit. Requires allowRemoteControl.
+      description: Third phase of the staged update; after this the transaction can no longer be rolled back.
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [pluginId, transactionId]
+              properties:
+                pluginId: { type: string }
+                transactionId: { type: string }
+      responses:
+        "200":
+          { description: Finalized., content: { application/json: { schema: { type: "null" } } } }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "403": { $ref: "#/components/responses/RemoteControlForbidden" }
+        "500":
+          {
+            description: error,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
+  /api/v1/_rpc/plugin_discard_staged_update:
+    post:
+      operationId: rpcPluginDiscardStagedUpdate
+      tags: [rpc-plugin]
+      summary: Roll back a staged or committed update. Requires allowRemoteControl.
+      description: Restores the retained previous version and deletes the staged payload. Valid until the transaction is finalized.
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [pluginId, transactionId]
+              properties:
+                pluginId: { type: string }
+                transactionId: { type: string }
+      responses:
+        "200":
+          { description: Discarded., content: { application/json: { schema: { type: "null" } } } }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "403": { $ref: "#/components/responses/RemoteControlForbidden" }
+        "500":
+          {
+            description: error,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
   /api/v1/_rpc/plugin_backup_create:
     post:
       operationId: rpcPluginBackupCreate
@@ -10109,6 +10235,392 @@ paths:
   # rpc — workflow CRUD (ADR-0027 Wave 4.1). Routed through the desktop-writes
   # bridge. create/update/schedule are ungated; delete + cancel are gated.
   # ─────────────────────────────────────────────────────────────────────────
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # rpc-ide — managed code-server lifecycle, proxy artifacts, and the
+  # agent↔IDE broker. Lifecycle and proxy calls need a headless host; the
+  # broker calls are reserved for the loopback service token.
+  # ─────────────────────────────────────────────────────────────────────────
+
+  /api/v1/_rpc/codeserver_supported:
+    post:
+      operationId: rpcCodeserverSupported
+      tags: [rpc-ide]
+      summary: Report whether this host's platform can run managed code-server (read-only).
+      description: Resolves the download target for the current OS and architecture. Answers on every host, including desktop, and never starts anything.
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object } } }
+      responses:
+        "200":
+          {
+            description: true when a managed code-server build exists for this platform.,
+            content: { application/json: { schema: { type: boolean } } },
+          }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "500":
+          {
+            description: error,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
+  /api/v1/_rpc/codeserver_status:
+    post:
+      operationId: rpcCodeserverStatus
+      tags: [rpc-ide]
+      summary: Report the managed code-server state for one workspace root (read-only).
+      description: Never spawns. Requires a headless host.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [root]
+              properties:
+                root: { type: string }
+      responses:
+        "200":
+          {
+            description: Running flag,
+            loopback port,
+            and active profile.,
+            content: { application/json: { schema: { type: object, additionalProperties: true } } },
+          }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "503":
+          {
+            description: not a headless install,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+        "500":
+          {
+            description: error,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
+  /api/v1/_rpc/codeserver_ensure:
+    post:
+      operationId: rpcCodeserverEnsure
+      tags: [rpc-ide]
+      summary: Ensure a healthy managed code-server is serving a workspace root. Requires allowRemoteControl.
+      description: Downloads and installs the pinned build on first use, then spawns it bound to loopback. Returns the existing instance when one is already healthy. Requires a headless host.
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [root]
+              properties:
+                root: { type: string }
+                profile: { type: string, enum: [managed, native] }
+      responses:
+        "200":
+          {
+            description: Running flag,
+            loopback port,
+            and active profile.,
+            content: { application/json: { schema: { type: object, additionalProperties: true } } },
+          }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "403": { $ref: "#/components/responses/RemoteControlForbidden" }
+        "503":
+          {
+            description: not a headless install,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+        "500":
+          {
+            description: error,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
+  /api/v1/_rpc/codeserver_stop:
+    post:
+      operationId: rpcCodeserverStop
+      tags: [rpc-ide]
+      summary: Stop the managed code-server serving one workspace root. Requires allowRemoteControl.
+      description: Idempotent when already stopped. Requires a headless host.
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [root]
+              properties:
+                root: { type: string }
+      responses:
+        "200":
+          {
+            description: true when an instance was running and has been stopped.,
+            content: { application/json: { schema: { type: boolean } } },
+          }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "403": { $ref: "#/components/responses/RemoteControlForbidden" }
+        "503":
+          {
+            description: not a headless install,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+        "500":
+          {
+            description: error,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
+  /api/v1/_rpc/codeserver_stop_all:
+    post:
+      operationId: rpcCodeserverStopAll
+      tags: [rpc-ide]
+      summary: Stop every managed code-server instance on this host. Requires allowRemoteControl.
+      description: Idempotent. Requires a headless host.
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object } } }
+      responses:
+        "200":
+          {
+            description: All instances stopped.,
+            content: { application/json: { schema: { type: "null" } } },
+          }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "403": { $ref: "#/components/responses/RemoteControlForbidden" }
+        "503":
+          {
+            description: not a headless install,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+        "500":
+          {
+            description: error,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
+  /api/v1/_rpc/codeserver_list_proxies:
+    post:
+      operationId: rpcCodeserverListProxies
+      tags: [rpc-ide]
+      summary: List built managed proxy extension artifacts (read-only, service scope only).
+      description: Reserved for the loopback brain service token; device JWTs are rejected. Requires a headless host.
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object } } }
+      responses:
+        "200":
+          {
+            description: Proxy artifact descriptors.,
+            content:
+              {
+                application/json:
+                  { schema: { type: array, items: { type: object, additionalProperties: true } } },
+              },
+          }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "403":
+          {
+            description: device-scope token,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+        "503":
+          {
+            description: not a headless install,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+        "500":
+          {
+            description: error,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
+  /api/v1/_rpc/codeserver_build_proxy:
+    post:
+      operationId: rpcCodeserverBuildProxy
+      tags: [rpc-ide]
+      summary: Build a managed proxy extension artifact (service scope only).
+      description: Generates the .vsix that lets an existing VS Code extension reach Cognia's broker. Reserved for the loopback brain service token; device JWTs are rejected. Requires a headless host.
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [request]
+              properties:
+                request: { type: object, additionalProperties: true }
+      responses:
+        "200":
+          {
+            description: Built proxy artifact descriptor.,
+            content: { application/json: { schema: { type: object, additionalProperties: true } } },
+          }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "403":
+          {
+            description: device-scope token,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+        "503":
+          {
+            description: not a headless install,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+        "500":
+          {
+            description: error,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
+  /api/v1/_rpc/codeserver_activate_proxy:
+    post:
+      operationId: rpcCodeserverActivateProxy
+      tags: [rpc-ide]
+      summary: Install a built proxy artifact into the managed profile (service scope only).
+      description: Reserved for the loopback brain service token; device JWTs are rejected. Requires a headless host.
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [artifact]
+              properties:
+                artifact: { type: object, additionalProperties: true }
+      responses:
+        "200":
+          {
+            description: true when the artifact was installed.,
+            content: { application/json: { schema: { type: boolean } } },
+          }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "403":
+          {
+            description: device-scope token,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+        "503":
+          {
+            description: not a headless install,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+        "500":
+          {
+            description: error,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
+  /api/v1/_rpc/codeserver_broker_validate_paths:
+    post:
+      operationId: rpcCodeserverBrokerValidatePaths
+      tags: [rpc-ide]
+      summary: Confine a batch of paths to a workspace root (service scope only).
+      description: Each path is resolved and rejected if it escapes the root, so the broker never acts on a path the workspace does not own. Reserved for the loopback brain service token; device JWTs are rejected.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [root, paths]
+              properties:
+                root: { type: string }
+                paths: { type: array, items: { type: string } }
+      responses:
+        "200":
+          {
+            description: The resolved absolute paths,
+            in request order.,
+            content: { application/json: { schema: { type: array, items: { type: string } } } },
+          }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "403":
+          {
+            description: device-scope token,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+        "500":
+          {
+            description: error,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
+  /api/v1/_rpc/codeserver_broker_respond:
+    post:
+      operationId: rpcCodeserverBrokerRespond
+      tags: [rpc-ide]
+      summary: Answer a pending broker request from the IDE side (service scope only).
+      description: Carries the result or the error for one in-flight request id. The generation is checked so a response from a retired channel is dropped rather than applied. Reserved for the loopback brain service token; device JWTs are rejected.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [root, generation, id]
+              properties:
+                root: { type: string }
+                generation: { type: integer, format: int64, minimum: 0 }
+                id: { description: JSON-RPC request id — string or number. }
+                result: { description: Present on success. }
+                error: { description: Present on failure. }
+      responses:
+        "200":
+          {
+            description: Response delivered.,
+            content: { application/json: { schema: { type: "null" } } },
+          }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "403":
+          {
+            description: device-scope token,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+        "500":
+          {
+            description: error,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
+  /api/v1/_rpc/codeserver_broker_notify:
+    post:
+      operationId: rpcCodeserverBrokerNotify
+      tags: [rpc-ide]
+      summary: Push a broker notification to the IDE side (service scope only).
+      description: Fire-and-forget; the generation is checked so a notification for a retired channel is dropped. Reserved for the loopback brain service token; device JWTs are rejected.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [root, generation, params]
+              properties:
+                root: { type: string }
+                generation: { type: integer, format: int64, minimum: 0 }
+                params: { type: object, additionalProperties: true }
+      responses:
+        "200":
+          {
+            description: Notification delivered.,
+            content: { application/json: { schema: { type: "null" } } },
+          }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "403":
+          {
+            description: device-scope token,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+        "500":
+          {
+            description: error,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
 
   /api/v1/_rpc/workflow_run_list:
     post:
