@@ -44,10 +44,12 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet"
 import { cn } from "@/lib/utils"
+import { MotionSelectionIndicator } from "@/components/chat/motion/motion-reveal"
 import { ChatScopeProvider } from "@/components/chat/chat-scope-provider"
 import { useResourceWorkbenchSession } from "@/hooks/chat/use-resource-workbench-session"
 import { contextPanelRegistry } from "@/lib/context-workbench/panel-registry"
 import {
+  publishActiveContextPanels,
   setActiveContextForHost,
   touchActiveContextHost,
 } from "@/lib/context-workbench/active-context"
@@ -58,8 +60,10 @@ import {
   useContextWorkbenchStore,
   type ContextWorkbenchLayout,
 } from "@/stores/context-workbench/context-workbench-store"
+import { useSettingsStore } from "@/stores/settings/settings-store"
+import { workbenchRailLayoutOf } from "@/components/shell/use-workbench-rail-layout"
+import { isWorkbenchActivityHidden, workbenchRailIndex } from "@/lib/shell/workbench-rail"
 import {
-  contextActivityRailIndex,
   getContextResourceKey,
   type ContextPanelDefinition,
   type ContextPanelMode,
@@ -337,6 +341,11 @@ export function ContextWorkbench({
   const setMode = useContextWorkbenchStore((state) => state.setMode)
   const setWidth = useContextWorkbenchStore((state) => state.setWidth)
   const setUserPinned = useContextWorkbenchStore((state) => state.setUserPinned)
+  // Selected off the single settings field, not through `useWorkbenchRailLayout`
+  // — that hook reads the whole `settings` object, and this component is
+  // mounted in four hosts and re-renders on every panel switch.
+  const storedRailLayout = useSettingsStore((state) => state.settings?.workbenchRail)
+  const railLayout = useMemo(() => workbenchRailLayoutOf(storedRailLayout), [storedRailLayout])
 
   // Held in a ref so the host registration only churns on resource/scope
   // changes: a host passing an inline arrow would otherwise re-register on
@@ -467,10 +476,18 @@ export function ContextWorkbench({
     // one number mean two things, so ordering panels within a group silently
     // reshuffled the rail — which is how the primary surface ended up third,
     // behind a chat panel that merely happened to sort first.
-    return [...groups.entries()].sort(
-      ([left], [right]) => contextActivityRailIndex(left) - contextActivityRailIndex(right)
-    )
-  }, [resolvedPanels])
+    //
+    // The user's stored order wins over the shipped one; hidden activities lose
+    // their rail *button* only. Their panels stay in `resolvedPanels`, so the
+    // command palette and `ctrl+1..7` still reach them — which is the whole
+    // reason hiding is safe to offer.
+    return [...groups.entries()]
+      .filter(([activity]) => !isWorkbenchActivityHidden(activity, railLayout))
+      .sort(
+        ([left], [right]) =>
+          workbenchRailIndex(left, railLayout) - workbenchRailIndex(right, railLayout)
+      )
+  }, [railLayout, resolvedPanels])
   const activePanel = resolvedPanels.find((panel) => panel.id === layout.activePanelId)
   const activeGroup = activePanel
     ? (activityGroups.find(([activity]) => activity === activePanel.activity)?.[1] ?? [])
@@ -485,6 +502,28 @@ export function ContextWorkbench({
     const panelIds = resolvedPanelKey ? resolvedPanelKey.split("\u0000") : []
     reconcilePanels(scopeKey, panelIds, panelIds[0])
   }, [reconcilePanels, resolvedPanelKey, scopeKey])
+
+  // Publish the resolved set so surfaces outside the workbench can name a panel
+  // — the command palette and the activity shortcuts both need it, and native
+  // panels are declared inline by each host rather than in a registry they could
+  // read. Keyed on the panel ids: activity and label are fixed per id, so a
+  // re-publish is only warranted when the set itself changes.
+  useEffect(() => {
+    publishActiveContextPanels(
+      scopeKey,
+      resolvedPanels.map((panel) => ({
+        id: panel.id,
+        activity: panel.activity,
+        labelKey: panel.labelKey,
+        label: panel.label,
+        pluginId: panel.pluginId,
+        preferredMode: panel.preferredMode,
+      }))
+    )
+    // `resolvedPanels` is derived from `resolvedPanelKey`; depending on the
+    // array itself would republish on every render that re-memoises it.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [resolvedPanelKey, scopeKey])
 
   const invokePanelLifecycle = useCallback(
     (panel: ContextPanelDefinition, phase: "first" | "restore") => {
@@ -760,22 +799,33 @@ export function ContextWorkbench({
                 ) +
                 group.filter((candidate) => layout.pendingPanelIds.includes(candidate.id)).length
               const label = getPanelLabel(panel)
+              const isActive = activePanel?.activity === activity
               return (
                 <Tooltip key={activity}>
                   <TooltipTrigger asChild>
                     <Button
                       type="button"
                       size="icon-sm"
-                      variant={activePanel?.activity === activity ? "secondary" : "ghost"}
+                      // Always `ghost`: the selected background is the shared
+                      // indicator below, which slides between activities
+                      // instead of blinking off one and on at the next.
+                      variant="ghost"
                       aria-label={label}
-                      aria-pressed={activePanel?.activity === activity}
+                      aria-pressed={isActive}
                       data-workbench-activity-button
                       onClick={() => handleActivate(panel, "rail")}
-                      className="relative"
+                      className={cn("relative", isActive && "text-foreground")}
                     >
-                      {Icon ? <Icon className="size-4" /> : <Rows3Icon className="size-4" />}
+                      <MotionSelectionIndicator
+                        groupId={`workbench-activity-${scopeKey}`}
+                        active={isActive}
+                        className="absolute inset-0 rounded-md bg-secondary"
+                      />
+                      <span className="relative flex items-center justify-center">
+                        {Icon ? <Icon className="size-4" /> : <Rows3Icon className="size-4" />}
+                      </span>
                       {badge > 0 ? (
-                        <Badge className="absolute -right-1 -top-1 h-4 min-w-4 px-1 text-[9px]">
+                        <Badge className="absolute -right-1 -top-1 z-10 h-4 min-w-4 px-1 text-[9px]">
                           {badge > 99 ? "99+" : badge}
                         </Badge>
                       ) : null}

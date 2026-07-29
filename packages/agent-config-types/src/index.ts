@@ -2858,6 +2858,23 @@ export interface AppSettings {
    */
   sidebarLayout?: import("@/types/shell/sidebar").SidebarLayout
   /**
+   * Which window edge the desktop navigation rail (`GuildRail`) sits on.
+   * Separate from `sidebarLayout` on purpose — that type's mutators rebuild
+   * their object, and its `reset()` means "restore my pinned icons", which must
+   * not move the rail. Desktop-only; the mobile shell keeps the rail in a
+   * drawer. See `@/types/shell/sidebar` for the model + default.
+   */
+  sidebarSide?: import("@/types/shell/sidebar").SidebarSide
+  /**
+   * Customization of the Context Workbench's activity rail — the icon column
+   * inside the right-hand workbench: the order of its activities plus the ones
+   * the user removed. One layout for all four hosts (chat dock, Canvas, the
+   * workflow and project editors); each renders only the activities its own
+   * panels declare. Lives in settings JSON (same pattern as `sidebarLayout`) —
+   * no Dexie migration. See `@/types/shell/workbench-rail`.
+   */
+  workbenchRail?: import("@/types/shell/workbench-rail").WorkbenchRailLayout
+  /**
    * Customization of the desktop title bar (the top window bar): the order of
    * its segments plus the ones the user removed. Lives in settings JSON (same
    * pattern as `sidebarLayout`) so it persists without a Dexie migration and

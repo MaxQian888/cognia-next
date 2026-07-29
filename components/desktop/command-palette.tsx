@@ -15,8 +15,11 @@ import {
   FolderIcon,
   FolderOpenIcon,
   KeyRoundIcon,
+  MailIcon,
   MessageSquareIcon,
   MoonIcon,
+  PanelRightIcon,
+  PencilRulerIcon,
   PlusIcon,
   PuzzleIcon,
   RefreshCwIcon,
@@ -30,8 +33,17 @@ import {
 } from "lucide-react"
 import { useTheme } from "next-themes"
 import { useTranslations } from "next-intl"
-import { useEffect, useState } from "react"
+import { useRouter } from "next/navigation"
+import { useEffect, useMemo, useState, useSyncExternalStore } from "react"
 import { useSessions } from "@/hooks/chat"
+import { usePlatform } from "@/hooks/use-platform"
+import { getSidebarCatalog } from "@/lib/shell/sidebar-nav"
+import {
+  getActiveContextRevision,
+  getActiveWorkbenchPanels,
+  revealActiveWorkbenchPanel,
+  subscribeActiveContext,
+} from "@/lib/context-workbench/active-context"
 import { useChatStore } from "@/stores/chat"
 import { useSettingsStore } from "@/stores/settings"
 import { useUIStore } from "@/stores/ui"
@@ -76,6 +88,26 @@ export function CommandPalette({ onOpenSettings }: Props) {
   const setActiveProject = useProjectStore((s) => s.setActiveProject)
   const { theme, setTheme } = useTheme()
   const pluginQuickActions = usePluginQuickActions("palette")
+  const router = useRouter()
+  const platform = usePlatform()
+  const railT = useTranslations("desktop.guildRail")
+  const workbenchT = useTranslations()
+
+  // The whole nav catalog, including what the user hid from the rail: the
+  // palette is the fallback route to a destination they took off the rail, and
+  // the only one once the rail moved to the far edge.
+  const navItems = useMemo(() => getSidebarCatalog(platform), [platform])
+
+  // Panels of whichever workbench is in front. Empty on routes that mount none,
+  // which drops the group entirely rather than listing dead entries.
+  //
+  // Subscribed to the active *context* rather than `subscribeActiveWorkbench`:
+  // the latter also fires on every layout-store write, so dragging the dock's
+  // divider would re-render this always-mounted component once per frame. The
+  // snapshot is the revision counter — the panel accessor returns fresh clones,
+  // which React would reject as an uncached snapshot.
+  useSyncExternalStore(subscribeActiveContext, getActiveContextRevision, () => 0)
+  const workbenchPanels = getActiveWorkbenchPanels()
 
   // Global Cmd/Ctrl+K trigger.
   useEffect(() => {
@@ -217,6 +249,35 @@ export function CommandPalette({ onOpenSettings }: Props) {
     setActiveProject(id)
   }
 
+  const handleNavigate = (route: string) => {
+    log.info("command-palette navigate", { route })
+    close()
+    router.push(route)
+  }
+
+  const handleSwitchGuild = (kind: "dm" | "canvas") => {
+    log.info("command-palette switch-guild", { kind })
+    close()
+    setSelectedGuild({ kind })
+    router.push("/")
+  }
+
+  const handleRevealPanel = (panelId: string) => {
+    log.info("command-palette reveal-panel", { panelId })
+    close()
+    revealActiveWorkbenchPanel(panelId)
+  }
+
+  /** Plugin panels namespace their label key; native ones live under the app tree. */
+  const panelLabel = (panel: (typeof workbenchPanels)[number]) => {
+    if (!panel.pluginId) return workbenchT(panel.labelKey as never)
+    const key = `plugin.${panel.pluginId}.${panel.labelKey}`
+    const has = (workbenchT as typeof workbenchT & { has?: (candidate: string) => boolean }).has
+    return typeof has === "function" && has(key)
+      ? workbenchT(key as never)
+      : (panel.label ?? panel.labelKey)
+  }
+
   const handleOpenFolder = async () => {
     log.info("command-palette open-folder")
     close()
@@ -263,6 +324,62 @@ export function CommandPalette({ onOpenSettings }: Props) {
             <span>{t("actions.openFolder")}</span>
           </CommandItem>
         </CommandGroup>
+
+        <CommandSeparator />
+
+        {/* Every destination the navigation rail can reach, hidden ones
+            included. Without this the rail was the only route to 19 pages —
+            and it now sits at the far edge, away from the conversation list it
+            drives. Reuses the rail's own catalog and labels, so a new section
+            appears here the moment it appears there. */}
+        <CommandGroup heading={t("groups.navigate")}>
+          <CommandItem
+            value={`navigate ${railT("directMessages")}`}
+            onSelect={() => handleSwitchGuild("dm")}
+          >
+            <MailIcon className="size-4" />
+            <span>{railT("directMessages")}</span>
+          </CommandItem>
+          <CommandItem
+            value={`navigate ${railT("canvas")}`}
+            onSelect={() => handleSwitchGuild("canvas")}
+          >
+            <PencilRulerIcon className="size-4" />
+            <span>{railT("canvas")}</span>
+          </CommandItem>
+          {navItems.map((item) => (
+            <CommandItem
+              key={item.id}
+              value={`navigate ${railT(item.i18nKey)} ${item.route}`}
+              onSelect={() => handleNavigate(item.route)}
+            >
+              <item.Icon className="size-4" />
+              <span>{railT(item.i18nKey)}</span>
+              <span className="ml-auto text-xs text-muted-foreground">{item.route}</span>
+            </CommandItem>
+          ))}
+        </CommandGroup>
+
+        {workbenchPanels.length > 0 && (
+          <>
+            <CommandSeparator />
+            {/* The right-hand workbench's panels. Reachable here even when the
+                user has hidden that activity from its rail — which is what
+                makes hiding safe to offer at all. */}
+            <CommandGroup heading={t("groups.workbenchPanels")}>
+              {workbenchPanels.map((panel) => (
+                <CommandItem
+                  key={panel.id}
+                  value={`panel ${panelLabel(panel)}`}
+                  onSelect={() => handleRevealPanel(panel.id)}
+                >
+                  <PanelRightIcon className="size-4" />
+                  <span className="truncate">{panelLabel(panel)}</span>
+                </CommandItem>
+              ))}
+            </CommandGroup>
+          </>
+        )}
 
         <CommandSeparator />
 

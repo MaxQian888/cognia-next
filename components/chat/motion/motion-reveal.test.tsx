@@ -8,6 +8,7 @@ import {
   MotionCollapse,
   MotionPopover,
   MotionReveal,
+  MotionSelectionIndicator,
   MotionStatusSwap,
   useFlowMotion,
 } from "./motion-reveal"
@@ -174,5 +175,38 @@ describe("MotionPopover", () => {
     )
     expect((container.firstChild as HTMLElement)?.tagName).toBe("DIV")
     expect(getByTestId("body")).toBeTruthy()
+  })
+})
+
+describe("MotionSelectionIndicator", () => {
+  const setReduce = (reduce: boolean) =>
+    useSettingsStore.setState({ settings: { motion: { reduce, speed: 1 } } as never })
+
+  it("renders nothing for an unselected item", () => {
+    setReduce(false)
+    const { container } = render(
+      <MotionSelectionIndicator groupId="g" active={false} className="tint" />
+    )
+    expect(container.firstChild).toBeNull()
+  })
+
+  it("renders a decorative layer for the selected item", () => {
+    setReduce(false)
+    const { container } = render(<MotionSelectionIndicator groupId="g" active className="tint" />)
+    const span = container.querySelector("span")
+    expect(span).toHaveClass("tint")
+    // Purely visual — it must never reach the accessibility tree, or every
+    // selected rail button would gain a phantom child.
+    expect(span).toHaveAttribute("aria-hidden", "true")
+  })
+
+  it("drops the shared-layout mechanism entirely under reduced motion", () => {
+    // `layoutId` IS the animation here, so reduced motion has to render a plain
+    // span. A motion element left mounted would still project between items.
+    setReduce(true)
+    const { container } = render(<MotionSelectionIndicator groupId="g" active className="tint" />)
+    const span = container.querySelector("span")!
+    expect(span).toHaveClass("tint")
+    expect(span.getAttribute("style")).toBeNull()
   })
 })

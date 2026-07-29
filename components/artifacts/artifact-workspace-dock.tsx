@@ -21,6 +21,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react"
 import type { PanelImperativeHandle } from "react-resizable-panels"
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable"
 import { isProIdePanePinnedWithin } from "@/lib/codeserver/pane-manager"
+import { MOBILE_DURATION, MOBILE_EASE } from "@/lib/ui/motion"
 import { cn } from "@/lib/utils"
 import { useBreakpoint } from "@/hooks/ui"
 import { useArtifactStore } from "@/stores/artifact/artifact-store"
@@ -43,7 +44,7 @@ import { WorkspaceRevealOpener } from "./workspace-mode/workspace-reveal-opener"
  *
  * The panel's content is pinned to the width it will occupy when the animation
  * settles, so the shrinking shell *wipes* it instead of reflowing it. Without
- * that pin the dock squashed for 200ms — the activity rail is `shrink-0` while
+ * that pin the dock squashed for the whole transition — the activity rail is `shrink-0` while
  * the panel body is not, so the body alone got crushed on the way out and
  * stretched on the way in.
  *
@@ -58,12 +59,23 @@ import { WorkspaceRevealOpener } from "./workspace-mode/workspace-reveal-opener"
  * tweens it, and its bounds are re-pushed over IPC once per frame. Animating
  * around it costs a full VS Code relayout every frame — and, worse, the frozen
  * content width below would hold the reserved rect at full size for the whole
- * 200ms, so a collapse left a full-width VS Code hanging over the chat before
+ * transition, so a collapse left a full-width VS Code hanging over the chat before
  * snapping away. `app/globals.css` states this policy for the shell transitions
  * it can reach; inline styles are out of the stylesheet's reach, so the same
  * policy is enforced here instead.
  */
-const DOCK_RESIZE_DURATION_MS = 200
+/**
+ * Duration and curve both come from the shared motion tokens, so the dock
+ * moves on the same clock as the terminal dock, the mobile sheets and every
+ * other surface built from them. They used to be a local `200ms ease-in-out`,
+ * which was a third curve competing with `MOBILE_EASE` and `MotionCollapse`.
+ *
+ * The divider below carries the same pair as a literal Tailwind class — an
+ * arbitrary value cannot be interpolated from a constant and still be
+ * JIT-compiled. `artifact-workspace-dock.test.tsx` pins the two together.
+ */
+export const DOCK_RESIZE_DURATION_MS = MOBILE_DURATION.normal * 1000
+export const DOCK_RESIZE_EASE = `cubic-bezier(${MOBILE_EASE.join(",")})`
 /** Cleanup runs a beat past the animation so a slower preference isn't cut short. */
 const DOCK_RESIZE_CLEANUP_SLACK_MS = 40
 
@@ -105,7 +117,7 @@ function animateDockResize(
   if (content && frozenWidth > 0) content.style.width = `${frozenWidth}px`
   panel.style.transitionProperty = "flex-grow"
   panel.style.transitionDuration = `calc(${DOCK_RESIZE_DURATION_MS}ms * var(--motion-duration-scale, 1))`
-  panel.style.transitionTimingFunction = "ease-in-out"
+  panel.style.transitionTimingFunction = DOCK_RESIZE_EASE
   // Commit the transition style before react-resizable-panels updates flex-grow.
   void panel.offsetWidth
   apply()
@@ -267,8 +279,8 @@ function ArtifactWorkspaceDockDesktop({ children }: { children: ReactNode }) {
   const previousDockSizeRequestRef = useRef(dockSizeRequest)
   const dockContentMounted = useDockContentMounted(dockCollapsed, dockPanelElementRef)
 
-  // Match the conversation sidebar: animate only collapse/expand for ~200ms,
-  // then remove the transition so manual divider dragging remains immediate.
+  // Match the conversation sidebar: animate only collapse/expand, then remove
+  // the transition so manual divider dragging remains immediate.
   useEffect(() => {
     if (previousDockCollapsedRef.current === dockCollapsed) return
     previousDockCollapsedRef.current = dockCollapsed
@@ -354,7 +366,9 @@ function ArtifactWorkspaceDockDesktop({ children }: { children: ReactNode }) {
           withHandle
           aria-hidden={dockCollapsed || undefined}
           className={cn(
-            "transition-[width,opacity] duration-[calc(200ms*var(--motion-duration-scale,1))] ease-in-out",
+            // Literal twin of DOCK_RESIZE_DURATION_MS / DOCK_RESIZE_EASE — see
+            // their declaration for why this cannot read them directly.
+            "transition-[width,opacity] duration-[calc(280ms*var(--motion-duration-scale,1))] ease-[cubic-bezier(0.32,0.72,0,1)]",
             dockCollapsed && "w-0 opacity-0 [&>div]:opacity-0"
           )}
           disabled={dockCollapsed}

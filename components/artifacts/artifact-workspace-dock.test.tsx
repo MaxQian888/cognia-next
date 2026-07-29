@@ -126,7 +126,14 @@ jest.mock("./workspace-mode/workspace-reveal-opener", () => ({
   WorkspaceRevealOpener: () => <div data-testid="workspace-reveal-opener" />,
 }))
 
-import { ArtifactWorkspaceDock } from "./artifact-workspace-dock"
+import {
+  ArtifactWorkspaceDock,
+  DOCK_RESIZE_DURATION_MS,
+  DOCK_RESIZE_EASE,
+} from "./artifact-workspace-dock"
+import { readFileSync } from "node:fs"
+import { join } from "node:path"
+import { MOBILE_DURATION, MOBILE_EASE } from "@/lib/ui/motion"
 import { useBreakpoint } from "@/hooks/ui"
 import { useArtifactStore } from "@/stores/artifact/artifact-store"
 import { useArtifactDockLayoutStore } from "@/stores/artifact/artifact-dock-layout-store"
@@ -187,7 +194,7 @@ describe("ArtifactWorkspaceDock", () => {
 
       // Still mounted through the collapse animation: `animateDockResize` pins
       // the content's width so the shrinking shell wipes it, and unmounting on
-      // the same frame would leave that 200ms animation wiping a blank box.
+      // the same frame would leave that animation wiping a blank box.
       expect(screen.getByTestId("dock")).toBeInTheDocument()
 
       act(() => jest.advanceTimersByTime(400))
@@ -404,7 +411,7 @@ describe("ArtifactWorkspaceDock", () => {
     // Inline styles (not Tailwind classes) so the duration can consume the
     // user's --motion-duration-scale preference.
     expect(dockPanel.style.transitionProperty).toBe("flex-grow")
-    expect(dockPanel.style.transitionTimingFunction).toBe("ease-in-out")
+    expect(dockPanel.style.transitionTimingFunction).toBe(DOCK_RESIZE_EASE)
     expect(dockPanel.getAttribute("style") ?? "").toContain("--motion-duration-scale")
 
     // Transition is removed after the (scaled) animation so manual dragging stays immediate.
@@ -625,5 +632,24 @@ describe("ArtifactWorkspaceDock", () => {
     )
 
     expect(useArtifactDockLayoutStore.getState().dockCollapsed).toBe(false)
+  })
+})
+
+describe("dock motion tokens", () => {
+  it("takes its duration and curve from the shared motion tokens", () => {
+    expect(DOCK_RESIZE_DURATION_MS).toBe(MOBILE_DURATION.normal * 1000)
+    expect(DOCK_RESIZE_EASE).toBe(`cubic-bezier(${MOBILE_EASE.join(",")})`)
+  })
+
+  it("keeps the divider's literal class in step with them", () => {
+    // The divider fades and narrows as one movement with the panel, but its
+    // transition is a Tailwind arbitrary value, which cannot be interpolated
+    // from a constant and still be JIT-compiled. Assert the literals agree so
+    // the two cannot drift into a visible mismatch.
+    const source = readFileSync(join(__dirname, "artifact-workspace-dock.tsx"), "utf8")
+    expect(source).toContain(
+      `duration-[calc(${DOCK_RESIZE_DURATION_MS}ms*var(--motion-duration-scale,1))]`
+    )
+    expect(source).toContain(`ease-[${DOCK_RESIZE_EASE}]`)
   })
 })

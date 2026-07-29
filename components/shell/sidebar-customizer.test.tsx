@@ -15,19 +15,28 @@ jest.mock("next-intl", () => ({
   useTranslations: () => (key: string) => key,
 }))
 
-const saveMock = jest.fn(
-  async (_patch?: { sidebarLayout?: { pinned: string[]; hidden: string[] } }) => {}
-)
+let platformValue: "tauri" | "mobile" | "web" = "tauri"
+jest.mock("@/hooks/use-platform", () => ({
+  usePlatform: () => platformValue,
+}))
 
-function setLayout(pinned: string[], hidden: string[]) {
+interface SavePatch {
+  sidebarLayout?: { pinned: string[]; hidden: string[] }
+  sidebarSide?: "left" | "right"
+}
+
+const saveMock = jest.fn(async (_patch?: SavePatch) => {})
+
+function setLayout(pinned: string[], hidden: string[], side?: "left" | "right") {
   useSettingsStore.setState({
-    settings: { sidebarLayout: { pinned, hidden } } as never,
+    settings: { sidebarLayout: { pinned, hidden }, sidebarSide: side } as never,
     save: saveMock as never,
   })
 }
 
 beforeEach(() => {
   saveMock.mockClear()
+  platformValue = "tauri"
   setLayout(["workflows", "inbox"], [])
 })
 
@@ -38,8 +47,10 @@ const renderCustomizer = () =>
     </TooltipProvider>
   )
 
+const lastPatch = () => saveMock.mock.calls[saveMock.mock.calls.length - 1]?.[0] as SavePatch
+
 const lastSaved = () =>
-  saveMock.mock.calls[saveMock.mock.calls.length - 1]?.[0]?.sidebarLayout as {
+  lastPatch()?.sidebarLayout as {
     pinned: string[]
     hidden: string[]
   }
@@ -140,13 +151,69 @@ describe("SidebarCustomizer", () => {
 
   it("shows the More-empty placeholder when every item is pinned or hidden", () => {
     // Derive the full id universe from the real nav registry so this can't go
-    // stale when a wave adds a new section. The test runs under the "web"
-    // platform (jsdom has no Tauri/Capacitor globals), so no `desktopOnly`
-    // filtering happens and the whole catalog is in play. Pinning every id
-    // leaves nothing for overflow → the "More" bucket is empty.
+    // stale when a wave adds a new section. The suite pins the platform to
+    // "tauri", so the catalog is the whole of `SIDEBAR_NAV_META` with no
+    // `desktopOnly` filtering. Pinning every id leaves nothing for overflow →
+    // the "More" bucket is empty.
     const allIds = SIDEBAR_NAV_META.map((m) => m.id)
     setLayout(allIds, [])
     renderCustomizer()
     expect(screen.getByText("customize.moreEmpty")).toBeInTheDocument()
+  })
+})
+
+describe("SidebarCustomizer — rail side", () => {
+  const sideGroup = () => screen.queryByTestId("sidebar-customizer-side")
+
+  it("is the entry point for choosing the rail's edge", () => {
+    renderCustomizer()
+    expect(sideGroup()).toBeInTheDocument()
+    expect(screen.getByRole("radio", { name: "customize.sideLeft" })).toBeInTheDocument()
+    expect(screen.getByRole("radio", { name: "customize.sideRight" })).toBeInTheDocument()
+  })
+
+  it("reflects the persisted edge", () => {
+    setLayout(["workflows"], [], "left")
+    renderCustomizer()
+    expect(screen.getByRole("radio", { name: "customize.sideLeft" })).toHaveAttribute(
+      "data-state",
+      "on"
+    )
+  })
+
+  it("writes only the side, leaving the layout alone", () => {
+    setLayout(["workflows"], [], "right")
+    renderCustomizer()
+    fireEvent.click(screen.getByRole("radio", { name: "customize.sideLeft" }))
+    expect(lastPatch()).toEqual({ sidebarSide: "left" })
+  })
+
+  it("keeps the current edge when the pressed item is toggled off", () => {
+    // Radix single-type groups emit "" on deselect. The rail has to be on some
+    // edge, so that must not reach the store as an empty side.
+    setLayout(["workflows"], [], "left")
+    renderCustomizer()
+    fireEvent.click(screen.getByRole("radio", { name: "customize.sideLeft" }))
+    expect(saveMock).not.toHaveBeenCalled()
+  })
+
+  it("is hidden on the mobile shell, where the rail has no window edge", () => {
+    // The mobile rail lives inside the nav drawer, where there is no edge to pick.
+    platformValue = "mobile"
+    renderCustomizer()
+    expect(sideGroup()).not.toBeInTheDocument()
+    // The rest of the customizer still renders.
+    expect(screen.getByTestId("sidebar-customizer-pinned-workflows")).toBeInTheDocument()
+  })
+
+  it("is offered in the browser too, which also honours the stored edge", () => {
+    // `desktop-app-shell.tsx` applies `sidebarSide` for every non-mobile
+    // platform. Hiding the toggle on web left those users with the new
+    // right-edge default, no way back, and no explanation.
+    platformValue = "web"
+    renderCustomizer()
+    expect(sideGroup()).toBeInTheDocument()
+    fireEvent.click(screen.getByRole("radio", { name: "customize.sideLeft" }))
+    expect(lastPatch()).toEqual({ sidebarSide: "left" })
   })
 })

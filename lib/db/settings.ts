@@ -15,7 +15,7 @@ import { DEFAULT_BACKGROUND_SETTINGS } from "@/types/appearance"
 import { DEFAULT_NETWORK_PROXY_SETTINGS } from "@/types/network/proxy"
 import { DEFAULT_OCR_SETTINGS, type UserOcrSettings } from "@/types/ocr"
 import { DEFAULT_GIT_SETTINGS } from "@/types/git"
-import { DEFAULT_SIDEBAR_LAYOUT } from "@/types/shell/sidebar"
+import { DEFAULT_SIDEBAR_LAYOUT, DEFAULT_SIDEBAR_SIDE } from "@/types/shell/sidebar"
 import { DEFAULT_EVAL_SETTINGS } from "@/types/eval/settings"
 import { getDb, withDbReopenRetry } from "./schema"
 
@@ -88,6 +88,10 @@ export const DEFAULTS: AppSettings = {
   pinnedWorkflowIds: [],
   pinnedMeRowIds: [],
   sidebarLayout: DEFAULT_SIDEBAR_LAYOUT,
+  // A scalar, so `{ ...DEFAULTS, ...row }` in `getSettings` already seeds it
+  // for rows saved before the rail could move — no entry needed alongside the
+  // nested-object merges below.
+  sidebarSide: DEFAULT_SIDEBAR_SIDE,
   lastInboxViewedAt: 0,
   // TTS defaults (mirror types/media/tts.ts → DEFAULT_TTS_SETTINGS).
   ttsProvider: DEFAULT_TTS_SETTINGS.ttsProvider,

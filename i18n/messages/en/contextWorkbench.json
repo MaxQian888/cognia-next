@@ -1,6 +1,26 @@
 {
+  "activities": {
+    "ai": "AI",
+    "comments": "Comments",
+    "inspect": "Inspect",
+    "preview-run": "Preview / run",
+    "review": "Review",
+    "templates": "Templates",
+    "workspace": "Workspace"
+  },
   "aiActions": "AI actions",
   "aiLoading": "Preparing the resource conversation…",
+  "customize": {
+    "dragHint": "Drag to reorder",
+    "hidden": "Hidden",
+    "hiddenEmpty": "Nothing hidden.",
+    "hideItem": "Hide",
+    "hint": "Hiding an activity removes its rail button only — the panel stays reachable from the command palette and its shortcut.",
+    "onRail": "On the rail",
+    "onRailEmpty": "No activities on the rail.",
+    "restoreDefaults": "Restore defaults",
+    "showItem": "Show"
+  },
   "artifactSelectionComment": {
     "label": "Selection instruction",
     "placeholder": "Tell AI what to do with this selection",

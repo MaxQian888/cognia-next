@@ -6,11 +6,14 @@ import { act, renderHook } from "@testing-library/react"
 
 import { useSidebarLayout } from "./use-sidebar-layout"
 import { useSettingsStore } from "@/stores/settings/settings-store"
-import { DEFAULT_SIDEBAR_LAYOUT } from "@/types/shell/sidebar"
+import { DEFAULT_SIDEBAR_LAYOUT, DEFAULT_SIDEBAR_SIDE } from "@/types/shell/sidebar"
 
-const saveMock = jest.fn(
-  async (_patch?: { sidebarLayout?: { pinned: string[]; hidden: string[] } }) => {}
-)
+interface SavePatch {
+  sidebarLayout?: { pinned: string[]; hidden: string[] }
+  sidebarSide?: "left" | "right"
+}
+
+const saveMock = jest.fn(async (_patch?: SavePatch) => {})
 
 beforeEach(() => {
   saveMock.mockClear()
@@ -20,8 +23,10 @@ beforeEach(() => {
   })
 })
 
+const lastPatch = () => saveMock.mock.calls[saveMock.mock.calls.length - 1]?.[0] as SavePatch
+
 const lastSaved = () =>
-  saveMock.mock.calls[saveMock.mock.calls.length - 1]?.[0]?.sidebarLayout as {
+  lastPatch()?.sidebarLayout as {
     pinned: string[]
     hidden: string[]
   }
@@ -120,5 +125,65 @@ describe("useSidebarLayout", () => {
       await result.current.reset()
     })
     expect(lastSaved()).toEqual(DEFAULT_SIDEBAR_LAYOUT)
+  })
+
+  describe("side", () => {
+    it("defaults to the shipped edge when unset", () => {
+      useSettingsStore.setState({ settings: {} as never })
+      const { result } = renderHook(() => useSidebarLayout())
+      expect(result.current.side).toBe(DEFAULT_SIDEBAR_SIDE)
+    })
+
+    it("reads the persisted edge", () => {
+      useSettingsStore.setState({
+        settings: { sidebarLayout: DEFAULT_SIDEBAR_LAYOUT, sidebarSide: "left" } as never,
+      })
+      const { result } = renderHook(() => useSidebarLayout())
+      expect(result.current.side).toBe("left")
+    })
+
+    it("writes only its own key", async () => {
+      const { result } = renderHook(() => useSidebarLayout())
+      await act(async () => {
+        await result.current.setSide("left")
+      })
+      expect(lastPatch()).toEqual({ sidebarSide: "left" })
+    })
+
+    // The reason `side` is not a field on `SidebarLayout`: `pin` and `hide`
+    // build a fresh layout object rather than spreading the current one, so an
+    // extra field living there would be dropped on the next pin. Assert the
+    // separation holds by checking those patches never mention the side.
+    it.each(["pin", "hide", "unpin", "show"] as const)(
+      "%s leaves the edge untouched",
+      async (mutator) => {
+        useSettingsStore.setState({
+          settings: {
+            sidebarLayout: { pinned: ["workflows"], hidden: ["logs"] },
+            sidebarSide: "left",
+          } as never,
+        })
+        const { result } = renderHook(() => useSidebarLayout())
+        await act(async () => {
+          await result.current[mutator]("logs")
+        })
+        expect(lastPatch()).not.toHaveProperty("sidebarSide")
+        expect(result.current.side).toBe("left")
+      }
+    )
+
+    // "Restore defaults" is about which icons are pinned. Teleporting the rail
+    // across the screen is not something a user asks for by pressing it.
+    it("survives a layout reset", async () => {
+      useSettingsStore.setState({
+        settings: { sidebarLayout: DEFAULT_SIDEBAR_LAYOUT, sidebarSide: "left" } as never,
+      })
+      const { result } = renderHook(() => useSidebarLayout())
+      await act(async () => {
+        await result.current.reset()
+      })
+      expect(lastPatch()).not.toHaveProperty("sidebarSide")
+      expect(result.current.side).toBe("left")
+    })
   })
 })

@@ -123,7 +123,26 @@ jest.mock("@/lib/tauri", () => ({
   isTauri: () => false,
 }))
 
+const routerPush = jest.fn()
+jest.mock("next/navigation", () => ({
+  useRouter: () => ({ push: routerPush, replace: jest.fn(), back: jest.fn() }),
+  usePathname: () => "/",
+  useSearchParams: () => new URLSearchParams(),
+}))
+
+let platformValue: "tauri" | "mobile" | "web" = "tauri"
+jest.mock("@/hooks/use-platform", () => ({
+  usePlatform: () => platformValue,
+}))
+
 import { CommandPalette } from "./command-palette"
+import {
+  publishActiveContextPanels,
+  resetActiveContextForTesting,
+  setActiveContextForHost,
+} from "@/lib/context-workbench/active-context"
+import { useContextWorkbenchStore } from "@/stores/context-workbench/context-workbench-store"
+import { SIDEBAR_NAV_META } from "@/types/shell/sidebar"
 
 beforeEach(() => {
   logInfo.mockReset()
@@ -143,6 +162,9 @@ beforeEach(() => {
   charactersRef.current = []
   teamsRef.current = []
   theme = "light"
+  routerPush.mockReset()
+  platformValue = "tauri"
+  resetActiveContextForTesting()
 })
 
 function queueChars(c: Character[], t: Team[]) {
@@ -278,3 +300,109 @@ test("Cleanup removes the keydown listener on unmount", () => {
 // React 19 doesn't expose `act` directly from imports for our use, but we keep
 // this here in case the rule changes.
 void act
+
+describe("navigation", () => {
+  test("lists every rail destination and routes to it", async () => {
+    queueChars([], [])
+    render(<CommandPalette onOpenSettings={jest.fn()} />)
+    await openWithShortcut()
+
+    // The whole catalog, not just the pinned three — the palette is the
+    // fallback route to anything the user took off the rail.
+    for (const meta of SIDEBAR_NAV_META) {
+      expect(screen.getByText(meta.i18nKey)).toBeInTheDocument()
+    }
+
+    const user = userEvent.setup()
+    await user.click(screen.getByText("workflows"))
+    expect(routerPush).toHaveBeenCalledWith("/workflows")
+    expect(logInfo).toHaveBeenCalledWith("command-palette navigate", { route: "/workflows" })
+  })
+
+  test("drops desktop-only destinations off the desktop shell", async () => {
+    platformValue = "web"
+    queueChars([], [])
+    render(<CommandPalette onOpenSettings={jest.fn()} />)
+    await openWithShortcut()
+    // `browser` is desktopOnly — listing it in a browser is a dead end.
+    expect(screen.queryByText("browser")).not.toBeInTheDocument()
+    expect(screen.getByText("workflows")).toBeInTheDocument()
+  })
+
+  test("switches to the DM and Canvas guilds and returns home", async () => {
+    queueChars([], [])
+    render(<CommandPalette onOpenSettings={jest.fn()} />)
+    await openWithShortcut()
+    const user = userEvent.setup()
+    await user.click(screen.getByText("directMessages"))
+    expect(setSelectedGuild).toHaveBeenCalledWith({ kind: "dm" })
+    expect(routerPush).toHaveBeenCalledWith("/")
+  })
+})
+
+describe("workbench panels", () => {
+  const SCOPE = "dock::session:s-1"
+  const mountWorkbench = () => {
+    setActiveContextForHost(SCOPE, {
+      kind: "session",
+      id: "s-1",
+      title: "S",
+      capabilities: [],
+    } as never)
+    publishActiveContextPanels(SCOPE, [
+      { id: "artifacts", activity: "review", labelKey: "artifacts.dock.artifacts" },
+      { id: "workspace", activity: "workspace", labelKey: "artifacts.dock.workspace" },
+    ])
+  }
+
+  test("omits the group entirely when no workbench is mounted", async () => {
+    queueChars([], [])
+    render(<CommandPalette onOpenSettings={jest.fn()} />)
+    await openWithShortcut()
+    expect(screen.queryByText("desktop.commandPalette.groups.workbenchPanels")).toBeNull()
+  })
+
+  test("lists the mounted workbench's panels and reveals the chosen one", async () => {
+    queueChars([], [])
+    act(() => mountWorkbench())
+    render(<CommandPalette onOpenSettings={jest.fn()} />)
+    await openWithShortcut()
+
+    expect(screen.getByText("artifacts.dock.workspace")).toBeInTheDocument()
+    const user = userEvent.setup()
+    await user.click(screen.getByText("artifacts.dock.workspace"))
+    expect(logInfo).toHaveBeenCalledWith("command-palette reveal-panel", { panelId: "workspace" })
+    // Reaching a panel is the point — assert it actually landed in front.
+    expect(useContextWorkbenchStore.getState().layouts[SCOPE]?.activePanelId).toBe("workspace")
+  })
+})
+
+test("labels a plugin panel from its own namespace, falling back to its literal", async () => {
+  // Plugin panels namespace their label key. The mocked `useTranslations` has no
+  // `has()`, which is exactly the "no translation shipped" case — the panel's
+  // own `label` is the fallback, and its raw key the last resort.
+  queueChars([], [])
+  const SCOPE = "dock::session:s-2"
+  act(() => {
+    setActiveContextForHost(SCOPE, {
+      kind: "session",
+      id: "s-2",
+      title: "S",
+      capabilities: [],
+    } as never)
+    publishActiveContextPanels(SCOPE, [
+      {
+        id: "acme:board",
+        activity: "templates",
+        labelKey: "board",
+        label: "Acme board",
+        pluginId: "acme",
+      },
+      { id: "acme:bare", activity: "review", labelKey: "bare", pluginId: "acme" },
+    ])
+  })
+  render(<CommandPalette onOpenSettings={jest.fn()} />)
+  await openWithShortcut()
+  expect(screen.getByText("Acme board")).toBeInTheDocument()
+  expect(screen.getByText("bare")).toBeInTheDocument()
+})

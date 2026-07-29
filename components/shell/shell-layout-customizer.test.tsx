@@ -27,8 +27,11 @@ const renderCustomizer = (props?: React.ComponentProps<typeof ShellLayoutCustomi
   )
 
 describe("ShellLayoutCustomizer", () => {
-  it("lists the three shell surfaces", () => {
-    expect(SHELL_SURFACES).toEqual(["sidebar", "title", "status"])
+  it("lists the shell surfaces, workbench beside the nav rail", () => {
+    // Order is the tab order. The two icon columns sit side by side on the same
+    // window edge now, so their editors are adjacent rather than split by the
+    // window bars.
+    expect(SHELL_SURFACES).toEqual(["sidebar", "workbench", "title", "status"])
   })
 
   it("defaults to the nav rail", () => {

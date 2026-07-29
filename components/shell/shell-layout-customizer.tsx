@@ -22,11 +22,20 @@ import { useTranslations } from "next-intl"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { BarCustomizer } from "./bar-customizer"
 import { SidebarCustomizer } from "./sidebar-customizer"
+import { WorkbenchCustomizer } from "./workbench-customizer"
 
 /** Which surface a customizer entry point should open on. */
-export type ShellSurface = "sidebar" | "title" | "status"
+export type ShellSurface = "sidebar" | "workbench" | "title" | "status"
 
-export const SHELL_SURFACES: readonly ShellSurface[] = ["sidebar", "title", "status"] as const
+export const SHELL_SURFACES: readonly ShellSurface[] = [
+  "sidebar",
+  // Next to the nav rail rather than at the end: the two are icon columns that
+  // now sit side by side on the same edge, and a user reordering one expects
+  // the other to be adjacent.
+  "workbench",
+  "title",
+  "status",
+] as const
 
 export function ShellLayoutCustomizer({
   defaultSurface = "sidebar",
@@ -59,6 +68,10 @@ export function ShellLayoutCustomizer({
       <TabsContent value="sidebar" className="mt-4 space-y-3">
         <p className="text-xs text-muted-foreground">{t("description.sidebar")}</p>
         <SidebarCustomizer />
+      </TabsContent>
+      <TabsContent value="workbench" className="mt-4 space-y-3">
+        <p className="text-xs text-muted-foreground">{t("description.workbench")}</p>
+        <WorkbenchCustomizer />
       </TabsContent>
       <TabsContent value="title" className="mt-4 space-y-3">
         <p className="text-xs text-muted-foreground">{t("description.title")}</p>

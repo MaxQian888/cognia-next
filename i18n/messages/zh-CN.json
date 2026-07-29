@@ -5434,6 +5434,15 @@
       "unpin": "取消固定面板",
       "wide": "宽栏模式"
     },
+    "activities": {
+      "ai": "AI",
+      "comments": "评论",
+      "inspect": "检视",
+      "preview-run": "预览 / 运行",
+      "review": "审阅",
+      "templates": "模板",
+      "workspace": "工作区"
+    },
     "activityRailLabel": "上下文工作台活动",
     "aiActions": "AI 操作",
     "aiLoading": "正在准备资源会话…",
@@ -5465,6 +5474,17 @@
       "stale": "锚点已过期",
       "toggleReaction": "切换 {emoji} 表情回应",
       "you": "你"
+    },
+    "customize": {
+      "dragHint": "拖拽以排序",
+      "hidden": "已隐藏",
+      "hiddenEmpty": "暂无隐藏项。",
+      "hideItem": "隐藏",
+      "hint": "隐藏某个活动只会移除它的图标按钮——面板仍可通过命令面板和快捷键到达。",
+      "onRail": "在活动栏上",
+      "onRailEmpty": "活动栏上暂无活动。",
+      "restoreDefaults": "恢复默认",
+      "showItem": "显示"
     },
     "exportResourceSession": "导出此资源会话",
     "metadata": {
@@ -5794,11 +5814,13 @@
       "empty": "未找到匹配项。",
       "groups": {
         "actions": "操作",
+        "navigate": "前往",
         "newChat": "与角色开始新聊天",
         "pluginActions": "插件操作",
         "sessions": "会话",
         "settings": "设置",
         "switchTeam": "切换团队",
+        "workbenchPanels": "工作台面板",
         "workspaces": "切换工作区"
       },
       "placeholder": "输入命令或会话名…",
@@ -5845,6 +5867,9 @@
         "pinnedEmpty": "暂无固定项——所有项都在「更多」菜单中。",
         "restoreDefaults": "恢复默认",
         "showItem": "显示",
+        "side": "导航栏位置",
+        "sideLeft": "左侧",
+        "sideRight": "右侧",
         "title": "自定义侧边栏"
       },
       "directMessages": "私信",
@@ -6215,12 +6240,14 @@
         "section": "选择侧边栏、顶部栏和底部栏显示哪些内容，以及它们的顺序。修改立即生效，并会同步到你的其他设备。",
         "sidebar": "把最常用的项目固定到导航栏，其余的会收进「更多」菜单。拖拽可调整顺序，也可以隐藏从不使用的项目。",
         "status": "底部栏承载环境状态。隐藏的分段会被卸载而不只是不可见，因此隐藏性能监视也会同时停止采样。",
-        "title": "顶部栏承载导航、搜索和窗口控制。隐藏的项目会被完全移除——窗口按钮和应用菜单始终保留。"
+        "title": "顶部栏承载导航、搜索和窗口控制。隐藏的项目会被完全移除——窗口按钮和应用菜单始终保留。",
+        "workbench": "右侧工作台内的图标列。拖拽可调整顺序；隐藏只会移除它的按钮——面板仍可通过命令面板和快捷键到达。"
       },
       "tab": {
         "sidebar": "侧边栏",
         "status": "底部栏",
-        "title": "顶部栏"
+        "title": "顶部栏",
+        "workbench": "工作台"
       },
       "title": "界面布局"
     },
@@ -24722,6 +24749,13 @@
         "skillsSearch": "聚焦技能搜索",
         "skillsSelectAll": "全选技能",
         "terminalToggle": "切换终端",
+        "workbenchActivityAi": "工作台：AI",
+        "workbenchActivityComments": "工作台：评论",
+        "workbenchActivityInspect": "工作台：检视",
+        "workbenchActivityPreviewRun": "工作台：预览 / 运行",
+        "workbenchActivityReview": "工作台：审阅",
+        "workbenchActivityTemplates": "工作台：模板",
+        "workbenchActivityWorkspace": "工作台：工作区",
         "zoomIn": "放大",
         "zoomOut": "缩小",
         "zoomReset": "重置缩放"

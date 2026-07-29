@@ -124,11 +124,13 @@
     "empty": "No matches found.",
     "groups": {
       "actions": "Actions",
+      "navigate": "Go to",
       "newChat": "New chat with character",
       "pluginActions": "Plugin actions",
       "sessions": "Sessions",
       "settings": "Settings",
       "switchTeam": "Switch to team",
+      "workbenchPanels": "Workbench panels",
       "workspaces": "Switch workspace"
     },
     "placeholder": "Type a command or session name…",
@@ -175,6 +177,9 @@
       "pinnedEmpty": "No pinned items — everything is in the More menu.",
       "restoreDefaults": "Restore defaults",
       "showItem": "Show",
+      "side": "Rail position",
+      "sideLeft": "Left",
+      "sideRight": "Right",
       "title": "Customize sidebar"
     },
     "directMessages": "Direct Messages",
@@ -545,12 +550,14 @@
       "section": "Choose what appears in the sidebar, the top bar and the bottom bar — and in what order. Changes apply immediately and sync with your other devices.",
       "sidebar": "Pin the items you use most to the rail; the rest collapse into the More menu. Drag to reorder, or hide items you never use.",
       "status": "The bottom bar carries ambient status. Hidden segments are unmounted, not just invisible, so hiding the performance monitor also stops its sampling.",
-      "title": "The top bar carries navigation, search and window controls. Hidden items are removed entirely — the window buttons and the app menu always stay."
+      "title": "The top bar carries navigation, search and window controls. Hidden items are removed entirely — the window buttons and the app menu always stay.",
+      "workbench": "The icon column inside the right-hand workbench. Drag to reorder; hiding one only removes its button — the panel stays reachable from the command palette and its shortcut."
     },
     "tab": {
       "sidebar": "Sidebar",
       "status": "Bottom bar",
-      "title": "Top bar"
+      "title": "Top bar",
+      "workbench": "Workbench"
     },
     "title": "Shell layout"
   },

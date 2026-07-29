@@ -5,6 +5,7 @@ import { useEffect } from "react"
 import { NextIntlClientProvider } from "next-intl"
 import type { ContextPanelDefinition, ContextResource } from "@/types/context-workbench"
 import { useContextWorkbenchStore } from "@/stores/context-workbench/context-workbench-store"
+import { useSettingsStore } from "@/stores/settings/settings-store"
 import {
   ContextWorkbench,
   ContextWorkbenchMobileSheet,
@@ -77,6 +78,9 @@ function renderWorkbench(panels: ContextPanelDefinition[]) {
 describe("ContextWorkbench", () => {
   beforeEach(() => {
     useContextWorkbenchStore.setState({ layouts: {} })
+    // The rail order/hidden set now comes from settings; start every test on
+    // the shipped default.
+    useSettingsStore.setState({ settings: {} as never })
     mockResourceSession = null
     mockUseResourceWorkbenchSession.mockClear()
   })
@@ -1017,5 +1021,85 @@ describe("ContextWorkbench", () => {
 
       expect(onModeWidthHint.mock.calls.map(([mode]) => mode)).toEqual(["wide", "narrow", "focus"])
     })
+  })
+})
+
+describe("ContextWorkbench — customizable activity rail", () => {
+  const PANELS: ContextPanelDefinition[] = [
+    {
+      id: "review",
+      activity: "review",
+      labelKey: "contextWorkbench.panels.review",
+      appliesTo: () => true,
+      renderer: () => <div>review-panel</div>,
+    },
+    {
+      id: "comments",
+      activity: "comments",
+      labelKey: "contextWorkbench.panels.comments",
+      appliesTo: () => true,
+      renderer: () => <div>comments-panel</div>,
+    },
+    {
+      id: "ai",
+      activity: "ai",
+      labelKey: "contextWorkbench.panels.ai",
+      appliesTo: () => true,
+      renderer: () => <div>ai-panel</div>,
+    },
+  ]
+
+  const railLabels = () =>
+    Array.from(
+      screen
+        .getByTestId("context-workbench-activity-rail")
+        .querySelectorAll<HTMLButtonElement>("[data-workbench-activity-button]")
+    ).map((button) => button.getAttribute("aria-label"))
+
+  beforeEach(() => {
+    useContextWorkbenchStore.setState({ layouts: {} })
+    useSettingsStore.setState({ settings: {} as never })
+    mockResourceSession = null
+  })
+
+  afterEach(clearAllMockExtensions)
+
+  it("follows the shipped order when the user has not customized it", () => {
+    renderWorkbench(PANELS)
+    expect(railLabels()).toEqual([
+      "contextWorkbench.panels.review",
+      "contextWorkbench.panels.ai",
+      "contextWorkbench.panels.comments",
+    ])
+  })
+
+  it("follows the user's stored order", () => {
+    useSettingsStore.setState({
+      settings: { workbenchRail: { order: ["comments", "ai", "review"], hidden: [] } } as never,
+    })
+    renderWorkbench(PANELS)
+    expect(railLabels()).toEqual([
+      "contextWorkbench.panels.comments",
+      "contextWorkbench.panels.ai",
+      "contextWorkbench.panels.review",
+    ])
+  })
+
+  it("drops a hidden activity's button but keeps its panel resolvable", () => {
+    useSettingsStore.setState({
+      settings: { workbenchRail: { order: ["review", "ai", "comments"], hidden: ["ai"] } } as never,
+    })
+    renderWorkbench(PANELS)
+    expect(railLabels()).toEqual([
+      "contextWorkbench.panels.review",
+      "contextWorkbench.panels.comments",
+    ])
+
+    // The panel is still reachable — this is what the command palette and
+    // `ctrl+1..7` use, and it is the whole reason hiding is safe to offer.
+    act(() => {
+      useContextWorkbenchStore.getState().navigatePanel("window-a::artifact:a1", "ai", "narrow")
+    })
+    expect(screen.getByText("ai-panel")).toBeInTheDocument()
   })
 })

@@ -79,6 +79,28 @@ export interface SidebarLayout {
 }
 
 /**
+ * Which window edge the rail occupies.
+ *
+ * Deliberately NOT a field on {@link SidebarLayout}: three of that type's
+ * mutators in `components/shell/use-sidebar-layout.ts` build a fresh object
+ * rather than spreading the current one, so an extra field would be dropped on
+ * the next pin/hide; and `reset()` — "restore my pinned icons" — would teleport
+ * the rail across the screen as a side effect. Placement is not content.
+ */
+export type SidebarSide = "left" | "right"
+
+/**
+ * The rail's shipped edge.
+ *
+ * Right, so the chat pane owns the left edge where reading starts and the
+ * navigation clusters with the context workbench on the trailing side. Users
+ * who prefer the Discord/Slack arrangement switch it back in the customizer.
+ * Desktop-only — on the mobile shell the rail lives inside a drawer, where
+ * "which edge" has no meaning.
+ */
+export const DEFAULT_SIDEBAR_SIDE: SidebarSide = "right"
+
+/**
  * The rail's shipped pins.
  *
  * This used to be "every `feature` item", which put eleven icons on a 64px rail

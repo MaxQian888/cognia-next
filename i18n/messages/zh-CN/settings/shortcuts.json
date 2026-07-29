@@ -26,6 +26,13 @@
     "skillsSearch": "聚焦技能搜索",
     "skillsSelectAll": "全选技能",
     "terminalToggle": "切换终端",
+    "workbenchActivityAi": "工作台：AI",
+    "workbenchActivityComments": "工作台：评论",
+    "workbenchActivityInspect": "工作台：检视",
+    "workbenchActivityPreviewRun": "工作台：预览 / 运行",
+    "workbenchActivityReview": "工作台：审阅",
+    "workbenchActivityTemplates": "工作台：模板",
+    "workbenchActivityWorkspace": "工作台：工作区",
     "zoomIn": "放大",
     "zoomOut": "缩小",
     "zoomReset": "重置缩放"

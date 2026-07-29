@@ -20,6 +20,7 @@ import { AnimatePresence, motion, useReducedMotion } from "motion/react"
 import type { CSSProperties, ReactNode } from "react"
 
 import { useSettingsStore } from "@/stores/settings"
+import { MOBILE_DURATION, MOBILE_EASE, MOBILE_SPRING } from "@/lib/ui/motion"
 import { DEFAULT_MOTION } from "@/types/appearance"
 
 export interface FlowMotion {
@@ -93,7 +94,9 @@ export interface MotionCollapseProps {
  * Height animates on a *monotonic* eased tween rather than a spring: a spring
  * overshoots `auto`, and under `overflow: hidden` that overshoot clips the last
  * rows of content for a frame. A 0→auto tween never exceeds the final height, so
- * the body is never clipped. Opacity keeps its quick ease-out.
+ * the body is never clipped. `MOBILE_EASE` is monotonic, so it satisfies that
+ * constraint while putting this on the same clock as every other surface —
+ * before, this was a fourth hand-tuned curve. Opacity keeps its quick ease-out.
  */
 export function MotionCollapse({ open, children, className }: MotionCollapseProps) {
   const { reduce, speed } = useFlowMotion()
@@ -112,8 +115,8 @@ export function MotionCollapse({ open, children, className }: MotionCollapseProp
           animate={{ height: "auto", opacity: 1 }}
           exit={{ height: 0, opacity: 0 }}
           transition={{
-            height: { duration: 0.2 * speed, ease: [0.2, 0.8, 0.2, 1] },
-            opacity: { duration: 0.16 * speed, ease: "easeOut" },
+            height: { duration: MOBILE_DURATION.normal * speed, ease: MOBILE_EASE },
+            opacity: { duration: MOBILE_DURATION.fast * speed, ease: "easeOut" },
           }}
           style={{ overflow: "hidden" }}
         >
@@ -121,6 +124,55 @@ export function MotionCollapse({ open, children, className }: MotionCollapseProp
         </motion.div>
       ) : null}
     </AnimatePresence>
+  )
+}
+
+export interface MotionSelectionIndicatorProps {
+  /**
+   * Shared identity for one selectable group. Every item in the group passes
+   * the same value; motion then treats the indicator as *one* element moving
+   * rather than one disappearing and another appearing.
+   *
+   * It must be unique per mounted group. Two workbenches on screen sharing an
+   * id would make the indicator fly between them when either one's selection
+   * changed, so hosts key it on something instance-scoped.
+   */
+  groupId: string
+  /** Whether this item currently owns the indicator. */
+  active: boolean
+  /** Shape of the indicator — the caller supplies radius and tint. */
+  className?: string
+}
+
+/**
+ * The moving highlight behind a selected rail button or tab.
+ *
+ * Selection used to be a per-item background that switched on instantly, so
+ * moving between items read as "this one goes out, that one comes on" with
+ * nothing connecting them. Rendering a single shared-layout element instead
+ * lets motion interpolate its box between the old and new item, which is the
+ * one animation that actually communicates *where the selection went*.
+ *
+ * Sprung rather than timed, per `MOBILE_SPRING`: the travel distance depends on
+ * how far apart the two items are, and a fixed duration reads sluggish for
+ * neighbours and abrupt for a jump across the rail.
+ *
+ * The caller positions it — this renders an absolutely-filled layer, so the
+ * item needs `relative` and its content needs to sit above it.
+ */
+export function MotionSelectionIndicator({
+  groupId,
+  active,
+  className,
+}: MotionSelectionIndicatorProps) {
+  const { reduce } = useFlowMotion()
+  if (!active) return null
+  // No `layoutId` under reduced motion: that prop is the whole mechanism, so
+  // dropping it turns the indicator back into a plain per-item background that
+  // appears where it belongs with no travel.
+  if (reduce) return <span aria-hidden className={className} />
+  return (
+    <motion.span aria-hidden layoutId={groupId} className={className} transition={MOBILE_SPRING} />
   )
 }
 

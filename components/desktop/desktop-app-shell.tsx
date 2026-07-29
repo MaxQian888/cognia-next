@@ -7,9 +7,13 @@
  * `MobileShellWrapper` and the routed children.
  *
  *   ┌────────── TitleBar ──────────┐  ← always mounted (close button lives here)
- *   │ Guild │  {children}           │  ← page-specific content
- *   │ Rail  │                       │
+ *   │  {children}           │ Guild │  ← page-specific content
+ *   │                       │ Rail  │
  *   ├──────────── StatusBar ────────┤
+ *
+ * - The rail's edge is `settings.sidebarSide` (default `"right"`, as drawn).
+ *   It is the outermost column on whichever side it takes, so the transient
+ *   extension host bar appearing beside it never shifts it.
  *
  * - On mobile (`platform === "mobile"`) this component is a no-op so
  *   `MobileShellWrapper` keeps full ownership of the layout.
@@ -36,13 +40,16 @@ import { VscodeExtensionHostBar } from "@/components/extensions/vscode-extension
 import { TerminalDock } from "@/components/terminal/terminal-dock"
 import { TerminalToggleShortcut } from "@/components/terminal/terminal-toggle-shortcut"
 import { useTerminalStore } from "@/stores/terminal/terminal-store"
+import { useWorkbenchActivityShortcuts } from "@/hooks/context-workbench/use-workbench-activity-shortcuts"
 import { useMenuEventRouter } from "@/hooks/desktop/use-menu-event-router"
 import { usePlatform } from "@/hooks/use-platform"
 import { PageLoading } from "@/components/ui/loading-states"
 import { loadSystemFonts } from "@/lib/appearance/load-system-fonts"
 import { whenSeeded } from "@/lib/db/schema"
 import { loggers } from "@cognia/logging"
+import { useSettingsStore } from "@/stores/settings/settings-store"
 import { useUIStore } from "@/stores/ui/ui-store"
+import { DEFAULT_SIDEBAR_SIDE } from "@/types/shell/sidebar"
 
 const log = loggers.shell
 
@@ -77,6 +84,12 @@ export function DesktopAppShell({ children }: { children: React.ReactNode }) {
   const guildRailCollapsed = useUIStore((s) => s.guildRailCollapsed)
   const statusBarCollapsed = useUIStore((s) => s.statusBarCollapsed)
 
+  // Which edge the rail occupies. Selected as a scalar rather than through
+  // `useSidebarLayout()` on purpose: that hook subscribes to the whole
+  // `settings` object, and this component wraps every desktop route — a theme
+  // or font change would re-render the entire app shell for nothing.
+  const sidebarSide = useSettingsStore((s) => s.settings?.sidebarSide ?? DEFAULT_SIDEBAR_SIDE)
+
   // Terminal dock (plan: vscode-vivid-wilkinson) — height drives the
   // dock's slice of the shell's vertical column. Hidden when closed.
   const terminalPanelOpen = useTerminalStore((s) => s.panelOpen)
@@ -92,6 +105,12 @@ export function DesktopAppShell({ children }: { children: React.ReactNode }) {
   // OS menu / global shortcuts still work everywhere except bypass routes
   // (where the desktop chrome is suppressed on purpose).
   useMenuEventRouter()
+
+  // Ctrl+1..7 → the workbench's canonical activities. Mounted here, not per
+  // host: the reveal resolves against whichever workbench is in front, so one
+  // registration serves the chat dock, Canvas, and both editors. Registering
+  // per host would put several handlers on one keystroke.
+  useWorkbenchActivityShortcuts()
 
   const [mounted, setMounted] = useState(false)
   useEffect(() => {
@@ -134,6 +153,13 @@ export function DesktopAppShell({ children }: { children: React.ReactNode }) {
     router.push(tab ? `/settings?section=${tab}` : "/settings")
   }
 
+  // Rendered on whichever edge `sidebarSide` names — outermost either way, so
+  // the rail is pinned to the window edge and never shifts when the (transient,
+  // plugin-driven) extension host bar appears beside it.
+  const guildRail = guildRailCollapsed ? null : (
+    <GuildRail onCreateTeam={handleCreateTeam} onOpenSettings={() => handleOpenSettings()} />
+  )
+
   return (
     <div className="relative flex h-screen w-full flex-col bg-background text-foreground">
       <WindowFocusTracker />
@@ -142,9 +168,7 @@ export function DesktopAppShell({ children }: { children: React.ReactNode }) {
       <TerminalToggleShortcut />
       <TitleBar />
       <div className="flex flex-1 overflow-hidden">
-        {!guildRailCollapsed && (
-          <GuildRail onCreateTeam={handleCreateTeam} onOpenSettings={() => handleOpenSettings()} />
-        )}
+        {sidebarSide === "left" ? guildRail : null}
         <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
           <div data-find-scope className="flex min-h-0 flex-1 overflow-hidden">
             {children}
@@ -176,6 +200,7 @@ export function DesktopAppShell({ children }: { children: React.ReactNode }) {
          * default case. Phase A4 of the LSP reuse work.
          */}
         <VscodeExtensionHostBar className="hidden w-72 shrink-0 border-l lg:flex" />
+        {sidebarSide === "right" ? guildRail : null}
       </div>
       {mounted && <CommandPalette onOpenSettings={handleOpenSettings} />}
       <FindBar />

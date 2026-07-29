@@ -7,7 +7,11 @@ import { TooltipProvider } from "@/components/ui/tooltip"
 import type { Team } from "@cognia/agent-config-types"
 import type { SelectedGuild } from "@/stores/ui"
 import { useSettingsStore } from "@/stores/settings/settings-store"
-import { DEFAULT_SIDEBAR_LAYOUT, SIDEBAR_NAV_META } from "@/types/shell/sidebar"
+import {
+  DEFAULT_SIDEBAR_LAYOUT,
+  DEFAULT_SIDEBAR_SIDE,
+  SIDEBAR_NAV_META,
+} from "@/types/shell/sidebar"
 import { CHROME_BUDGET, countControls } from "@/lib/ui/chrome-budget"
 
 function withTooltipProvider(node: React.ReactNode) {
@@ -229,7 +233,17 @@ test("right-click context menu can open the full customizer", () => {
 test("the More button reflects the active state when on an overflow route", () => {
   pathname = "/logs"
   render(withTooltipProvider(<GuildRail onCreateTeam={jest.fn()} onOpenSettings={jest.fn()} />))
-  expect(screen.getByTestId("guild-more")).toHaveClass("bg-primary/10")
+  // The tint is a shared-layout indicator layer now, not a class on the button
+  // — that is what lets it slide between rail buttons instead of blinking.
+  const indicator = screen.getByTestId("guild-more").querySelector("span[aria-hidden]")
+  expect(indicator?.className).toContain("bg-primary/10")
+})
+
+test("only the active rail button carries the selection indicator", () => {
+  pathname = "/workflows"
+  render(withTooltipProvider(<GuildRail onCreateTeam={jest.fn()} onOpenSettings={jest.fn()} />))
+  expect(screen.getByLabelText("workflows").querySelector("span[aria-hidden]")).not.toBeNull()
+  expect(screen.getByLabelText("inbox").querySelector("span[aria-hidden]")).toBeNull()
 })
 
 test("a selected team button shows the active boxShadow when on the home route", () => {
@@ -423,4 +437,75 @@ test("the sheet variant still reaches every navigation destination", async () =>
 
   await user.click(screen.getByLabelText("openSettings"))
   expect(onOpenSettings).toHaveBeenCalled()
+})
+
+describe("which edge the rail occupies", () => {
+  const setSide = (side: "left" | "right" | undefined) =>
+    act(() => {
+      useSettingsStore.setState({
+        settings: { sidebarLayout: { ...DEFAULT_SIDEBAR_LAYOUT }, sidebarSide: side } as never,
+        save: saveMock as never,
+      })
+    })
+
+  test("defaults to the shipped edge and marks it on the container", () => {
+    const { container } = render(
+      withTooltipProvider(<GuildRail onCreateTeam={jest.fn()} onOpenSettings={jest.fn()} />)
+    )
+    expect(container.querySelector("aside")).toHaveAttribute("data-side", DEFAULT_SIDEBAR_SIDE)
+  })
+
+  test("borders against the workbench on the right, but not on the left", () => {
+    setSide("right")
+    const { container, rerender } = render(
+      withTooltipProvider(<GuildRail onCreateTeam={jest.fn()} onOpenSettings={jest.fn()} />)
+    )
+    // Both this rail and ContextWorkbench declare data-bg-target="sidebar", so
+    // with a wallpaper on, tone alone leaves no seam between them.
+    expect(container.querySelector("aside")!.className).toContain("border-l")
+
+    setSide("left")
+    rerender(withTooltipProvider(<GuildRail onCreateTeam={jest.fn()} onOpenSettings={jest.fn()} />))
+    // Nothing to its left but the window edge — a border would draw the seam twice.
+    expect(container.querySelector("aside")!.className).not.toContain("border-l")
+  })
+
+  // Only the rail-on-the-right direction is asserted through Radix. jsdom has
+  // no layout, so every rect Floating UI measures is zero and its collision
+  // logic collapses a requested `side="right"` back to "left" — a probe
+  // confirms `left` survives and `right` does not. Asserting the mirror case
+  // here would be asserting jsdom, not the rail. The `left` edge is covered by
+  // the `data-side` assertions above, which are our own markup.
+  test("on the right edge the More popover opens inward", async () => {
+    setSide("right")
+    const user = userEvent.setup()
+    render(withTooltipProvider(<GuildRail onCreateTeam={jest.fn()} onOpenSettings={jest.fn()} />))
+    await user.click(screen.getByTestId("guild-more"))
+    expect(screen.getByTestId("guild-more-item-skills").closest("[data-side]")).toHaveAttribute(
+      "data-side",
+      "left"
+    )
+  })
+
+  test("on the right edge tooltips open inward", async () => {
+    setSide("right")
+    const user = userEvent.setup()
+    render(withTooltipProvider(<GuildRail onCreateTeam={jest.fn()} onOpenSettings={jest.fn()} />))
+    await user.hover(screen.getByLabelText("directMessages"))
+    const tip = await screen.findByRole("tooltip")
+    expect(tip.closest("[data-side]")).toHaveAttribute("data-side", "left")
+  })
+
+  test("the sheet variant ignores the desktop edge", () => {
+    // In the mobile drawer the rail is the leading column with the channel list
+    // beside it — not a window edge, so the desktop preference must not reach it.
+    setSide("right")
+    const { container } = render(
+      withTooltipProvider(
+        <GuildRail variant="sheet" onCreateTeam={jest.fn()} onOpenSettings={jest.fn()} />
+      )
+    )
+    expect(container.querySelector("aside")).toHaveAttribute("data-side", "left")
+    expect(container.querySelector("aside")!.className).not.toContain("border-l")
+  })
 })

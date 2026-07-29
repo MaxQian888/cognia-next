@@ -4,15 +4,36 @@ import {
   type ContextWorkbenchLayout,
 } from "@/stores/context-workbench/context-workbench-store"
 import type {
+  ContextActivity,
   ContextPanelMode,
   ContextResource,
   ContextWorkbenchMode,
 } from "@/types/context-workbench"
 
+/**
+ * The part of a panel definition that survives leaving the workbench.
+ *
+ * Native panels are declared inline by each host (the chat dock, Canvas, the
+ * workflow and project editors) and handed over as a prop — only *plugin*
+ * panels reach `contextPanelRegistry`. So anything outside the workbench that
+ * wants to name a panel (the command palette, the activity shortcuts) has no
+ * way to enumerate them. Publishing this projection is that way; it carries
+ * identity and labelling only, never renderers or callbacks.
+ */
+export interface ActiveContextPanel {
+  id: string
+  activity: ContextActivity
+  labelKey: string
+  label?: string
+  pluginId?: string
+  preferredMode?: ContextPanelMode
+}
+
 interface ActiveContextHost {
   scopeKey: string
   resource: ContextResource
   touchedAt: number
+  panels: ActiveContextPanel[]
   /**
    * Bring the host's own container on screen. The workbench store only decides
    * *which panel* is in front; whether the surface around it is visible belongs
@@ -31,6 +52,7 @@ export interface ActiveContextHostOptions {
 const hosts = new Map<string, ActiveContextHost>()
 const listeners = new Set<() => void>()
 let activeScopeKey: string | null = null
+let revision = 0
 
 function cloneResource(resource: ContextResource): ContextResource {
   if (resource.kind === "canvas-document") {
@@ -71,6 +93,7 @@ function cloneResource(resource: ContextResource): ContextResource {
 }
 
 function notify(): void {
+  revision++
   listeners.forEach((listener) => {
     try {
       listener()
@@ -93,6 +116,10 @@ export function setActiveContextForHost(
     scopeKey,
     resource: cloneResource(resource),
     touchedAt: Date.now(),
+    // Carried over: the panel list is published by a separate effect that may
+    // have run before this one on a resource change, and dropping it here would
+    // blank the palette until the next registry mutation.
+    panels: hosts.get(scopeKey)?.panels ?? [],
     ensureVisible: options.ensureVisible,
   })
   activeScopeKey = scopeKey
@@ -112,6 +139,64 @@ export function touchActiveContextHost(scopeKey: string): void {
   notify()
 }
 
+/**
+ * Record which panels the workbench at `scopeKey` currently resolves to.
+ *
+ * Separate from {@link setActiveContextForHost} because the two change on
+ * different clocks: the resource changes when the user moves between artifacts,
+ * while the panel set also changes whenever a plugin registers or a context key
+ * flips. Folding them together would re-register the host on every registry
+ * mutation. A publish for an unknown scope is dropped, not queued — the host
+ * republishes on its next render.
+ */
+export function publishActiveContextPanels(scopeKey: string, panels: ActiveContextPanel[]): void {
+  const host = hosts.get(scopeKey)
+  if (!host) return
+  host.panels = panels.map((panel) => ({ ...panel }))
+  notify()
+}
+
+/** Panels of the workbench currently in front, or `[]` when there is none. */
+export function getActiveWorkbenchPanels(): ActiveContextPanel[] {
+  return (activeHost()?.panels ?? []).map((panel) => ({ ...panel }))
+}
+
+/**
+ * Bring `panelId` to the front of the active workbench, opening its container
+ * first. Returns false when no workbench is mounted or it has no such panel.
+ *
+ * Unlike {@link revealPluginContextPanel} there is no ownership check: the
+ * callers are first-party surfaces acting on a direct user request (the command
+ * palette, the activity shortcuts), not a contributor reaching across.
+ */
+export function revealActiveWorkbenchPanel(panelId: string, mode?: ContextPanelMode): boolean {
+  const active = activeHost()
+  if (!active) return false
+  const panel = active.panels.find((candidate) => candidate.id === panelId)
+  if (!panel) return false
+  active.ensureVisible?.()
+  useContextWorkbenchStore
+    .getState()
+    .smartReveal(active.scopeKey, panel.id, mode ?? panel.preferredMode ?? "narrow")
+  return true
+}
+
+/**
+ * Bring the active workbench's panel for `activity` to the front.
+ *
+ * Resolves to the *first* panel in that activity group, matching what clicking
+ * the rail button does. Returns false when the mounted workbench has no panel
+ * for it — a session surface has no `comments`, for instance. Callers must let
+ * that be a no-op rather than falling back to a neighbouring activity, or a
+ * fixed keybinding would quietly mean different things on different surfaces.
+ */
+export function revealActiveWorkbenchActivity(activity: ContextActivity): boolean {
+  const active = activeHost()
+  if (!active) return false
+  const panel = active.panels.find((candidate) => candidate.activity === activity)
+  return panel ? revealActiveWorkbenchPanel(panel.id) : false
+}
+
 export function getActiveContextResource(): ContextResource | null {
   const active = activeScopeKey ? hosts.get(activeScopeKey) : newestHost()
   return active ? cloneResource(active.resource) : null
@@ -120,6 +205,16 @@ export function getActiveContextResource(): ContextResource | null {
 export function subscribeActiveContext(listener: () => void): () => void {
   listeners.add(listener)
   return () => listeners.delete(listener)
+}
+
+/**
+ * Monotonic counter for `useSyncExternalStore`. A primitive, because the
+ * accessors here return fresh clones every call and React rejects a snapshot
+ * whose identity changes — subscribers read the revision and then call the
+ * accessor they actually want.
+ */
+export function getActiveContextRevision(): number {
+  return revision
 }
 
 function activeHost(): ActiveContextHost | undefined {

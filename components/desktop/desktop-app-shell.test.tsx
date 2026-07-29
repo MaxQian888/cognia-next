@@ -101,6 +101,14 @@ jest.mock("@/stores/ui/ui-store", () => ({
   useUIStore: (selector: (s: typeof uiStateRef) => unknown) => selector(uiStateRef),
 }))
 
+const settingsStateRef: { settings: { sidebarSide?: "left" | "right" } | undefined } = {
+  settings: undefined,
+}
+jest.mock("@/stores/settings/settings-store", () => ({
+  useSettingsStore: (selector: (s: typeof settingsStateRef) => unknown) =>
+    selector(settingsStateRef),
+}))
+
 import { DesktopAppShell, isShellBypassRoute } from "./desktop-app-shell"
 
 beforeEach(() => {
@@ -112,6 +120,7 @@ beforeEach(() => {
   platformValue = "web"
   uiStateRef.guildRailCollapsed = false
   uiStateRef.statusBarCollapsed = false
+  settingsStateRef.settings = undefined
 })
 
 test("renders TitleBar, StatusBar, GuildRail, CommandPalette, and resize edges", () => {
@@ -296,5 +305,49 @@ describe("collapse toggles from ui-store", () => {
     )
     expect(screen.getByTestId("guild-rail-stub")).toBeInTheDocument()
     expect(screen.getByTestId("status-bar")).toBeInTheDocument()
+  })
+})
+
+describe("navigation rail placement", () => {
+  /** DOM order of the rail stub relative to the routed content. */
+  const railComesBeforeContent = () => {
+    const rail = screen.getByTestId("guild-rail-stub")
+    const content = screen.getByTestId("route-content")
+    // Node.DOCUMENT_POSITION_FOLLOWING — content comes after the rail.
+    return Boolean(rail.compareDocumentPosition(content) & Node.DOCUMENT_POSITION_FOLLOWING)
+  }
+
+  const renderShell = () =>
+    render(
+      <DesktopAppShell>
+        <div data-testid="route-content" />
+      </DesktopAppShell>
+    )
+
+  test("defaults to the trailing edge", () => {
+    platformValue = "tauri"
+    renderShell()
+    expect(railComesBeforeContent()).toBe(false)
+  })
+
+  test("moves to the leading edge when the setting says left", () => {
+    platformValue = "tauri"
+    settingsStateRef.settings = { sidebarSide: "left" }
+    renderShell()
+    expect(railComesBeforeContent()).toBe(true)
+  })
+
+  // The extension host bar appears only once a plugin registers a surface. The
+  // rail has to be outermost on whichever edge it takes, or every activation
+  // would slide it sideways.
+  test.each([
+    ["right", "lastElementChild"],
+    ["left", "firstElementChild"],
+  ] as const)("on the %s edge it is the row's %s", (side, position) => {
+    platformValue = "tauri"
+    settingsStateRef.settings = { sidebarSide: side }
+    renderShell()
+    const rail = screen.getByTestId("guild-rail-stub")
+    expect(rail.parentElement?.[position]).toBe(rail)
   })
 })

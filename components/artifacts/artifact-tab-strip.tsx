@@ -16,9 +16,11 @@
 import { useState } from "react"
 import { CornerUpLeftIcon, MessageSquarePlusIcon, XIcon } from "lucide-react"
 import { useTranslations } from "next-intl"
+import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import { wholeArtifactSelection } from "@/lib/artifacts/format-selection-context"
 import { cn } from "@/lib/utils"
+import { MotionSelectionIndicator } from "@/components/chat/motion/motion-reveal"
 import { useArtifactStore } from "@/stores/artifact/artifact-store"
 import { useActiveArtifactId, useOpenArtifactIds } from "@/hooks/artifacts/use-session-artifacts"
 import { useChatStore } from "@/stores/chat"
@@ -51,6 +53,7 @@ const EMPTY_TABS: string[] = []
 
 export function ArtifactTabStrip({ className }: { className?: string }) {
   const t = useTranslations("artifacts")
+  const tJump = useTranslations("chat.jump")
   const artifacts = useArtifactStore((state) => state.artifacts)
   const activeArtifactId = useActiveArtifactId()
   const setActiveArtifact = useArtifactStore((state) => state.setActiveArtifact)
@@ -68,6 +71,20 @@ export function ArtifactTabStrip({ className }: { className?: string }) {
   // send. Only sub-ranges could be referenced before, via the preview's
   // selection button — there was no way to say "this artifact" as a whole.
   const addContextSelection = useChatStore((state) => state.addContextSelection)
+  // Scopes the sliding selection indicator. Two strips can be mounted at once
+  // (the desktop dock plus the mobile sheet behind it); a shared group id would
+  // let the highlight fly between them.
+  const sessionKey = useChatStore((state) => state.activeSessionId) ?? "none"
+
+  // The jump can legitimately fail — the source message may have been compacted
+  // away or belong to a session that is no longer open. That used to be a
+  // silent no-op, so the affordance looked broken rather than inapplicable.
+  const goToSource = (messageId: string) => {
+    if (!jumpToMessage) return
+    if (!jumpToMessage(messageId, undefined, { align: "center" })) {
+      toast.error(tJump("notFound"))
+    }
+  }
 
   if (tabs.length === 0) return null
 
@@ -105,8 +122,8 @@ export function ArtifactTabStrip({ className }: { className?: string }) {
                   setDraggedId(null)
                 }}
                 className={cn(
-                  "group flex min-w-0 shrink items-center gap-1 rounded-md pr-0.5 pl-1.5",
-                  active ? "bg-secondary" : "hover:bg-accent/50",
+                  "group relative flex min-w-0 shrink items-center gap-1 rounded-md pr-0.5 pl-1.5",
+                  !active && "hover:bg-accent/50",
                   // A ring rather than a fill: "selected" is already spending the
                   // background, and these two are independent — the tab you are
                   // reading is often not the one the conversation is scrolled to.
@@ -114,12 +131,21 @@ export function ArtifactTabStrip({ className }: { className?: string }) {
                   draggedId === id && "opacity-50"
                 )}
               >
+                {/* Keyed on the session: two docks (a split pane, the mobile
+                    sheet behind the desktop one) must not share an indicator. */}
+                <MotionSelectionIndicator
+                  groupId={`artifact-tabs-${sessionKey}`}
+                  active={active}
+                  className="absolute inset-0 rounded-md bg-secondary"
+                />
                 <button
                   type="button"
                   role="tab"
                   aria-selected={active}
                   data-testid={`artifact-tab-${id}`}
-                  className="flex min-w-0 items-center gap-1.5 py-1 text-xs"
+                  // `relative` so it paints above the absolutely-positioned
+                  // selection indicator rather than under it.
+                  className="relative flex min-w-0 items-center gap-1.5 py-1 text-xs"
                   title={
                     jumpToMessage ? t("dock.tabHint", { title: artifact.title }) : artifact.title
                   }
@@ -127,7 +153,7 @@ export function ArtifactTabStrip({ className }: { className?: string }) {
                   // Every artifact records the message it came out of, but nothing
                   // could act on it — the link ran one way only. Double-click is
                   // the editor convention for "reveal the source of this tab".
-                  onDoubleClick={() => jumpToMessage?.(artifact.messageId)}
+                  onDoubleClick={() => goToSource(artifact.messageId)}
                   // Browser/editor convention: middle-click closes the tab.
                   onAuxClick={(event) => {
                     if (event.button === 1) closeArtifact(id)
@@ -146,7 +172,7 @@ export function ArtifactTabStrip({ className }: { className?: string }) {
                   data-testid={`artifact-tab-close-${id}`}
                   // Hover-revealed on mouse; always visible on coarse pointers,
                   // where there is no hover to reveal it.
-                  className="size-5 shrink-0 opacity-0 focus-visible:opacity-100 group-hover:opacity-100 pointer-coarse:opacity-100"
+                  className="relative size-5 shrink-0 opacity-0 focus-visible:opacity-100 group-hover:opacity-100 pointer-coarse:opacity-100"
                   onClick={() => closeArtifact(id)}
                 >
                   <XIcon className="size-3" />
@@ -164,7 +190,7 @@ export function ArtifactTabStrip({ className }: { className?: string }) {
               <ContextMenuItem
                 disabled={!jumpToMessage}
                 data-testid={`artifact-tab-source-${id}`}
-                onSelect={() => jumpToMessage?.(artifact.messageId)}
+                onSelect={() => goToSource(artifact.messageId)}
               >
                 <CornerUpLeftIcon className="size-4" />
                 {t("dock.goToSource")}

@@ -100,6 +100,66 @@ export const APP_SHORTCUT_CATALOG: ShortcutDescriptor[] = [
     // so the two never contend (they also never co-mount).
     when: "!view.canvas",
   },
+  // One chord per *canonical activity*, not per rail position.
+  //
+  // The workbench shows two faces — six activities with an artifact in front,
+  // three without — and plugins add more. Binding "the Nth icon" would make a
+  // fixed chord mean different panels depending on what happened to be open,
+  // and reordering the rail would silently remap every key. Binding the
+  // activity keeps `ctrl+3` meaning "AI" forever; where the mounted workbench
+  // has no such panel the chord is simply inert (see
+  // `revealActiveWorkbenchActivity`), never a fallback to a neighbour.
+  //
+  // `ctrl+1..7` are free repo-wide; `ctrl+0` is taken by zoom reset.
+  {
+    id: "workbench.activity.previewRun",
+    scope: "app",
+    labelKey: "settings.shortcuts.catalog.workbenchActivityPreviewRun",
+    category: "app.panels",
+    defaultChord: "ctrl+1",
+  },
+  {
+    id: "workbench.activity.review",
+    scope: "app",
+    labelKey: "settings.shortcuts.catalog.workbenchActivityReview",
+    category: "app.panels",
+    defaultChord: "ctrl+2",
+  },
+  {
+    id: "workbench.activity.ai",
+    scope: "app",
+    labelKey: "settings.shortcuts.catalog.workbenchActivityAi",
+    category: "app.panels",
+    defaultChord: "ctrl+3",
+  },
+  {
+    id: "workbench.activity.comments",
+    scope: "app",
+    labelKey: "settings.shortcuts.catalog.workbenchActivityComments",
+    category: "app.panels",
+    defaultChord: "ctrl+4",
+  },
+  {
+    id: "workbench.activity.inspect",
+    scope: "app",
+    labelKey: "settings.shortcuts.catalog.workbenchActivityInspect",
+    category: "app.panels",
+    defaultChord: "ctrl+5",
+  },
+  {
+    id: "workbench.activity.workspace",
+    scope: "app",
+    labelKey: "settings.shortcuts.catalog.workbenchActivityWorkspace",
+    category: "app.panels",
+    defaultChord: "ctrl+6",
+  },
+  {
+    id: "workbench.activity.templates",
+    scope: "app",
+    labelKey: "settings.shortcuts.catalog.workbenchActivityTemplates",
+    category: "app.panels",
+    defaultChord: "ctrl+7",
+  },
   {
     id: "canvasLayout.toggleLeft",
     scope: "app",

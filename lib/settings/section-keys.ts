@@ -199,7 +199,7 @@ export const SECTION_OWNED_KEYS: Partial<Record<SettingsSectionId, (keyof AppSet
   artifacts: ["artifacts"],
   pet: ["petSettings"],
   eval: ["evalSettings"],
-  sidebar: ["sidebarLayout", "titleBarLayout", "statusBarLayout"],
+  sidebar: ["sidebarLayout", "sidebarSide", "workbenchRail", "titleBarLayout", "statusBarLayout"],
   workflows: ["workflowEditorPerformanceTier"],
 }
 

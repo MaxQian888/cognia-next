@@ -9,6 +9,9 @@ jest.mock("next-intl", () => ({
     values ? `${key}:${Object.values(values).join(",")}` : key,
 }))
 
+jest.mock("sonner", () => ({ toast: { error: jest.fn() } }))
+
+import { toast } from "sonner"
 import { ArtifactTabStrip } from "./artifact-tab-strip"
 import {
   selectActiveArtifactId,
@@ -37,6 +40,7 @@ const openTabs = () => selectOpenArtifactIds(useArtifactStore.getState(), SESSIO
 const activeTab = () => selectActiveArtifactId(useArtifactStore.getState(), SESSION)
 
 beforeEach(() => {
+  jest.clearAllMocks()
   localStorage.clear()
   act(() => {
     useArtifactStore.setState({
@@ -226,7 +230,7 @@ describe("ArtifactTabStrip", () => {
           artifacts: { ...s.artifacts, [first.id]: { ...first, messageId: "msg-a" } },
         }))
       )
-      const jump = jest.fn()
+      const jump = jest.fn(() => true)
       act(() => useChatViewportStore.getState().registerJumpToMessage(jump))
 
       render(<ArtifactTabStrip />)
@@ -234,8 +238,27 @@ describe("ArtifactTabStrip", () => {
 
       // Artifacts have always recorded their source message; nothing read it
       // back, so the chat could open the dock but the dock could not point at
-      // the chat.
-      expect(jump).toHaveBeenCalledWith("msg-a")
+      // the chat. `center` because an artifact's source is a point of interest,
+      // not a place to start reading downwards from.
+      expect(jump).toHaveBeenCalledWith("msg-a", undefined, { align: "center" })
+      expect(toast.error).not.toHaveBeenCalled()
+    })
+
+    it("reports an unreachable source message instead of doing nothing", () => {
+      const [first] = seed(["First", "Second"])
+      act(() =>
+        useArtifactStore.setState((s) => ({
+          artifacts: { ...s.artifacts, [first.id]: { ...first, messageId: "gone" } },
+        }))
+      )
+      // A list is mounted, but the message is not in it — compacted away, or
+      // owned by a session that is no longer open.
+      act(() => useChatViewportStore.getState().registerJumpToMessage(() => false))
+
+      render(<ArtifactTabStrip />)
+      fireEvent.doubleClick(screen.getByTestId(`artifact-tab-${first.id}`))
+
+      expect(toast.error).toHaveBeenCalledWith("notFound")
     })
 
     it("closes a tab from its context menu", () => {
