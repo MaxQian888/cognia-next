@@ -47,6 +47,7 @@ import { encodePairPayload } from "@/lib/qr/pair-payload"
 import { cn } from "@/lib/utils"
 import { APP_VERSION } from "@/lib/app-version"
 import { useAccountStore } from "@/stores/account/account-store"
+import { ChannelMatrixCard } from "./channel-matrix-card"
 import { PairedDevicesCard } from "./paired-devices-card"
 import { WebRtcCard } from "./webrtc-card"
 import { SyncStatusCard } from "./sync-status-card"
@@ -192,6 +193,9 @@ export function CompanionSection() {
   return (
     <div className="space-y-3 p-4" data-testid="companion-section">
       <CompanionGroup id="network" title={t("network")} defaultOpen>
+        {/* First, because it is the question the four cards below only answer
+            between them: which routes does this desktop actually answer on. */}
+        <ChannelMatrixCard />
         <ServerStatusCard />
         <TunnelCard />
         <MdnsCard />
@@ -208,11 +212,13 @@ export function CompanionSection() {
       <CompanionGroup id="push" title={t("push")} defaultOpen>
         <PushCredentialsCard />
       </CompanionGroup>
-      {/* Diagnostics + per-table sync state are power-user surfaces; collapse
-          them by default so the common pairing / push path isn't buried. */}
+      {/* Per-table sync state is a power-user surface; collapsed by default so
+          the common pairing / push path isn't buried. The reachability probe
+          that used to live here moved into the channel matrix above, where its
+          results are attributed to a channel instead of printed as a flat list
+          of URLs. */}
       <CompanionGroup id="advanced" title={t("advanced")} defaultOpen={false}>
         <SyncStatusCard />
-        <ReachabilityDiagnosticsCard />
       </CompanionGroup>
     </div>
   )
@@ -969,80 +975,6 @@ function formatRemaining(secs: number): string {
 // ---------------------------------------------------------------------------
 // Reachability diagnostics card (Phase C2)
 // ---------------------------------------------------------------------------
-
-interface ReachabilityRow {
-  url: string
-  reachable: boolean
-  latencyMs?: number
-  error?: string
-}
-
-async function probeLocalReachability(): Promise<ReachabilityRow[]> {
-  if (!isTauri()) return []
-  return transport.call<ReachabilityRow[]>("companion_test_local_reachability")
-}
-
-function ReachabilityDiagnosticsCard() {
-  const [rows, setRows] = useState<ReachabilityRow[] | null>(null)
-  const [busy, setBusy] = useState(false)
-  const desktop = isTauri()
-  const t = useTranslations("mobile.companion.diagnostics")
-
-  const onTest = useCallback(async () => {
-    setBusy(true)
-    try {
-      const out = await probeLocalReachability()
-      setRows(out)
-    } catch (err) {
-      toast.error(t("probeFailed", { message: err instanceof Error ? err.message : String(err) }))
-    } finally {
-      setBusy(false)
-    }
-  }, [t])
-
-  return (
-    <Card>
-      <CardHeader className="pb-3">
-        <CardTitle className="text-sm font-medium">{t("title")}</CardTitle>
-        <CardDescription className="text-xs">{t("description")}</CardDescription>
-      </CardHeader>
-      <CardContent className="space-y-3">
-        <Button size="sm" variant="outline" onClick={onTest} disabled={!desktop || busy}>
-          {busy ? t("probing") : t("testButton")}
-        </Button>
-        {!desktop && <p className="text-xs text-muted-foreground">{t("desktopOnly")}</p>}
-        {rows && rows.length > 0 && (
-          <div className="space-y-1.5">
-            {rows.map((row) => (
-              <div
-                key={row.url}
-                className={cn(
-                  "flex items-start gap-2 rounded border px-3 py-2 text-xs",
-                  row.reachable
-                    ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
-                    : "border-red-500/40 bg-red-500/10 text-red-700 dark:text-red-300"
-                )}
-              >
-                <CircleIcon
-                  className={cn("mt-0.5 h-2 w-2 shrink-0 fill-current", row.reachable ? "" : "")}
-                />
-                <div className="flex-1 space-y-0.5">
-                  <div className="font-mono">{row.url}</div>
-                  <div className="text-[10px] text-muted-foreground">
-                    {row.reachable
-                      ? `${t("ok")} · ${row.latencyMs ?? "—"} ${t("ms")}`
-                      : `${t("failed")}${row.error ? ` · ${row.error}` : ""}`}
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-        {rows && rows.length === 0 && <p className="text-xs text-muted-foreground">{t("empty")}</p>}
-      </CardContent>
-    </Card>
-  )
-}
 
 // ---------------------------------------------------------------------------
 // Push credentials card (Phase B follow-up)
