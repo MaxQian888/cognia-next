@@ -9,6 +9,8 @@ import { downloadFromUrl } from "@/lib/files/download"
 import { openExternal } from "@/lib/tauri/opener"
 
 import { ImageBlock } from "./image-block"
+import { getMessageMedia, mediaRef } from "@/lib/db/message-media"
+import { __TESTING__ as resolveTesting } from "@/lib/chat/media/resolve-media"
 
 const mockCopy = jest.fn(async () => undefined)
 let mockCopied = false
@@ -25,8 +27,16 @@ jest.mock("@/lib/tauri/opener", () => ({
   openExternal: jest.fn(async () => undefined),
 }))
 
+// Only the Dexie read is mocked; the object-URL registry underneath
+// `useMediaUrl` is the real one, so refcounting runs for real here too.
+jest.mock("@/lib/db/message-media", () => {
+  const actual = jest.requireActual("@/lib/db/message-media")
+  return { ...actual, getMessageMedia: jest.fn() }
+})
+
 const mockDownloadFromUrl = jest.mocked(downloadFromUrl)
 const mockOpenExternal = jest.mocked(openExternal)
+const mockGetMessageMedia = jest.mocked(getMessageMedia)
 
 const messages = {
   chat: {
@@ -317,5 +327,95 @@ describe("ImageBlock", () => {
       fireEvent.doubleClick(fullscreenImg)
       expect(screen.getByText("100%")).toBeInTheDocument()
     })
+  })
+})
+
+describe("ImageBlock — content-addressed references", () => {
+  const storedRow = {
+    hash: "h",
+    mediaType: "image/jpeg",
+    width: 1600,
+    height: 1000,
+    blob: { size: 1_000 } as unknown as Blob,
+    byteSize: 1_000,
+    createdAt: 1,
+    lastUsedAt: 1,
+  }
+
+  beforeEach(() => {
+    resolveTesting.reset()
+    mockGetMessageMedia.mockReset()
+    URL.createObjectURL = jest.fn(() => "blob:mock/0")
+    URL.revokeObjectURL = jest.fn()
+  })
+
+  it("renders the resolved object URL, never the reference itself", async () => {
+    mockGetMessageMedia.mockResolvedValue(storedRow as never)
+
+    renderBlock({ src: mediaRef("h") })
+
+    await waitFor(() => {
+      expect(screen.getByAltText("a picture")).toHaveAttribute("src", "blob:mock/0")
+    })
+  })
+
+  it("reserves the box from the stored dimensions before any byte is fetched", async () => {
+    mockGetMessageMedia.mockResolvedValue(storedRow as never)
+
+    const { container } = renderBlock({ src: mediaRef("h") })
+
+    await waitFor(() => {
+      expect(container.querySelector("figure")).toHaveStyle({ aspectRatio: "1600 / 1000" })
+    })
+  })
+
+  it("shows the failure affordance for a reference that resolves to nothing", async () => {
+    mockGetMessageMedia.mockResolvedValue(undefined as never)
+
+    renderBlock({ src: mediaRef("gone") })
+
+    await waitFor(() => {
+      expect(screen.getByText("Failed to load image")).toBeInTheDocument()
+    })
+    // Local bytes have nowhere to open externally.
+    expect(screen.queryByText("Open URL")).toBeNull()
+  })
+
+  it("hides copy-URL for a reference, whose URL means nothing elsewhere", async () => {
+    mockGetMessageMedia.mockResolvedValue(storedRow as never)
+
+    renderBlock({ src: mediaRef("h") })
+
+    await waitFor(() => expect(screen.getByAltText("a picture")).toBeInTheDocument())
+    expect(screen.queryByLabelText("Copy URL")).toBeNull()
+  })
+
+  it("keeps copy-URL for a plain URL", () => {
+    renderBlock({ src: "https://example.com/pic.png" })
+
+    expect(screen.getByLabelText("Copy URL")).toBeInTheDocument()
+    expect(mockGetMessageMedia).not.toHaveBeenCalled()
+  })
+
+  it("downloads through the resolved URL but names the file from the reference", async () => {
+    mockGetMessageMedia.mockResolvedValue(storedRow as never)
+
+    renderBlock({ src: mediaRef("h") })
+    await waitFor(() => expect(screen.getByAltText("a picture")).toBeInTheDocument())
+    fireEvent.click(screen.getByLabelText("Download"))
+
+    await waitFor(() => expect(mockDownloadFromUrl).toHaveBeenCalled())
+    expect(mockDownloadFromUrl.mock.calls[0][0]).toBe("blob:mock/0")
+  })
+
+  it("releases its holder when the row unmounts", async () => {
+    mockGetMessageMedia.mockResolvedValue(storedRow as never)
+
+    const { unmount } = renderBlock({ src: mediaRef("h") })
+    await waitFor(() => expect(screen.getByAltText("a picture")).toBeInTheDocument())
+    expect(resolveTesting.stats().holders).toBe(1)
+
+    unmount()
+    expect(resolveTesting.stats().holders).toBe(0)
   })
 })
