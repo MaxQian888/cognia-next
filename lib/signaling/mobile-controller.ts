@@ -1,20 +1,29 @@
 "use client"
 
 /**
- * Mobile-side glue that opts the live `CompanionTransport` into the
- * WebRTC tier whenever:
+ * Client-side glue for every runtime whose live transport is a
+ * `CompanionTransport` — a Capacitor phone, and a browser pointed at a cloud
+ * `cognia-server` (ADR-0059's front-end/back-end split). It owns the parts of
+ * staying connected that the transport itself does not: refreshing the channel
+ * inventory, re-probing after the network returns, failing over between
+ * channels, and opting into the WebRTC tier.
  *
- *   - the user has not disabled it (AppSettings.webrtcEnabled),
- *   - the paired device has a rendezvous tuple (post-ADR-0021 pair),
- *   - and an `signalingUrl` is configured.
+ * It used to return a no-op for anything that was not Capacitor, which meant a
+ * browser companion had none of it: it never learned the host's other
+ * addresses, never re-probed on reconnect, never provisioned TURN, and never
+ * got a WebRTC tier at all — only the transport's own WebSocket backoff. Every
+ * one of those is host-neutral; the single genuinely Capacitor-bound piece is
+ * local-network discovery (mDNS plus a /24 sweep), which a browser cannot do
+ * and which is now the only thing gated.
  *
- * Runs only on Capacitor; the Tauri desktop is the server peer (driven
- * by `desktop-controller.ts`) and the plain browser shell has no
- * CompanionTransport. The transport itself handles fallback to HTTPS+WS
- * when the WebRTC negotiation fails, so this controller can be safe to
- * invoke unconditionally on platform detection.
+ * The Tauri desktop is excluded because it is the server peer, driven by
+ * `desktop-controller.ts`.
  *
- * ADR-0021.
+ * The file is still named `mobile-controller` so an active concurrent branch
+ * does not have to rebase over a rename; the exported entry point carries the
+ * accurate name.
+ *
+ * ADR-0021, ADR-0059.
  */
 
 import { liveQuery, type Subscription } from "dexie"
@@ -32,6 +41,7 @@ import { resolveLanBaseUrl } from "@/lib/connectivity/lan-resolver"
 import { buildCandidates, pickReachable } from "@/lib/connectivity/connection-strategy"
 import { refreshCompanionEndpoints } from "@/lib/connectivity/endpoint-refresh"
 import { fetchHealthz } from "@/lib/connectivity/healthz"
+import { hasWebCompanionTarget } from "@/lib/platform/web-companion"
 import { getSettings } from "@/lib/db/settings"
 import { resolveTurnServerCredentials } from "@/lib/credentials/turn-credentials"
 import {
@@ -63,8 +73,13 @@ export const REUPGRADE_MIN_SPACING_MS = 15_000
 export const LAN_RERESOLVE_MIN_SPACING_MS = 10_000
 
 export interface MobileSignalingControllerOptions {
-  /** Override platform detection for tests. */
+  /**
+   * Override Capacitor detection for tests. Also decides whether local-network
+   * discovery runs: a browser cannot do mDNS or a subnet sweep.
+   */
   isCapacitorOverride?: boolean
+  /** Override browser-companion detection for tests. */
+  hasWebCompanionTargetOverride?: boolean
   /** Test injection of the transport (defaults to the live module-scope `transport`). */
   transportOverride?: CompanionTransport
   /** Test injection of the settings reader (defaults to the Dexie `getSettings`). */
@@ -120,21 +135,30 @@ export async function probeCandidateDefault(
 /**
  * Install the controller. Returns an uninstall function. Re-installing
  * after uninstall is safe; concurrent installs share the live transport.
+ *
+ * A no-op on any runtime whose transport is not a `CompanionTransport` — the
+ * Tauri desktop (it is the peer) and a plain web build with no configured
+ * server.
  */
-export function installMobileSignalingController(
+export function installCompanionSignalingController(
   options: MobileSignalingControllerOptions = {}
 ): () => void {
-  const cap = options.isCapacitorOverride ?? isCapacitor()
-  if (!cap) {
+  const capacitor = options.isCapacitorOverride ?? isCapacitor()
+  const webCompanion = options.hasWebCompanionTargetOverride ?? hasWebCompanionTarget()
+  if (!capacitor && !webCompanion) {
     return () => {
-      // No-op outside Capacitor.
+      // No CompanionTransport on this runtime — nothing to drive.
     }
   }
+  // mDNS and the /24 probe sweep need native networking. A browser skips
+  // discovery and relies on the addresses the host reports over the
+  // authenticated connection instead.
+  const canScanLan = capacitor
 
   // We need a typed reference to call `enableWebRtcTier` — the runtime
   // `transport` is the `Transport` interface, the upgrade method only
-  // exists on `CompanionTransport`. Capacitor builds always pick
-  // `CompanionTransport` (see `lib/tauri/transport-instance.ts`).
+  // exists on `CompanionTransport`. Both Capacitor and web-companion builds
+  // resolve to `CompanionTransport` (see `lib/tauri/transport-instance.ts`).
   const tx =
     (options.transportOverride as CompanionTransport | undefined) ??
     (transport as unknown as CompanionTransport)
@@ -212,12 +236,18 @@ export function installMobileSignalingController(
     lanAbort = controller
 
     let lanBaseUrl: string | null = null
-    try {
-      ;({ lanBaseUrl } = await resolveLan({ config, signal: controller.signal }))
-    } catch {
-      // Scan failure is not fatal — fall through to the failover sweep, which
-      // probes concrete addresses rather than discovering new ones.
+    if (canScanLan) {
+      try {
+        ;({ lanBaseUrl } = await resolveLan({ config, signal: controller.signal }))
+      } catch {
+        // Scan failure is not fatal — fall through to the failover sweep, which
+        // probes concrete addresses rather than discovering new ones.
+      }
     }
+    // A browser has no discovery, so it goes straight to the sweep below. That
+    // is not a downgrade: the sweep probes the concrete addresses the host
+    // reported through `companion_endpoints`, which is the only way a browser
+    // could learn them anyway.
     if (controller.signal.aborted) return
     if (lanBaseUrl) {
       if (lanBaseUrl !== config.baseUrl) {
@@ -371,7 +401,7 @@ export function installMobileSignalingController(
  * Project an `AppSettings` snapshot onto the transport — exported for unit
  * testing without the `dexie.liveQuery` indirection. Test consumers `await`
  * this directly with handcrafted settings objects; the production caller
- * uses [`installMobileSignalingController`] and fires-and-forgets via
+ * uses [`installCompanionSignalingController`] and fires-and-forgets via
  * `.catch`.
  *
  * Returns a promise so callers (and tests) can observe completion. The

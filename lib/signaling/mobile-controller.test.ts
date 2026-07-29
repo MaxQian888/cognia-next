@@ -1,14 +1,14 @@
 /** @jest-environment jsdom */
 /**
  * Mobile-controller — covers the `applySettings` reducer that the
- * production `installMobileSignalingController` plumbs through
+ * production `installCompanionSignalingController` plumbs through
  * `dexie.liveQuery`. Exercising the reducer directly avoids the
  * `liveQuery` timing race that fake-indexeddb exhibits under Jest.
  */
 
 import {
   applySettings,
-  installMobileSignalingController,
+  installCompanionSignalingController,
   probeCandidateDefault,
   LAN_RERESOLVE_MIN_SPACING_MS,
   REUPGRADE_MIN_SPACING_MS,
@@ -185,7 +185,7 @@ describe("applySettings", () => {
   })
 })
 
-describe("installMobileSignalingController — TURN provisioner", () => {
+describe("installCompanionSignalingController — TURN provisioner", () => {
   // NB: the liveQuery initial fire is unreliable under fake-indexeddb (see the
   // file header), so these exercise the provisioner via a network trigger,
   // which runs `reupgrade()` → `manageProvisioner` like production.
@@ -194,7 +194,7 @@ describe("installMobileSignalingController — TURN provisioner", () => {
     const stop = jest.fn()
     let netHandler: (s: NetworkStatus) => void = () => {}
     let startCount = 0
-    const uninstall = installMobileSignalingController({
+    const uninstall = installCompanionSignalingController({
       isCapacitorOverride: true,
       transportOverride: tx as unknown as Tx,
       getSettingsOverride: async () =>
@@ -229,7 +229,7 @@ describe("installMobileSignalingController — TURN provisioner", () => {
     const tx = new FakeTransport()
     let netHandler: (s: NetworkStatus) => void = () => {}
     let startCount = 0
-    const uninstall = installMobileSignalingController({
+    const uninstall = installCompanionSignalingController({
       isCapacitorOverride: true,
       transportOverride: tx as unknown as Tx,
       getSettingsOverride: async () => settings({ webrtcEnabled: true }),
@@ -252,15 +252,78 @@ describe("installMobileSignalingController — TURN provisioner", () => {
   })
 })
 
-describe("installMobileSignalingController", () => {
-  it("returns a no-op uninstaller outside Capacitor", () => {
+describe("installCompanionSignalingController", () => {
+  it("returns a no-op uninstaller when no companion transport exists", () => {
+    // Neither Capacitor nor a browser with a configured server: the live
+    // transport is Tauri IPC or the web stub, so there is nothing to drive.
     const tx = new FakeTransport()
-    const uninstall = installMobileSignalingController({
+    const uninstall = installCompanionSignalingController({
       isCapacitorOverride: false,
+      hasWebCompanionTargetOverride: false,
       transportOverride: tx as unknown as Tx,
     })
     expect(typeof uninstall).toBe("function")
     expect(tx.enableCalls).toEqual([])
+    uninstall()
+  })
+
+  it("runs in a browser pointed at a cloud server", async () => {
+    // This is the gap the host-neutral split closed: a browser companion used
+    // to get an immediate no-op, so it never refreshed the channel inventory,
+    // never re-probed on reconnect and never had a WebRTC tier at all.
+    const tx = new FakeTransport()
+    const refreshEndpoints = jest.fn(async () => undefined)
+    let netHandler: (s: NetworkStatus) => void = () => {}
+    const uninstall = installCompanionSignalingController({
+      isCapacitorOverride: false,
+      hasWebCompanionTargetOverride: true,
+      transportOverride: tx as unknown as Tx,
+      getSettingsOverride: async () => settings({ webrtcEnabled: true }),
+      refreshEndpointsOverride: refreshEndpoints as never,
+      subscribeNetworkOverride: async (handler) => {
+        netHandler = handler
+        return () => {}
+      },
+      subscribeResumeOverride: async () => () => {},
+    })
+
+    await new Promise((r) => setTimeout(r, 10))
+    // The WebRTC tier is opted into from settings, exactly as on a phone.
+    expect(tx.enableCalls.length).toBeGreaterThan(0)
+    // And a network-recovery trigger is wired.
+    expect(typeof netHandler).toBe("function")
+    uninstall()
+  })
+
+  it("skips local-network discovery in a browser but still sweeps channels", async () => {
+    // mDNS and a /24 sweep need native networking. Reaching for them in a
+    // browser would be a guaranteed failure on every reconnect; the concrete
+    // addresses the host reports over `companion_endpoints` are the browser's
+    // only route, so the sweep still runs.
+    const tx = new FakeTransport()
+    tx.connectionState = "offline"
+    const resolveLan = jest.fn(async () => ({ lanBaseUrl: null }))
+    await saveCompanionConfig({
+      baseUrl: "https://cloud.example",
+      deviceJwt: "jwt",
+      deviceId: "d1",
+      serverVersion: "1",
+      tunnelBaseUrl: "https://tunnel.example",
+    } as CompanionConfig)
+
+    const uninstall = installCompanionSignalingController({
+      isCapacitorOverride: false,
+      hasWebCompanionTargetOverride: true,
+      transportOverride: tx as unknown as Tx,
+      getSettingsOverride: async () => settings({ webrtcEnabled: false }),
+      resolveLanBaseUrlOverride: resolveLan as never,
+      probeCandidateOverride: async () => true,
+      subscribeNetworkOverride: async () => () => {},
+      subscribeResumeOverride: async () => () => {},
+    })
+
+    await new Promise((r) => setTimeout(r, 20))
+    expect(resolveLan).not.toHaveBeenCalled()
     uninstall()
   })
 
@@ -269,7 +332,7 @@ describe("installMobileSignalingController", () => {
     let netHandler: (s: NetworkStatus) => void = () => {}
     let resumeHandler: () => void = () => {}
     let nowMs = 0
-    const uninstall = installMobileSignalingController({
+    const uninstall = installCompanionSignalingController({
       isCapacitorOverride: true,
       transportOverride: tx as unknown as Tx,
       getSettingsOverride: async () => settings({ webrtcEnabled: true }),
@@ -310,7 +373,7 @@ describe("installMobileSignalingController", () => {
   it("does not re-upgrade on a disconnected network event", async () => {
     const tx = new FakeTransport()
     let netHandler: (s: NetworkStatus) => void = () => {}
-    const uninstall = installMobileSignalingController({
+    const uninstall = installCompanionSignalingController({
       isCapacitorOverride: true,
       transportOverride: tx as unknown as Tx,
       getSettingsOverride: async () => settings({ webrtcEnabled: true }),
@@ -332,7 +395,7 @@ describe("installMobileSignalingController", () => {
   })
 })
 
-describe("installMobileSignalingController — LAN re-resolution", () => {
+describe("installCompanionSignalingController — LAN re-resolution", () => {
   const LAN_CONFIG: CompanionConfig = {
     baseUrl: "https://abc-1234.trycloudflare.com",
     deviceJwt: "jwt",
@@ -356,7 +419,7 @@ describe("installMobileSignalingController — LAN re-resolution", () => {
     const tx = new FakeTransport()
     let netHandler: (s: NetworkStatus) => void = () => {}
     const resolveCalls: Array<{ baseUrl: string }> = []
-    const uninstall = installMobileSignalingController({
+    const uninstall = installCompanionSignalingController({
       isCapacitorOverride: true,
       transportOverride: tx as unknown as Tx,
       getSettingsOverride: async () => settings({ webrtcEnabled: true }),
@@ -387,7 +450,7 @@ describe("installMobileSignalingController — LAN re-resolution", () => {
     tx.onLan = true
     let netHandler: (s: NetworkStatus) => void = () => {}
     let resolveCount = 0
-    const uninstall = installMobileSignalingController({
+    const uninstall = installCompanionSignalingController({
       isCapacitorOverride: true,
       transportOverride: tx as unknown as Tx,
       getSettingsOverride: async () => settings({ webrtcEnabled: true }),
@@ -417,7 +480,7 @@ describe("installMobileSignalingController — LAN re-resolution", () => {
     let netHandler: (s: NetworkStatus) => void = () => {}
     let capturedSignal: AbortSignal | null = null
     let nowMs = 0
-    const uninstall = installMobileSignalingController({
+    const uninstall = installCompanionSignalingController({
       isCapacitorOverride: true,
       transportOverride: tx as unknown as Tx,
       getSettingsOverride: async () => settings({ webrtcEnabled: true }),
@@ -447,13 +510,13 @@ describe("installMobileSignalingController — LAN re-resolution", () => {
   })
 })
 
-describe("installMobileSignalingController — resilience", () => {
+describe("installCompanionSignalingController — resilience", () => {
   it("re-pushes ICE servers when the provisioner rotates credentials", async () => {
     const tx = new FakeTransport()
     let onRefresh: ((iceServers: RTCIceServer[]) => void) | null = null
     let servers: RTCIceServer[] = [{ urls: "turn:first" }]
     let netHandler: (s: NetworkStatus) => void = () => {}
-    const uninstall = installMobileSignalingController({
+    const uninstall = installCompanionSignalingController({
       isCapacitorOverride: true,
       transportOverride: tx as unknown as Tx,
       getSettingsOverride: async () =>
@@ -492,7 +555,7 @@ describe("installMobileSignalingController — resilience", () => {
     const tx = new FakeTransport()
     let onRefresh: ((iceServers: RTCIceServer[]) => void) | null = null
     let netHandler: (s: NetworkStatus) => void = () => {}
-    const uninstall = installMobileSignalingController({
+    const uninstall = installCompanionSignalingController({
       isCapacitorOverride: true,
       transportOverride: tx as unknown as Tx,
       getSettingsOverride: async () =>
@@ -540,7 +603,7 @@ describe("installMobileSignalingController — resilience", () => {
     })
     const tx = new FakeTransport()
     tx.lanCheckError = new Error("transport torn down")
-    const uninstall = installMobileSignalingController({
+    const uninstall = installCompanionSignalingController({
       isCapacitorOverride: true,
       transportOverride: tx as unknown as Tx,
       getSettingsOverride: async () => settings({ webrtcEnabled: false }),
@@ -561,7 +624,7 @@ describe("installMobileSignalingController — resilience", () => {
     const warn = jest.spyOn(console, "warn").mockImplementation(() => {})
     const tx = new FakeTransport()
     tx.enableError = new Error("negotiation exploded")
-    const uninstall = installMobileSignalingController({
+    const uninstall = installCompanionSignalingController({
       isCapacitorOverride: true,
       transportOverride: tx as unknown as Tx,
       getSettingsOverride: async () => settings({ webrtcEnabled: true }),
@@ -585,7 +648,7 @@ describe("installMobileSignalingController — resilience", () => {
     const warn = jest.spyOn(console, "warn").mockImplementation(() => {})
     const tx = new FakeTransport()
     let netHandler: (s: NetworkStatus) => void = () => {}
-    const uninstall = installMobileSignalingController({
+    const uninstall = installCompanionSignalingController({
       isCapacitorOverride: true,
       transportOverride: tx as unknown as Tx,
       getSettingsOverride: async () => {
@@ -612,7 +675,7 @@ describe("installMobileSignalingController — resilience", () => {
     // No Capacitor plugin (or no window): the settings liveQuery still drives
     // the happy path, so installation must not throw or leak.
     const tx = new FakeTransport()
-    const uninstall = installMobileSignalingController({
+    const uninstall = installCompanionSignalingController({
       isCapacitorOverride: true,
       transportOverride: tx as unknown as Tx,
       getSettingsOverride: async () => settings({ webrtcEnabled: true }),
@@ -637,7 +700,7 @@ describe("installMobileSignalingController — resilience", () => {
     const netUnsub = jest.fn()
     const resumeUnsub = jest.fn()
     let releaseNet: (() => void) | null = null
-    const uninstall = installMobileSignalingController({
+    const uninstall = installCompanionSignalingController({
       isCapacitorOverride: true,
       transportOverride: tx as unknown as Tx,
       getSettingsOverride: async () => settings({ webrtcEnabled: true }),
@@ -720,7 +783,7 @@ describe("probeCandidateDefault", () => {
   })
 })
 
-describe("installMobileSignalingController — channel failover", () => {
+describe("installCompanionSignalingController — channel failover", () => {
   /**
    * A phone paired on the LAN that has since left the network: `baseUrl` is a
    * dead 192.168.x address, and the tunnel URL is only known because a prior
@@ -748,10 +811,10 @@ describe("installMobileSignalingController — channel failover", () => {
 
   function install(
     tx: FakeTransport,
-    overrides: Partial<Parameters<typeof installMobileSignalingController>[0]> = {}
+    overrides: Partial<Parameters<typeof installCompanionSignalingController>[0]> = {}
   ) {
     let netHandler: (s: NetworkStatus) => void = () => {}
-    const uninstall = installMobileSignalingController({
+    const uninstall = installCompanionSignalingController({
       isCapacitorOverride: true,
       transportOverride: tx as unknown as Tx,
       getSettingsOverride: async () => settings({ webrtcEnabled: false }),

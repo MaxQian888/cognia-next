@@ -9,8 +9,10 @@
  *   the payloads to the `pairedDevices` Dexie table.
  * - `installDesktopSignalingController` keeps the Rust `SignalingHub` in
  *   sync with Dexie + AppSettings on the desktop Tauri renderer.
- * - `installMobileSignalingController` opts the live `CompanionTransport`
- *   into the WebRTC tier on the Capacitor renderer.
+ * - `installCompanionSignalingController` drives the live `CompanionTransport`
+ *   — channel inventory, reconnect probing, failover and the WebRTC tier — on
+ *   the Capacitor renderer and in a browser pointed at a cloud server. It
+ *   self-gates, so this mount stays unconditional.
  *
  * All three are idempotent and safe to mount under React strict-mode
  * double-render — each `useEffect` returns its own detach handle.
@@ -20,7 +22,7 @@ import { useEffect } from "react"
 import { installCompanionEventBridge } from "@/lib/companion/event-bridge"
 import {
   installDesktopSignalingController,
-  installMobileSignalingController,
+  installCompanionSignalingController,
 } from "@/lib/signaling"
 
 export function CompanionEventBridgeProvider({ children }: { children: React.ReactNode }) {
@@ -38,7 +40,7 @@ export function CompanionEventBridgeProvider({ children }: { children: React.Rea
 
   useEffect(() => {
     if (typeof window === "undefined") return
-    const detach = installMobileSignalingController()
+    const detach = installCompanionSignalingController()
     return detach
   }, [])
 

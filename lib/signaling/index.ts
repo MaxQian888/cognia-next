@@ -33,7 +33,7 @@ export {
 
 export { installDesktopSignalingController, normalizeServers } from "./desktop-controller"
 export type { DesktopSignalingControllerOptions } from "./desktop-controller"
-export { installMobileSignalingController } from "./mobile-controller"
+export { installCompanionSignalingController } from "./mobile-controller"
 export type { MobileSignalingControllerOptions } from "./mobile-controller"
 export type {
   ClientFrame,
