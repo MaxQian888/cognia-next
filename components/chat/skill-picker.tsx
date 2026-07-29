@@ -1,8 +1,8 @@
 "use client"
 
 import { useTranslations } from "next-intl"
-import { useLiveQuery } from "dexie-react-hooks"
 import { CheckIcon, SparklesIcon } from "lucide-react"
+import { useLiveQueryState } from "@/hooks/ui/use-live-query-state"
 import {
   CommandDialog,
   CommandEmpty,
@@ -31,8 +31,13 @@ export function SkillPicker({ open, onOpenChange, value, onChange }: Props) {
   // picker stays mounted for the toolbar trigger, and the table is written on
   // every send (usage telemetry), so an always-on liveQuery would re-render
   // the closed dialog on each message.
-  const skills = useLiveQuery(() => (open ? listSkills() : Promise.resolve([])), [open]) ?? []
-  const enabled = skills.filter((s) => (s.status ?? "enabled") === "enabled")
+  // `?? []` here used to collapse "not read yet" into "there are none", so the
+  // dialog opened onto its "no skills" copy and then popped the list in.
+  const { data: skills, isLoading } = useLiveQueryState(
+    () => (open ? listSkills() : Promise.resolve([])),
+    [open]
+  )
+  const enabled = (skills ?? []).filter((s) => (s.status ?? "enabled") === "enabled")
   const custom = enabled.filter((s) => !s.isBuiltIn)
   const builtin = enabled.filter((s) => s.isBuiltIn)
 
@@ -61,7 +66,9 @@ export function SkillPicker({ open, onOpenChange, value, onChange }: Props) {
     >
       <CommandInput placeholder={t("searchPlaceholder")} />
       <CommandList>
-        <CommandEmpty>{t("empty")}</CommandEmpty>
+        {/* Suppressed while the read is in flight — cmdk renders this whenever
+            no items match, which during load is "not yet" rather than "none". */}
+        {isLoading ? null : <CommandEmpty>{t("empty")}</CommandEmpty>}
         {custom.length > 0 && (
           <CommandGroup heading={t("groupHeading")}>{custom.map(renderItem)}</CommandGroup>
         )}

@@ -15,6 +15,7 @@ import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
+import { Skeleton } from "@/components/ui/skeleton"
 import { MemoizedLogEntry, TraceGroup } from "./log-entry"
 import type { Density } from "@/hooks/logging/use-log-panel-filters"
 import type { StructuredLogEntry } from "@cognia/logging"
@@ -111,12 +112,9 @@ export function VirtualizedLogList({
               className="flex items-center gap-3 border-b border-border/30 px-3"
               style={{ height: rowHeight }}
             >
-              <div className="h-3 w-12 rounded bg-muted motion-safe:animate-pulse" />
-              <div className="h-3 w-16 rounded bg-muted motion-safe:animate-pulse" />
-              <div
-                className="h-3 rounded bg-muted motion-safe:animate-pulse"
-                style={{ width: `${40 + (index % 4) * 15}%` }}
-              />
+              <Skeleton className="h-3 w-12" />
+              <Skeleton className="h-3 w-16" />
+              <Skeleton className="h-3" style={{ width: `${40 + (index % 4) * 15}%` }} />
             </div>
           ))}
         </div>

@@ -96,6 +96,7 @@ import { A2UICarousel } from "./navigation/a2ui-carousel"
 import { A2UIDrawer } from "./navigation/a2ui-drawer"
 import { A2UISheet } from "./navigation/a2ui-sheet"
 import { A2UIScrollArea } from "./navigation/a2ui-scroll-area"
+import { Skeleton } from "@/components/ui/skeleton"
 import { A2UIPagination } from "./navigation/a2ui-pagination"
 import { A2UISidebar } from "./navigation/a2ui-sidebar"
 
@@ -291,13 +292,7 @@ export const A2UIRenderer = memo(function A2UIRenderer({
 
   return (
     <A2UIErrorBoundary componentType={component.component} componentId={component.id}>
-      {isLazy ? (
-        <Suspense fallback={<div className="animate-pulse h-8 bg-muted rounded" />}>
-          {element}
-        </Suspense>
-      ) : (
-        element
-      )}
+      {isLazy ? <Suspense fallback={<Skeleton className="h-8" />}>{element}</Suspense> : element}
     </A2UIErrorBoundary>
   )
 })

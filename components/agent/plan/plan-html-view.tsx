@@ -31,6 +31,7 @@ import {
   type PlanHtmlSavePayload,
   type PlanHtmlStyle,
 } from "@/lib/agent/plan/plan-html"
+import { Skeleton } from "@/components/ui/skeleton"
 import type { AgentPlan } from "@/types/agent/plan"
 import type { PlanEditPatch } from "./plan-approval-card"
 
@@ -139,11 +140,7 @@ export function PlanHtmlView({
   return (
     <div className={cn("relative min-h-0 overflow-hidden rounded-md border", className)}>
       {!ready && (
-        <div
-          className="absolute inset-0 animate-pulse rounded-md bg-muted/40"
-          data-testid="plan-html-loading"
-          aria-hidden="true"
-        />
+        <Skeleton className="absolute inset-0 bg-muted/40" data-testid="plan-html-loading" />
       )}
       {disabled && (
         <div

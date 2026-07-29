@@ -123,10 +123,16 @@ describe("VirtualizedLogList", () => {
       )
     })
 
-    it("uses motion-safe animate-pulse on skeleton bars", () => {
+    it("builds its bars from the shared Skeleton primitive", () => {
+      // Was `motion-safe:animate-pulse`, which SUPPRESSED the pulse under
+      // reduced motion — leaving those users a frozen grey block with no sign
+      // the log stream was still loading. `data-slot="skeleton"` is what the
+      // tiered reduce-motion rule in globals.css keys its exemption off, so
+      // routing through the primitive is what keeps the bars breathing.
       const { container } = render(<Harness isLoading />)
-      const animated = container.querySelectorAll(".motion-safe\\:animate-pulse")
-      expect(animated.length).toBeGreaterThan(0)
+      const bars = container.querySelectorAll('[data-slot="skeleton"]')
+      expect(bars.length).toBeGreaterThan(0)
+      expect(bars[0]).toHaveClass("animate-pulse")
     })
   })
 
