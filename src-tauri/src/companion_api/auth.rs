@@ -14,7 +14,7 @@
 //! All failures return JSON `{ "error": { "code": "...", "message": "..." } }`.
 
 use axum::{
-    extract::State,
+    extract::{ConnectInfo, State},
     http::StatusCode,
     response::{IntoResponse, Response},
     Extension, Json,
@@ -23,6 +23,7 @@ use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 use rand::RngCore;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+use std::net::SocketAddr;
 use uuid::Uuid;
 
 use super::{
@@ -130,8 +131,17 @@ pub struct PairResponse {
 /// countdown.
 pub async fn issue_handler(
     State(state): State<SharedState>,
+    ConnectInfo(peer_addr): ConnectInfo<SocketAddr>,
     maybe_body: Option<Json<IssueRequest>>,
 ) -> Response {
+    if !peer_addr.ip().is_loopback() {
+        return error_response(
+            StatusCode::FORBIDDEN,
+            "pair_issue_loopback_only",
+            "pair invitations can only be issued from the host itself",
+        );
+    }
+
     let Some(Json(req)) = maybe_body else {
         return error_response(
             StatusCode::BAD_REQUEST,
@@ -554,19 +564,32 @@ mod tests {
         serde_json::from_slice(&bytes).expect("json parse")
     }
 
+    fn with_peer(mut request: Request<Body>, peer: &str) -> Request<Body> {
+        request.extensions_mut().insert(axum::extract::ConnectInfo(
+            peer.parse::<std::net::SocketAddr>().expect("peer address"),
+        ));
+        request
+    }
+
+    fn loopback(request: Request<Body>) -> Request<Body> {
+        with_peer(request, "127.0.0.1:43123")
+    }
+
     // ── /api/v1/auth/pair/issue ──────────────────────────────────────────
 
     #[tokio::test]
     async fn issue_returns_200_with_pair_jwt() {
         let router = build_router(test_state());
-        let req = Request::builder()
-            .method("POST")
-            .uri("/api/v1/auth/pair/issue")
-            .header("content-type", "application/json")
-            .body(Body::from(
-                serde_json::to_vec(&serde_json::json!({ "accountId": ACCOUNT_ID })).unwrap(),
-            ))
-            .unwrap();
+        let req = loopback(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/auth/pair/issue")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::to_vec(&serde_json::json!({ "accountId": ACCOUNT_ID })).unwrap(),
+                ))
+                .unwrap(),
+        );
         let resp = router.oneshot(req).await.unwrap();
         assert_eq!(resp.status().as_u16(), 200);
         let body = body_json(resp).await;
@@ -589,6 +612,26 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn issue_rejects_non_loopback_peer_even_with_spoofed_forwarding_headers() {
+        let router = build_router(test_state());
+        let mut req = Request::builder()
+            .method("POST")
+            .uri("/api/v1/auth/pair/issue")
+            .header("content-type", "application/json")
+            .header("x-forwarded-for", "127.0.0.1")
+            .body(Body::from(
+                serde_json::to_vec(&serde_json::json!({ "accountId": ACCOUNT_ID })).unwrap(),
+            ))
+            .unwrap();
+        req = with_peer(req, "192.0.2.10:43123");
+
+        let resp = router.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::FORBIDDEN);
+        let body = body_json(resp).await;
+        assert_eq!(body["code"], "pair_issue_loopback_only");
+    }
+
+    #[tokio::test]
     async fn issue_persists_code_into_lru() {
         // The mint path is responsible for writing into pair_code_lru —
         // verify by checking len changes from 0 to 1 around a single
@@ -597,14 +640,16 @@ mod tests {
         let state = test_state();
         assert_eq!(state.pair_code_lru.len(), 0);
         let router = build_router(Arc::clone(&state));
-        let req = Request::builder()
-            .method("POST")
-            .uri("/api/v1/auth/pair/issue")
-            .header("content-type", "application/json")
-            .body(Body::from(
-                serde_json::to_vec(&serde_json::json!({ "accountId": ACCOUNT_ID })).unwrap(),
-            ))
-            .unwrap();
+        let req = loopback(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/auth/pair/issue")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::to_vec(&serde_json::json!({ "accountId": ACCOUNT_ID })).unwrap(),
+                ))
+                .unwrap(),
+        );
         let resp = router.oneshot(req).await.unwrap();
         assert_eq!(resp.status().as_u16(), 200);
         assert_eq!(state.pair_code_lru.len(), 1);
@@ -622,7 +667,7 @@ mod tests {
         // Issue first so a code exists in the LRU.
         let issue_resp = router
             .clone()
-            .oneshot(
+            .oneshot(loopback(
                 Request::builder()
                     .method("POST")
                     .uri("/api/v1/auth/pair/issue")
@@ -632,7 +677,7 @@ mod tests {
                             .unwrap(),
                     ))
                     .unwrap(),
-            )
+            ))
             .await
             .unwrap();
         let issue_body = body_json(issue_resp).await;
@@ -669,7 +714,7 @@ mod tests {
 
         let issue_resp = router
             .clone()
-            .oneshot(
+            .oneshot(loopback(
                 Request::builder()
                     .method("POST")
                     .uri("/api/v1/auth/pair/issue")
@@ -679,7 +724,7 @@ mod tests {
                             .unwrap(),
                     ))
                     .unwrap(),
-            )
+            ))
             .await
             .unwrap();
         let code = body_json(issue_resp).await["pairCode"]

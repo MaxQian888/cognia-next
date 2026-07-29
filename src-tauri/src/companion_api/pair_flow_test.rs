@@ -80,20 +80,21 @@ mod tests {
         let router = build_router(Arc::clone(&state));
 
         // Step 1 — issue pair JWT.
-        let issue_resp = router
-            .clone()
-            .oneshot(
-                Request::builder()
-                    .method("POST")
-                    .uri("/api/v1/auth/pair/issue")
-                    .header("content-type", "application/json")
-                    .body(Body::from(
-                        serde_json::to_vec(&json!({ "accountId": ACCOUNT_ID })).unwrap(),
-                    ))
-                    .unwrap(),
-            )
-            .await
+        let mut issue_request = Request::builder()
+            .method("POST")
+            .uri("/api/v1/auth/pair/issue")
+            .header("content-type", "application/json")
+            .body(Body::from(
+                serde_json::to_vec(&json!({ "accountId": ACCOUNT_ID })).unwrap(),
+            ))
             .unwrap();
+        issue_request
+            .extensions_mut()
+            .insert(axum::extract::ConnectInfo(std::net::SocketAddr::from((
+                [127, 0, 0, 1],
+                43123,
+            ))));
+        let issue_resp = router.clone().oneshot(issue_request).await.unwrap();
         assert_eq!(issue_resp.status().as_u16(), 200);
         let issue_body = body_json(issue_resp).await;
         let pair_jwt = issue_body["pairJwt"]

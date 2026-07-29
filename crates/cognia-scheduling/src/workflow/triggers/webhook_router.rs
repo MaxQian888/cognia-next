@@ -118,7 +118,11 @@ pub enum SignedPayloadPart {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", tag = "type")]
+#[serde(
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase",
+    tag = "type"
+)]
 pub enum IntegrationVerification {
     #[serde(rename = "hmac-sha256")]
     HmacSha256 {
