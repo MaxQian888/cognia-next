@@ -28,6 +28,7 @@
   "biometricUnavailable": "This device has no biometric enrolled.",
   "canvasRow": "Canvas",
   "charactersRow": "Characters",
+  "cloudAccountRow": "Cloud account",
   "commandHistoryRow": "Command history",
   "computerUse": {
     "masterStateOff": "Mobile Computer Use is disabled.",

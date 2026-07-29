@@ -1281,138 +1281,13 @@ fn lan_base_url(bind_lan: Option<bool>) -> Option<String> {
 
 /// Allowlisted patch keys for `app_settings_update`. The mobile client may
 /// only mutate user-facing preferences; transport, sidecar, and provider
-/// configuration stay desktop-only. Mirror this with the OpenAPI spec.
-const APP_SETTINGS_MOBILE_ALLOWED_KEYS: &[&str] = &[
-    "theme",
-    "fontScale",
-    "language",
-    "reduceMotion",
-    "defaultModel",
-    "defaultCharacterId",
-    "biometricRequiredFor",
-    // Mobile `/me/computer-use` master toggle (ADR-0020 follow-up). When
-    // false, mobile-initiated turns refuse computer-use regardless of the
-    // per-character flag.
-    "mobileComputerUseEnabled",
-    // Appearance — mobile `/me/appearance` route writes these through the
-    // same allowlist. The matching field types live in
-    // `lib/claude/types.ts` (`colorTheme`, `customThemes`,
-    // `activeCustomThemeId`, `wallpapers`, `customCss`, `customCssEnabled`,
-    // `importedVscodeThemes`).
-    "colorTheme",
-    "customThemes",
-    "activeCustomThemeId",
-    "wallpapers",
-    "customCss",
-    "customCssEnabled",
-    "importedVscodeThemes",
-    // ADR-0021 — WebRTC WAN transport configuration. Mobile clients toggle
-    // the feature and configure ICE/TURN/signaling endpoints from the
-    // Mobile companion settings tab.
-    "webrtcEnabled",
-    "signalingUrl",
-    "iceServers",
-    "turnServers",
-    "turnProvider",
-    // Wave 4.1 — broader user-facing preference surface so the mobile shell can
-    // mirror the desktop settings it already renders. All are non-credential,
-    // non-transport preference fields on `AppSettings` (`lib/claude/types.ts`).
-    "telemetryEnabled",
-    "sttLanguage",
-    "selectedMicId",
-    "pinnedWorkflowIds",
-    "pinnedMeRowIds",
-    "sidebarLayout",
-    "lastInboxViewedAt",
-    "conversationTitle",
-    "conversationTimeline",
-    "searchEnabled",
-    "searchMaxResults",
-    "ttsEnabled",
-    "ttsProvider",
-    "ttsRate",
-    "ttsPitch",
-    "ttsVolume",
-    "ttsAutoPlay",
-    // ADR-0056 (mobile settings parity) — the remaining "portable" appearance
-    // keys that already sync desktop→phone (`CROSS_PLATFORM_SETTING_KEYS`) but
-    // were not yet writable back, so the embedded `<AppearanceSection/>` on
-    // `/me/appearance` silently 400'd on those tabs. All are non-credential
-    // presentation prefs.
-    "autoMode",
-    "density",
-    "radius",
-    "motion",
-    "typographyExt",
-    "a11y",
-    // Theme system enhancement — the standalone accent-color override and the
-    // directly-activated plugin theme pointer. Both are non-credential
-    // presentation prefs written by the embedded `<AppearanceSection/>` theme
-    // tab on `/me/appearance`; without these the phone 400's on those writes.
-    "accentColor",
-    "activePluginThemeId",
-    // ADR-0056 — agent-default preferences. Editable from the phone's
-    // `/me/agent` page only in PAIRED mode (the standalone engine has no agent
-    // loop). `permissionMode` escalations are additionally biometric-gated on
-    // the client (decision D4); the server still only checks allowlist
-    // membership here. None are credentials or transport config.
-    "permissionMode",
-    "defaultSystemPrompt",
-    "defaultMaxThinkingTokens",
-    "bareMode",
-    "debugMode",
-    "briefMode",
-    // ADR-0056 (Wave 2) — conversation completeness. `composerBehavior` and
-    // `streamPartialMessages` are phone-composer / render prefs; `compaction`
-    // is agent-execution config edited from `/me/agent` (paired). None are
-    // credentials or transport config.
-    "composerBehavior",
-    "streamPartialMessages",
-    "compaction",
-    // Conversation-list (sidebar) render prefs edited from `/me/conversation`
-    // — density / preview / grouping / unread badges / search scope. Pure UI
-    // presentation config, no credentials.
-    "conversationSidebar",
-    // ADR-0056 (Wave 3) — project instruction loading config (CLAUDE.md /
-    // AGENTS.md discovery on the paired desktop). Remote-edited from
-    // `/me/instructions`. The globalPath / extraPaths it carries are desktop
-    // filesystem paths, but the value is config, not a credential.
-    "instructions",
-    // ADR-0056 (Wave 3) — master toggle for built-in surface-skill auto-
-    // injection (flows into `resolveSendOptions`). Edited from `/me/agent`.
-    "surfaceSkillsEnabled",
-    // ADR-0056 — visual workflow editor performance tier. Edited from
-    // `/me/workflows-settings` (both modes). A per-device motion/computation
-    // knob, not a credential or transport field; it is intentionally NOT
-    // mirrored desktop→phone (kept device-local) but is writable up so a
-    // paired desktop's tier can be set from the phone.
-    "workflowEditorPerformanceTier",
-    // ADR-0056 (Wave 2) — per-provider TTS voice selection. The phone's
-    // `/me/speech` page writes the active provider's flat voice-id key
-    // (matching the desktop `provider-config.tsx` field names). All are
-    // non-credential preference strings; API keys are NOT here.
-    "systemVoice",
-    "openaiVoice",
-    "geminiVoice",
-    "edgeVoice",
-    "elevenlabsVoice",
-    "lmntVoice",
-    "humeVoice",
-    "cartesiaVoice",
-    "deepgramVoice",
-    "xiaomiVoice",
-    "mistralVoiceId",
-    // ADR-0056 (Wave 2) — web-search completeness. Preferred provider +
-    // cloud→system fallback edited from `/me/web-search`. Provider API keys
-    // stay device-local (`searchProviders` is deliberately NOT allowlisted).
-    "defaultSearchProvider",
-    "searchFallbackEnabled",
-    // ADR-0056 (Wave 2) — Notification Center preferences (one JSON object).
-    // The phone's `/me/notifications` page edits channels / level gates / quiet
-    // hours / behaviour / per-source mute / retention. The OS push permission
-    // itself stays a native, device-local grant (not part of this value).
-    "notificationPreferences",
-];
+/// configuration stay desktop-only.
+///
+/// The list itself is generated from
+/// `packages/agent-config-types/src/settings-sync.ts` — the one table that also
+/// drives the down-mirror and the OpenAPI enum, so the three can no longer
+/// drift apart. Edit that table, then run `pnpm settings-sync:gen`.
+use super::settings_sync_generated::APP_SETTINGS_MOBILE_ALLOWED_KEYS;
 
 /// Public read-only accessor for the mobile-side `app_settings_update`
 /// allowlist. Used by the OpenAPI `spec_parity` test (Wave 3.6) and by the
@@ -8333,11 +8208,15 @@ rl.on("line", (line) => {
                 "Wave-3 key '{key}' missing from APP_SETTINGS_MOBILE_ALLOWED_KEYS"
             );
         }
-        // ADR-0056 — workflow editor performance tier, written from
-        // `/me/workflows-settings`. Missing → 400 on save.
+        // `workflowEditorPerformanceTier` is deliberately NOT here. It is a
+        // motion/computation budget picked for one device's GPU and CPU; the
+        // old comment on the allowlist already called it "kept device-local"
+        // while still letting the phone write the desktop's copy, which is a
+        // contradiction. It is now `device-local` in the classification table:
+        // `/me/workflows-settings` sets this handset's tier and nothing else.
         assert!(
-            APP_SETTINGS_MOBILE_ALLOWED_KEYS.contains(&"workflowEditorPerformanceTier"),
-            "workflowEditorPerformanceTier missing from APP_SETTINGS_MOBILE_ALLOWED_KEYS"
+            !APP_SETTINGS_MOBILE_ALLOWED_KEYS.contains(&"workflowEditorPerformanceTier"),
+            "workflowEditorPerformanceTier must stay device-local"
         );
     }
 
@@ -8390,10 +8269,20 @@ rl.on("line", (line) => {
     }
 
     #[test]
-    fn mobile_allowlist_includes_webrtc_keys() {
-        // ADR-0021 — the WebRTC settings card writes these from the mobile
-        // companion tab; `turnProvider` (ephemeral-TURN provisioning) joined
-        // the original four. Missing any → 400 on save.
+    fn mobile_allowlist_excludes_transport_config_keys() {
+        // These were allowlisted for a "mobile companion settings tab" that was
+        // never built — no mobile surface ever wrote one of them, so the
+        // entries were dead. Worse, the direction was backwards: the phone
+        // reads `signalingUrl` / `iceServers` / `turnServers` from its OWN
+        // settings row to dial the rendezvous, and they were never mirrored
+        // down, so a self-hosted signaling server or TURN relay configured on
+        // the desktop could not reach the phone at all — it silently fell back
+        // to the public default and WebRTC failed behind symmetric NAT.
+        //
+        // They are now `server-authoritative` in
+        // `packages/agent-config-types/src/settings-sync.ts`: mirrored down,
+        // never accepted up. `webrtcEnabled` is `device-local` — whether to
+        // attempt the tier is each device's own call.
         for key in [
             "webrtcEnabled",
             "signalingUrl",
@@ -8402,8 +8291,8 @@ rl.on("line", (line) => {
             "turnProvider",
         ] {
             assert!(
-                APP_SETTINGS_MOBILE_ALLOWED_KEYS.contains(&key),
-                "WebRTC key '{key}' missing from APP_SETTINGS_MOBILE_ALLOWED_KEYS"
+                !APP_SETTINGS_MOBILE_ALLOWED_KEYS.contains(&key),
+                "transport key '{key}' must NOT be writable from a paired client"
             );
         }
     }
@@ -8411,18 +8300,29 @@ rl.on("line", (line) => {
     #[test]
     fn mobile_allowlist_keeps_baseline_keys() {
         // Don't accidentally drop a baseline key while editing this list.
-        for key in [
-            "theme",
-            "fontScale",
-            "language",
-            "reduceMotion",
-            "defaultModel",
-            "defaultCharacterId",
-            "biometricRequiredFor",
-        ] {
+        for key in ["theme", "fontScale", "language", "reduceMotion", "defaultModel"] {
             assert!(
                 APP_SETTINGS_MOBILE_ALLOWED_KEYS.contains(&key),
                 "baseline key '{key}' must stay in the mobile allowlist"
+            );
+        }
+
+        // Two former "baseline" entries are gone on purpose.
+        //
+        // `defaultCharacterId` never existed on `AppSettings` — it lives on
+        // `AdapterInstanceRow`. A phone could pass the allowlist with it and
+        // then write a field the desktop's settings row does not have. It was
+        // pure drift, invisible because nothing checked the constant against
+        // the type.
+        //
+        // `biometricRequiredFor` is now `device-local`: gating is a property of
+        // the device's own authenticator, and letting one device push its
+        // policy onto another either weakens it or locks out a device with no
+        // biometric hardware.
+        for key in ["defaultCharacterId", "biometricRequiredFor"] {
+            assert!(
+                !APP_SETTINGS_MOBILE_ALLOWED_KEYS.contains(&key),
+                "'{key}' must NOT be in the mobile allowlist"
             );
         }
     }

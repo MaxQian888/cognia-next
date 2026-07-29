@@ -101,6 +101,11 @@ const REGISTRY = [
   { script: "build:packages", group: "artifacts", resource: "package-build" },
   { script: "skills:check", group: "artifacts" },
   { script: "plugin-node:check", group: "artifacts" },
+  // The mobile settings contract: one classification table generates the Rust
+  // write-allowlist and the OpenAPI patch enum. Before it existed those two
+  // were hand-maintained and had drifted (dead keys, fields writable up but
+  // never mirrored down, transport config classified backwards).
+  { script: "settings-sync:check", group: "artifacts" },
   { script: "plugin-convert:check", group: "artifacts" },
   { script: "plugin:contract:check", group: "artifacts" },
   { script: "ide:check", group: "artifacts" },

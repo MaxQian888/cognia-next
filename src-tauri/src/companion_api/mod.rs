@@ -60,6 +60,7 @@ pub mod redemption_lru;
 pub mod rpc;
 pub mod secret;
 pub mod server;
+pub mod settings_sync_generated;
 pub mod signaling;
 pub mod spec_parity;
 pub mod store;

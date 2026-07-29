@@ -15,6 +15,8 @@
     "skills:build": "node scripts/build/build-builtin-skills.mjs",
     "skills:check": "node scripts/build/build-builtin-skills.mjs --check",
     "skills:build:test": "node --test scripts/build/build-builtin-skills.test.mjs",
+    "settings-sync:gen": "node scripts/build/gen-settings-sync.mjs",
+    "settings-sync:check": "node scripts/build/gen-settings-sync.mjs --check",
     "plugin-node:prepare": "node scripts/build/prepare-plugin-node.mjs",
     "plugin-node:check": "node scripts/build/prepare-plugin-node.mjs --check",
     "plugin-convert:bundle": "node scripts/plugin/build-convert-bundle.mjs",

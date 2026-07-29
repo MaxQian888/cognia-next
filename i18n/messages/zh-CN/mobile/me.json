@@ -28,6 +28,7 @@
   "biometricUnavailable": "本设备未注册生物识别。",
   "canvasRow": "画布",
   "charactersRow": "角色",
+  "cloudAccountRow": "云账号",
   "commandHistoryRow": "命令历史",
   "computerUse": {
     "masterStateOff": "移动端 Computer Use 已停用。",

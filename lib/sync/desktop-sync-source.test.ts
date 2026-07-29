@@ -198,6 +198,56 @@ describe("readDexieDelta", () => {
     expect(afterChange.next_since).toBe(150)
   })
 
+  it("never puts host credentials on the wire with the settings singleton", async () => {
+    // The client only *applies* the mirrored subset, which made emitting the
+    // whole row look harmless — but the row had already crossed the wire, so
+    // every paired device received the host's provider credentials. Redaction
+    // has to happen here, at the source: a client cannot un-receive a secret.
+    const db = getDb()
+    await db.settings.put({
+      id: "singleton",
+      updatedAt: 100,
+      theme: "dark",
+      signalingUrl: "wss://self-hosted.example/v1/signaling",
+      apiKey: "sk-ant-secret",
+      apiBaseUrl: "https://internal.example",
+      providerSettings: { openai: { apiKey: "sk-openai-secret" } },
+      customProviders: [{ id: "p1", apiKey: "sk-custom-secret" }],
+      searchProviders: { tavily: { apiKey: "tvly-secret" } },
+      skillsShToken: "skills-secret",
+      webdavSync: { url: "https://dav.example", password: "dav-secret" },
+      networkProxy: { mode: "manual", username: "u", password: "proxy-secret" },
+      defaultWorkingDir: "/Users/someone/private",
+    } as never)
+
+    const delta = await readDexieDelta("settings", 0)
+    const row = delta.rows[0] as Record<string, unknown>
+
+    // Mirrored fields still arrive — including the transport config the phone
+    // needs to reach a self-hosted signaling server.
+    expect(row.theme).toBe("dark")
+    expect(row.signalingUrl).toBe("wss://self-hosted.example/v1/signaling")
+    // Envelope fields the client keys and cursors on.
+    expect(row.id).toBe("singleton")
+    expect(row.updatedAt).toBe(100)
+
+    for (const secret of [
+      "apiKey",
+      "apiBaseUrl",
+      "providerSettings",
+      "customProviders",
+      "searchProviders",
+      "skillsShToken",
+      "webdavSync",
+      "networkProxy",
+      "defaultWorkingDir",
+    ]) {
+      expect(row).not.toHaveProperty(secret)
+    }
+    // Belt and braces: no secret value survives anywhere in the payload.
+    expect(JSON.stringify(delta)).not.toMatch(/secret|private/)
+  })
+
   it("filters skills by updatedAt", async () => {
     const db = getDb()
     await db.skills.bulkPut([

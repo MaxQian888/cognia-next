@@ -16,12 +16,14 @@
  */
 
 import type {
+  AppSettings,
   Skill,
   StoredMessage,
   ChatSession,
   Character,
   McpServer,
 } from "@cognia/agent-config-types"
+import { CROSS_PLATFORM_SETTING_KEYS } from "@cognia/agent-config-types/settings-sync"
 import type { WorkflowRunRow } from "@/types/workflow/visual"
 import type { TerminalHistoryRow } from "@/lib/db/terminal-history"
 import { getDb } from "@/lib/db/schema"
@@ -342,12 +344,42 @@ async function readSettingsDelta(since: number): Promise<SyncDelta<unknown>> {
   const updatedAt = Number((row as { updatedAt?: number }).updatedAt ?? 0)
   if (since === 0 || updatedAt > since) {
     return {
-      rows: [row],
+      rows: [projectMirroredSettings(row)],
       deleted_ids: [],
       next_since: updatedAt > 0 ? updatedAt : Date.now(),
     }
   }
   return { rows: [], deleted_ids: [], next_since: since }
+}
+
+/**
+ * Narrow the settings singleton to the fields a paired client is allowed to
+ * see, before it goes on the wire.
+ *
+ * This used to emit the whole row. The client only *applied* the mirrored
+ * subset, so the omission looked harmless — but the full row had already
+ * crossed the wire, which meant every paired device received the host's
+ * `apiKey`, `apiBaseUrl`, `providerSettings`, `customProviders`,
+ * `searchProviders`, `skillsShToken`, `subscriptionSettings`, `webdavSync`
+ * credentials and `networkProxy` auth. The `app_settings_update` allowlist
+ * documented "provider configuration stays desktop-only", but that only ever
+ * constrained the write direction; nothing constrained the read direction.
+ *
+ * Redacting at the source rather than at the client is the point: a client
+ * cannot un-receive a secret, and non-first-party clients speak this same wire
+ * protocol.
+ */
+function projectMirroredSettings(row: AppSettings): Partial<AppSettings> {
+  // `id` and `updatedAt` are envelope fields, not preferences: the client keys
+  // its singleton by `id` and the cursor arithmetic above reads `updatedAt`.
+  const projected: Record<string, unknown> = {
+    id: row.id,
+    updatedAt: (row as { updatedAt?: number }).updatedAt,
+  }
+  for (const key of CROSS_PLATFORM_SETTING_KEYS) {
+    if (row[key] !== undefined) projected[key] = row[key]
+  }
+  return projected as Partial<AppSettings>
 }
 
 interface UpdatedAtRow {

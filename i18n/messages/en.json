@@ -10526,17 +10526,37 @@
       "uses": "{count, plural, =1 {1 run} other {# runs}}"
     },
     "companion": {
-      "diagnostics": {
-        "description": "Test which local URLs the desktop server is reachable on. Useful when a phone reports a connection error and you want to confirm the LAN / tunnel paths are healthy.",
-        "desktopOnly": "Only available in the Tauri desktop build.",
-        "empty": "No candidates to probe — start the companion server first.",
-        "failed": "Failed",
-        "ms": "ms",
-        "ok": "OK",
-        "probeFailed": "Probe failed: {message}",
-        "probing": "Probing…",
-        "testButton": "Test reachability",
-        "title": "Connection diagnostics"
+      "channels": {
+        "blocked": {
+          "loopbackOnly": "Bound to this machine only — switch the server to LAN.",
+          "noSignaling": "No rendezvous server configured.",
+          "serverStopped": "The companion server is not running."
+        },
+        "channel": {
+          "lan": "Local network",
+          "mdns": "Local discovery",
+          "tunnel": "Public tunnel",
+          "webrtc": "Direct (WebRTC)"
+        },
+        "description": "Every route a paired device can use to reach this desktop, and whether it currently works.",
+        "desktopOnly": "Reachability can only be tested from the desktop app.",
+        "noReason": "no reason given",
+        "probeButton": "Test reachability",
+        "probeFailed": "Reachability test failed: {message}",
+        "probeFailedShort": "Unreachable — {message}",
+        "probeOk": "Reachable in {ms} ms",
+        "probing": "Testing…",
+        "state": {
+          "blocked": "Blocked",
+          "live": "On",
+          "off": "Off"
+        },
+        "summary": {
+          "blocked": "Nothing can reach this desktop",
+          "none": "No channels enabled",
+          "reachable": "Reachable"
+        },
+        "title": "Channels"
       },
       "groups": {
         "advanced": "Advanced & diagnostics",
@@ -10549,7 +10569,6 @@
         "awaitingCode": "A browser window opened. After you authorize, paste the full redirect URL (or just the code) below.",
         "cancel": "Cancel",
         "description": "Sign in to your Logto tenant so this desktop can act as an authenticated client of the cloud / headless companion gateway.",
-        "desktopOnly": "Cloud sign-in is only available in the desktop app (the session is stored in the OS keyring).",
         "errors": {
           "codeMalformed": "Could not read a code from that input. Paste the full redirect URL or the code value.",
           "missingFields": "Issuer, client ID, API resource and redirect URI are all required.",
@@ -10570,6 +10589,7 @@
         "loading": "Checking cloud session…",
         "signIn": "Sign in with Logto",
         "signOut": "Sign out",
+        "storageFallback": "Signed-in tokens are stored in an encrypted vault in this browser or app rather than the operating system keyring.",
         "submitCode": "Finish sign-in",
         "title": "Logto cloud sign-in",
         "toast": {
@@ -11232,6 +11252,7 @@
       "biometricUnavailable": "This device has no biometric enrolled.",
       "canvasRow": "Canvas",
       "charactersRow": "Characters",
+      "cloudAccountRow": "Cloud account",
       "commandHistoryRow": "Command history",
       "computerUse": {
         "masterStateOff": "Mobile Computer Use is disabled.",
@@ -11546,6 +11567,21 @@
       "proxy": {
         "description": "The HTTP/SOCKS proxy used for outbound requests is managed on the desktop.",
         "title": "Proxy"
+      },
+      "rendezvous": {
+        "description": "How this device reaches the paired host when it is not on the same network. Configured on the host and mirrored here.",
+        "provider": {
+          "cloudflare-calls": "Credentials issued on demand by Cloudflare Calls.",
+          "none": "No credential provider — the static list above is all that is available.",
+          "twilio": "Credentials issued on demand by Twilio."
+        },
+        "serverCount": "{count, plural, =0 {none} one {# server} other {# servers}}",
+        "signalingLabel": "Signaling server",
+        "sourceBuiltIn": "Built-in",
+        "sourceHost": "From host",
+        "stunLabel": "STUN",
+        "title": "Direct connection",
+        "turnLabel": "TURN relays"
       },
       "title": "Network"
     },

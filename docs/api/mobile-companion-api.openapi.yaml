@@ -2766,11 +2766,76 @@ paths:
               required: [patch]
               properties:
                 patch:
-                  {
-                    type: object,
-                    additionalProperties: true,
-                    description: "Allowlisted AppSettings keys only.",
-                  }
+                  type: object
+                  additionalProperties: true
+                  description: "Allowlisted AppSettings keys only."
+                  propertyNames:
+                    # BEGIN GENERATED settings-sync
+                    enum:
+                      - a11y
+                      - accentColor
+                      - activeCustomThemeId
+                      - activePluginThemeId
+                      - autoMode
+                      - bareMode
+                      - briefMode
+                      - cartesiaVoice
+                      - colorTheme
+                      - compaction
+                      - composerBehavior
+                      - conversationSidebar
+                      - conversationTimeline
+                      - conversationTitle
+                      - customCss
+                      - customCssEnabled
+                      - customThemes
+                      - debugMode
+                      - deepgramVoice
+                      - defaultMaxThinkingTokens
+                      - defaultModel
+                      - defaultSearchProvider
+                      - defaultSystemPrompt
+                      - density
+                      - edgeVoice
+                      - elevenlabsVoice
+                      - fontScale
+                      - geminiVoice
+                      - humeVoice
+                      - importedVscodeThemes
+                      - instructions
+                      - language
+                      - lastInboxViewedAt
+                      - lmntVoice
+                      - mistralVoiceId
+                      - mobileComputerUseEnabled
+                      - motion
+                      - notificationPreferences
+                      - openaiVoice
+                      - permissionMode
+                      - pinnedWorkflowIds
+                      - profile
+                      - radius
+                      - reduceMotion
+                      - searchEnabled
+                      - searchFallbackEnabled
+                      - searchMaxResults
+                      - sidebarLayout
+                      - streamPartialMessages
+                      - sttLanguage
+                      - surfaceSkillsEnabled
+                      - systemVoice
+                      - telemetryEnabled
+                      - theme
+                      - ttsAutoPlay
+                      - ttsEnabled
+                      - ttsPitch
+                      - ttsProvider
+                      - ttsRate
+                      - ttsVolume
+                      - typographyExt
+                      - wallpapers
+                      - xiaomiVoice
+                    # END GENERATED settings-sync
             examples:
               theme: { value: { patch: { theme: "dark" } } }
       responses:
