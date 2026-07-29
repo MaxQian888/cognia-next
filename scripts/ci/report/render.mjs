@@ -109,6 +109,17 @@ export function renderPlaywright(pw) {
       ),
       ""
     )
+    // The gate and the trunk baseline run different suites, so the trend is
+    // computed over their shared slice. Say how big that slice is: a delta
+    // over 12 of 400 tests should not read like a whole-suite verdict.
+    const skipped = pw.trend.baseOnlyTests + pw.trend.currentOnlyTests
+    lines.push(
+      `Trend over the **${pw.trend.comparedTests}** test(s) both runs executed` +
+        (skipped > 0
+          ? ` — ${pw.trend.baseOnlyTests} baseline-only and ${pw.trend.currentOnlyTests} run-only test(s) excluded.`
+          : "."),
+      ""
+    )
   }
 
   if (pw.failed.length) {
