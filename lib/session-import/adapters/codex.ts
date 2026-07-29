@@ -247,13 +247,26 @@ export function parseCodexRollout(
       const text = messageText(payload)
       if (!text) continue
       if (role === "user" && !firstUserText) firstUserText = text
+      const phase = asString(payload.phase)
+      const part =
+        role === "assistant" && phase === "commentary"
+          ? ({
+              type: "data-commentary",
+              data: {
+                ...(asString(payload.id) ? { messageId: asString(payload.id) } : {}),
+                text,
+                state: "done",
+                source: "codex",
+              },
+            } as unknown as Part)
+          : textPart(text)
       messages.push(
         buildMessage({
           sessionId: sid(),
           projectId,
           index: msgCounter++,
           role,
-          parts: [textPart(text)],
+          parts: [part],
           createdAt: ms,
         })
       )

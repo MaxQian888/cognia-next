@@ -235,9 +235,15 @@ export async function runStep(input: RunStepInput): Promise<StepExecution> {
     await logger.stepStarted(node.id, { attempt }, input.iterationMeta)
     // Fresh sink per attempt so a failed attempt's partial stream never
     // interleaves with the retry's output. The sink throttles `step_stream`
-    // writes; usage lands as one `step_usage` event.
+    // writes; commentary uses an independent channel so it cannot be folded
+    // into final output. Usage lands as one `step_usage` event.
     const sink = createStreamSink({ stepId: node.id, logger })
+    const commentarySink = createStreamSink({
+      stepId: node.id,
+      logger: { stepStream: logger.stepCommentary },
+    })
     ctx.emitStream = (delta) => sink.push(delta)
+    ctx.emitCommentary = (delta) => commentarySink.push(delta)
     ctx.reportUsage = (usage) => void logger.stepUsage(node.id, usage)
     try {
       const result = await runWithTimeout(
@@ -246,6 +252,7 @@ export async function runStep(input: RunStepInput): Promise<StepExecution> {
         (attemptSignal) => reg.execute({ ...ctx, signal: attemptSignal })
       )
       sink.final()
+      commentarySink.final()
       const exec: StepExecution = {
         output: result.output,
         decision: result.decision,
@@ -264,6 +271,7 @@ export async function runStep(input: RunStepInput): Promise<StepExecution> {
       return exec
     } catch (err) {
       sink.final()
+      commentarySink.final()
       const message = err instanceof Error ? err.message : String(err)
       const retryable = reg.retryable !== false && isRetryableError(err)
       const lastAttempt = attempt >= retryPolicy.attempts

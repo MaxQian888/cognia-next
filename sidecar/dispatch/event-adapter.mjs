@@ -109,6 +109,10 @@ function mergeMessageMetadata(base, overrides) {
   return result
 }
 
+function isRawAnalysis(event) {
+  return event?.providerMetadata?.cognia?.reasoningSource === "raw-analysis"
+}
+
 /**
  * Build a stateful translator. Call `.handle(event)` for each Vercel-AI-SDK
  * event; it returns zero or more SDKMessage objects to emit. Call `.finish(usage?)`
@@ -584,11 +588,15 @@ export function createEventAdapter(ctx) {
           return out
         }
         case "reasoning-start": {
+          if (isRawAnalysis(event)) return out
           reasoningProviderMetadata = getProviderMetadata(event) ?? reasoningProviderMetadata
           return out
         }
         case "reasoning":
         case "reasoning-delta": {
+          // Raw chain-of-thought is provider-internal state. Provenance-aware
+          // middleware marks it before this persistence/rendering boundary.
+          if (isRawAnalysis(event)) return out
           if (activeBlockKind === "tool_use") {
             // Same boundary split the text-delta case does: reasoning after a
             // sealed tool_use starts a fresh message. Without it, interleaved-
@@ -608,6 +616,7 @@ export function createEventAdapter(ctx) {
           return out
         }
         case "reasoning-end": {
+          if (isRawAnalysis(event)) return out
           reasoningProviderMetadata = getProviderMetadata(event) ?? reasoningProviderMetadata
           return out
         }

@@ -173,11 +173,59 @@ function mergeProviderOptions(base, extra) {
  * pass-through for models that already stream reasoning natively or never emit
  * the tag — nothing is extracted, the text flows unchanged.
  */
-async function withReasoningExtraction(model) {
+export function rawAnalysisProvenanceMiddleware() {
+  const mark = (part) => ({
+    ...part,
+    providerMetadata: {
+      ...(part.providerMetadata ?? {}),
+      cognia: {
+        ...(part.providerMetadata?.cognia ?? {}),
+        reasoningSource: "raw-analysis",
+      },
+    },
+  })
+
+  return {
+    specificationVersion: "v3",
+    wrapGenerate: async ({ doGenerate }) => {
+      const result = await doGenerate()
+      return {
+        ...result,
+        content: result.content.map((part) => (part.type === "reasoning" ? mark(part) : part)),
+      }
+    },
+    wrapStream: async ({ doStream }) => {
+      const result = await doStream()
+      return {
+        ...result,
+        stream: result.stream.pipeThrough(
+          new TransformStream({
+            transform(chunk, controller) {
+              controller.enqueue(
+                chunk.type === "reasoning-start" ||
+                  chunk.type === "reasoning-delta" ||
+                  chunk.type === "reasoning-end"
+                  ? mark(chunk)
+                  : chunk
+              )
+            },
+          })
+        ),
+      }
+    },
+  }
+}
+
+export async function withReasoningExtraction(model, modelId = model.modelId) {
   const { wrapLanguageModel, extractReasoningMiddleware } = await import("ai")
-  return wrapLanguageModel({
+  const extracted = wrapLanguageModel({
     model,
     middleware: extractReasoningMiddleware({ tagName: "think" }),
+  })
+  if (!/gpt-oss/i.test(modelId ?? "")) return extracted
+  return wrapLanguageModel({
+    model: extracted,
+    middleware: rawAnalysisProvenanceMiddleware(),
   })
 }
 
@@ -221,7 +269,7 @@ export async function buildModel({
     roleArn,
     roleSessionName,
   })
-  return withReasoningExtraction(base)
+  return withReasoningExtraction(base, model)
 }
 
 /** Construct the un-wrapped provider model. Split out so the wrap is uniform. */

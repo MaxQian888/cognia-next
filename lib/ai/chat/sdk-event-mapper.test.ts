@@ -232,6 +232,20 @@ describe("createSdkEventMapper", () => {
     })
   })
 
+  it("drops reasoning explicitly marked as raw analysis before rendering or sealing", () => {
+    const m = createSdkEventMapper({ ...ctx, model: "openai/gpt-oss-20b" })
+    const metadata = { cognia: { reasoningSource: "raw-analysis" } }
+    const streamed = m.handle({
+      type: "reasoning-delta",
+      text: "private chain of thought",
+      providerMetadata: metadata,
+    }) as AnyMsg[]
+
+    expect(streamed.some((item) => item.event?.type === "content_block_delta")).toBe(false)
+    expect(m.sealAssistant()).toEqual([])
+    expect(JSON.stringify(streamed)).not.toContain("private chain of thought")
+  })
+
   it("preserves the latest provider metadata on sealed reasoning blocks", () => {
     const m = createSdkEventMapper(ctx)
     m.handle({

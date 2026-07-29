@@ -432,6 +432,48 @@ describe("workflow-progress-runner — cumulative mode (adapter supports edit)",
     stop()
   })
 
+  it("edits commentary into the cumulative card without sending append-mode message spam", async () => {
+    await putRun({})
+    await createFanoutSubscription({
+      workflowId: "wf1",
+      adapterId: "wecom:mirror",
+      conversationKey: "wecom:wecom:mirror:c1",
+      createdBy: "settings-ui",
+    })
+    const { enqueue, jobs } = makeMockEnqueue({ entryPlatformMessageId: "status-card-1" })
+    const stop = startWorkflowProgressRunner({
+      enqueue,
+      adapterSupportsEdit: (adapterId) => adapterId === "wecom:a",
+    })
+
+    await putEvent({ id: "ev1", stepId: "step_search", type: "step_started", ts: 1_000_100 })
+    await waitFor(() => jobs.length >= 2)
+    const appendCountBeforeCommentary = jobs.filter(
+      (job) => job.adapterId === "wecom:mirror"
+    ).length
+
+    await putEvent({
+      id: "ev2",
+      stepId: "step_search",
+      type: "step_commentary",
+      ts: 1_000_200,
+      payload: { delta: "Checking the relevant files", seq: 0 },
+    })
+    await waitFor(() =>
+      jobs.some(
+        (job) =>
+          job.adapterId === "wecom:a" &&
+          job.editTargetMessageId === "status-card-1" &&
+          JSON.stringify(job.segments).includes("Checking the relevant files")
+      )
+    )
+
+    expect(jobs.filter((job) => job.adapterId === "wecom:mirror")).toHaveLength(
+      appendCountBeforeCommentary
+    )
+    stop()
+  })
+
   it("flips status + appends terminal body on run completion", async () => {
     await putRun({})
     const { enqueue, jobs } = makeMockEnqueue({

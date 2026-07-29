@@ -41,6 +41,16 @@ export function externalEventToCaptureEvents(event: ExternalAgentEvent): Capture
     case "thinking": {
       return event.thinking ? [{ type: "thinking-delta", delta: event.thinking }] : []
     }
+    case "commentary_delta": {
+      return [
+        {
+          type: "commentary-delta",
+          delta: event.text,
+          ...(event.messageId ? { messageId: event.messageId } : {}),
+          ...(typeof event.done === "boolean" ? { done: event.done } : {}),
+        },
+      ]
+    }
     case "tool_use_start": {
       // One tool boundary per tool call — paired with the later `tool_result`
       // by `toolUseId`. `tool_use_delta` (partial arg streaming) and

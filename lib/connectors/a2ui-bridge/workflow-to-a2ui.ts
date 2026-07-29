@@ -191,6 +191,8 @@ export interface CumulativeStepEntry {
   endedAt?: number
   /** Error message captured from a step_failed event, when present. */
   errorMessage?: string
+  /** User-visible agent narration accumulated for the active step. */
+  commentary?: string
 }
 
 export interface CumulativeStatusState {
@@ -252,7 +254,8 @@ function statusLine(entry: CumulativeStepEntry): string {
     entry.status === "failed" && entry.errorMessage
       ? ` — ${truncate(entry.errorMessage, ERROR_MESSAGE_MAX)}`
       : ""
-  return `${icon} ${entry.label}${durationStr}${tail}`
+  const commentary = entry.commentary ? `\n  ↳ ${entry.commentary}` : ""
+  return `${icon} ${entry.label}${durationStr}${tail}${commentary}`
 }
 
 /**

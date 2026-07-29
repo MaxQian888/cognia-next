@@ -1084,7 +1084,12 @@ const DesktopWaitParams = DesktopTargetableParams.extend({
   pollMs: numberRange(1).optional(),
 })
 
-const DesktopEventKind = z.enum(["focus-changed", "structure-changed", "property-changed"])
+const DesktopEventKind = z.enum([
+  "focus-changed",
+  "structure-changed",
+  "property-changed",
+  "text-selection-changed",
+])
 const DesktopEventTriggerParams = z.object({
   kinds: z.array(DesktopEventKind).optional(),
   scope: DesktopElementRef.optional(),

@@ -225,6 +225,7 @@ export type CanonicalAgentEvent =
   | { kind: "lifecycle"; phase: "started" | "ended" | "interrupted"; detail?: string }
   | { kind: "text-delta"; delta: string }
   | { kind: "thinking-delta"; delta: string }
+  | { kind: "commentary-delta"; delta: string; messageId?: string; done?: boolean }
   | {
       kind: "tool-call"
       toolName: string
@@ -588,6 +589,7 @@ const CANONICAL_EVENT_KINDS: readonly string[] = [
   "lifecycle",
   "text-delta",
   "thinking-delta",
+  "commentary-delta",
   "tool-call",
   "tool-result",
   "permission-request",

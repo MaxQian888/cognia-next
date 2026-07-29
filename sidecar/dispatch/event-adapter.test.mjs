@@ -315,6 +315,17 @@ test("v6 reasoning-delta uses `text`", () => {
   assert.equal(thinking.thinking, "thinking...")
 })
 
+test("raw-analysis provenance prevents reasoning from entering stream or sealed messages", () => {
+  const adapter = createEventAdapter(baseCtx())
+  const out = adapter.handle({
+    type: "reasoning-delta",
+    text: "private chain of thought",
+    providerMetadata: { cognia: { reasoningSource: "raw-analysis" } },
+  })
+  assert.ok(!JSON.stringify(out).includes("private chain of thought"))
+  assert.deepEqual(adapter.sealAssistant(), [])
+})
+
 test("v6 tool-result reads `output`", () => {
   const adapter = createEventAdapter(baseCtx())
   const out = adapter.handle({ type: "tool-result", toolCallId: "c1", output: "done" })

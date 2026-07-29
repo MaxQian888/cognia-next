@@ -64,6 +64,46 @@ describe("parseCodexRollout", () => {
     expect(tool.input).toEqual({ cmd: "ls" })
   })
 
+  it("preserves assistant commentary phase as commentary instead of final text", () => {
+    const lines = [
+      {
+        type: "response_item",
+        payload: {
+          id: "commentary-1",
+          type: "message",
+          role: "assistant",
+          phase: "commentary",
+          content: [{ type: "output_text", text: "Checking the repository" }],
+        },
+      },
+      {
+        type: "response_item",
+        payload: {
+          id: "answer-1",
+          type: "message",
+          role: "assistant",
+          phase: "final_answer",
+          content: [{ type: "output_text", text: "Done" }],
+        },
+      },
+    ]
+      .map((line) => JSON.stringify(line))
+      .join("\n")
+
+    const parsed = parseCodexRollout(lines, "r.jsonl")
+    expect(parsed.messages).toHaveLength(2)
+    expect(parsed.messages[0].parts[0]).toEqual({
+      type: "data-commentary",
+      data: {
+        messageId: "commentary-1",
+        text: "Checking the repository",
+        state: "done",
+        source: "codex",
+      },
+    })
+    expect(parsed.messages[1].parts[0]).toMatchObject({ type: "text", text: "Done" })
+  })
+
   it("marks a failed tool result as an error (non-zero exit_code)", () => {
     const lines = [
       {

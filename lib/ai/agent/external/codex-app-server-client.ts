@@ -1376,15 +1376,18 @@ export class CodexAppServerAdapter extends BaseProtocolAdapter {
         const delta = readString(p.delta) ?? readString(readObject(p.delta)?.text) ?? ""
         if (delta) {
           this.streamedItems.add(itemId)
-          // Commentary-phase assistant text (mid-turn narration) streams as
-          // thinking so the final answer stays clean. The delta carries no
-          // phase; it was registered from the item/started payload.
+          // Commentary is user-visible mid-turn narration, not model
+          // reasoning. Keep it on its own event track so the final answer stays
+          // clean without folding progress into a reasoning disclosure.
           if (this.itemPhases.get(itemId) === "commentary") {
             this.emit(sessionId, {
-              type: "thinking",
+              type: "commentary_delta",
               sessionId,
               timestamp: new Date(),
-              thinking: delta,
+              messageId: itemId,
+              text: delta,
+              done: false,
+              source: "codex",
             })
             return
           }
@@ -1399,6 +1402,9 @@ export class CodexAppServerAdapter extends BaseProtocolAdapter {
         return
       }
       case "item/reasoning/textDelta":
+        // App-server identifies this as raw reasoning text. It must remain
+        // inside the provider/tool loop and never enter UI or persisted parts.
+        return
       case "item/reasoning/summaryTextDelta": {
         const itemId = readString(p.itemId) ?? "reasoning"
         const text = readString(p.delta) ?? readString(p.text) ?? ""
@@ -1570,8 +1576,8 @@ export class CodexAppServerAdapter extends BaseProtocolAdapter {
     const id = item.id
     switch (item.type) {
       case "agentMessage":
-        // Register the message phase so deltas (phase-less) can route
-        // commentary to thinking. Commentary items emit no message_start.
+        // Register the message phase so phase-less deltas can route
+        // commentary separately. Commentary items emit no message_start.
         if (typeof item.phase === "string") this.itemPhases.set(id, item.phase)
         if (item.phase === "commentary") return
         this.emit(sessionId, {
@@ -1673,15 +1679,28 @@ export class CodexAppServerAdapter extends BaseProtocolAdapter {
       case "agentMessage": {
         const phase = readString(item.phase) ?? this.itemPhases.get(id)
         const text = readString(item.text) ?? extractText(item.content)
-        // Commentary text is mid-turn narration: emit as thinking (when not
-        // already streamed) and skip the message_start/end envelope.
+        // Commentary text is mid-turn narration. Emit it on its dedicated
+        // track and skip the final-answer message_start/end envelope.
         if (phase === "commentary") {
           if (text && !this.streamedItems.has(id)) {
             this.emit(sessionId, {
-              type: "thinking",
+              type: "commentary_delta",
               sessionId,
               timestamp: new Date(),
-              thinking: text,
+              messageId: id,
+              text,
+              done: true,
+              source: "codex",
+            })
+          } else {
+            this.emit(sessionId, {
+              type: "commentary_delta",
+              sessionId,
+              timestamp: new Date(),
+              messageId: id,
+              text: "",
+              done: true,
+              source: "codex",
             })
           }
           this.itemPhases.delete(id)
@@ -1707,8 +1726,9 @@ export class CodexAppServerAdapter extends BaseProtocolAdapter {
       }
       case "reasoning": {
         if (!this.streamedItems.has(id)) {
-          const text =
-            readString(item.content) ?? extractText(item.summary) ?? extractText(item.content)
+          // Only the app-server's readable summary is eligible for display.
+          // `content` is raw analysis and must never cross this boundary.
+          const text = extractText(item.summary)
           if (text)
             this.emit(sessionId, {
               type: "thinking",
@@ -3292,13 +3312,16 @@ function hydrateMessagesFromTurns(
             timestamp: new Date(),
           })
         }
-      } else if (item.type === "agentMessage" && item.phase !== "commentary") {
+      } else if (item.type === "agentMessage") {
         const text = readString(item.text) ?? extractText(item.content)
         if (text) {
           messages.push({
             id: item.id ?? `assistant_${messages.length}`,
             role: "assistant",
-            content: [{ type: "text", text }],
+            content:
+              item.phase === "commentary"
+                ? [{ type: "commentary", text, source: "codex" }]
+                : [{ type: "text", text }],
             timestamp: new Date(),
           })
         }

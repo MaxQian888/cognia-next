@@ -83,6 +83,10 @@ interface AiSdkStreamPart {
 
 type ProviderMetadata = Record<string, Record<string, unknown>>
 
+function isRawAnalysis(event: AiSdkStreamPart): boolean {
+  return event.providerMetadata?.cognia?.reasoningSource === "raw-analysis"
+}
+
 /** Usage surfaced by AI SDK v4/v6 (and openai-compatible providers). */
 interface AiSdkUsage {
   promptTokens?: number
@@ -604,11 +608,15 @@ export function createSdkEventMapper(ctx: SdkEventMapperContext): SdkEventMapper
           return out
         }
         case "reasoning-start": {
+          if (isRawAnalysis(event)) return out
           reasoningProviderMetadata = getProviderMetadata(event) ?? reasoningProviderMetadata
           return out
         }
         case "reasoning":
         case "reasoning-delta": {
+          // Raw chain-of-thought is provider-internal state. Provenance-aware
+          // middleware marks it before this persistence/rendering boundary.
+          if (isRawAnalysis(event)) return out
           activeBlockKind = "reasoning"
           const chunk = event.text ?? event.textDelta ?? event.delta ?? ""
           reasoningBuf += chunk
@@ -618,6 +626,7 @@ export function createSdkEventMapper(ctx: SdkEventMapperContext): SdkEventMapper
           return out
         }
         case "reasoning-end": {
+          if (isRawAnalysis(event)) return out
           reasoningProviderMetadata = getProviderMetadata(event) ?? reasoningProviderMetadata
           return out
         }

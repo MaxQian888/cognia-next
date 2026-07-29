@@ -1,0 +1,16 @@
+{
+  "model": "openai/gpt-oss-20b",
+  "stream": [
+    { "type": "text-start", "id": "text-1" },
+    { "type": "text-delta", "id": "text-1", "delta": "<thi" },
+    { "type": "text-delta", "id": "text-1", "delta": "nk>private chain " },
+    { "type": "text-delta", "id": "text-1", "delta": "of thought</think>" },
+    { "type": "text-delta", "id": "text-1", "delta": "Safe final answer." },
+    { "type": "text-end", "id": "text-1" },
+    {
+      "type": "finish",
+      "finishReason": "stop",
+      "usage": { "inputTokens": 10, "outputTokens": 8, "totalTokens": 18 }
+    }
+  ]
+}

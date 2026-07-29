@@ -199,6 +199,12 @@ describe("isAgentEventEnvelope", () => {
         event: { kind: "failure", code: "upstream_error", message: "boom" },
       })
     ).toBe(true)
+    expect(
+      isAgentEventEnvelope({
+        ...envelope,
+        event: { kind: "commentary-delta", delta: "Checking", messageId: "c1", done: false },
+      })
+    ).toBe(true)
   })
 
   it("rejects envelopes with missing ids, negative sequence or unknown kind", () => {

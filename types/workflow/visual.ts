@@ -923,6 +923,9 @@ export type RunEventType =
   // `{ delta, seq }`). Presentation-only — resume reads the final output
   // from `step_completed`, never reassembles chunks.
   | "step_stream"
+  // User-visible agent narration, kept separate from model reasoning and
+  // coalesced by the runtime before presentation.
+  | "step_commentary"
   // Token/cost usage snapshot for one step (payload = StepUsage).
   | "step_usage"
   // Emitted before each retry backoff wait (payload
@@ -1019,6 +1022,11 @@ export interface StepExecutionContext<TParams = Record<string, unknown>> {
    * when the run surface doesn't render live output.
    */
   emitStream?: (delta: string) => void
+  /**
+   * Push user-visible mid-turn agent narration. This is distinct from
+   * `emitStream` (the final answer) and never carries raw model analysis.
+   */
+  emitCommentary?: (delta: string) => void
   /**
    * Report token/cost usage for this step. Lands as a `step_usage` event;
    * call at most once, after the LLM call settles.

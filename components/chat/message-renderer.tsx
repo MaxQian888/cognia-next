@@ -83,6 +83,7 @@ import {
   BookmarkIcon,
   CheckIcon,
   CopyIcon,
+  LinkIcon,
   CornerUpLeftIcon,
   GitBranchIcon,
   ImageIcon,
@@ -98,6 +99,7 @@ import { UsageBreakdown } from "@/components/chat/usage-breakdown"
 import type { Character } from "@cognia/agent-config-types"
 import React, { memo, useCallback, useMemo, useState, type KeyboardEvent } from "react"
 import { useTranslations } from "next-intl"
+import { buildMessagePermalink } from "@/lib/chat/message-permalink"
 import { cn } from "@/lib/utils"
 import { avatarColor, avatarGlyph } from "@/lib/ui/avatar"
 import { useChatStore } from "@/stores/chat"
@@ -318,6 +320,19 @@ function MessageRendererInner({
     }
     if (ok) onCopy?.()
   }, [messageShareContent, messageText, copy, onCopy])
+
+  // A permalink back into THIS app (`?session=…&message=…`), not a published
+  // share link — see `lib/chat/message-permalink.ts`.
+  const [linkCopied, setLinkCopied] = useState(false)
+  const handleCopyLink = useCallback(async () => {
+    if (!branchSessionId) return
+    const ok = await copy(
+      buildMessagePermalink({ sessionId: branchSessionId, messageId: message.id })
+    )
+    if (!ok) return
+    setLinkCopied(true)
+    window.setTimeout(() => setLinkCopied(false), 1500)
+  }, [branchSessionId, message.id, copy])
 
   const handleShare = useCallback(async () => {
     if (!messageShareContent.hasContent) return
@@ -632,6 +647,24 @@ function MessageRendererInner({
             >
               <Share2Icon className="size-3.5" />
             </MessageAction>
+
+            {branchSessionId && (
+              <MessageAction
+                // Deliberately worded as a *link to this message*, never as
+                // "share": the neighbouring share action publishes content,
+                // this one only navigates, and confusing the two is either a
+                // privacy accident or a dead link.
+                tooltip={linkCopied ? t("copyLinkDone") : t("copyLinkTooltip")}
+                label={t("copyLinkLabel")}
+                onClick={handleCopyLink}
+              >
+                {linkCopied ? (
+                  <CheckIcon className="size-3.5" />
+                ) : (
+                  <LinkIcon className="size-3.5" />
+                )}
+              </MessageAction>
+            )}
 
             {messageShareContent.hasContent && (
               <MessageAction
@@ -1090,6 +1123,28 @@ function renderPart(
         <ReasoningTrigger />
         <ReasoningContent>{text}</ReasoningContent>
       </Reasoning>
+    )
+  }
+
+  if (type === "data-commentary") {
+    const data = (part as { data?: { text?: string } }).data
+    const text = data?.text ?? ""
+    if (!text.trim()) return null
+    return (
+      <div
+        key={key}
+        role="status"
+        aria-live="polite"
+        className="border-muted-foreground/30 text-muted-foreground border-l-2 pl-3 text-sm"
+      >
+        <MarkdownRenderer
+          content={text}
+          messageId={messageId}
+          isStreaming={isStreaming}
+          projectRoot={projectRoot}
+          className="[&>*:first-child]:mt-0 [&>*:last-child]:mb-0"
+        />
+      </div>
     )
   }
 

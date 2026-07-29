@@ -67,6 +67,48 @@ describe("AgentRunEventProducer", () => {
     })
   })
 
+  it("projects commentary into one updatable progress activity", async () => {
+    const appended: AppendRunEventInput[] = []
+    const producer = new AgentRunEventProducer("run-agent", async (_runId, input) => {
+      appended.push(input)
+      return {} as never
+    })
+
+    await producer.onCaptureEvent(
+      { type: "commentary-delta", messageId: "c1", delta: "Checking ", done: false },
+      2_000
+    )
+    await producer.onCaptureEvent(
+      { type: "commentary-delta", messageId: "c1", delta: "the files", done: false },
+      2_001
+    )
+    await producer.onCaptureEvent(
+      { type: "commentary-delta", messageId: "c1", delta: "", done: true },
+      2_002
+    )
+
+    expect(appended.map((item) => item.type)).toEqual([
+      "step.added",
+      "step.started",
+      "step.progress",
+    ])
+    expect(appended.map((item) => item.payload.stepId)).toEqual([
+      "commentary:c1",
+      "commentary:c1",
+      "commentary:c1",
+    ])
+    expect(appended[0].payload).toMatchObject({
+      title: "Checking",
+      safeTitle: true,
+      category: "status",
+    })
+    expect(appended[2].payload).toMatchObject({
+      title: "Checking the files",
+      safeTitle: true,
+      category: "status",
+    })
+  })
+
   it("categorizes tools, synthesizes ids, and reports failures", async () => {
     const appended: AppendRunEventInput[] = []
     const producer = new AgentRunEventProducer("run-agent", async (_runId, input) => {

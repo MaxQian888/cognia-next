@@ -1460,7 +1460,7 @@ export type ExternalAgentMessageRole = "user" | "assistant" | "system" | "tool"
  * Content block types
  */
 export type ExternalAgentContentType =
-  "text" | "image" | "file" | "tool_use" | "tool_result" | "thinking" | "error"
+  "text" | "image" | "file" | "tool_use" | "tool_result" | "thinking" | "commentary" | "error"
 
 /**
  * Text content block
@@ -1524,6 +1524,13 @@ export interface ExternalAgentThinkingContent {
   thinking: string
 }
 
+/** User-visible mid-turn narration retained when hydrating session history. */
+export interface ExternalAgentCommentaryContent {
+  type: "commentary"
+  text: string
+  source?: "codex"
+}
+
 /**
  * Error content block
  */
@@ -1544,6 +1551,7 @@ export type ExternalAgentContent =
   | ExternalAgentToolUseContent
   | ExternalAgentToolResultContent
   | ExternalAgentThinkingContent
+  | ExternalAgentCommentaryContent
   | ExternalAgentErrorContent
 
 /**
@@ -1587,6 +1595,7 @@ export type ExternalAgentEventType =
   | "tool_call_update"
   | "permission_request"
   | "permission_response"
+  | "commentary_delta"
   | "thinking"
   | "plan_update"
   | "commands_update"
@@ -1722,6 +1731,19 @@ export interface ExternalAgentPermissionResponseEvent extends ExternalAgentEvent
 export interface ExternalAgentThinkingEvent extends ExternalAgentEventBase {
   type: "thinking"
   thinking: string
+}
+
+/**
+ * User-visible mid-turn narration. This is intentionally separate from
+ * `thinking`: commentary may be rendered as progress, while reasoning remains
+ * governed by the reasoning disclosure policy.
+ */
+export interface ExternalAgentCommentaryDeltaEvent extends ExternalAgentEventBase {
+  type: "commentary_delta"
+  messageId?: string
+  text: string
+  done?: boolean
+  source?: "codex"
 }
 
 /**
@@ -1861,6 +1883,7 @@ export type ExternalAgentEvent =
   | ExternalAgentToolCallUpdateEvent
   | ExternalAgentPermissionRequestEvent
   | ExternalAgentPermissionResponseEvent
+  | ExternalAgentCommentaryDeltaEvent
   | ExternalAgentThinkingEvent
   | ExternalAgentPlanUpdateEvent
   | ExternalAgentCommandsUpdateEvent

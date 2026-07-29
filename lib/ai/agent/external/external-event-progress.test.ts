@@ -42,6 +42,20 @@ describe("externalEventToCaptureEvents", () => {
     expect(externalEventToCaptureEvents(ev)).toEqual([{ type: "thinking-delta", delta: "hmm" }])
   })
 
+  it("maps commentary without folding it into thinking", () => {
+    const ev: ExternalAgentEvent = {
+      type: "commentary_delta",
+      timestamp: now,
+      messageId: "c1",
+      text: "Checking",
+      done: false,
+      source: "codex",
+    }
+    expect(externalEventToCaptureEvents(ev)).toEqual([
+      { type: "commentary-delta", delta: "Checking", messageId: "c1", done: false },
+    ])
+  })
+
   it("maps tool_use_start to a tool-call with id + input", () => {
     const ev: ExternalAgentEvent = {
       type: "tool_use_start",

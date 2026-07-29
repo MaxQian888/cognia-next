@@ -65,6 +65,7 @@ import { FlushCoalescer } from "../_shared/flush-coalescer"
 
 const ACTIVE_STATUSES: ReadonlyArray<RunStatus> = ["pending", "running", "waiting", "paused"]
 const TERMINAL_STATUSES: ReadonlyArray<RunStatus> = ["succeeded", "failed", "cancelled"]
+const COMMENTARY_MAX_CHARS = 500
 
 /**
  * Per-channel state. One per (adapterId, conversationKey) pair on a
@@ -461,6 +462,23 @@ function foldEventIntoState(watcher: RunWatcher, ev: WorkflowRunEventRow): void 
       }
       entry.status = "skipped"
       entry.endedAt = ev.ts
+      watcher.steps.set(ev.stepId, entry)
+      break
+    }
+    case "step_commentary": {
+      const payload = ev.payload as { delta?: unknown } | undefined
+      if (!payload || typeof payload.delta !== "string" || !payload.delta) break
+      const entry: CumulativeStepEntry = existing ?? {
+        stepId: ev.stepId,
+        label,
+        status: "running",
+      }
+      entry.status = entry.status === "pending" ? "running" : entry.status
+      const commentary = `${entry.commentary ?? ""}${payload.delta}`
+      entry.commentary =
+        commentary.length <= COMMENTARY_MAX_CHARS
+          ? commentary
+          : `…${commentary.slice(-(COMMENTARY_MAX_CHARS - 1))}`
       watcher.steps.set(ev.stepId, entry)
       break
     }

@@ -251,6 +251,13 @@ export function createRunLogger(runId: string) {
         stepId,
         payload: { delta, seq },
       }),
+    stepCommentary: (stepId: string, delta: string, seq: number) =>
+      enqueueRunEvent({
+        runId,
+        type: "step_commentary",
+        stepId,
+        payload: { delta, seq },
+      }),
     /** Token/cost usage snapshot for one step (payload = StepUsage). */
     stepUsage: (stepId: string, usage: StepUsage) => {
       // Shadow-write into the unified billing table so workflow spend reaches

@@ -26,6 +26,7 @@ import { createXai } from "@ai-sdk/xai"
 import { createTogetherAI } from "@ai-sdk/togetherai"
 import { createFireworks } from "@ai-sdk/fireworks"
 import { createDeepInfra } from "@ai-sdk/deepinfra"
+import type { LanguageModelV3 } from "@ai-sdk/provider"
 
 import {
   LOCAL_PROVIDER_URLS,
@@ -44,6 +45,7 @@ import type {
 } from "@cognia/provider-types"
 import { validateBedrockConnectionSettings } from "@cognia/provider-types"
 import { createBedrockSidecarLanguageModel } from "@/lib/claude/feature-call"
+import { protectRawAnalysis } from "@/lib/ai/raw-analysis"
 // Single source of truth for provider→protocol (shared with the sidecar; the
 // sidecar can't import `lib/`, so the file lives under `sidecar/` and TS imports
 // it — see sidecar/dispatch/protocol-adapters/provider-protocol.mjs).
@@ -544,19 +546,22 @@ export function createFeatureProviderModel(
 ) {
   if (resolved.protocol === "bedrock" && resolved.bedrock?.authMode === "default-chain") {
     const bedrock = resolved.bedrock
-    return createBedrockSidecarLanguageModel({
-      modelId: resolved.model ?? defaultModelForProtocol("bedrock"),
-      providerId: resolved.providerId,
-      credentials: {
-        protocol: "bedrock",
-        bedrockAuthMode: "default-chain",
-        region: bedrock.region,
-        baseURL: resolved.baseURL ?? bedrock.baseURL,
-        profile: bedrock.profile,
-        roleArn: bedrock.roleArn,
-        roleSessionName: bedrock.roleSessionName,
-      },
-    })
+    return protectRawAnalysis(
+      createBedrockSidecarLanguageModel({
+        modelId: resolved.model ?? defaultModelForProtocol("bedrock"),
+        providerId: resolved.providerId,
+        credentials: {
+          protocol: "bedrock",
+          bedrockAuthMode: "default-chain",
+          region: bedrock.region,
+          baseURL: resolved.baseURL ?? bedrock.baseURL,
+          profile: bedrock.profile,
+          roleArn: bedrock.roleArn,
+          roleSessionName: bedrock.roleSessionName,
+        },
+      }),
+      resolved.model ?? defaultModelForProtocol("bedrock")
+    )
   }
   const client = createFeatureProviderClient({
     providerId: resolved.providerId,
@@ -584,14 +589,18 @@ export function createFeatureProviderModel(
       providerId: resolved.providerId,
     })
     if (flavor === "responses" && typeof handle?.responses === "function") {
-      return handle.responses(modelId)
+      return protectRawAnalysis(handle.responses(modelId) as LanguageModelV3, modelId)
     }
     if (typeof handle?.chat === "function") {
-      return handle.chat(modelId)
+      return protectRawAnalysis(handle.chat(modelId) as LanguageModelV3, modelId)
     }
   }
-  if (typeof handle === "function") return handle(modelId)
-  if (typeof handle?.chat === "function") return handle.chat(modelId)
+  if (typeof handle === "function") {
+    return protectRawAnalysis(handle(modelId) as LanguageModelV3, modelId)
+  }
+  if (typeof handle?.chat === "function") {
+    return protectRawAnalysis(handle.chat(modelId) as LanguageModelV3, modelId)
+  }
   throw new Error(
     `createFeatureProviderModel: client for ${resolved.providerId} has no model entrypoint`
   )

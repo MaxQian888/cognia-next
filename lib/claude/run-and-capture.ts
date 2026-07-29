@@ -248,6 +248,7 @@ export class RunAndCaptureError extends Error {
 export type CaptureStreamEvent =
   | { type: "text-delta"; delta: string }
   | { type: "thinking-delta"; delta: string }
+  | { type: "commentary-delta"; delta: string; messageId?: string; done?: boolean }
   | {
       type: "tool-call"
       toolName: string

@@ -27,6 +27,18 @@ describe("mapWorkflowRunEvent", () => {
     expect(
       mapWorkflowRunEvent(workflowEvent("step_stream", { delta: "raw model text" }))
     ).toBeNull()
+    expect(
+      mapWorkflowRunEvent(
+        workflowEvent("step_commentary", { delta: "Checking the repository", seq: 0 })
+      )
+    ).toMatchObject({
+      type: "step.progress",
+      payload: {
+        title: "Checking the repository",
+        safeTitle: true,
+        category: "status",
+      },
+    })
   })
 
   it("maps terminal failures without copying raw structured payloads", () => {

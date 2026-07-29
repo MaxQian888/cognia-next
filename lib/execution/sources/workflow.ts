@@ -79,6 +79,20 @@ export function mapWorkflowRunEvent(
           ...(typeof payload.progress === "number" ? { progress: payload.progress } : {}),
         },
       }
+    case "step_commentary": {
+      const commentary = text(payload.delta)
+      if (!commentary) return null
+      return {
+        ...base,
+        type: "step.progress",
+        payload: {
+          ...stepPayload(),
+          title: commentary,
+          safeTitle: true,
+          category: "status",
+        },
+      }
+    }
     case "step_stream":
     case "step_usage":
     case "run_log":

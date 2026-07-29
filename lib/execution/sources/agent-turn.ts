@@ -7,6 +7,7 @@ import {
 import type { RunEvent } from "@/types/execution/run"
 import type { RunActivityCategory } from "@/types/execution/run"
 import {
+  sanitizeActivityLabel,
   safeToolActivityMetadata,
   type SafeToolActivityMetadata,
 } from "@/lib/execution/run-activity"
@@ -45,6 +46,8 @@ export class AgentRunEventProducer {
   private anonymousToolCounter = 0
   private readonly stepByToolCall = new Map<string, string>()
   private readonly metadataByToolCall = new Map<string, SafeToolActivityMetadata>()
+  private readonly commentaryByMessage = new Map<string, string>()
+  private readonly startedCommentary = new Set<string>()
   private pending: Promise<void> = Promise.resolve()
 
   constructor(
@@ -69,6 +72,33 @@ export class AgentRunEventProducer {
   private async processCaptureEvent(event: CaptureStreamEvent, ts: number): Promise<void> {
     if (event.type === "thinking-delta" || event.type === "text-delta") return
     if (event.type === "usage" || event.type === "compact") return
+
+    if (event.type === "commentary-delta") {
+      const messageId = event.messageId ?? "current"
+      const stepId = `commentary:${messageId}`
+      const accumulated = `${this.commentaryByMessage.get(messageId) ?? ""}${event.delta}`
+      this.commentaryByMessage.set(messageId, accumulated)
+      const title = sanitizeActivityLabel(accumulated, "Agent progress")
+      if (!title) return
+
+      if (!this.startedCommentary.has(messageId)) {
+        this.startedCommentary.add(messageId)
+        const payload = { stepId, title, safeTitle: true, category: "status" }
+        await this.append(this.runId, semanticRunEvent("step.added", payload, { ts }))
+        await this.append(this.runId, semanticRunEvent("step.started", payload, { ts }))
+      }
+      if (event.done) {
+        await this.append(
+          this.runId,
+          semanticRunEvent(
+            "step.progress",
+            { stepId, title, safeTitle: true, category: "status" },
+            { ts }
+          )
+        )
+      }
+      return
+    }
 
     if (event.type === "tool-call") {
       const toolCallId = event.id ?? `anonymous-${++this.anonymousToolCounter}`

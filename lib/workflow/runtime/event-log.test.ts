@@ -113,6 +113,16 @@ describe("event-log ts monotonicity", () => {
     expect(events.map((e) => e.type)).toEqual(["step_started", "step_completed"])
   })
 
+  it("persists commentary on a channel distinct from final output streaming", async () => {
+    const logger = createRunLogger("run_commentary")
+    await logger.stepCommentary("n1", "Checking the repository", 0)
+    await logger.stepStream("n1", "Final answer", 0)
+
+    const events = await listRunEvents("run_commentary")
+    expect(events.map((event) => event.type)).toEqual(["step_commentary", "step_stream"])
+    expect(events[0].payload).toEqual({ delta: "Checking the repository", seq: 0 })
+  })
+
   it("mirrors every workflow lifecycle outcome into typed behavior telemetry", async () => {
     const logger = createRunLogger("run_lifecycle")
     await logger.runStarted({ trigger: { kind: "trigger.manual" } })

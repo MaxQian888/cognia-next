@@ -12,12 +12,13 @@ import { CircuitOpenError, resetCircuitBreaker } from "./circuit-breaker"
 import { addPluginCatalogEntry, __resetPluginCatalogForTesting } from "@/lib/workflow/nodes/catalog"
 import {
   DEFAULT_WORKFLOW_SETTINGS,
+  type StepExecutionContext,
   type TriggerEvent,
   type VisualWorkflow,
   type WorkflowNode,
 } from "@/types/workflow/visual"
 
-const execSpy = jest.fn(async () => ({ output: { real: true } }))
+const execSpy = jest.fn(async (_ctx: StepExecutionContext) => ({ output: { real: true } }))
 
 // Register once for this isolated module registry. Cast because the test kind
 // reuses a real union member but supplies its own spy executor.
@@ -107,6 +108,20 @@ describe("runStep pin short-circuit", () => {
 
     expect(execSpy).toHaveBeenCalledTimes(1)
     expect(result.output).toEqual({ real: true })
+  })
+
+  it("coalesces commentary through a dedicated runtime event sink", async () => {
+    execSpy.mockImplementationOnce(async (ctx) => {
+      ctx.emitCommentary?.("Checking ")
+      ctx.emitCommentary?.("the repository")
+      return { output: { real: true } }
+    })
+    const input = await buildInput({})
+    const commentarySpy = jest.spyOn(input.logger, "stepCommentary")
+
+    await runStep(input)
+
+    expect(commentarySpy).toHaveBeenCalledWith("n1", "Checking the repository", 0)
   })
 })
 

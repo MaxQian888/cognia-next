@@ -1,5 +1,6 @@
 import { test } from "node:test"
 import assert from "node:assert/strict"
+import { readFileSync } from "node:fs"
 import {
   buildModel,
   makeAiSdkAdapter,
@@ -7,7 +8,9 @@ import {
   isResponsesOnlyEndpoint,
   buildReasoningProviderOptions,
   buildCodexResponsesProviderOptions,
+  withReasoningExtraction,
 } from "./ai-sdk-adapter.mjs"
+import { createEventAdapter } from "../event-adapter.mjs"
 
 test("buildModel throws on unsupported protocols", async () => {
   await assert.rejects(() => buildModel({ protocol: "smoke-signal", model: "m" }), /unsupported/)
@@ -411,6 +414,52 @@ test("buildModel wraps every protocol with <think>-tag reasoning extraction", as
   // The middleware is observable: a wrapped model exposes the original via the
   // standard wrapLanguageModel shape.
   assert.ok(m, "model built and wrapped")
+})
+
+test("gpt-oss streaming fixture marks raw analysis and prevents display or persistence", async () => {
+  const fixture = JSON.parse(
+    readFileSync(new URL("../fixtures/gpt-oss-raw-analysis-stream.json", import.meta.url), "utf8")
+  )
+  const rawModel = {
+    specificationVersion: "v3",
+    provider: "fixture",
+    modelId: fixture.model,
+    supportedUrls: {},
+    doGenerate: async () => ({ content: [], finishReason: "stop", usage: {} }),
+    doStream: async () => ({
+      stream: new ReadableStream({
+        start(controller) {
+          for (const part of fixture.stream) controller.enqueue(part)
+          controller.close()
+        },
+      }),
+    }),
+  }
+  const model = await withReasoningExtraction(rawModel, fixture.model)
+  const result = await model.doStream({ prompt: [] })
+  const parts = []
+  for await (const part of result.stream) parts.push(part)
+
+  const reasoning = parts.filter((part) => part.type.startsWith("reasoning"))
+  assert.ok(reasoning.length > 0, "fixture exercises an extracted reasoning stream")
+  assert.ok(
+    reasoning.every((part) => part.providerMetadata?.cognia?.reasoningSource === "raw-analysis"),
+    "every raw-analysis chunk carries explicit provenance"
+  )
+
+  const adapter = createEventAdapter({
+    sessionId: "s1",
+    sdkSessionId: "sdk1",
+    model: fixture.model,
+    provider: "openai",
+  })
+  const wire = []
+  for (const part of parts) wire.push(...adapter.handle(part))
+  wire.push(...adapter.sealAssistant())
+  const serialized = JSON.stringify(wire)
+  assert.ok(serialized.includes("Safe final answer."))
+  assert.ok(!serialized.includes("private chain of thought"))
+  assert.ok(!serialized.includes("thinking_delta"))
 })
 
 test("buildReasoningProviderOptions: no reasoning config → null", () => {

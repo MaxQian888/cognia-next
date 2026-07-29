@@ -65,6 +65,13 @@ export function canonicalEventFromExternalEvent(event: {
     case "thinking":
     case "reasoning":
       return { kind: "thinking-delta", delta: String(event.text ?? event.delta ?? "") }
+    case "commentary_delta":
+      return {
+        kind: "commentary-delta",
+        delta: String(event.text ?? event.delta ?? ""),
+        ...(typeof event.messageId === "string" ? { messageId: event.messageId } : {}),
+        ...(typeof event.done === "boolean" ? { done: event.done } : {}),
+      }
     case "tool_call":
       return {
         kind: "tool-call",
@@ -114,6 +121,13 @@ export function captureEventFromCanonical(event: CanonicalAgentEvent): CaptureSt
       return { type: "text-delta", delta: event.delta }
     case "thinking-delta":
       return { type: "thinking-delta", delta: event.delta }
+    case "commentary-delta":
+      return {
+        type: "commentary-delta",
+        delta: event.delta,
+        ...(event.messageId ? { messageId: event.messageId } : {}),
+        ...(typeof event.done === "boolean" ? { done: event.done } : {}),
+      }
     case "tool-call":
       return {
         type: "tool-call",

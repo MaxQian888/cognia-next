@@ -81,6 +81,19 @@ describe("canonicalEventFromExternalEvent", () => {
     expect(
       canonicalEventFromExternalEvent({ type: "error", message: "boom", code: "acp_error" })
     ).toEqual({ kind: "failure", code: "acp_error", message: "boom" })
+    expect(
+      canonicalEventFromExternalEvent({
+        type: "commentary_delta",
+        text: "Checking",
+        messageId: "c1",
+        done: false,
+      })
+    ).toEqual({
+      kind: "commentary-delta",
+      delta: "Checking",
+      messageId: "c1",
+      done: false,
+    })
   })
 
   it("never drops unknown kinds silently — they become diagnostics", () => {
@@ -105,6 +118,19 @@ describe("captureEventFromCanonical", () => {
     expect(
       captureEventFromCanonical({ kind: "tool-call", toolName: "Bash", input: {}, toolCallId: "t" })
     ).toMatchObject({ type: "tool-call", toolName: "Bash" })
+    expect(
+      captureEventFromCanonical({
+        kind: "commentary-delta",
+        delta: "Checking",
+        messageId: "c1",
+        done: true,
+      })
+    ).toEqual({
+      type: "commentary-delta",
+      delta: "Checking",
+      messageId: "c1",
+      done: true,
+    })
   })
 
   it("returns null for envelope-only kinds", () => {

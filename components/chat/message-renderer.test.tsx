@@ -323,6 +323,26 @@ describe("reasoning parts", () => {
   })
 })
 
+describe("commentary parts", () => {
+  it("renders commentary as progress without using the reasoning disclosure", () => {
+    const msg = {
+      id: "c1",
+      role: "assistant",
+      parts: [
+        {
+          type: "data-commentary",
+          data: { text: "Checking the affected files", state: "streaming", source: "codex" },
+        },
+      ],
+    } as unknown as UIMessage
+
+    render(<MessageRenderer message={msg} isStreaming />)
+
+    expect(screen.getByRole("status")).toHaveTextContent("Checking the affected files")
+    expect(document.querySelector("[data-test='reasoning']")).toBeNull()
+  })
+})
+
 describe("memory transparency chips", () => {
   it("mounts learned and recalled chips for a completed assistant turn", () => {
     const msg = {

@@ -172,6 +172,23 @@ describe("runAgentTurn", () => {
     )
   })
 
+  it("projects commentary events through the dedicated workflow progress sink", async () => {
+    const emitCommentary = jest.fn()
+    mockExecuteAgent.mockImplementation(async (_prompt, config) => {
+      config.onEvent?.({
+        type: "commentary-delta",
+        delta: "Checking the repository",
+        messageId: "c1",
+        done: false,
+      })
+      return { text: "done", channel: "sidecar", toolsAvailable: true }
+    })
+
+    await runAgentTurn(makeCtx({ prompt: "go" }, { emitCommentary }))
+
+    expect(emitCommentary).toHaveBeenCalledWith("Checking the repository")
+  })
+
   describe("typed output (D3)", () => {
     const schema = {
       type: "object",

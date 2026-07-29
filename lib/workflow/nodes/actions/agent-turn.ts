@@ -15,6 +15,7 @@ import {
   type SchemaViolationMode,
 } from "@/lib/workflow/nodes/ai/structured-turn"
 import type { ExecuteAgentResult } from "@/lib/ai/agent/agent-executor"
+import type { CaptureStreamEvent } from "@/lib/claude/run-and-capture"
 
 export interface AgentTurnParams {
   prompt?: string
@@ -142,6 +143,11 @@ export async function runAgentTurn(ctx: StepExecutionContext): Promise<StepExecu
       allowedTools: params.allowedTools,
       timeoutMs: params.timeoutMs ?? DEFAULT_TIMEOUT_MS,
       onDelta: ctx.emitStream,
+      onEvent: (event: CaptureStreamEvent) => {
+        if (event.type === "commentary-delta" && event.delta) {
+          ctx.emitCommentary?.(event.delta)
+        }
+      },
       ...(settings
         ? {
             defaultProvider: settings.defaultProvider,

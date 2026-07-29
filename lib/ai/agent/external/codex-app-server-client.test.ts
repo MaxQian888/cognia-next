@@ -438,7 +438,7 @@ describe("CodexAppServerAdapter", () => {
       expect(await run(undefined)).toBeUndefined()
     })
 
-    it("routes commentary-phase agentMessage deltas and completions to thinking", async () => {
+    it("routes commentary-phase agentMessage deltas separately from reasoning and final text", async () => {
       const adapter = await connectedAdapter()
       const session = await adapter.createSession()
       const it = iterator(adapter, session.id, userMessage("hi"))
@@ -464,18 +464,30 @@ describe("CodexAppServerAdapter", () => {
       feed("turn/completed", { threadId: "thr_1", turn: { id: "turn_1", status: "completed" } })
 
       const thinking: string[] = []
+      const commentary: Array<{ text: string; done?: boolean; messageId?: string }> = []
       const deltas: string[] = []
       const starts: string[] = []
       let r = await first
       while (!r.done) {
         if (r.value.type === "thinking") thinking.push(r.value.thinking)
+        if (r.value.type === "commentary_delta") {
+          commentary.push({
+            text: r.value.text,
+            done: r.value.done,
+            messageId: r.value.messageId,
+          })
+        }
         if (r.value.type === "message_delta") {
           deltas.push((r.value as { delta: { text: string } }).delta.text)
         }
         if (r.value.type === "message_start" && r.value.messageId) starts.push(r.value.messageId)
         r = await it.next()
       }
-      expect(thinking).toContain("checking…")
+      expect(thinking).toEqual([])
+      expect(commentary).toEqual([
+        { text: "checking…", done: false, messageId: "c1" },
+        { text: "", done: true, messageId: "c1" },
+      ])
       expect(deltas).toEqual(["Answer."])
       // No message_start envelope for the commentary item.
       expect(starts).toEqual(["f1"])
@@ -497,6 +509,51 @@ describe("CodexAppServerAdapter", () => {
         r = await it.next()
       }
       expect(thinking).toEqual(["part 1", "\n\n", "part 2"])
+    })
+
+    it("never emits raw reasoning text and only surfaces readable summaries", async () => {
+      const adapter = await connectedAdapter()
+      const session = await adapter.createSession()
+      const it = iterator(adapter, session.id, userMessage("hi"))
+      const first = it.next()
+      feed("item/reasoning/textDelta", {
+        threadId: "thr_1",
+        itemId: "raw-stream",
+        delta: "private chain of thought",
+      })
+      feed("item/reasoning/summaryTextDelta", {
+        threadId: "thr_1",
+        itemId: "summary-stream",
+        delta: "Checking the relevant files",
+      })
+      feed("item/completed", {
+        threadId: "thr_1",
+        item: {
+          id: "raw-completed",
+          type: "reasoning",
+          content: "private completed chain of thought",
+        },
+      })
+      feed("item/completed", {
+        threadId: "thr_1",
+        item: {
+          id: "summary-completed",
+          type: "reasoning",
+          content: "private content",
+          summary: [{ type: "summary_text", text: "Found the affected adapter" }],
+        },
+      })
+      feed("turn/completed", { threadId: "thr_1", turn: { id: "turn_1", status: "completed" } })
+
+      const thinking: string[] = []
+      let r = await first
+      while (!r.done) {
+        if (r.value.type === "thinking") thinking.push(r.value.thinking)
+        r = await it.next()
+      }
+
+      expect(thinking).toEqual(["Checking the relevant files", "Found the affected adapter"])
+      expect(JSON.stringify(thinking)).not.toContain("private")
     })
 
     it("maps collabAgentToolCall / imageView / review-mode / contextCompaction items", async () => {
@@ -606,9 +663,13 @@ describe("CodexAppServerAdapter", () => {
       const adapter = await connectedAdapter()
       const session = await adapter.resumeSession("thr_res", { systemPrompt: "You are helpful." })
       expect(session.id).toBe("thr_res")
-      expect(session.messages).toHaveLength(2)
+      expect(session.messages).toHaveLength(3)
       expect(session.messages?.[0]).toMatchObject({ role: "user" })
       expect(session.messages?.[1]).toMatchObject({ role: "assistant" })
+      expect(session.messages?.[2]).toMatchObject({
+        role: "assistant",
+        content: [{ type: "commentary", text: "working…", source: "codex" }],
+      })
       expect(session.metadata?.selectedModel).toBe("gpt-5.2-codex")
       expect(session.metadata?.reasoningEffort).toBe("high")
       expect(adapter.getSessionExtensionSupport()["session/resume"].state).toBe("supported")
@@ -1510,10 +1571,14 @@ describe("CodexAppServerAdapter", () => {
         threadId: "thr_1",
         item: { id: "m1", type: "mcpToolCall", tool: "search", result: "ok", error: "boom" },
       })
-      feed("item/reasoning/textDelta", { threadId: "thr_1", itemId: "r1", delta: "thinking…" })
+      feed("item/reasoning/summaryTextDelta", {
+        threadId: "thr_1",
+        itemId: "r1",
+        delta: "thinking…",
+      })
       feed("item/completed", {
         threadId: "thr_1",
-        item: { id: "r2", type: "reasoning", content: "final reasoning" },
+        item: { id: "r2", type: "reasoning", summary: "final reasoning" },
       })
       feed("item/started", {
         threadId: "thr_1",
