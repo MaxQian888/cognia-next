@@ -5027,8 +5027,10 @@
         "hideLines": "隐藏行号",
         "hideLinesAria": "隐藏行号",
         "plainText": "纯文本",
+        "showAllLines": "显示全部行",
         "showLines": "显示行号",
         "showLinesAria": "显示行号",
+        "truncatedNotice": "已显示 {total, number} 行中的前 {shown, number} 行。",
         "unwrap": "取消换行",
         "unwrapAria": "取消自动换行",
         "wrap": "自动换行",
@@ -5093,10 +5095,16 @@
         "errorFallback": "图表渲染失败",
         "exportSvg": "导出 SVG",
         "hideSource": "隐藏源码",
+        "renderAnyway": "仍然渲染",
         "retry": "重试",
         "showSource": "查看源码",
+        "tooLarge": "这张图较大（{chars, number} 个字符），绘制可能需要一些时间。",
         "viewFullscreen": "全屏查看",
         "viewSource": "查看源码"
+      },
+      "table": {
+        "showAllRows": "显示全部行",
+        "truncatedNotice": "已显示 {total, number} 行中的前 {shown, number} 行。"
       },
       "taskList": {
         "progress": "进度"
@@ -22969,6 +22977,10 @@
           "desc": "复制灵动岛定位所依赖的全部输入。请分别在普通桌面、有 App 全屏时、以及外接显示器上各取一次。",
           "label": "定位诊断",
           "unavailable": "灵动岛诊断信息仅在桌面端可用。"
+        },
+        "hideOnFullscreen": {
+          "desc": "当某个应用全屏占据灵动岛所在的显示器时，收起灵动岛，把顶部让给它。有会话需要你处理时仍会自动出现。仅 macOS 生效。",
+          "label": "全屏应用时隐藏"
         },
         "label": "灵动岛悬浮层",
         "monitor": {

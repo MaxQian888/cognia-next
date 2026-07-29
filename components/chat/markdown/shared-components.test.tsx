@@ -1,10 +1,12 @@
 /**
  * @jest-environment jsdom
  */
-import { render, screen } from "@testing-library/react"
+import { fireEvent, render, screen } from "@testing-library/react"
 import { NextIntlClientProvider } from "next-intl"
 
 import {
+  TABLE_AUTO_RENDER_MAX_ROWS,
+  countRowCells,
   createSharedMarkdownComponents,
   extractTextContent,
   isAudioUrl,
@@ -278,5 +280,86 @@ describe("helpers", () => {
   it("isAudioUrl matches audio extensions only", () => {
     expect(isAudioUrl("https://x.test/a.flac")).toBe(true)
     expect(isAudioUrl("https://x.test/a.mp4")).toBe(false)
+  })
+})
+
+describe("table row budget", () => {
+  const row = (i: number) => (
+    <tr key={i}>
+      <td>{`cell ${i}`}</td>
+      <td>{`other ${i}`}</td>
+    </tr>
+  )
+
+  function renderBody(count: number) {
+    const components = createSharedMarkdownComponents()
+    const Tbody = components.tbody as React.ComponentType<{ children?: React.ReactNode }>
+    return render(
+      <table>
+        <Tbody>{Array.from({ length: count }, (_, i) => row(i))}</Tbody>
+      </table>
+    )
+  }
+
+  it("renders a small table in full, with no notice", () => {
+    const { container, queryByRole } = renderBody(5)
+
+    expect(container.querySelectorAll("tbody tr")).toHaveLength(5)
+    expect(queryByRole("button", { name: /show all/i })).toBeNull()
+  })
+
+  it("leaves a table exactly at the budget untouched", () => {
+    const { container, queryByRole } = renderBody(TABLE_AUTO_RENDER_MAX_ROWS)
+
+    expect(container.querySelectorAll("tbody tr")).toHaveLength(TABLE_AUTO_RENDER_MAX_ROWS)
+    expect(queryByRole("button", { name: /show all/i })).toBeNull()
+  })
+
+  it("caps an oversized table and says what it withheld", () => {
+    const { container, getByRole } = renderBody(TABLE_AUTO_RENDER_MAX_ROWS + 50)
+
+    // Capped rows plus the one notice row.
+    expect(container.querySelectorAll("tbody tr")).toHaveLength(TABLE_AUTO_RENDER_MAX_ROWS + 1)
+    expect(getByRole("button", { name: /show all/i })).toBeInTheDocument()
+    // The notice text itself is i18n's job (and `lint:i18n` + the ICU
+    // validator cover it); what matters here is that rows were withheld and
+    // the reader is told so.
+    expect(container.textContent).toContain("rows")
+    expect(container.textContent).not.toContain("cell 200")
+  })
+
+  it("spans the notice across every column", () => {
+    const { container } = renderBody(TABLE_AUTO_RENDER_MAX_ROWS + 1)
+    const notice = container.querySelector("tbody tr:last-child td")
+
+    expect(notice?.getAttribute("colspan")).toBe("2")
+  })
+
+  it("renders every row once the reader asks", () => {
+    const { container, getByRole } = renderBody(TABLE_AUTO_RENDER_MAX_ROWS + 50)
+
+    fireEvent.click(getByRole("button", { name: /show all/i }))
+
+    expect(container.querySelectorAll("tbody tr")).toHaveLength(TABLE_AUTO_RENDER_MAX_ROWS + 50)
+  })
+})
+
+describe("countRowCells", () => {
+  it("counts the cells of a row", () => {
+    expect(
+      countRowCells(
+        <tr>
+          <td>a</td>
+          <td>b</td>
+          <td>c</td>
+        </tr>
+      )
+    ).toBe(3)
+  })
+
+  it("falls back to a single column for anything unrecognisable", () => {
+    expect(countRowCells("not an element")).toBe(1)
+    expect(countRowCells(undefined)).toBe(1)
+    expect(countRowCells(<tr />)).toBe(1)
   })
 })

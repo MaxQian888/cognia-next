@@ -172,9 +172,22 @@ impl Default for AuditSettings {
 }
 
 /// Screenshot down-scaling applied before frames reach vision models.
-/// Disabled by default — the operator opts in via Settings → Automation →
+/// Enabled by default; the operator can opt out via Settings → Automation →
 /// Behavior. 1280×800 (WXGA) is the Anthropic-recommended sweet spot for
 /// computer-use click accuracy vs token cost.
+///
+/// The default was `false` until the chat render benchmark
+/// (`tests/e2e/mobile/chat-render-perf.spec.ts`) put a number on it: an
+/// un-scaled Retina frame inlines as several MB of base64 into
+/// `messages.parts`, and a session's worth of them costs gigabytes of renderer
+/// heap. Coordinates survive the change because `lib/automation/coordinate-
+/// scaler.ts` already maps model space back to physical pixels off the
+/// `source_width`/`source_height` stamped below — that path existed for this
+/// setting and was simply never exercised by default.
+///
+/// Must stay in step with `defaultAutomationSettings()` in
+/// `lib/automation/client.ts`: whichever side answers first wins, so a
+/// disagreement shows up as scaling that flips depending on boot order.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct ScreenshotScalingSettings {
@@ -186,7 +199,7 @@ pub struct ScreenshotScalingSettings {
 impl Default for ScreenshotScalingSettings {
     fn default() -> Self {
         Self {
-            enabled: false,
+            enabled: true,
             max_width: 1280,
             max_height: 800,
         }
@@ -661,7 +674,9 @@ mod tests {
     #[test]
     fn settings_defaults_include_behavior_fields() {
         let s = AutomationSettings::default();
-        assert!(!s.screenshot_scaling.enabled);
+        // On by default: an un-scaled Retina frame inlines as megabytes of
+        // base64 into the chat transcript (see the type's doc comment).
+        assert!(s.screenshot_scaling.enabled);
         assert_eq!(s.screenshot_scaling.max_width, 1280);
         assert_eq!(s.screenshot_scaling.max_height, 800);
         assert!(s.screenshot_dedup);
@@ -679,7 +694,11 @@ mod tests {
         assert!(s.screenshot_dedup);
         assert!(!s.always_hide_picture_in_picture);
         assert_eq!(s.paste_threshold_chars, 200);
-        assert!(!s.screenshot_scaling.enabled);
+        // A payload that predates the field adopts the new default rather than
+        // staying off: not having chosen is what "default" means here. An
+        // operator who explicitly turned scaling off has `enabled: false`
+        // persisted and keeps it.
+        assert!(s.screenshot_scaling.enabled);
     }
 
     #[test]

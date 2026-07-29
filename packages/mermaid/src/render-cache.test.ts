@@ -27,10 +27,42 @@ describe("mermaid render-cache", () => {
 
   it("renders the source to SVG and caches it", async () => {
     const svg = await renderMermaidCached("default", "graph TD; A-->B")
-    expect(svg).toContain("graph TD; A-->B")
+    // Entity-escaped: what is cached is the output of `sanitizeMermaidSvg`,
+    // which round-trips the markup through the DOM before any caller injects
+    // it. `>` in text content comes back as `&gt;`.
+    expect(svg).toContain("graph TD; A--&gt;B")
     expect(renderMock).toHaveBeenCalledTimes(1)
     // Synchronous lookup now hits — the flash-free remount path.
     expect(getCachedMermaid("default", "graph TD; A-->B")).toBe(svg)
+  })
+
+  it("renders one diagram at a time so a theme flip cannot pile up", async () => {
+    // A theme toggle in a diagram-heavy session re-renders every visible
+    // diagram. Concurrent CPU-bound layout does not finish sooner — it fuses
+    // into one unbroken main-thread block.
+    let live = 0
+    let peak = 0
+    renderMock.mockImplementation(async (id: string, source: string) => {
+      live += 1
+      peak = Math.max(peak, live)
+      await new Promise((resolve) => setTimeout(resolve, 0))
+      live -= 1
+      return { svg: `<svg data-id="${id}">${source}</svg>` }
+    })
+
+    await Promise.all(
+      ["one", "two", "three", "four"].map((source) => renderMermaidCached("default", source))
+    )
+
+    expect(peak).toBe(1)
+    expect(renderMock).toHaveBeenCalledTimes(4)
+  })
+
+  it("keeps a rejected render from stalling the queue behind it", async () => {
+    renderMock.mockRejectedValueOnce(new Error("bad syntax"))
+
+    await expect(renderMermaidCached("default", "broken")).rejects.toThrow("bad syntax")
+    await expect(renderMermaidCached("default", "fine")).resolves.toContain("<svg")
   })
 
   it("does not re-render a cached (theme, source) pair", async () => {

@@ -30,7 +30,7 @@
  * contravariant).
  */
 
-import { Children, isValidElement } from "react"
+import { Children, isValidElement, useState } from "react"
 import { useTranslations } from "next-intl"
 
 import { AlertBlock, parseAlertFromBlockquote } from "@/components/chat/renderers/alert-block"
@@ -83,6 +83,62 @@ function MarkdownDetails({ children }: { children: React.ReactNode }) {
     }
   })
   return <SafeDetailsBlock summary={summaryContent}>{restContent}</SafeDetailsBlock>
+}
+
+/**
+ * Rows rendered before a markdown table truncates itself.
+ *
+ * A tool that returns a query result can emit thousands of rows, and each one
+ * is a real `<tr>` with real cells — the benchmark's robustness tier measured
+ * multi-second frames on a single 5000-row table. The cap is render-only: the
+ * message text is untouched, so search, copy, export and the model's own view
+ * of the conversation all still see every row.
+ */
+export const TABLE_AUTO_RENDER_MAX_ROWS = 200
+
+/**
+ * A `<tbody>` that stops at `TABLE_AUTO_RENDER_MAX_ROWS` and offers the rest on
+ * request. A module-scope component (rather than a hook call inside the
+ * factory) so its identity is stable across `useMemo` recomputes, matching
+ * `MarkdownDetails` above.
+ */
+function MarkdownTableBody({ children }: { children?: React.ReactNode }) {
+  const t = useTranslations("chat.renderers.table")
+  const [showAll, setShowAll] = useState(false)
+  const rows = Children.toArray(children)
+  if (showAll || rows.length <= TABLE_AUTO_RENDER_MAX_ROWS) return <tbody>{children}</tbody>
+
+  return (
+    <tbody>
+      {rows.slice(0, TABLE_AUTO_RENDER_MAX_ROWS)}
+      <tr>
+        <td
+          colSpan={countRowCells(rows[0])}
+          className="border border-border bg-muted/40 px-4 py-2 text-xs"
+        >
+          <span className="text-muted-foreground">
+            {t("truncatedNotice", { shown: TABLE_AUTO_RENDER_MAX_ROWS, total: rows.length })}
+          </span>
+          <button
+            type="button"
+            onClick={() => setShowAll(true)}
+            className="ml-2 rounded px-2 py-1 font-medium text-primary hover:bg-primary/10 focus-visible:ring-2 focus-visible:ring-ring/70 focus-visible:outline-none"
+          >
+            {t("showAllRows")}
+          </button>
+        </td>
+      </tr>
+    </tbody>
+  )
+}
+
+/** Cell count of a rendered `<tr>`, so the notice spans the whole table. */
+export function countRowCells(row: React.ReactNode): number {
+  if (!isValidElement(row)) return 1
+  const cells = Children.toArray((row.props as { children?: React.ReactNode }).children).filter(
+    (child) => isValidElement(child)
+  )
+  return Math.max(1, cells.length)
 }
 
 /**
@@ -163,6 +219,9 @@ export function createSharedMarkdownComponents(options: SharedMarkdownComponentO
           <table className="min-w-full border-collapse border border-border">{children}</table>
         </div>
       )
+    },
+    tbody({ children }: MarkdownElementProps<"tbody">) {
+      return <MarkdownTableBody>{children}</MarkdownTableBody>
     },
     th({ children }: MarkdownElementProps<"th">) {
       return (

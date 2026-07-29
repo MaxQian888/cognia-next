@@ -329,9 +329,11 @@ describe("defaultAutomationSettings", () => {
     expect(s.perSurface.plugin.perPluginOverrides).toEqual({})
   })
 
-  it("includes behavior defaults (scaling off, dedup on, paste 200)", () => {
+  it("includes behavior defaults (scaling on, dedup on, paste 200)", () => {
     const s = defaultAutomationSettings()
-    expect(s.screenshotScaling).toEqual({ enabled: false, maxWidth: 1280, maxHeight: 800 })
+    // Mirrors `ScreenshotScalingSettings::default()` in cognia-automation —
+    // the two defaults must not disagree.
+    expect(s.screenshotScaling).toEqual({ enabled: true, maxWidth: 1280, maxHeight: 800 })
     expect(s.screenshotDedup).toBe(true)
     expect(s.alwaysHidePictureInPicture).toBe(false)
     expect(s.pasteThresholdChars).toBe(200)

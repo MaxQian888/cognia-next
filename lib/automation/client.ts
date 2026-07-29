@@ -616,7 +616,15 @@ export function defaultAutomationSettings(): AutomationSettings {
     },
     audit: { retentionDays: 30, exportEnabled: true },
     redactScreenshots: false,
-    screenshotScaling: { enabled: false, maxWidth: 1280, maxHeight: 800 },
+    // On by default. An un-scaled Retina frame inlines as several MB of base64
+    // into `messages.parts` and a session's worth costs gigabytes of renderer
+    // heap (`tests/e2e/mobile/chat-render-perf.baseline.json`). Click accuracy
+    // is unaffected: `coordinate-scaler.ts` maps model space back to physical
+    // pixels from the dims recorded on every screenshot. Must match
+    // `ScreenshotScalingSettings::default()` in the Rust crate — whichever side
+    // answers first wins, so a mismatch reads as scaling that depends on boot
+    // order.
+    screenshotScaling: { enabled: true, maxWidth: 1280, maxHeight: 800 },
     screenshotDedup: true,
     alwaysHidePictureInPicture: false,
     pasteThresholdChars: 200,

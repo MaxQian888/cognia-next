@@ -162,26 +162,56 @@ async function readJsHeap(page: Page): Promise<number | null> {
   }
 }
 
+interface ScrollMeasurement {
+  worstFrameMs: number
+  medianFrameMs: number
+  samples: number
+  /** Screens actually traversed before hitting the bottom. */
+  screens: number
+  /**
+   * How much the reported scroll height moved while sweeping. This is the
+   * virtualizer's estimate being corrected by real measurements: every row
+   * whose estimate was wrong shifts the total, and the shift is what a user
+   * feels as the content lurching under the cursor. Lower is better, and it is
+   * the metric the row-height estimator moves.
+   */
+  scrollHeightDriftPx: number
+}
+
 /**
- * Sweep the list from top to bottom in `steps` jumps, sampling the gap between
- * animation frames. Scripted rather than gesture-driven so the numbers are
- * comparable across runs; the frame gaps still capture the layout, decode and
- * highlight work each newly-revealed row triggers.
+ * Sweep the list one screen at a time, sampling the gap between animation
+ * frames.
+ *
+ * Stepping by a fixed *pixel* distance rather than a fixed fraction of the
+ * range is what makes runs comparable: improving the row-height estimator
+ * changes the virtual total, so a fraction-based sweep would silently cover
+ * more content per step and report the extra work as a regression.
  */
-async function measureScroll(
-  page: Page,
-  steps: number
-): Promise<{ worstFrameMs: number; medianFrameMs: number; samples: number }> {
+async function measureScroll(page: Page, maxScreens: number): Promise<ScrollMeasurement> {
   return page.evaluate(
-    async ({ selector, steps }) => {
+    async ({ selector, maxScreens }) => {
       const el = document.querySelector(selector) as HTMLElement | null
-      if (!el) return { worstFrameMs: -1, medianFrameMs: -1, samples: 0 }
+      if (!el) {
+        return {
+          worstFrameMs: -1,
+          medianFrameMs: -1,
+          samples: 0,
+          screens: 0,
+          scrollHeightDriftPx: -1,
+        }
+      }
       const gaps: number[] = []
       let last = performance.now()
-      const range = el.scrollHeight - el.clientHeight
+      let minHeight = el.scrollHeight
+      let maxHeight = el.scrollHeight
+      let screens = 0
 
-      for (let step = 0; step <= steps; step++) {
-        el.scrollTop = (range * step) / steps
+      const step = Math.max(1, el.clientHeight)
+      for (let i = 0; i <= maxScreens; i++) {
+        const target = step * i
+        if (target > el.scrollHeight - el.clientHeight) break
+        el.scrollTop = target
+        screens = i
         // Two frames per step: the first commits the scroll, the second
         // catches the work it scheduled (measure passes, image decode).
         for (let frame = 0; frame < 2; frame++) {
@@ -190,6 +220,8 @@ async function measureScroll(
               const now = performance.now()
               gaps.push(now - last)
               last = now
+              minHeight = Math.min(minHeight, el.scrollHeight)
+              maxHeight = Math.max(maxHeight, el.scrollHeight)
               done()
             })
           )
@@ -201,9 +233,11 @@ async function measureScroll(
         worstFrameMs: Math.round(sorted[sorted.length - 1] ?? 0),
         medianFrameMs: Math.round(sorted[Math.floor(sorted.length / 2)] ?? 0),
         samples: gaps.length,
+        screens,
+        scrollHeightDriftPx: Math.round(maxHeight - minHeight),
       }
     },
-    { selector: LOG, steps }
+    { selector: LOG, maxScreens }
   )
 }
 
@@ -248,7 +282,9 @@ test.describe("chat render performance", () => {
     })
     const openMs = Date.now() - openStart
 
-    const scroll = await measureScroll(page, 20)
+    // 40 screens: enough to traverse the perf tier end to end and to get well
+    // into the robustness tier, at a fixed cost per step.
+    const scroll = await measureScroll(page, 40)
     const longTasks = await readLongTasks(page)
     const snapshot = {
       tier: TIER_NAME,

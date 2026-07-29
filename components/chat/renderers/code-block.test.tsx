@@ -1,6 +1,6 @@
-import { render } from "@testing-library/react"
+import { fireEvent, render, waitFor } from "@testing-library/react"
 import { TooltipProvider } from "@/components/ui/tooltip"
-import { CodeBlock } from "./code-block"
+import { CODE_AUTO_RENDER_MAX_LINES, CodeBlock } from "./code-block"
 import { highlightCached, clearHighlightCache } from "@/lib/shiki/highlight-cache"
 
 // Delegate to the real cache by default (so the seed tests use real shiki-mock
@@ -176,6 +176,75 @@ describe("CodeBlock", () => {
       // Explicit per-line emphasis still uses the table (bg on chosen lines);
       // this opt-in path intentionally renders without Shiki colour.
       expect(container.querySelector("table")).toBeTruthy()
+    })
+  })
+
+  describe("oversized blocks", () => {
+    const hugeCode = Array.from(
+      { length: CODE_AUTO_RENDER_MAX_LINES + 500 },
+      (_, i) => `line ${i}`
+    ).join("\n")
+
+    it("renders only the first N lines of a huge block", () => {
+      const { container } = renderInProvider(
+        <CodeBlock code={hugeCode} showLineNumbers isStreaming />
+      )
+
+      const rows = container.querySelectorAll("tbody tr")
+      expect(rows).toHaveLength(CODE_AUTO_RENDER_MAX_LINES)
+      expect(container.textContent).toContain(`line ${CODE_AUTO_RENDER_MAX_LINES - 1}`)
+      expect(container.textContent).not.toContain(`line ${CODE_AUTO_RENDER_MAX_LINES}\n`)
+    })
+
+    it("highlights only the visible slice, not the whole block", async () => {
+      const highlightMock = highlightCached as jest.MockedFunction<typeof highlightCached>
+      highlightMock.mockClear()
+
+      renderInProvider(<CodeBlock code={hugeCode} language="ts" />)
+
+      await Promise.resolve()
+      for (const call of highlightMock.mock.calls) {
+        expect(call[0].split("\n")).toHaveLength(CODE_AUTO_RENDER_MAX_LINES)
+      }
+    })
+
+    it("offers a way out and renders everything once taken", () => {
+      const { container, getByRole } = renderInProvider(
+        <CodeBlock code={hugeCode} showLineNumbers isStreaming />
+      )
+
+      fireEvent.click(getByRole("button", { name: /show all/i }))
+
+      expect(container.querySelectorAll("tbody tr")).toHaveLength(CODE_AUTO_RENDER_MAX_LINES + 500)
+      // The escape hatch is spent, not sticky chrome.
+      expect(container.textContent).not.toMatch(/Showing the first/i)
+    })
+
+    it("leaves a block at the limit untouched", () => {
+      const atLimit = Array.from({ length: CODE_AUTO_RENDER_MAX_LINES }, (_, i) => `x${i}`).join(
+        "\n"
+      )
+      const { container, queryByRole } = renderInProvider(
+        <CodeBlock code={atLimit} showLineNumbers isStreaming />
+      )
+
+      expect(queryByRole("button", { name: /show all/i })).toBeNull()
+      expect(container.querySelectorAll("tbody tr")).toHaveLength(CODE_AUTO_RENDER_MAX_LINES)
+    })
+
+    it("copies the whole block, not the truncated view", async () => {
+      const writeText = jest.fn().mockResolvedValue(undefined)
+      Object.assign(navigator, { clipboard: { writeText } })
+
+      const { getAllByRole } = renderInProvider(<CodeBlock code={hugeCode} isStreaming />)
+      const copyButton = getAllByRole("button").find((b) =>
+        /copy/i.test(b.getAttribute("aria-label") ?? "")
+      )!
+      fireEvent.click(copyButton)
+
+      await waitFor(() => expect(writeText).toHaveBeenCalled())
+      // The cap is a render budget; the data is never truncated.
+      expect(writeText.mock.calls[0][0].split("\n")).toHaveLength(CODE_AUTO_RENDER_MAX_LINES + 500)
     })
   })
 })

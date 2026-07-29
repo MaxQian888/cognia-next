@@ -1031,8 +1031,10 @@
       "hideLines": "Hide lines",
       "hideLinesAria": "Hide line numbers",
       "plainText": "plain text",
+      "showAllLines": "Show all lines",
       "showLines": "Show lines",
       "showLinesAria": "Show line numbers",
+      "truncatedNotice": "Showing the first {shown, number} of {total, number} lines.",
       "unwrap": "Unwrap",
       "unwrapAria": "Disable word wrap",
       "wrap": "Wrap",
@@ -1097,10 +1099,16 @@
       "errorFallback": "Failed to render diagram",
       "exportSvg": "Export SVG",
       "hideSource": "Hide source",
+      "renderAnyway": "Render anyway",
       "retry": "Retry",
       "showSource": "Show source",
+      "tooLarge": "This diagram is large ({chars, number} characters) and may take a while to draw.",
       "viewFullscreen": "View fullscreen",
       "viewSource": "View source"
+    },
+    "table": {
+      "showAllRows": "Show all rows",
+      "truncatedNotice": "Showing the first {shown, number} of {total, number} rows."
     },
     "taskList": {
       "progress": "Progress"

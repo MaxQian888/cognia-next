@@ -1031,8 +1031,10 @@
       "hideLines": "隐藏行号",
       "hideLinesAria": "隐藏行号",
       "plainText": "纯文本",
+      "showAllLines": "显示全部行",
       "showLines": "显示行号",
       "showLinesAria": "显示行号",
+      "truncatedNotice": "已显示 {total, number} 行中的前 {shown, number} 行。",
       "unwrap": "取消换行",
       "unwrapAria": "取消自动换行",
       "wrap": "自动换行",
@@ -1097,10 +1099,16 @@
       "errorFallback": "图表渲染失败",
       "exportSvg": "导出 SVG",
       "hideSource": "隐藏源码",
+      "renderAnyway": "仍然渲染",
       "retry": "重试",
       "showSource": "查看源码",
+      "tooLarge": "这张图较大（{chars, number} 个字符），绘制可能需要一些时间。",
       "viewFullscreen": "全屏查看",
       "viewSource": "查看源码"
+    },
+    "table": {
+      "showAllRows": "显示全部行",
+      "truncatedNotice": "已显示 {total, number} 行中的前 {shown, number} 行。"
     },
     "taskList": {
       "progress": "进度"

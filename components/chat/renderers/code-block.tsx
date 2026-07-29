@@ -32,6 +32,18 @@ export interface CodeBlockProps {
   isStreaming?: boolean
 }
 
+/**
+ * Lines rendered before the block truncates itself.
+ *
+ * A tool that dumps a whole file can hand the transcript tens of thousands of
+ * lines. Every one of them is a Shiki parse and a DOM row, on the main thread,
+ * for a block the reader is usually scrolling past — the benchmark's
+ * robustness tier measured an 8-second frame on a single 10k-line fence. The
+ * cap is render-only: copy, download, search and export all still see the whole
+ * thing.
+ */
+export const CODE_AUTO_RENDER_MAX_LINES = 2000
+
 export const CodeBlock = memo(function CodeBlock({
   code,
   language,
@@ -45,15 +57,24 @@ export const CodeBlock = memo(function CodeBlock({
   const [isFullscreen, setIsFullscreen] = useState(false)
   const [wordWrap, setWordWrap] = useState(false)
   const [localShowLineNumbers, setLocalShowLineNumbers] = useState(showLineNumbers)
+  const [showAllLines, setShowAllLines] = useState(false)
   const { copied, copy } = useCopy({ logger: loggers.chat, scope: "chat" })
   const codeRef = useRef<HTMLPreElement>(null)
+
+  const allLines = code.split("\n")
+  const truncated = !showAllLines && allLines.length > CODE_AUTO_RENDER_MAX_LINES
+  // Everything downstream — highlighting included — works off the visible
+  // slice, so an oversized block costs no more than a capped one.
+  const visibleCode = truncated ? allLines.slice(0, CODE_AUTO_RENDER_MAX_LINES).join("\n") : code
 
   // Seed synchronously from the shared highlight cache: when a virtualized row
   // scrolls back into view, an already-highlighted snippet paints coloured on
   // the very first frame (no flash of unstyled <pre>). A cold snippet starts
   // null and fills in once the async pass below resolves.
   const [highlight, setHighlight] = useState<HighlightHtml | null>(() =>
-    language && code && !isStreaming ? (getCachedHighlight(code, language) ?? null) : null
+    language && visibleCode && !isStreaming
+      ? (getCachedHighlight(visibleCode, language) ?? null)
+      : null
   )
 
   useEffect(() => {
@@ -64,19 +85,19 @@ export const CodeBlock = memo(function CodeBlock({
     // visual gap; only the syntax colours are deferred. Theme/colour parity
     // with the streaming Streamdown view comes from `CHAT_CODE_THEME`, baked
     // into the cache.
-    if (!language || !code || isStreaming) {
+    if (!language || !visibleCode || isStreaming) {
       setHighlight(null)
       return
     }
 
-    const cached = getCachedHighlight(code, language)
+    const cached = getCachedHighlight(visibleCode, language)
     if (cached) {
       setHighlight(cached)
       return
     }
 
     let cancelled = false
-    void highlightCached(code, language)
+    void highlightCached(visibleCode, language)
       .then((result) => {
         if (!cancelled) setHighlight(result)
       })
@@ -87,12 +108,12 @@ export const CodeBlock = memo(function CodeBlock({
     return () => {
       cancelled = true
     }
-  }, [code, language, isStreaming])
+  }, [visibleCode, language, isStreaming])
 
   const highlightedHtml = highlight?.light ?? ""
   const darkHighlightedHtml = highlight?.dark ?? ""
 
-  const lines = code.split("\n")
+  const lines = truncated ? allLines.slice(0, CODE_AUTO_RENDER_MAX_LINES) : allLines
 
   const handleCopy = useCallback(async () => {
     await copy(code)
@@ -181,14 +202,16 @@ export const CodeBlock = memo(function CodeBlock({
                 </tbody>
               </table>
             ) : (
-              <span className={wordWrap ? "whitespace-pre-wrap" : "whitespace-pre"}>{code}</span>
+              <span className={wordWrap ? "whitespace-pre-wrap" : "whitespace-pre"}>
+                {visibleCode}
+              </span>
             )}
           </code>
         </pre>
       )
     },
     [
-      code,
+      visibleCode,
       language,
       langLabel,
       lines,
@@ -202,6 +225,24 @@ export const CodeBlock = memo(function CodeBlock({
       t,
     ]
   )
+
+  const truncationFooter = truncated ? (
+    <div className="flex items-center justify-between gap-2 border-t bg-muted/40 px-4 py-2 text-xs">
+      <span className="text-muted-foreground">
+        {t("truncatedNotice", {
+          shown: CODE_AUTO_RENDER_MAX_LINES,
+          total: allLines.length,
+        })}
+      </span>
+      <button
+        type="button"
+        onClick={() => setShowAllLines(true)}
+        className="rounded px-2 py-1 font-medium text-primary hover:bg-primary/10 focus-visible:ring-2 focus-visible:ring-ring/70 focus-visible:outline-none"
+      >
+        {t("showAllLines")}
+      </button>
+    </div>
+  ) : null
 
   return (
     <>
@@ -283,6 +324,7 @@ export const CodeBlock = memo(function CodeBlock({
         </div>
 
         {renderCode(false)}
+        {truncationFooter}
       </div>
 
       <Dialog open={isFullscreen} onOpenChange={setIsFullscreen}>
@@ -336,7 +378,10 @@ export const CodeBlock = memo(function CodeBlock({
             </DialogTitle>
           </DialogHeader>
 
-          <div className="flex-1 overflow-auto rounded-lg border">{renderCode(true)}</div>
+          <div className="flex-1 overflow-auto rounded-lg border">
+            {renderCode(true)}
+            {truncationFooter}
+          </div>
 
           <div className="text-xs text-muted-foreground pt-2">
             {t("footer", { lineCount: lines.length, charCount: code.length })}

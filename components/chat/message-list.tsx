@@ -23,6 +23,7 @@ import { useChatViewportStore, type JumpToMessage } from "@/stores/chat/chat-vie
 import { MessageSearchBar } from "./message-search-bar"
 import type { MessageSearchHit } from "@/lib/chat/message-search"
 import { findMessageAnchor } from "@/lib/chat/message-anchor"
+import { FALLBACK_ROW_PX, estimateMessageHeight } from "@/lib/chat/row-height-estimate"
 import { useJumpFlash } from "@/hooks/chat/use-jump-flash"
 import { useJumpHistory } from "@/hooks/chat/use-jump-history"
 import { JumpFlash } from "./jump-flash"
@@ -791,28 +792,35 @@ export function MessageList({
 }
 
 /**
- * Estimate a row's height for the TanStack virtualizer. Non-streaming rows
- * fall back to the default 200px until their ref-attached measureElement
- * runs; the streaming row uses a monotonically-growing projection so the
- * scroll position stays stable while tokens append (which is why we skip
- * the measureElement ref on that row — re-measuring per token causes a
- * jitter loop).
+ * Estimate a row's height for the TanStack virtualizer.
  *
- * Coefficient: 0.55px per character ≈ one line per 80 characters at the
- * chat column's typical mono+text mix. Adjust if the chat column width
- * changes materially.
+ * Non-streaming rows are estimated from their content (`estimateMessageHeight`,
+ * memoized per parts array) until their ref-attached measureElement runs. They
+ * used to take a flat 200px, which is roughly right for prose and badly wrong
+ * for anything carrying images, diagrams or a long fence — the shortfall shows
+ * up as the scroll position lurching as each row scrolls in and corrects
+ * itself.
+ *
+ * The streaming row keeps its own monotonically-growing projection rather than
+ * the content estimate: it is the one row with no measureElement ref (measuring
+ * per token causes a jitter loop), so its estimate must never decrease, and a
+ * content-derived number carries no such guarantee.
+ *
+ * Coefficient: 0.55px per character ≈ one line per 80 characters at the chat
+ * column's typical mono+text mix.
  */
 function estimateRowSize(index: number, streamingRowIndex: number, messages: UIMessage[]): number {
-  if (index !== streamingRowIndex) return 200
   const m = messages[index]
-  if (!m) return 200
+  // Also the thinking row, whose index is one past the end.
+  if (!m) return FALLBACK_ROW_PX
+  if (index !== streamingRowIndex) return estimateMessageHeight(m)
   let textLen = 0
   for (const part of m.parts) {
     const p = part as { type?: string; text?: string }
     if (p.type === "text" && typeof p.text === "string") textLen += p.text.length
     else if (p.type === "reasoning" && typeof p.text === "string") textLen += p.text.length
   }
-  // Monotonically non-decreasing: 200px floor + ~0.55px per char.
+  // Monotonically non-decreasing: 220px floor + ~0.55px per char.
   return Math.max(220, 220 + textLen * 0.55)
 }
 
