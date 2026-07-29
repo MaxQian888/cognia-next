@@ -34,6 +34,7 @@ export type DiagnosticCode =
   | "exprNotUpstream"
   | "credentialMissing"
   | "pluginUnavailable"
+  | "kindRetired"
   | "desktopOnlyInWeb"
   | "joinPolicyInLoop"
 

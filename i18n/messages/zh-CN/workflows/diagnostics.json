@@ -26,5 +26,6 @@
   "runWithWarnings": "运行中（含 {count} 条警告）。",
   "savedWithWarnings": "已保存（含 {count} 条警告）。",
   "selfParent": "节点不能将自身作为容器。",
-  "title": "问题"
+  "title": "问题",
+  "kindRetired": "该节点（{kind}）已在 {removedIn} 中移除，无法再运行。请改写这一步，或安装提供它的兼容插件。"
 }

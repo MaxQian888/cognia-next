@@ -2,7 +2,7 @@
  * @jest-environment jsdom
  */
 import { createEditorStore, EDITOR_HISTORY_LIMIT } from "./store"
-import type { VisualWorkflow } from "@/types/workflow/visual"
+import type { VisualWorkflow, WorkflowNodeKind } from "@/types/workflow/visual"
 import { addPluginCatalogEntry, __resetPluginCatalogForTesting } from "@/lib/workflow/nodes/catalog"
 import { workflowEditorRevision } from "./editor-revision"
 
@@ -1260,6 +1260,42 @@ describe("editor store — diagnostics", () => {
     const first = useStore.getState().recomputeDiagnostics()
     const second = useStore.getState().recomputeDiagnostics()
     expect(second).toBe(first)
+  })
+
+  it("passes a registry-backed availability predicate, so a retired kind is reported", () => {
+    // `isKindAvailable` is optional on the engine input and omitting it skips
+    // the check entirely — this store is its only production caller, so the
+    // check is dead unless the predicate is passed here.
+    const useStore = createEditorStore(emptyWorkflow())
+    const id = useStore.getState().addNode("trigger.manual", { x: 0, y: 0 })
+    // A saved workflow can hold a kind the build no longer provides; the
+    // editor has no way to author one, so rewrite the node directly. The cast
+    // is the point of the test — a retired kind has left `WorkflowNodeKind`,
+    // so only persisted data can still carry it.
+    const retiredKind = "action.github.runIssueLoop" as WorkflowNodeKind
+    useStore
+      .getState()
+      .setNodes(
+        useStore
+          .getState()
+          .nodes.map((n) => (n.id === id ? { ...n, data: { ...n.data, kind: retiredKind } } : n))
+      )
+
+    const result = useStore.getState().recomputeDiagnostics()
+    const retired = result.diagnostics.find((d) => d.code === "kindRetired")
+    expect(retired).toMatchObject({
+      severity: "error",
+      nodeId: id,
+      messageParams: { kind: "action.github.runIssueLoop", removedIn: "0.2.0" },
+    })
+  })
+
+  it("does not report a kind the registry still provides", () => {
+    const useStore = createEditorStore(emptyWorkflow())
+    useStore.getState().addNode("trigger.manual", { x: 0, y: 0 })
+    const result = useStore.getState().recomputeDiagnostics()
+    expect(result.diagnostics.some((d) => d.code === "kindRetired")).toBe(false)
+    expect(result.diagnostics.some((d) => d.code === "pluginUnavailable")).toBe(false)
   })
 
   it("debounces recompute via scheduleDiagnostics after a graph mutation", () => {

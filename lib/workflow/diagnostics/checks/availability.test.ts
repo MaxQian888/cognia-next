@@ -65,4 +65,32 @@ describe("checkKindAvailability", () => {
       messageParams: { kind: "action.connector.send" },
     })
   })
+
+  it("reports an unavailable retired kind as an error naming the removal version", () => {
+    const retired = node("a")
+    retired.type = "action.github.runIssueLoop" as WorkflowNode["type"]
+    const diags = checkKindAvailability(wf([retired]), () => false)
+    expect(diags).toHaveLength(1)
+    expect(diags[0]).toMatchObject({
+      severity: "error",
+      code: "kindRetired",
+      nodeId: "a",
+      messageParams: { kind: "action.github.runIssueLoop", removedIn: "0.2.0" },
+    })
+  })
+
+  it("stays silent for a retired kind whose compatibility plugin is installed", () => {
+    // The compat plugin re-registers the same kind strings, so availability
+    // must win — this workflow is not broken and must not be reported as such.
+    const retired = node("a")
+    retired.type = "action.github.runIssueLoop" as WorkflowNode["type"]
+    expect(checkKindAvailability(wf([retired]), () => true)).toEqual([])
+  })
+
+  it("still warns rather than erroring for an unavailable non-retired plugin kind", () => {
+    const third = node("a")
+    third.type = "action.acme.doThing" as WorkflowNode["type"]
+    const diags = checkKindAvailability(wf([third]), () => false)
+    expect(diags[0]).toMatchObject({ severity: "warning", code: "pluginUnavailable" })
+  })
 })

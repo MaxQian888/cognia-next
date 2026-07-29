@@ -406,3 +406,37 @@ describe("runtime parameter and timeout integrity", () => {
     expect(execute).not.toHaveBeenCalled()
   })
 })
+
+describe("runStep with no registered executor", () => {
+  async function inputForKind(kind: string): Promise<RunStepInput> {
+    const base = await buildInput({})
+    const missing: WorkflowNode = { ...node, type: kind as WorkflowNode["type"] }
+    return { ...base, node: missing, workflow: { ...base.workflow, nodes: [missing] } }
+  }
+
+  it("tells the user a retired kind was removed instead of naming a plugin to install", async () => {
+    const input = await inputForKind("action.github.runIssueLoop")
+    await expect(runStep(input)).rejects.toThrow(
+      /action\.github\.runIssueLoop was removed in 0\.2\.0/
+    )
+    // The advice for an uninstalled plugin would be actionable; for a retired
+    // kind it is not, so it must not appear.
+    await expect(runStep(await inputForKind("action.github.runIssueLoop"))).rejects.not.toThrow(
+      /No executor registered/
+    )
+  })
+
+  it("keeps the install-the-plugin message for an unavailable kind that was never retired", async () => {
+    const input = await inputForKind("action.acme.doThing")
+    await expect(runStep(input)).rejects.toThrow(/No executor registered for action\.acme\.doThing/)
+  })
+
+  it("records the failure as non-retryable on the run timeline", async () => {
+    await expect(runStep(await inputForKind("action.github.runIssueLoop"))).rejects.toThrow()
+    const events = await listRunEvents("run_1")
+    const failed = events.find((e) => e.type === "step_failed")
+    expect(failed).toBeDefined()
+    expect((failed?.payload as { retryable?: boolean })?.retryable).toBe(false)
+    expect((failed?.payload as { message?: string })?.message).toMatch(/removed in 0\.2\.0/)
+  })
+})

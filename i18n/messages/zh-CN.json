@@ -29062,6 +29062,7 @@
       "flowOutsideLoop": "{kind} 必须位于循环体内部。",
       "graphCycle": "处于环路中（{nodes}）。回边不会重复执行——请把需要循环的节点放进 Loop 容器内。",
       "joinPolicyInLoop": "循环体内的 Join 策略「{policy}」会被忽略——循环子图始终等待所有分支。需要 any/race 语义请把 Join 移到顶层。",
+      "kindRetired": "该节点（{kind}）已在 {removedIn} 中移除，无法再运行。请改写这一步，或安装提供它的兼容插件。",
       "missingParent": "所属容器（{parentId}）已不存在。",
       "missingTrigger": "没有触发器节点——该工作流只能手动启动。",
       "orphanNode": "无法从任何触发器到达，将永远不会运行。",

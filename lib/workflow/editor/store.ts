@@ -31,6 +31,7 @@ import type {
   WorkflowPublication,
   WorkflowSettings,
 } from "@/types/workflow/visual"
+import { WORKFLOW_NODE_KINDS } from "@/types/workflow/visual"
 import {
   reactFlowToWorkflow,
   workflowToReactFlow,
@@ -59,6 +60,7 @@ import type { PerformanceTier } from "./performance-tier"
 import type { LastRunSummary } from "@/lib/workflow/runtime/last-run-summary"
 import { runDiagnostics } from "@/lib/workflow/diagnostics/engine"
 import { EMPTY_DIAGNOSTICS, type DiagnosticsResult } from "@/lib/workflow/diagnostics/types"
+import { listRegisteredKinds } from "@/lib/workflow/nodes/registry"
 import { isTauri } from "@/lib/platform/detect"
 
 export interface EditorStateSnapshot {
@@ -1541,7 +1543,27 @@ export function createEditorStore(initial: VisualWorkflow): EditorStore {
         },
         recomputeDiagnostics: () => {
           const workflow = get().toWorkflow()
-          const result = runDiagnostics({ workflow, isWeb: !isTauri() })
+          // `isKindAvailable` is optional on the engine input, and omitting it
+          // silently skips `checkKindAvailability` — this is the only
+          // production caller, so the check never ran until it was passed.
+          //
+          // Availability is the union of what this build ships and what is
+          // registered right now, NOT the executor registry alone. Built-in
+          // executors register as an import side effect of the orchestrator,
+          // which the editor does not import; asking the registry alone would
+          // report every built-in node as an uninstalled plugin whenever the
+          // editor loads first. `WORKFLOW_NODE_KINDS` is the static taxonomy,
+          // so it answers the same regardless of load order.
+          //
+          // Node typeVersion is deliberately not consulted: a version mismatch
+          // is a different diagnostic, and asking about the kind alone keeps a
+          // node whose provider registered a newer version out of this report.
+          const available = new Set<string>([...WORKFLOW_NODE_KINDS, ...listRegisteredKinds()])
+          const result = runDiagnostics({
+            workflow,
+            isWeb: !isTauri(),
+            isKindAvailable: (kind) => available.has(kind),
+          })
           const prev = get().diagnostics
           if (diagnosticsSignature(prev) === diagnosticsSignature(result)) return prev
           set({ diagnostics: result })

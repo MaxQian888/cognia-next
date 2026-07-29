@@ -26,5 +26,6 @@
   "runWithWarnings": "Running with {count} warning(s).",
   "savedWithWarnings": "Saved with {count} warning(s).",
   "selfParent": "A node can't be its own container.",
-  "title": "Problems"
+  "title": "Problems",
+  "kindRetired": "This node ({kind}) was removed in {removedIn} and can no longer run. Re-author this step, or install the compatibility plugin that provides it."
 }

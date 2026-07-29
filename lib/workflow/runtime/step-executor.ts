@@ -12,6 +12,7 @@ import type {
   WorkflowRetryPolicy,
 } from "@/types/workflow/visual"
 import { getExecutor } from "@/lib/workflow/nodes/registry"
+import { retiredNodeKind } from "@/lib/workflow/nodes/retired-kinds"
 import { resolveDeep } from "./expression"
 import { IdempotencyCache } from "./idempotency"
 import type { RunLogger } from "./event-log"
@@ -142,9 +143,18 @@ export async function runStep(input: RunStepInput): Promise<StepExecution> {
 
   const reg = getExecutor(node.type, node.typeVersion)
   if (!reg) {
+    // A retired kind cannot be fixed by installing a plugin from this app, so
+    // it must not be reported as if it could. The editor's `kindRetired`
+    // diagnostic blocks the run before it starts; this covers the paths that
+    // do not go through the editor — scheduled runs, API-triggered runs, and
+    // a workflow whose provider was unregistered mid-run.
+    const retired = retiredNodeKind(node.type)
     const err = new Error(
-      `No executor registered for ${node.type}@${node.typeVersion}. ` +
-        `Install the plugin that provides it, or change the node type.`
+      retired
+        ? `Node kind ${node.type} was removed in ${retired.removedIn} and has no executor. ` +
+            `Re-author this step, or install the compatibility plugin that provides it.`
+        : `No executor registered for ${node.type}@${node.typeVersion}. ` +
+            `Install the plugin that provides it, or change the node type.`
     )
     await logger.stepFailed(node.id, { message: err.message, retryable: false })
     throw err
