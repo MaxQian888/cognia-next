@@ -15,6 +15,7 @@
 
 import { useEffect } from "react"
 import type { SeededWorkflowKind } from "./workflow-fixtures"
+import type { ChatPerfMediaOptions } from "./chat-perf-fixtures"
 
 export type MockBaseUrls = {
   anthropic?: string
@@ -49,11 +50,17 @@ declare global {
      * Long enough to exercise the virtualized path and the timeline minimap,
      * which is what the conversation-anchor specs need and what no amount of
      * jsdom can produce (it has no layout).
+     *
+     * `media` loads the conversation with the payload the render-performance
+     * benchmark measures — agent-sized screenshots as `file` parts, mermaid
+     * fences, and oversized table / code blocks. Omit it and the shape is
+     * exactly what it was before the benchmark existed.
      */
     __cogniaSeedConversation?: (draft: {
       turns: number
       title?: string
-    }) => Promise<{ sessionId: string; messageIds: string[] }>
+      media?: ChatPerfMediaOptions
+    }) => Promise<{ sessionId: string; messageIds: string[]; imageBytes: number }>
     __cogniaSeedSkill?: (draft: {
       name: string
       trigger?: string
@@ -284,31 +291,19 @@ export function ExposeTestGlobals(): null {
       window.__cogniaSeedConversation = async (draft) => {
         const { createSession } = await import("@/lib/db/sessions")
         const { persistMessages } = await import("@/lib/db/messages")
+        const { buildPerfConversation, createNoiseImageDataUrl } =
+          await import("./chat-perf-fixtures")
         const session = await createSession({ title: draft.title ?? "Anchors spec" })
-        const messages = []
-        for (let turn = 0; turn < draft.turns; turn++) {
-          messages.push({
-            id: `seed-u-${turn}`,
-            role: "user" as const,
-            parts: [{ type: "text" as const, text: `Question number ${turn}` }],
-            metadata: { sessionId: session.id, createdAt: Date.now() + turn * 2 },
-          })
-          messages.push({
-            id: `seed-a-${turn}`,
-            role: "assistant" as const,
-            parts: [
-              {
-                type: "text" as const,
-                // Long enough that a handful of turns overflow the viewport,
-                // which is the precondition for anything scroll-related.
-                text: `Answer number ${turn}. ${"filler ".repeat(40)}`,
-              },
-            ],
-            metadata: { sessionId: session.id, createdAt: Date.now() + turn * 2 + 1 },
-          })
-        }
+        const longEdge = draft.media?.imageLongEdge ?? 1568
+        const { messages, imageBytes } = buildPerfConversation({
+          sessionId: session.id,
+          turns: draft.turns,
+          media: draft.media,
+          makeImage: (index) => createNoiseImageDataUrl(longEdge, index + 1),
+          baseTime: Date.now(),
+        })
         await persistMessages(session.id, messages as never)
-        return { sessionId: session.id, messageIds: messages.map((m) => m.id) }
+        return { sessionId: session.id, messageIds: messages.map((m) => m.id), imageBytes }
       }
 
       window.__cogniaSeedTeam = async (draft) => {

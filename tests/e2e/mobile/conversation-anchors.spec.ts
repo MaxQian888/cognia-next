@@ -29,14 +29,8 @@ import { injectCapacitor } from "../helpers/inject-capacitor"
 /** Past VIRTUALIZE_THRESHOLD (40 messages) and long enough to overflow. */
 const TURNS = 30
 
-declare global {
-  interface Window {
-    __cogniaSeedConversation?: (draft: {
-      turns: number
-      title?: string
-    }) => Promise<{ sessionId: string; messageIds: string[] }>
-  }
-}
+// `__cogniaSeedConversation` is declared globally by `lib/dev/expose-test-globals.tsx`
+// (same TS program) — re-declaring it here would have to track that signature.
 
 async function seedConversation(page: Page): Promise<string> {
   // The bridge mounts in an effect, so it is not on `window` the instant the

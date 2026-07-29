@@ -1,0 +1,69 @@
+{
+  "$comment": [
+    "Committed baseline for tests/e2e/mobile/chat-render-perf.spec.ts, captured BEFORE any",
+    "of the image/chart rendering work. The spec writes its own run to the gitignored",
+    "test-results/; this file is the thing to diff against.",
+    "",
+    "Absolute timings are machine-bound (captured on an Apple Silicon laptop against the",
+    "Turbopack dev server) — read the RATIOS, not the milliseconds. The load-bearing",
+    "numbers are jsHeapUsedBytes / imageBytes (how far the payload amplifies) and",
+    "longTasks.worstMs (what the user feels as a freeze).",
+    "",
+    "Caveat on imageBytes: the seeder encodes full-frame noise, which is the worst case",
+    "for a given resolution — a real UI screenshot has flat regions and compresses better.",
+    "The perf tier's 72MB across 40 frames is therefore closer to what ~150 real 1568px",
+    "screenshots weigh. The amplification ratio is unaffected."
+  ],
+  "capturedAt": "2026-07-29",
+  "commit": "988dbdcaf",
+  "project": "mobile-pixel-7",
+  "runner": "pnpm dev (Turbopack), NODE_ENV=development",
+  "tiers": {
+    "perf": {
+      "config": {
+        "turns": 60,
+        "images": 40,
+        "imageLongEdge": 1568,
+        "charts": 12,
+        "chartNodes": 12,
+        "tableRows": 0,
+        "codeLines": 0
+      },
+      "messages": 120,
+      "imageBytes": 72171364,
+      "seedMs": 1014,
+      "openMs": 4658,
+      "jsHeapUsedBytes": 600050964,
+      "heapPerImageByte": 8.31,
+      "reactCommits": { "count": 164, "totalMs": 992 },
+      "longTasks": { "count": 15, "totalMs": 3215, "worstMs": 1124 },
+      "scroll": { "worstFrameMs": 90, "medianFrameMs": 32, "samples": 42 }
+    },
+    "robust": {
+      "config": {
+        "turns": 200,
+        "images": 150,
+        "imageLongEdge": 2560,
+        "charts": 40,
+        "chartNodes": 40,
+        "tableRows": 5000,
+        "codeLines": 10000
+      },
+      "messages": 404,
+      "imageBytes": 717067386,
+      "seedMs": 7441,
+      "openMs": 18196,
+      "jsHeapUsedBytes": 1864157420,
+      "heapPerImageByte": 2.6,
+      "reactCommits": { "count": 104, "totalMs": 18246 },
+      "longTasks": { "count": 30, "totalMs": 27141, "worstMs": 9179 },
+      "scroll": { "worstFrameMs": 8067, "medianFrameMs": 23, "samples": 42 }
+    }
+  },
+  "readings": [
+    "40 images inline as 72MB of base64 and cost 600MB of JS heap — the same bytes are held by the Dexie row, the Zustand store, the DOM attribute and the decoded bitmap at once.",
+    "The robustness tier does not crash on a desktop-class Chromium, but 18s to open, a 9.2s main-thread freeze and an 8.1s scroll frame make it unusable; a real iOS WKWebView (~1-1.5GB per tab) would be OOM-killed well before 1.86GB.",
+    "The robust tier's lower heap-per-byte ratio is not an improvement: Chromium is already under memory pressure and evicting decoded bitmaps, which is what the 8s scroll frame is — re-decoding on the way back.",
+    "Median scroll frame stays healthy in both tiers (32ms / 23ms). The cost is concentrated in a few catastrophic frames, so a median-based metric would have reported everything as fine."
+  ]
+}
