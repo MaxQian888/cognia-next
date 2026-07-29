@@ -2068,6 +2068,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "cognia-media"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "tauri",
+ "tempfile",
+ "thiserror 2.0.19",
+ "tokio",
+ "uuid",
+]
+
+[[package]]
 name = "cognia-net"
 version = "0.1.0"
 dependencies = [
@@ -2113,6 +2126,7 @@ dependencies = [
  "cognia-git",
  "cognia-instrument",
  "cognia-mcp-server",
+ "cognia-media",
  "cognia-net",
  "cognia-ocr",
  "cognia-plugin-runtime",

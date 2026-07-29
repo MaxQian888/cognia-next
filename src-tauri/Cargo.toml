@@ -85,6 +85,8 @@ cognia-secrets = { path = "../crates/cognia-secrets" }
 # ADR-0067 Tier B prep — proxy_config foundation (state + detection + WSS
 # dialer); `proxy_config/` stays as an app-side facade for the command shells.
 cognia-net = { path = "../crates/cognia-net" }
+# Native local-video metadata, frame extraction, trimming, and analysis.
+cognia-media = { path = "../crates/cognia-media" }
 # ADR-0067 Tier B — integrated terminal subsystem (portable-pty). Re-aliased
 # as `crate::terminal`; commands referenced from generate_handler!.
 cognia-terminal = { path = "../crates/cognia-terminal" }

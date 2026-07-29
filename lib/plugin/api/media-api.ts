@@ -197,6 +197,39 @@ export interface VideoExportOptions {
   onProgress?: (progress: ExportProgress) => void
 }
 
+export type VideoAnalysisMode = "keyframes" | "scene"
+
+export interface VideoAnalysisOptions {
+  mode?: VideoAnalysisMode
+  startTime?: number
+  endTime?: number
+  maxFrames?: number
+  width?: number
+  deduplicate?: boolean
+  duplicateThreshold?: number
+}
+
+export interface VideoAnalysisFrame {
+  path: string
+  timestamp: number
+  reason: "keyframe" | "scene-change" | "uniform-fallback"
+}
+
+export interface VideoAnalysisManifest {
+  sourcePath: string
+  outputDirectory: string
+  mode: VideoAnalysisMode
+  range: {
+    startTime: number
+    endTime: number
+  }
+  metadata: NativeVideoInfo
+  candidateCount: number
+  deduplicatedCount: number
+  frames: VideoAnalysisFrame[]
+  warnings: string[]
+}
+
 export interface ExportProgress {
   phase: "preparing" | "rendering" | "encoding" | "finalizing" | "complete" | "error"
   percent: number
@@ -256,6 +289,11 @@ export interface PluginMediaAPI {
       bitrate: number
       hasAudio: boolean
     }>
+    analyze: (
+      source: string | Blob | File,
+      options?: VideoAnalysisOptions
+    ) => Promise<VideoAnalysisManifest>
+    cleanupAnalysis: (manifest: VideoAnalysisManifest) => Promise<void>
     trim: (clipId: string, startTime: number, endTime: number) => Promise<VideoClip>
     concatenate: (clipIds: string[]) => Promise<VideoClip>
     applyEffect: (
@@ -690,7 +728,7 @@ function getHistogram(imageData: ImageData): {
   return { r, g, b, luminance }
 }
 
-interface NativeVideoInfo {
+export interface NativeVideoInfo {
   durationMs: number
   width: number
   height: number
@@ -698,6 +736,7 @@ interface NativeVideoInfo {
   codec: string
   fileSize: number
   hasAudio: boolean
+  sourceToken: string
 }
 
 interface NativeVideoProgressEvent {
@@ -711,6 +750,7 @@ interface NativeVideoProgressEvent {
 
 interface LocalVideoClipEntry {
   sourcePath: string
+  sourceToken?: string
   clip: VideoClip
 }
 
@@ -746,7 +786,6 @@ function ensurePathSource(source: string | Blob | File): string {
 }
 
 async function getNativeVideoInfo(sourcePath: string): Promise<NativeVideoInfo> {
-  // invoke-parity-exempt: native video pipeline not yet shipped in Rust; rejects at runtime by design
   return invoke<NativeVideoInfo>("video_get_info", { filePath: sourcePath })
 }
 
@@ -767,8 +806,8 @@ function buildVideoClip(sourcePath: string, info: NativeVideoInfo): VideoClip {
   }
 }
 
-function persistClip(clip: VideoClip, sourcePath: string): VideoClip {
-  localVideoClipRegistry.set(clip.id, { clip, sourcePath })
+function persistClip(clip: VideoClip, sourcePath: string, sourceToken?: string): VideoClip {
+  localVideoClipRegistry.set(clip.id, { clip, sourcePath, sourceToken })
   return clip
 }
 
@@ -790,13 +829,21 @@ function requireClip(clipId: string): LocalVideoClipEntry {
   return entry
 }
 
-function frameToImageData(frame: {
-  data: number[] | Uint8Array
-  width: number
-  height: number
-}): ImageData {
-  const bytes = frame.data instanceof Uint8Array ? frame.data : new Uint8Array(frame.data)
-  return new ImageData(new Uint8ClampedArray(bytes), frame.width, frame.height)
+function frameResponseToImageData(response: ArrayBuffer | Uint8Array): ImageData {
+  const bytes = response instanceof Uint8Array ? response : new Uint8Array(response)
+  if (bytes.byteLength < 8) {
+    throw new Error("Native video frame response is missing its dimension header")
+  }
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
+  const width = view.getUint32(0, true)
+  const height = view.getUint32(4, true)
+  const expectedLength = width * height * 4
+  if (bytes.byteLength !== expectedLength + 8) {
+    throw new Error(
+      `Native video frame response has ${bytes.byteLength - 8} pixels bytes; expected ${expectedLength}`
+    )
+  }
+  return new ImageData(new Uint8ClampedArray(bytes.slice(8)), width, height)
 }
 
 function toBlobPart(bytes: Uint8Array): ArrayBuffer {
@@ -1286,20 +1333,19 @@ export function createMediaAPI(pluginId: string, _manager: PluginManager): Plugi
       loadClip: async (source: string | Blob | File): Promise<VideoClip> => {
         const sourcePath = ensurePathSource(source)
         const info = await getNativeVideoInfo(sourcePath)
-        return persistClip(buildVideoClip(sourcePath, info), sourcePath)
+        return persistClip(buildVideoClip(sourcePath, info), sourcePath, info.sourceToken)
       },
 
       getFrame: async (clipId: string, time: number): Promise<ImageData> => {
-        // invoke-parity-exempt: native video pipeline not yet shipped in Rust; rejects at runtime by design
-        const frame = await invoke<{ data: number[] | Uint8Array; width: number; height: number }>(
-          "plugin_media_get_video_frame",
-          {
-            pluginId,
-            clipId,
-            time,
-          }
-        )
-        return frameToImageData(frame)
+        const entry = requireClip(clipId)
+        if (!entry.sourceToken) {
+          throw new Error(`Video clip is not backed by an authorized local source: ${clipId}`)
+        }
+        const frame = await invoke<ArrayBuffer>("plugin_media_get_video_frame", {
+          sourceToken: entry.sourceToken,
+          time,
+        })
+        return frameResponseToImageData(frame)
       },
 
       getMetadata: async (source: string | Blob | File) => {
@@ -1316,24 +1362,44 @@ export function createMediaAPI(pluginId: string, _manager: PluginManager): Plugi
         }
       },
 
+      analyze: async (
+        source: string | Blob | File,
+        options: VideoAnalysisOptions = {}
+      ): Promise<VideoAnalysisManifest> => {
+        const filePath = ensurePathSource(source)
+        const info = await getNativeVideoInfo(filePath)
+        return invoke<VideoAnalysisManifest>("video_analyze", {
+          options: {
+            sourceToken: info.sourceToken,
+            ...options,
+          },
+        })
+      },
+
+      cleanupAnalysis: async (manifest: VideoAnalysisManifest): Promise<void> => {
+        await invoke<void>("video_cleanup_analysis", {
+          outputDirectory: manifest.outputDirectory,
+        })
+      },
+
       trim: async (clipId: string, startTime: number, endTime: number): Promise<VideoClip> => {
         const entry = requireClip(clipId)
+        if (!entry.sourceToken) {
+          throw new Error(`Video clip is not backed by an authorized local source: ${clipId}`)
+        }
         const safeStart = Math.max(0, startTime)
         const safeEnd = Math.max(safeStart, endTime)
-        const outputPath = `${entry.sourcePath}.trim.${Date.now()}.mp4`
-        // invoke-parity-exempt: native video pipeline not yet shipped in Rust; rejects at runtime by design
-        const result = await invoke<{ outputPath?: string }>("video_trim", {
+        const result = await invoke<{ outputPath: string }>("video_trim", {
           options: {
-            inputPath: entry.sourcePath,
-            outputPath,
+            sourceToken: entry.sourceToken,
             startTime: safeStart,
             endTime: safeEnd,
             format: "mp4",
           },
         })
-        const trimmedPath = result.outputPath || outputPath
+        const trimmedPath = result.outputPath
         const info = await getNativeVideoInfo(trimmedPath)
-        return persistClip(buildVideoClip(trimmedPath, info), trimmedPath)
+        return persistClip(buildVideoClip(trimmedPath, info), trimmedPath, info.sourceToken)
       },
 
       concatenate: async (clipIds: string[]): Promise<VideoClip> => {
@@ -1674,6 +1740,8 @@ export function createMediaAPI(pluginId: string, _manager: PluginManager): Plugi
       loadClip: "media:video:read",
       getFrame: "media:video:read",
       getMetadata: "media:video:read",
+      analyze: "media:video:read",
+      cleanupAnalysis: "media:video:write",
       trim: "media:video:write",
       concatenate: "media:video:write",
       applyEffect: "media:video:write",

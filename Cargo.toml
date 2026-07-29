@@ -39,6 +39,10 @@ members = [
   # connectors/terminal/plugin_api extractions.
   "crates/cognia-secrets",
   "crates/cognia-net",
+  # Native local-video processing (FFmpeg/FFprobe discovery, probing, frame
+  # extraction, analysis, trimming) behind the plugin media API. Not part of the
+  # Tier-B list above — it unblocks none of those extractions.
+  "crates/cognia-media",
   # ADR-0067 Tier-B subsystem crates.
   "crates/cognia-terminal",
   "crates/cognia-subscription",

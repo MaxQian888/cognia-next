@@ -201,3 +201,30 @@ test("scanSource: tauri plugin-namespaced commands never match", () => {
   assert.equal(violations.length, 0)
   assert.equal(dynamicCount, 0)
 })
+
+test("scanSource: an exemption above a registered command is reported as stale", () => {
+  // The gate returned early on `registered.has(command)`, so a marker left
+  // behind after the command shipped was never looked at — and one claiming
+  // "native video pipeline not yet shipped in Rust" sat directly above an
+  // invoke of a command the same change registered.
+  const registered = new Set(["video_get_info"])
+  const src = `// invoke-parity-exempt: not shipped yet\ninvoke("video_get_info")`
+  const { violations, staleExempts } = scanSource("lib/x.ts", src, registered)
+  assert.equal(violations.length, 0)
+  assert.equal(staleExempts.length, 1)
+  assert.equal(staleExempts[0].command, "video_get_info")
+})
+
+test("scanSource: a registered command with no marker is not stale", () => {
+  const registered = new Set(["video_get_info"])
+  const { staleExempts } = scanSource("lib/x.ts", `invoke("video_get_info")`, registered)
+  assert.equal(staleExempts.length, 0)
+})
+
+test("scanSource: an exemption above an unregistered command stays valid", () => {
+  const registered = new Set()
+  const src = `// invoke-parity-exempt: still unimplemented\ninvoke("plugin_media_export_video")`
+  const { violations, staleExempts } = scanSource("lib/x.ts", src, registered)
+  assert.equal(violations.length, 0)
+  assert.equal(staleExempts.length, 0)
+})

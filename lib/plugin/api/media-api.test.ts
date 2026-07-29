@@ -473,13 +473,46 @@ describe("Media Registry", () => {
             codec: "h264",
             fileSize: 1024,
             hasAudio: true,
+            sourceToken: "authorized-source-token",
           }
         }
         if (command === "plugin_media_get_video_frame") {
+          const payload = new Uint8Array(8 + 4 * 2 * 2)
+          const header = new DataView(payload.buffer)
+          header.setUint32(0, 2, true)
+          header.setUint32(4, 2, true)
+          return payload.buffer
+        }
+        if (command === "video_analyze") {
           return {
-            data: new Uint8Array(4 * 2 * 2),
-            width: 2,
-            height: 2,
+            sourcePath: "/tmp/source.mp4",
+            outputDirectory: "/tmp/cognia-video/analysis-id",
+            mode: "scene",
+            range: { startTime: 2, endTime: 8 },
+            metadata: {
+              durationMs: 12_000,
+              width: 1920,
+              height: 1080,
+              fps: 30,
+              codec: "h264",
+              fileSize: 1024,
+              hasAudio: true,
+            },
+            candidateCount: 5,
+            deduplicatedCount: 2,
+            frames: [
+              {
+                path: "/tmp/cognia-video/analysis-id/frame-0001.jpg",
+                timestamp: 2,
+                reason: "scene-change",
+              },
+              {
+                path: "/tmp/cognia-video/analysis-id/frame-0004.jpg",
+                timestamp: 7.5,
+                reason: "scene-change",
+              },
+            ],
+            warnings: [],
           }
         }
         if (command === "plugin_media_concatenate_videos") {
@@ -503,13 +536,97 @@ describe("Media Registry", () => {
 
     it("should provide a real frame extraction path", async () => {
       const api = createMediaAPI(testPluginId, {} as never)
-      const imageData = await api.video.getFrame("clip-id", 1.5)
+      const clip = await api.video.loadClip("/tmp/source.mp4")
+      const imageData = await api.video.getFrame(clip.id, 1.5)
       expect(imageData).toBeInstanceOf(ImageData)
       expect(imageData.width).toBe(2)
       expect(invoke).toHaveBeenCalledWith(
         "plugin_media_get_video_frame",
-        expect.objectContaining({ clipId: "clip-id", time: 1.5 })
+        expect.objectContaining({
+          sourceToken: "authorized-source-token",
+          time: 1.5,
+        })
       )
+    })
+
+    it("should analyze a focused local-video range through the native pipeline", async () => {
+      const api = createMediaAPI(testPluginId, {} as never)
+      const manifest = await api.video.analyze("/tmp/source.mp4", {
+        mode: "scene",
+        startTime: 2,
+        endTime: 8,
+        maxFrames: 12,
+        deduplicate: true,
+      })
+
+      expect(manifest.frames).toHaveLength(2)
+      expect(manifest.frames[0]).toEqual(
+        expect.objectContaining({
+          timestamp: 2,
+          reason: "scene-change",
+        })
+      )
+      expect(invoke).toHaveBeenCalledWith("video_analyze", {
+        options: {
+          sourceToken: "authorized-source-token",
+          mode: "scene",
+          startTime: 2,
+          endTime: 8,
+          maxFrames: 12,
+          deduplicate: true,
+        },
+      })
+
+      await api.video.cleanupAnalysis(manifest)
+      expect(invoke).toHaveBeenCalledWith("video_cleanup_analysis", {
+        outputDirectory: "/tmp/cognia-video/analysis-id",
+      })
+    })
+
+    it("should use native analysis defaults when no options are provided", async () => {
+      const api = createMediaAPI(testPluginId, {} as never)
+
+      await api.video.analyze("/tmp/source.mp4")
+
+      expect(invoke).toHaveBeenCalledWith("video_analyze", {
+        options: {
+          sourceToken: "authorized-source-token",
+        },
+      })
+    })
+
+    it("should trim into a native-owned output without accepting a caller destination", async () => {
+      ;(invoke as jest.Mock).mockImplementation(async (command: string) => {
+        if (command === "video_get_info") {
+          return {
+            durationMs: 12_000,
+            width: 1920,
+            height: 1080,
+            fps: 30,
+            codec: "h264",
+            fileSize: 1024,
+            hasAudio: true,
+            sourceToken: "authorized-source-token",
+          }
+        }
+        if (command === "video_trim") {
+          return { outputPath: "/tmp/cognia-video/trims/trim-id.mp4" }
+        }
+        return undefined
+      })
+      const api = createMediaAPI(testPluginId, {} as never)
+      const clip = await api.video.loadClip("/tmp/source.mp4")
+
+      await api.video.trim(clip.id, 1, 3)
+
+      expect(invoke).toHaveBeenCalledWith("video_trim", {
+        options: {
+          sourceToken: "authorized-source-token",
+          startTime: 1,
+          endTime: 3,
+          format: "mp4",
+        },
+      })
     })
 
     it("should concatenate clips without throwing NOT_SUPPORTED", async () => {

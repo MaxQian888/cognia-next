@@ -1,4 +1,12 @@
-import type { FullPluginContext, PluginContext } from "./index"
+import type {
+  FullPluginContext,
+  NativeVideoInfo,
+  PluginContext,
+  VideoAnalysisFrame,
+  VideoAnalysisManifest,
+  VideoAnalysisMode,
+  VideoAnalysisOptions,
+} from "./index"
 
 describe("public FullPluginContext", () => {
   it("requires every API mounted by the full host context", () => {
@@ -28,5 +36,18 @@ describe("public FullPluginContext", () => {
     const assertNever = <Value extends never>(): Value | undefined => undefined
 
     expect(assertNever<MissingKeys>()).toBeUndefined()
+  })
+
+  it("exports the native video-analysis contract from the published context surface", () => {
+    const assertTypes = <
+      _T extends
+        | NativeVideoInfo
+        | VideoAnalysisFrame
+        | VideoAnalysisManifest
+        | VideoAnalysisMode
+        | VideoAnalysisOptions,
+    >(): void => undefined
+
+    expect(assertTypes).toBeDefined()
   })
 })

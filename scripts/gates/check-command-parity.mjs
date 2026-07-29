@@ -82,6 +82,7 @@ function lineNumberAt(src, index) {
 export function scanSource(relPath, src, registered) {
   const violations = []
   const badExempts = []
+  const staleExempts = []
   const lines = src.split("\n")
 
   const exemptState = (lineIdx) => {
@@ -95,9 +96,17 @@ export function scanSource(relPath, src, registered) {
 
   for (const m of src.matchAll(INVOKE_LITERAL_RE)) {
     const command = m[2]
-    if (registered.has(command)) continue
     const line = lineNumberAt(src, m.index)
     const exempt = exemptState(line - 1)
+    if (registered.has(command)) {
+      // The command shipped, but the marker saying it had not stayed behind.
+      // Worth failing on: the exemption is now a false statement sitting in the
+      // source, and only the absence of this check let one claim "native video
+      // pipeline not yet shipped in Rust" directly above an invoke of a
+      // command the same change registered.
+      if (exempt !== "none") staleExempts.push({ file: relPath, line, command })
+      continue
+    }
     if (exempt === "valid") continue
     if (exempt === "bare") {
       badExempts.push({ file: relPath, line, command })
@@ -107,7 +116,7 @@ export function scanSource(relPath, src, registered) {
   }
 
   const dynamicCount = [...src.matchAll(INVOKE_DYNAMIC_RE)].length
-  return { violations, badExempts, dynamicCount }
+  return { violations, badExempts, staleExempts, dynamicCount }
 }
 
 function main() {
@@ -116,6 +125,7 @@ function main() {
 
   const violations = []
   const badExempts = []
+  const staleExempts = []
   const invokedLiterals = new Set()
   let dynamicTotal = 0
 
@@ -125,12 +135,13 @@ function main() {
     const result = scanSource(rel, src, registered)
     violations.push(...result.violations)
     badExempts.push(...result.badExempts)
+    staleExempts.push(...result.staleExempts)
     dynamicTotal += result.dynamicCount
   }
 
   const neverInvoked = [...registered].filter((name) => !invokedLiterals.has(name))
 
-  if (violations.length === 0 && badExempts.length === 0) {
+  if (violations.length === 0 && badExempts.length === 0 && staleExempts.length === 0) {
     console.log(
       `[command-parity] OK: ${files.length} TS files audited, ` +
         `${invokedLiterals.size} distinct literal commands all registered ` +
@@ -168,7 +179,22 @@ function main() {
     console.error("")
   }
 
-  console.error(`[command-parity] ${violations.length + badExempts.length} issue(s).`)
+  if (staleExempts.length > 0) {
+    console.error(
+      `[command-parity] ${staleExempts.length} stale exempt marker(s) above a command ` +
+        `that IS registered:\n`
+    )
+    for (const v of staleExempts) {
+      console.error(
+        `  ${v.file}:${v.line}  invoke("${v.command}") — the exemption is no longer true`
+      )
+    }
+    console.error("\n  Delete the `// invoke-parity-exempt:` comment.\n")
+  }
+
+  console.error(
+    `[command-parity] ${violations.length + badExempts.length + staleExempts.length} issue(s).`
+  )
   return 1
 }
 

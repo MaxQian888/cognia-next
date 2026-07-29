@@ -131,6 +131,11 @@ export type {
   VideoExportOptions,
   ExportProgress,
   MediaProcessingResult,
+  NativeVideoInfo,
+  VideoAnalysisFrame,
+  VideoAnalysisManifest,
+  VideoAnalysisMode,
+  VideoAnalysisOptions,
 } from "@/lib/plugin/api/media-api"
 export type {
   PluginConnectorsAPI,
