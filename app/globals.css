@@ -310,6 +310,105 @@ html[data-reduce-motion="true"] *::after {
   }
 }
 
+/* ---------------------------------------------------------------------------
+   Essential-motion exemptions — the second half of the reduce-motion policy.
+
+   The guards above are deliberately blunt: they hit `*`, and they set
+   `animation-iteration-count: 1`. For decoration that is exactly right. For a
+   LOADING INDICATOR it is a bug: a spinner that runs one 1ms iteration and
+   stops is a frozen, broken-looking glyph, and a skeleton that pulses once and
+   stops is an inert grey box. The user is left with no evidence the app is
+   still working — reduced motion removes distraction, it must not remove
+   status. (Same reasoning the `.island-attention-ring` rules further down
+   already apply by hand; this generalises it.)
+
+   Three tiers, applied here:
+
+     1. DECORATIVE     — killed. Anything not listed below keeps the blunt
+                         behaviour: the shimmer sweep on the thinking label,
+                         avatar pulses, entrance reveals.
+     2. STATUS         — kept, because it is the feedback itself. Only
+                         `.animate-spin` (which in this repo is exclusively
+                         loader/refresh glyphs) and `[data-slot="skeleton"]`
+                         (emitted by `components/ui/skeleton.tsx`, so every
+                         call site is covered without touching one of them).
+     3. VESTIBULAR     — kept but stripped to opacity. `.animate-bounce` moves
+                         (translateY) and `.animate-ping` scales; both are the
+                         motion classes actually implicated in vestibular
+                         discomfort, so they keep signalling via fade alone.
+
+   Mechanics that are easy to get wrong here:
+     - Every rule must be repeated for ALL THREE guard paths. Miss the media
+       query and an OS-level reduce still freezes everything, which is the
+       majority case.
+     - Restoring `animation-duration` is not enough on its own — the guard also
+       pinned `animation-iteration-count: 1`, so a looping animation still runs
+       exactly once. Both have to come back.
+     - Specificity, not order, is what wins: `html.reduce-motion *` scores
+       (0,1,1) and `html.reduce-motion .animate-spin` scores (0,2,1). Both are
+       `!important`, so the more specific one takes it.
+     - Durations route through `--motion-duration-scale` so the speed
+       preference keeps applying; Tailwind's own `animate-*` utilities hard-code
+       their timing and would otherwise ignore it entirely.
+--------------------------------------------------------------------------- */
+
+/* Tier 2 — status feedback keeps running. */
+html.reduce-motion .animate-spin,
+html[data-reduce-motion="true"] .animate-spin {
+  animation-duration: calc(1s * var(--motion-duration-scale, 1)) !important;
+  animation-iteration-count: infinite !important;
+}
+
+html.reduce-motion [data-slot="skeleton"],
+html[data-reduce-motion="true"] [data-slot="skeleton"] {
+  animation-duration: calc(2s * var(--motion-duration-scale, 1)) !important;
+  animation-iteration-count: infinite !important;
+}
+
+/* Tier 3 — signal survives, the movement does not. */
+html.reduce-motion .animate-bounce,
+html.reduce-motion .animate-ping,
+html[data-reduce-motion="true"] .animate-bounce,
+html[data-reduce-motion="true"] .animate-ping {
+  animation-name: motion-safe-fade-pulse !important;
+  animation-duration: calc(1.4s * var(--motion-duration-scale, 1)) !important;
+  animation-timing-function: ease-in-out !important;
+  animation-iteration-count: infinite !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html:not([data-motion-respect="off"]) .animate-spin {
+    animation-duration: calc(1s * var(--motion-duration-scale, 1)) !important;
+    animation-iteration-count: infinite !important;
+  }
+
+  html:not([data-motion-respect="off"]) [data-slot="skeleton"] {
+    animation-duration: calc(2s * var(--motion-duration-scale, 1)) !important;
+    animation-iteration-count: infinite !important;
+  }
+
+  html:not([data-motion-respect="off"]) .animate-bounce,
+  html:not([data-motion-respect="off"]) .animate-ping {
+    animation-name: motion-safe-fade-pulse !important;
+    animation-duration: calc(1.4s * var(--motion-duration-scale, 1)) !important;
+    animation-timing-function: ease-in-out !important;
+    animation-iteration-count: infinite !important;
+  }
+}
+
+/* Opacity-only stand-in for the tier-3 classes. Never moves or scales the box,
+   so it cannot trigger the discomfort the originals can, and cannot shift
+   layout either. */
+@keyframes motion-safe-fade-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+
 /* Pro IDE shell-transition guard. The embedded code-server pane is a NATIVE
    child webview pinned over a reserved rect: it floats above the DOM, cannot be
    clipped or tweened by CSS, and its bounds are re-pushed over IPC roughly once

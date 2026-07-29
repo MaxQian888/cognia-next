@@ -1,9 +1,12 @@
 {
+  "cancel": "取消",
   "loading": "加载中…",
+  "offline": "当前离线 —— 网络恢复后会自动重试",
   "page": {
     "description": "正在准备你的工作区",
     "title": "加载中…"
   },
   "pageLoading": "加载中…",
+  "stillWorking": "仍在进行…（{seconds} 秒）",
   "thinking": "Claude 正在思考…"
 }

@@ -32,7 +32,12 @@ const MonacoDiff = dynamic(() => import("@monaco-editor/react").then((m) => m.Di
 function DiffLoading() {
   const t = useTranslations("sourceControl")
   return (
-    <div className="flex h-full items-center justify-center bg-muted/20 text-sm text-muted-foreground">
+    // The region announces, not the glyph: the label beside it is already the
+    // message, so a second live region on the spinner would say it twice.
+    <div
+      role="status"
+      className="flex h-full items-center justify-center bg-muted/20 text-sm text-muted-foreground"
+    >
       <Spinner className="mr-2 size-4" />
       {t("diff.loading")}
     </div>

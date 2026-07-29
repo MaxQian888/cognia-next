@@ -1,15 +1,22 @@
 "use client"
 
-import { Loader2, Bot, Sparkles, Search } from "lucide-react"
+import { Bot, Sparkles, Search } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { Skeleton } from "@/components/ui/skeleton"
+import { Spinner } from "@/components/ui/spinner"
 import { useLoadingI18n } from "@/hooks/ui/use-loading-i18n"
 
 interface LoadingSpinnerProps {
   size?: "sm" | "md" | "lg"
   className?: string
+  /**
+   * Accessible name. Omit inside a `LoadingRegion` or a labelled control — see
+   * `Spinner`, which this forwards to.
+   */
+  label?: string
 }
 
-export function LoadingSpinner({ size = "md", className }: LoadingSpinnerProps) {
+export function LoadingSpinner({ size = "md", className, label }: LoadingSpinnerProps) {
   const sizeClasses = {
     sm: "h-4 w-4",
     md: "h-6 w-6",
@@ -17,7 +24,7 @@ export function LoadingSpinner({ size = "md", className }: LoadingSpinnerProps) 
   }
 
   return (
-    <Loader2 className={cn("animate-spin text-muted-foreground", sizeClasses[size], className)} />
+    <Spinner label={label} className={cn("text-muted-foreground", sizeClasses[size], className)} />
   )
 }
 
@@ -158,9 +165,15 @@ export function PageLoading({ title, description }: PageLoadingProps) {
   return (
     <div className="flex flex-col items-center justify-center min-h-[400px] gap-4">
       <div className="relative">
-        <div className="absolute inset-0 rounded-full bg-primary/20 animate-ping" />
+        {/* Halo: pure decoration. Reduced motion downgrades it to an
+            opacity-only fade (globals.css tier 3) rather than killing it, so
+            the composition does not lose its centre of gravity. */}
+        <div
+          aria-hidden="true"
+          className="absolute inset-0 rounded-full bg-primary/20 animate-ping"
+        />
         <div className="relative flex items-center justify-center h-16 w-16 rounded-full bg-primary/10">
-          <Loader2 className="h-8 w-8 text-primary animate-spin" />
+          <Spinner className="h-8 w-8 text-primary" />
         </div>
       </div>
       <div className="text-center">
@@ -182,20 +195,27 @@ export function InlineLoading({ text, className }: InlineLoadingProps) {
 
   return (
     <span className={cn("inline-flex items-center gap-1.5 text-muted-foreground", className)}>
-      <Loader2 className="h-3 w-3 animate-spin" />
+      {/* Decorative: the adjacent text already says it. */}
+      <Spinner className="h-3 w-3" />
       <span className="text-sm">{label}</span>
     </span>
   )
 }
 
-// Chat-specific loading states
+// Chat-specific loading states.
+//
+// These use `Skeleton` rather than hand-rolled `bg-muted animate-pulse` divs.
+// The difference is not cosmetic: the reduce-motion tier in `globals.css` keys
+// its pulse exemption off `data-slot="skeleton"`, so a hand-rolled block would
+// freeze into an inert grey rectangle for anyone who has asked for reduced
+// motion, and would announce itself to a screen reader on top of that.
 export function MessageLoading() {
   return (
     <div className="flex items-start gap-3 p-4">
-      <div className="h-8 w-8 rounded-full bg-muted animate-pulse" />
+      <Skeleton className="h-8 w-8 rounded-full" />
       <div className="flex-1 space-y-2">
-        <div className="h-4 w-3/4 rounded bg-muted animate-pulse" />
-        <div className="h-4 w-1/2 rounded bg-muted animate-pulse" />
+        <Skeleton className="h-4 w-3/4" />
+        <Skeleton className="h-4 w-1/2" />
       </div>
     </div>
   )
@@ -206,8 +226,8 @@ export function SessionListLoading() {
     <div className="space-y-2 p-2">
       {[1, 2, 3, 4, 5].map((i) => (
         <div key={i} className="flex items-center gap-2 p-2 rounded-md">
-          <div className="h-4 w-4 rounded bg-muted animate-pulse" />
-          <div className="flex-1 h-4 rounded bg-muted animate-pulse" />
+          <Skeleton className="h-4 w-4" />
+          <Skeleton className="flex-1 h-4" />
         </div>
       ))}
     </div>
@@ -218,10 +238,10 @@ export function ArtifactPanelLoading() {
   return (
     <div className="flex flex-col h-full p-4">
       <div className="flex items-center gap-2 mb-4">
-        <div className="h-6 w-6 rounded bg-muted animate-pulse" />
-        <div className="h-5 w-32 rounded bg-muted animate-pulse" />
+        <Skeleton className="h-6 w-6" />
+        <Skeleton className="h-5 w-32" />
       </div>
-      <div className="flex-1 rounded-lg bg-muted animate-pulse" />
+      <Skeleton className="flex-1 rounded-lg" />
     </div>
   )
 }

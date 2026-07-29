@@ -9146,12 +9146,15 @@
     "title": "Cognia entry"
   },
   "loading": {
+    "cancel": "Cancel",
     "loading": "Loading…",
+    "offline": "You're offline — this will retry once the connection returns",
     "page": {
       "description": "Preparing your workspace",
       "title": "Loading…"
     },
     "pageLoading": "Loading…",
+    "stillWorking": "Still working… ({seconds}s)",
     "thinking": "Claude is thinking…"
   },
   "localeSwitcher": {
