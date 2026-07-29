@@ -22627,9 +22627,16 @@
         "clearConfirm": "Clear log",
         "clearConfirmDesc": "This removes all {count} rows from the audit log. The history cannot be recovered.",
         "clearConfirmTitle": "Clear MCP audit log?",
+        "deniedOnly": "Denied only",
         "description": "Newest 50 calls. Capped at 5000 total — older rows are pruned automatically.",
+        "detailAria": "Toggle details for {tool}",
         "empty": "No calls yet.",
+        "filterToolPlaceholder": "Filter by tool…",
         "latency": "Latency",
+        "latencyMs": "{ms}ms",
+        "reason": "Reason",
+        "rowLimit": "Rows",
+        "rowLimitValue": "{count} rows",
         "scope": "Scope",
         "status": "Status",
         "statusDeny": "DENY",
@@ -22642,7 +22649,40 @@
       "badgeIdle": "idle",
       "badgeLive": "live",
       "badgeWeb": "web",
+      "description": "Expose this app's knowledge and runtime to external MCP clients.",
       "loading": "Loading…",
+      "nav": {
+        "badgeScopesAria": "{granted} of {total} permission scopes granted",
+        "groups": {
+          "accessGroup": "Access",
+          "contentGroup": "Content",
+          "serviceGroup": "Service"
+        },
+        "items": {
+          "audit": {
+            "description": "Every call the bridge handled",
+            "label": "Audit log"
+          },
+          "scopes": {
+            "description": "What external clients may call",
+            "label": "Permission scopes"
+          },
+          "server": {
+            "description": "Enable the bridge and manage its token",
+            "label": "Server & token"
+          },
+          "setup": {
+            "description": "Config snippets for MCP clients",
+            "label": "Client setup"
+          },
+          "wiki": {
+            "description": "Rebuild and lint schedules",
+            "label": "Wiki maintenance"
+          }
+        },
+        "mobileTrigger": "Panels",
+        "title": "External Bridge settings"
+      },
       "scopeDescriptions": {
         "agent:dispatch": "⚠ Lets external agents run your built-in/plugin subagents or characters headlessly (tool loop + model calls). Returned text is PII-redacted. Default OFF.",
         "agent:team": "⚠ Lets external agents start an Agent Team headlessly — a multi-agent orchestration they couldn't otherwise reach. Default OFF.",
@@ -22666,6 +22706,20 @@
       },
       "scopes": {
         "description": "Each scope is opt-in. Default install ships with only the public-code wiki scopes enabled.",
+        "grantedCount": "{granted}/{total} granted",
+        "groups": {
+          "agent": "Agents",
+          "inbound": "Inbound",
+          "inbox": "Inbox",
+          "mcp": "Computer use",
+          "memory": "Memory",
+          "plugin": "Plugins",
+          "rag": "Retrieval",
+          "runtime": "Runtime",
+          "wiki": "Wiki"
+        },
+        "plannedBadge": "Planned",
+        "plannedReason": "Deferred past Phase 1: user-repository access needs per-repository consent, which does not exist yet. The scope stays in the API so handlers keep compiling, but it cannot be granted.",
         "title": "Permission scopes",
         "toggleAria": "Toggle {scope}"
       },
@@ -22673,6 +22727,9 @@
         "bearerTokenLabel": "Bearer token (HTTP only)",
         "copyTokenAria": "Copy token",
         "hide": "Hide",
+        "httpPort": "HTTP port",
+        "httpPortDiverged": "The listener is still on port {bound}. Restart the bridge to move it.",
+        "httpPortHelp": "Port the HTTP transport listens on. Used in the setup snippets below.",
         "regenerateWarning": "⚠ Regenerating invalidates the old token immediately.",
         "rotateConfirmAction": "Rotate token",
         "rotateConfirmCancel": "Cancel",
@@ -22686,18 +22743,24 @@
         "title": "MCP server",
         "toastServerStarted": "MCP HTTP server listening on 127.0.0.1:{port}",
         "toastServerStopped": "MCP server stopped.",
+        "toastSidecarMissing": "The MCP sidecar is not installed, so the bridge cannot start.",
         "toastTokenCopied": "Token copied to clipboard.",
         "toastTokenRegenerated": "New token generated. Old token is now invalid.",
         "toggleAriaLabel": "Enable MCP server",
-        "tokenNone": "(none)"
+        "tokenNone": "(none)",
+        "tokenRotatedAt": "Token last rotated {time}"
       },
       "setup": {
         "clientLabel": "Client",
         "copy": "Copy",
         "copyAria": "Copy snippet to clipboard",
         "description": "Pick a client and paste the snippet into its MCP configuration file. HTTP transport requires the Tauri sidecar to be running.",
+        "sidecarMissing": "The stdio sidecar is not installed, so this snippet has no command to run. Use the HTTP transport instead, or reinstall the app so the bundled sidecar is restored.",
+        "sidecarMissingPlaceholder": "'<'sidecar not installed>",
+        "sidecarResolving": "'<'resolving sidecar path…>",
         "title": "Setup snippet",
         "toastCopied": "Snippet copied.",
+        "tokenPlaceholder": "'<'paste-bearer-token>",
         "variantHelp": {
           "claude-desktop-http": "Edit Claude Desktop's claude_desktop_config.json and ensure the bridge HTTP transport is running. The bearer token rotates with the regenerate button above.",
           "claude-desktop-stdio": "Edit ~/Library/Application Support/Claude/claude_desktop_config.json (macOS) or %APPDATA%/Claude/claude_desktop_config.json (Windows). Restart Claude Desktop after saving.",
@@ -22711,6 +22774,7 @@
           "goose": "Goose"
         }
       },
+      "title": "External Bridge",
       "wikiIndex": {
         "articleCount": "Articles",
         "description": "Index the Cognia codebase so external agents can query it via MCP.",
@@ -22960,6 +23024,7 @@
       "copied": "Copied",
       "copy": "Copy",
       "copyKey": "Copy key",
+      "costUnknown": "—",
       "createKey": "Create key",
       "deleteKey": "Delete key",
       "deleteKeyConfirm": "Delete this key? Tools using it will stop working immediately.",
@@ -23012,6 +23077,7 @@
       "keysHeading": "API keys",
       "keysHelp": "Issue one scoped key per external tool. Each can be limited to specific models, given an expiry and its own rate limit, and disabled or deleted independently.",
       "lanWarning": "LAN binding exposes the gateway to your local network. Keep the IP allowlist tight and every key scoped — only allow-listed IPs with a valid key get through.",
+      "latencyMs": "{ms}ms",
       "listenerHeading": "Listener",
       "listenerHelp": "Where the gateway binds and who may reach it.",
       "liveBadge": "Applies immediately",
@@ -23032,6 +23098,8 @@
       "maxRetries": "Max attempts",
       "maxRetriesHelp": "Cap on candidates tried per request. 0 = walk the whole fallback chain.",
       "nav": {
+        "badgeNoKeyAria": "No usable API key",
+        "badgeParkedKeysAria": "{count, plural, one {# parked upstream key} other {# parked upstream keys}}",
         "groups": {
           "observabilityGroup": "Observability",
           "routingGroup": "Routing & protection",

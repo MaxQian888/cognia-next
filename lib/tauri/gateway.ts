@@ -23,6 +23,7 @@ import type {
   GatewayRoutingSnapshot,
   GatewaySnapshotEntry,
   GatewayStatus,
+  GatewayUpstreamProbeResult,
 } from "@/types/gateway"
 import { isAgentExecutionFlagEnabled } from "@/lib/ai/agent/execution/feature-flags"
 
@@ -47,6 +48,23 @@ export async function gatewayStart(): Promise<void> {
 /** Stop the listener. */
 export async function gatewayStop(): Promise<void> {
   await transport.call<void>("gateway_stop")
+}
+
+/**
+ * Run the upstream self-check for `model`, one row per resolved candidate.
+ *
+ * Goes over IPC rather than fetching the gateway's own `/healthz/upstream`
+ * route: that route is loopback-only AND the app CSP's `connect-src` admits no
+ * loopback origin, so the renderer cannot reach it directly. Rust probes
+ * through the live server state, so the calls share the rotation cursors,
+ * cooldown map and in-flight tally that real traffic uses.
+ *
+ * Every row is a real, billable upstream call — only ever call this from an
+ * explicit user action. Rejects when the gateway is stopped, no routing
+ * snapshot has been published, or the model resolves to no candidate.
+ */
+export async function gatewayProbeUpstream(model: string): Promise<GatewayUpstreamProbeResult[]> {
+  return transport.call<GatewayUpstreamProbeResult[]>("gateway_probe_upstream", { model })
 }
 
 // ---- API keys ---------------------------------------------------------------

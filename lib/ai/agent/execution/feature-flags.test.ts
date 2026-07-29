@@ -3,6 +3,8 @@ import {
   AGENT_EXECUTION_FLAGS,
   getAgentExecutionFlags,
   isAgentExecutionFlagEnabled,
+  setAgentExecutionFlag,
+  subscribeToAgentExecutionFlags,
 } from "./feature-flags"
 
 const STORAGE_KEY = "cognia-agent-execution-flags-v1"
@@ -76,5 +78,78 @@ describe("agent execution feature flags", () => {
       JSON.stringify({ agentExecutionResolverV2: "yes", unknownFlag: true })
     )
     expect(isAgentExecutionFlagEnabled("agentExecutionResolverV2")).toBe(false)
+  })
+
+  describe("setAgentExecutionFlag", () => {
+    it("turns a flag on and back off through the localStorage layer", () => {
+      expect(isAgentExecutionFlagEnabled("gatewayAgentRouteTickets")).toBe(false)
+
+      setAgentExecutionFlag("gatewayAgentRouteTickets", true)
+      expect(isAgentExecutionFlagEnabled("gatewayAgentRouteTickets")).toBe(true)
+
+      setAgentExecutionFlag("gatewayAgentRouteTickets", false)
+      expect(isAgentExecutionFlagEnabled("gatewayAgentRouteTickets")).toBe(false)
+    })
+
+    it("preserves other stored overrides when writing one flag", () => {
+      setAgentExecutionFlag("agentExecutionResolverV2", true)
+      setAgentExecutionFlag("gatewayAgentRouteTickets", true)
+
+      const flags = getAgentExecutionFlags()
+      expect(flags.agentExecutionResolverV2).toBe(true)
+      expect(flags.gatewayAgentRouteTickets).toBe(true)
+    })
+
+    it("writes an explicit false that overrides an env-enabled flag", () => {
+      // The stored layer sits ABOVE env, so a user turning the toggle off must
+      // win over a build that shipped the flag on.
+      process.env.NEXT_PUBLIC_GATEWAY_AGENT_ROUTE_TICKETS = "1"
+      expect(isAgentExecutionFlagEnabled("gatewayAgentRouteTickets")).toBe(true)
+
+      setAgentExecutionFlag("gatewayAgentRouteTickets", false)
+      expect(isAgentExecutionFlagEnabled("gatewayAgentRouteTickets")).toBe(false)
+    })
+
+    it("notifies subscribers so a UI can read through useSyncExternalStore", () => {
+      const listener = jest.fn()
+      const unsubscribe = subscribeToAgentExecutionFlags(listener)
+
+      setAgentExecutionFlag("gatewayAgentRouteTickets", true)
+      expect(listener).toHaveBeenCalledTimes(1)
+
+      setAgentExecutionFlag("gatewayAgentRouteTickets", false)
+      expect(listener).toHaveBeenCalledTimes(2)
+
+      unsubscribe()
+      setAgentExecutionFlag("gatewayAgentRouteTickets", true)
+      expect(listener).toHaveBeenCalledTimes(2)
+    })
+
+    it("still notifies when the write itself failed, so the UI can snap back", () => {
+      const setItem = jest.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+        throw new Error("QuotaExceededError")
+      })
+      const listener = jest.fn()
+      const unsubscribe = subscribeToAgentExecutionFlags(listener)
+
+      setAgentExecutionFlag("gatewayAgentRouteTickets", true)
+
+      expect(listener).toHaveBeenCalled()
+      expect(isAgentExecutionFlagEnabled("gatewayAgentRouteTickets")).toBe(false)
+
+      unsubscribe()
+      setItem.mockRestore()
+    })
+
+    it("survives a throwing localStorage rather than propagating", () => {
+      const setItem = jest.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+        throw new Error("QuotaExceededError")
+      })
+
+      expect(() => setAgentExecutionFlag("gatewayAgentRouteTickets", true)).not.toThrow()
+      expect(isAgentExecutionFlagEnabled("gatewayAgentRouteTickets")).toBe(false)
+
+      setItem.mockRestore()
+    })
   })
 })

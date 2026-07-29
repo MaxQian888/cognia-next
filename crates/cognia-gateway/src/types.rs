@@ -2,6 +2,7 @@
 //! mirror `types/gateway/index.ts` on the renderer side.
 
 use serde::{Deserialize, Serialize};
+use std::time::Duration;
 
 fn default_port() -> u16 {
     47823
@@ -46,6 +47,10 @@ fn default_disable_keywords() -> Vec<String> {
 
 fn default_concurrency_wait_ms() -> u32 {
     10_000
+}
+
+fn default_stream_idle_timeout_secs() -> u32 {
+    300
 }
 
 fn default_stripped_request_fields() -> Vec<String> {
@@ -158,6 +163,19 @@ pub struct GatewayConfig {
     /// rejected with 429. `0` = reject immediately (no queueing).
     #[serde(default = "default_concurrency_wait_ms")]
     pub concurrency_wait_ms: u32,
+    /// How long (seconds) an SSE pump tolerates TOTAL silence from the upstream
+    /// before abandoning the stream. `0` = wait forever.
+    ///
+    /// Streaming deliberately skips `request_timeout_secs` (a long generation is
+    /// not a hung one) and reqwest sets no read timeout, so without this an
+    /// upstream that accepts the connection and then never writes or closes
+    /// parks the pump task forever — holding its concurrency slots AND its
+    /// in-flight tally, which drives least-busy routing. Both upstream protocols
+    /// emit keepalives far more often than the 300 s default, so it fires only
+    /// on a genuinely dead connection. Setting `0` restores the old
+    /// park-forever behaviour and is not recommended.
+    #[serde(default = "default_stream_idle_timeout_secs")]
+    pub stream_idle_timeout_secs: u32,
 
     // ---- W3.2 outbound field stripping --------------------------------------
     /// Dotted-path fields stripped from every upstream request body (billing /
@@ -190,6 +208,7 @@ impl Default for GatewayConfig {
             max_concurrent_per_key: 0,
             max_concurrent_per_upstream_key: 0,
             concurrency_wait_ms: default_concurrency_wait_ms(),
+            stream_idle_timeout_secs: default_stream_idle_timeout_secs(),
             stripped_request_fields: default_stripped_request_fields(),
             field_strip_allow: Vec::new(),
         }
@@ -211,6 +230,17 @@ impl GatewayConfig {
             ));
         }
         Ok(())
+    }
+
+    /// How long an SSE pump waits on a silent upstream before abandoning it.
+    /// `None` when configured to `0` (wait forever — the pre-timeout
+    /// behaviour, which leaks concurrency slots and in-flight tally).
+    pub fn stream_idle_timeout(&self) -> Option<Duration> {
+        if self.stream_idle_timeout_secs == 0 {
+            None
+        } else {
+            Some(Duration::from_secs(self.stream_idle_timeout_secs as u64))
+        }
     }
 
     /// Whether a failed attempt with `status` should advance the failover
@@ -310,6 +340,7 @@ mod tests {
         assert_eq!(cfg.max_concurrent_per_key, 0);
         assert_eq!(cfg.max_concurrent_per_upstream_key, 0);
         assert_eq!(cfg.concurrency_wait_ms, 10_000);
+        assert_eq!(cfg.stream_idle_timeout_secs, 300);
         assert!(cfg
             .stripped_request_fields
             .iter()
@@ -337,6 +368,7 @@ mod tests {
             max_concurrent_per_key: 4,
             max_concurrent_per_upstream_key: 2,
             concurrency_wait_ms: 5_000,
+            stream_idle_timeout_secs: 90,
             stripped_request_fields: vec!["service_tier".into()],
             field_strip_allow: vec!["openai:service_tier".into()],
         };
@@ -352,6 +384,7 @@ mod tests {
         assert_eq!(json["maxConcurrentPerKey"], 4);
         assert_eq!(json["maxConcurrentPerUpstreamKey"], 2);
         assert_eq!(json["concurrencyWaitMs"], 5_000);
+        assert_eq!(json["streamIdleTimeoutSecs"], 90);
         assert_eq!(json["fieldStripAllow"][0], "openai:service_tier");
         let back: GatewayConfig = serde_json::from_value(json).unwrap();
         assert_eq!(back.port, 50001);
@@ -379,11 +412,29 @@ mod tests {
         assert_eq!(back.cooldown_fallback_secs, 20);
         assert_eq!(back.overload_cooldown_secs, 600);
         assert_eq!(back.concurrency_wait_ms, 10_000);
+        // A config written before the field existed must still get the bounded
+        // idle timeout — defaulting it to 0 would silently restore the
+        // park-forever pump for every existing install.
+        assert_eq!(back.stream_idle_timeout_secs, 300);
         assert!(back.stripped_request_fields.iter().any(|f| f == "store"));
         assert!(back
             .disable_keywords
             .iter()
             .any(|k| k == "account_deactivated"));
+    }
+
+    #[test]
+    fn stream_idle_timeout_maps_zero_to_wait_forever() {
+        let mut cfg = GatewayConfig::default();
+        assert_eq!(cfg.stream_idle_timeout(), Some(Duration::from_secs(300)));
+
+        cfg.stream_idle_timeout_secs = 45;
+        assert_eq!(cfg.stream_idle_timeout(), Some(Duration::from_secs(45)));
+
+        // `0` is the documented opt-out, not "time out instantly" — an
+        // instant timeout would abort every stream before its first byte.
+        cfg.stream_idle_timeout_secs = 0;
+        assert_eq!(cfg.stream_idle_timeout(), None);
     }
 
     #[test]

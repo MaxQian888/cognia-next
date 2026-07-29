@@ -5,20 +5,36 @@
  *
  * Reads the durable `gatewayRequestLog` Dexie table (fed by `GatewayProvider`
  * from the `gateway://request-log` event) via a live query, with outcome +
- * model filters, usage summary tiles, and a clear action — the newapi "Logs"
- * page equivalent.
+ * model + key filters, usage summary tiles, and a clear action — the newapi
+ * "Logs" page equivalent.
+ *
+ * `GatewayRequestLogRow` has always carried `error`, `route`, `remoteIp` and
+ * `stream`; none of them were rendered, so a failing request showed a red
+ * status badge and nothing else to act on. They are now on an expandable
+ * detail row. Cost comes from `estimateCallCostUsd` — the same estimator the
+ * routed workflow nodes price with, not a second implementation.
  */
 
-import { useEffect, useState } from "react"
-import { useTranslations } from "next-intl"
+import { useEffect, useMemo, useState } from "react"
+import { useFormatter, useTranslations } from "next-intl"
 import { useLiveQuery } from "dexie-react-hooks"
-import { Trash2Icon } from "lucide-react"
+import { ChevronRightIcon, Trash2Icon } from "lucide-react"
 import { toast } from "sonner"
 
+import { estimateCallCostUsd } from "@cognia/provider-core/providers/model-pricing"
+import { MotionCollapse, MotionReveal } from "@/components/chat/motion/motion-reveal"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
+import { cn } from "@/lib/utils"
 import {
   clearGatewayRequestLog,
   listGatewayRequestLog,
@@ -26,16 +42,19 @@ import {
   type GatewayRequestLogFilter,
 } from "@/lib/db/gateway-request-log"
 import { gatewayListKeys } from "@/lib/tauri/gateway"
-import type { GatewayApiKeyRedacted } from "@/types/gateway"
+import type { GatewayApiKeyRedacted, GatewayRequestLogRow } from "@/types/gateway"
 
 type Outcome = "all" | "ok" | "errors"
+
+const ALL_KEYS = "all"
 
 export function GatewayLogViewer() {
   const t = useTranslations("settings.gateway")
   const [outcome, setOutcome] = useState<Outcome>("all")
   const [model, setModel] = useState("")
-  const [keyFilter, setKeyFilter] = useState("all")
+  const [keyFilter, setKeyFilter] = useState(ALL_KEYS)
   const [keys, setKeys] = useState<GatewayApiKeyRedacted[]>([])
+  const [expanded, setExpanded] = useState<string | null>(null)
 
   useEffect(() => {
     // Key id → name map for the log's Key column + filter dropdown.
@@ -54,11 +73,16 @@ export function GatewayLogViewer() {
       const filter: GatewayRequestLogFilter = { limit: 100 }
       if (outcome !== "all") filter.outcome = outcome
       if (model.trim()) filter.model = model.trim()
-      if (keyFilter !== "all") filter.keyId = keyFilter
+      if (keyFilter !== ALL_KEYS) filter.keyId = keyFilter
       return listGatewayRequestLog(filter)
     }, [outcome, model, keyFilter]) ?? []
 
   const summary = summarizeGatewayUsage(rows)
+  // "Arrived while you were watching" — anything logged after the panel opened.
+  // Derived from the row's own timestamp rather than by diffing renders, so a
+  // filter change (which re-orders the whole table) animates nothing, and
+  // opening the panel does not slide a hundred historical rows in at once.
+  const [openedAt] = useState(() => Date.now())
 
   const onClear = async () => {
     await clearGatewayRequestLog().catch(() => {})
@@ -79,7 +103,10 @@ export function GatewayLogViewer() {
       </CardHeader>
       <CardContent className="space-y-3">
         {/* Usage summary */}
-        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4" data-testid="gateway-usage-summary">
+        <div
+          className="grid grid-cols-2 gap-2 @lg/gateway-pane:grid-cols-4"
+          data-testid="gateway-usage-summary"
+        >
           <SummaryTile label={t("summaryRequests")} value={String(summary.requests)} />
           <SummaryTile label={t("summaryErrors")} value={String(summary.errors)} />
           <SummaryTile
@@ -110,19 +137,21 @@ export function GatewayLogViewer() {
             className="h-8 w-40 text-xs"
             onChange={(e) => setModel(e.target.value)}
           />
-          <select
-            value={keyFilter}
-            aria-label={t("colKey")}
-            className="h-8 rounded-md border bg-background px-2 text-xs"
-            onChange={(e) => setKeyFilter(e.target.value)}
-          >
-            <option value="all">{t("logFilterAllKeys")}</option>
-            {keys.map((k) => (
-              <option key={k.id} value={k.id}>
-                {k.name}
-              </option>
-            ))}
-          </select>
+          {/* shadcn Select, not a bare <select>: this was the only native one
+              left in the repo and it ignored the app theme. */}
+          <Select value={keyFilter} onValueChange={setKeyFilter}>
+            <SelectTrigger className="h-8 w-44 text-xs" aria-label={t("colKey")}>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={ALL_KEYS}>{t("logFilterAllKeys")}</SelectItem>
+              {keys.map((k) => (
+                <SelectItem key={k.id} value={k.id}>
+                  {k.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </div>
 
         {/* Rows */}
@@ -133,6 +162,7 @@ export function GatewayLogViewer() {
             <table className="w-full text-xs" data-testid="gateway-log">
               <thead className="text-muted-foreground">
                 <tr className="border-b text-left">
+                  <th className="w-6 py-1" />
                   <th className="py-1 pr-2 font-medium">{t("colTime")}</th>
                   <th className="py-1 pr-2 font-medium">{t("colModel")}</th>
                   <th className="py-1 pr-2 font-medium">{t("colProvider")}</th>
@@ -140,31 +170,19 @@ export function GatewayLogViewer() {
                   <th className="py-1 pr-2 font-medium">{t("colStatus")}</th>
                   <th className="py-1 pr-2 font-medium">{t("colLatency")}</th>
                   <th className="py-1 pr-2 font-medium">{t("colTokens")}</th>
+                  <th className="py-1 pr-2 font-medium">{t("colCost")}</th>
                 </tr>
               </thead>
               <tbody className="font-mono">
                 {rows.map((r) => (
-                  <tr key={r.id} className="border-b/50 border-b">
-                    <td className="whitespace-nowrap py-1 pr-2 text-muted-foreground">
-                      {new Date(r.at).toLocaleTimeString()}
-                    </td>
-                    <td className="max-w-[8rem] truncate py-1 pr-2">{r.model ?? "—"}</td>
-                    <td className="max-w-[7rem] truncate py-1 pr-2 text-muted-foreground">
-                      {r.providerId ?? "—"}
-                    </td>
-                    <td className="max-w-[7rem] truncate py-1 pr-2 text-muted-foreground">
-                      {keyName(r.keyId)}
-                    </td>
-                    <td className="py-1 pr-2">
-                      <Badge variant={r.status < 400 ? "secondary" : "destructive"}>
-                        {r.status}
-                      </Badge>
-                    </td>
-                    <td className="py-1 pr-2 text-muted-foreground">{r.latencyMs}ms</td>
-                    <td className="py-1 pr-2 text-muted-foreground">
-                      {(r.inputTokens ?? 0) + " / " + (r.outputTokens ?? 0)}
-                    </td>
-                  </tr>
+                  <LogRow
+                    key={r.id}
+                    row={r}
+                    keyName={keyName(r.keyId)}
+                    isFresh={new Date(r.at).getTime() > openedAt}
+                    isExpanded={expanded === r.id}
+                    onToggle={() => setExpanded((cur) => (cur === r.id ? null : r.id))}
+                  />
                 ))}
               </tbody>
             </table>
@@ -172,6 +190,108 @@ export function GatewayLogViewer() {
         )}
       </CardContent>
     </Card>
+  )
+}
+
+function LogRow({
+  row,
+  keyName,
+  isFresh,
+  isExpanded,
+  onToggle,
+}: {
+  row: GatewayRequestLogRow
+  keyName: string
+  isFresh: boolean
+  isExpanded: boolean
+  onToggle: () => void
+}) {
+  const t = useTranslations("settings.gateway")
+  const format = useFormatter()
+  const cost = useMemo(() => {
+    if (!row.providerId || !row.model) return undefined
+    return estimateCallCostUsd({
+      providerId: row.providerId,
+      modelId: row.model,
+      inputTokens: row.inputTokens ?? 0,
+      outputTokens: row.outputTokens ?? 0,
+    })
+  }, [row.providerId, row.model, row.inputTokens, row.outputTokens])
+
+  return (
+    <>
+      <tr className="border-b">
+        <td className="py-1">
+          <button
+            type="button"
+            onClick={onToggle}
+            aria-expanded={isExpanded}
+            aria-label={t("logRowDetailAria", { id: row.id })}
+            className="rounded-sm p-0.5 text-muted-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+          >
+            <ChevronRightIcon
+              className={cn("size-3.5 transition-transform", isExpanded && "rotate-90")}
+              aria-hidden
+            />
+          </button>
+        </td>
+        <td className="whitespace-nowrap py-1 pr-2 text-muted-foreground">
+          {/* Only genuinely new rows animate; a filter change re-orders the whole
+              table and animating 100 rows there drops frames while scrolling. */}
+          <MotionReveal disabled={!isFresh}>
+            <span>{new Date(row.at).toLocaleTimeString()}</span>
+          </MotionReveal>
+        </td>
+        <td className="max-w-[8rem] truncate py-1 pr-2">{row.model ?? "—"}</td>
+        <td className="max-w-[7rem] truncate py-1 pr-2 text-muted-foreground">
+          {row.providerId ?? "—"}
+        </td>
+        <td className="max-w-[7rem] truncate py-1 pr-2 text-muted-foreground">{keyName}</td>
+        <td className="py-1 pr-2">
+          <Badge variant={row.status < 400 ? "secondary" : "destructive"}>{row.status}</Badge>
+        </td>
+        <td className="py-1 pr-2 text-muted-foreground">{t("latencyMs", { ms: row.latencyMs })}</td>
+        <td className="py-1 pr-2 text-muted-foreground">
+          {(row.inputTokens ?? 0) + " / " + (row.outputTokens ?? 0)}
+        </td>
+        <td className="py-1 pr-2 text-muted-foreground" data-testid={`gateway-log-cost-${row.id}`}>
+          {/* Upstream LLM pricing is quoted in USD, so the currency is fixed —
+              but the grouping, decimal separator and symbol placement are not,
+              and `$0.0123` hard-coded en-US into every locale. */}
+          {cost === undefined
+            ? t("costUnknown")
+            : format.number(cost, {
+                style: "currency",
+                currency: "USD",
+                minimumFractionDigits: 4,
+                maximumFractionDigits: 4,
+              })}
+        </td>
+      </tr>
+      <tr>
+        <td colSpan={9} className="p-0">
+          <MotionCollapse open={isExpanded}>
+            <dl
+              className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 bg-muted/40 px-3 py-2 text-[11px]"
+              data-testid={`gateway-log-detail-${row.id}`}
+            >
+              <dt className="text-muted-foreground">{t("colRoute")}</dt>
+              <dd className="truncate">{row.route}</dd>
+              <dt className="text-muted-foreground">{t("colRemoteIp")}</dt>
+              <dd className="truncate">{row.remoteIp}</dd>
+              <dt className="text-muted-foreground">{t("colStream")}</dt>
+              <dd>{row.stream ? t("streamYes") : t("streamNo")}</dd>
+              {row.error && (
+                <>
+                  <dt className="text-muted-foreground">{t("colError")}</dt>
+                  <dd className="whitespace-pre-wrap break-all text-destructive">{row.error}</dd>
+                </>
+              )}
+            </dl>
+          </MotionCollapse>
+        </td>
+      </tr>
+    </>
   )
 }
 

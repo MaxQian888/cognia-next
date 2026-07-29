@@ -44,6 +44,15 @@ export interface ClampedNumberInputProps extends Omit<
   onCommit: (next: number) => void
   /** Round to a whole number before committing. Defaults to false. */
   integer?: boolean
+  /**
+   * Commit an already-in-range draft on every keystroke. Defaults to true,
+   * which is what live-preview settings (terminal font size) want.
+   *
+   * Set false where a commit is expensive rather than instant — the gateway's
+   * fields each cost one Tauri IPC plus a disk write, so per-keystroke commits
+   * turn one edit into five writes. Blur and Enter still commit.
+   */
+  commitWhileTyping?: boolean
 }
 
 /** Clamp + optionally round, mirroring what the committed value will be. */
@@ -58,6 +67,7 @@ export function ClampedNumberInput({
   max,
   onCommit,
   integer = false,
+  commitWhileTyping = true,
   step,
   onBlur,
   onKeyDown,
@@ -100,6 +110,7 @@ export function ClampedNumberInput({
       onChange={(e) => {
         const raw = e.target.value
         setDraft(raw)
+        if (!commitWhileTyping) return
         const parsed = Number(raw)
         if (raw.trim() === "" || !Number.isFinite(parsed)) return
         // Only in-range drafts commit while typing; out-of-range prefixes wait

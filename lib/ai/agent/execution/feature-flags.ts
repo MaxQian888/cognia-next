@@ -83,3 +83,62 @@ export function getAgentExecutionFlags(): Record<AgentExecutionFlag, boolean> {
 export function isAgentExecutionFlagEnabled(flag: AgentExecutionFlag): boolean {
   return getAgentExecutionFlags()[flag]
 }
+
+/**
+ * Persist an override for one flag into the localStorage layer.
+ *
+ * Until this existed the module was read-only in practice: defaults are all
+ * OFF, `NEXT_PUBLIC_*` is fixed at build time, and nothing ever wrote the
+ * localStorage key — so any surface gated on a flag could never be switched on
+ * from inside the app. Settings → Gateway → Route tickets is the first caller.
+ *
+ * Writes the FULL resolved override map rather than a single key so a flag the
+ * env had flipped on stays on after an unrelated flag is toggled. No-ops
+ * without `window` (headless brain, node tests) — env remains the only layer
+ * there.
+ */
+export function setAgentExecutionFlag(flag: AgentExecutionFlag, value: boolean): void {
+  if (typeof window === "undefined") return
+  const next = { ...readStoredFlags(), [flag]: value }
+  try {
+    window.localStorage.setItem(AGENT_EXECUTION_FLAGS_KEY, JSON.stringify(next))
+  } catch {
+    // Private-mode / quota-exceeded: subscribers re-read through
+    // getAgentExecutionFlags(), so a failed write surfaces as the toggle
+    // snapping back rather than a lie about the flag being on.
+  }
+  for (const listener of listeners) listener()
+}
+
+/**
+ * Deliberately a bare listener set rather than Zustand, which is this repo's
+ * store primitive everywhere a component owns the state.
+ *
+ * This module is not component state: it is imported by `agent-executor`,
+ * `dispatch-teammate`, the workflow agent-turn node and the packaged CLI
+ * bundle, all of which run with no React. `useSyncExternalStore` wants exactly
+ * this shape — a subscribe function plus a snapshot getter — and the snapshot
+ * getter here is the pre-existing `isAgentExecutionFlagEnabled`, which resolves
+ * env and localStorage rather than reading a stored value. A store would add a
+ * second source of truth for the same flag and pull React state machinery into
+ * the headless bundle for no gain.
+ */
+const listeners = new Set<() => void>()
+
+/**
+ * Subscribe to flag changes made through {@link setAgentExecutionFlag}.
+ *
+ * Exists so a UI can read the flags via `useSyncExternalStore` instead of
+ * mirroring them into component state — the mirror needs a setState in an
+ * effect on mount, which cascades a second render on every consumer.
+ *
+ * Only same-tab writes notify: a `storage` event listener would fire for other
+ * tabs too, but these flags change agent execution routing mid-run, so picking
+ * up another tab's edit under a live agent is worse than being briefly stale.
+ */
+export function subscribeToAgentExecutionFlags(listener: () => void): () => void {
+  listeners.add(listener)
+  return () => {
+    listeners.delete(listener)
+  }
+}

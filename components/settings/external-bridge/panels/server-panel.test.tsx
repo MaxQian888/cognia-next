@@ -1,0 +1,313 @@
+import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+
+import { BridgeServerPanel } from "./server-panel"
+import type { ExternalBridgeSettings } from "@/types/wiki"
+
+jest.mock("next-intl", () => ({
+  useTranslations: () => (key: string, values?: Record<string, unknown>) =>
+    values ? `${key}:${Object.values(values).join(",")}` : key,
+}))
+
+const mockStatus = jest.fn()
+const mockStart = jest.fn()
+const mockStop = jest.fn()
+const mockRestart = jest.fn()
+jest.mock("@/lib/external-bridge/tauri-control", () => ({
+  getMcpServerStatus: () => mockStatus(),
+  startMcpServer: (...a: unknown[]) => mockStart(...a),
+  restartMcpServer: (...a: unknown[]) => mockRestart(...a),
+  stopMcpServer: () => mockStop(),
+}))
+
+jest.mock("@/lib/external-bridge/token", () => ({
+  generateToken: jest.fn(() => Promise.resolve("tok_generated")),
+}))
+
+let capability = true
+jest.mock("@/hooks/use-host-profile", () => ({ useCapability: () => capability }))
+
+const mockResolveSidecar = jest.fn()
+jest.mock("../bridge-runtime", () => ({
+  ...jest.requireActual("../bridge-runtime"),
+  resolveSidecarPath: () => mockResolveSidecar(),
+}))
+
+jest.mock("sonner", () => ({ toast: { error: jest.fn(), success: jest.fn() } }))
+
+function setup(over: Partial<ExternalBridgeSettings> = {}) {
+  const onChange = jest.fn()
+  const settings = {
+    enabled: false,
+    enabledScopes: [],
+    ...over,
+  } as ExternalBridgeSettings
+  render(<BridgeServerPanel settings={settings} onChange={onChange} />)
+  return { onChange }
+}
+
+beforeEach(() => {
+  capability = true
+  mockStatus.mockReset().mockResolvedValue({ running: false, port: null, startedAt: null })
+  mockStart.mockReset().mockResolvedValue(3001)
+  mockStop.mockReset().mockResolvedValue(undefined)
+  mockRestart.mockReset().mockResolvedValue(3001)
+  mockResolveSidecar.mockReset().mockResolvedValue("/opt/cognia/sidecar/cognia-mcp.mjs")
+})
+
+describe("BridgeServerPanel", () => {
+  it("starts the server with the configured port and the real sidecar path", async () => {
+    const { onChange } = setup({ enabled: false, bearerToken: "tok_abc", httpPort: 4444 })
+
+    fireEvent.click(screen.getByRole("switch", { name: "server.toggleAriaLabel" }))
+
+    await waitFor(() => expect(mockStart).toHaveBeenCalled())
+    expect(mockStart).toHaveBeenCalledWith(
+      expect.objectContaining({
+        port: 4444,
+        token: "tok_abc",
+        sidecarPath: "/opt/cognia/sidecar/cognia-mcp.mjs",
+      })
+    )
+    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ enabled: true }))
+  })
+
+  it("defaults the start port to 3001 rather than letting the OS assign one", async () => {
+    // An OS-assigned port cannot be written into a client config ahead of time,
+    // and producing such a config is this surface's entire job.
+    setup({ enabled: false, bearerToken: "tok_abc", httpPort: undefined })
+
+    fireEvent.click(screen.getByRole("switch", { name: "server.toggleAriaLabel" }))
+
+    await waitFor(() => expect(mockStart).toHaveBeenCalled())
+    expect(mockStart).toHaveBeenCalledWith(expect.objectContaining({ port: 3001 }))
+  })
+
+  it("mints a token on first enable", async () => {
+    const { onChange } = setup({ enabled: false, bearerToken: undefined })
+
+    fireEvent.click(screen.getByRole("switch", { name: "server.toggleAriaLabel" }))
+
+    await waitFor(() =>
+      expect(onChange).toHaveBeenCalledWith(
+        expect.objectContaining({ bearerToken: "tok_generated" })
+      )
+    )
+  })
+
+  it("stops the server when switched off", async () => {
+    setup({ enabled: true, bearerToken: "tok_abc" })
+
+    fireEvent.click(screen.getByRole("switch", { name: "server.toggleAriaLabel" }))
+
+    await waitFor(() => expect(mockStop).toHaveBeenCalled())
+    expect(mockStart).not.toHaveBeenCalled()
+  })
+
+  it("does not drive the Rust server without the mcp-runtime capability", async () => {
+    capability = false
+    const { onChange } = setup({ enabled: false, bearerToken: "tok_abc" })
+
+    fireEvent.click(screen.getByRole("switch", { name: "server.toggleAriaLabel" }))
+
+    await waitFor(() => expect(onChange).toHaveBeenCalled())
+    expect(mockStart).not.toHaveBeenCalled()
+  })
+
+  it("persists an edited HTTP port", () => {
+    const { onChange } = setup({ httpPort: 3001 })
+
+    const input = screen.getByLabelText("server.httpPort")
+    fireEvent.change(input, { target: { value: "4444" } })
+    fireEvent.blur(input)
+
+    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ httpPort: 4444 }))
+  })
+
+  it("refuses 0, which cannot be written into a client config ahead of time", () => {
+    setup({ httpPort: 3001 })
+    expect(screen.getByLabelText("server.httpPort")).toHaveAttribute("min", "1")
+  })
+
+  it("restarts a running listener onto the edited port", async () => {
+    // Persisting alone left the listener on the old port while the setup
+    // snippet immediately advertised the new one.
+    mockStatus.mockResolvedValue({ running: true, port: 3001, startedAt: "now" })
+    mockRestart.mockResolvedValue(4444)
+    const { onChange } = setup({ enabled: true, bearerToken: "tok_abc", httpPort: 3001 })
+    await waitFor(() => expect(mockStatus).toHaveBeenCalled())
+
+    const input = screen.getByLabelText("server.httpPort")
+    fireEvent.change(input, { target: { value: "4444" } })
+    fireEvent.blur(input)
+
+    await waitFor(() => expect(mockRestart).toHaveBeenCalled())
+    expect(mockRestart).toHaveBeenCalledWith(
+      expect.objectContaining({ port: 4444, sidecarPath: "/opt/cognia/sidecar/cognia-mcp.mjs" })
+    )
+    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ httpPort: 4444 }))
+  })
+
+  it("does not restart a listener that is not running", async () => {
+    mockStatus.mockResolvedValue({ running: false, port: null, startedAt: null })
+    setup({ enabled: false, bearerToken: "tok_abc", httpPort: 3001 })
+    await waitFor(() => expect(mockStatus).toHaveBeenCalled())
+
+    const input = screen.getByLabelText("server.httpPort")
+    fireEvent.change(input, { target: { value: "4444" } })
+    fireEvent.blur(input)
+
+    await new Promise((r) => setTimeout(r, 20))
+    expect(mockRestart).not.toHaveBeenCalled()
+  })
+
+  it("says so when the listener stayed on the old port", async () => {
+    // The restart can fail; silently leaving the two out of sync is the state
+    // this whole surface exists to make visible.
+    mockStatus.mockResolvedValue({ running: true, port: 3001, startedAt: "now" })
+    setup({ enabled: true, bearerToken: "tok_abc", httpPort: 4444 })
+
+    expect(await screen.findByTestId("bridge-port-diverged")).toHaveTextContent(
+      "server.httpPortDiverged:3001"
+    )
+  })
+
+  it("refuses to start when the sidecar is not installed", async () => {
+    // Rust spawns `node <path>`; starting against a path that is not there
+    // fails inside the child with nothing useful surfaced.
+    mockResolveSidecar.mockResolvedValue(null)
+    const { onChange } = setup({ enabled: false, bearerToken: "tok_abc" })
+
+    fireEvent.click(screen.getByRole("switch", { name: "server.toggleAriaLabel" }))
+
+    await waitFor(() =>
+      expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ enabled: false }))
+    )
+    expect(mockStart).not.toHaveBeenCalled()
+  })
+
+  it("shows when the token was last rotated", () => {
+    // Persisted on every rotation and previously never displayed, so "did I
+    // already rotate this?" had no answer in the UI.
+    const rotated = Date.UTC(2026, 6, 28, 8, 15)
+    setup({ bearerToken: "tok_abc", tokenRotatedAt: rotated })
+
+    expect(screen.getByTestId("bridge-token-rotated-at")).toHaveTextContent(
+      `server.tokenRotatedAt:${new Date(rotated).toLocaleString()}`
+    )
+  })
+
+  it("omits the rotation line when the token has never been rotated", () => {
+    setup({ bearerToken: "tok_abc", tokenRotatedAt: undefined })
+    expect(screen.queryByTestId("bridge-token-rotated-at")).not.toBeInTheDocument()
+  })
+
+  it("masks the token until revealed", () => {
+    setup({ bearerToken: "tok_secret_value" })
+
+    expect(screen.queryByText("tok_secret_value")).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: "server.show" }))
+    expect(screen.getByText("tok_secret_value")).toBeInTheDocument()
+  })
+
+  it("requires confirmation before rotating", async () => {
+    const { onChange } = setup({ bearerToken: "tok_abc" })
+
+    fireEvent.click(screen.getByRole("button", { name: "server.rotateTokenAria" }))
+    expect(onChange).not.toHaveBeenCalled()
+
+    fireEvent.click(await screen.findByText("server.rotateConfirmAction"))
+    await waitFor(() =>
+      expect(onChange).toHaveBeenCalledWith(
+        expect.objectContaining({ bearerToken: "tok_generated" })
+      )
+    )
+  })
+
+  it("surfaces a failed start rather than leaving the toggle looking successful", async () => {
+    const { toast } = jest.requireMock("sonner")
+    mockStart.mockRejectedValue(new Error("address already in use"))
+    setup({ enabled: false, bearerToken: "tok_abc" })
+
+    fireEvent.click(screen.getByRole("switch", { name: "server.toggleAriaLabel" }))
+
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith("address already in use"))
+  })
+
+  it("surfaces a failed rotation", async () => {
+    const { toast } = jest.requireMock("sonner")
+    const { generateToken } = jest.requireMock("@/lib/external-bridge/token")
+    generateToken.mockRejectedValueOnce(new Error("crypto unavailable"))
+    setup({ bearerToken: "tok_abc" })
+
+    fireEvent.click(screen.getByRole("button", { name: "server.rotateTokenAria" }))
+    fireEvent.click(await screen.findByText("server.rotateConfirmAction"))
+
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith("crypto unavailable"))
+  })
+
+  it("copies the token", async () => {
+    const writeText = jest.fn().mockResolvedValue(undefined)
+    Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true })
+    setup({ bearerToken: "tok_abc" })
+
+    fireEvent.click(screen.getByRole("button", { name: "server.copyTokenAria" }))
+
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith("tok_abc"))
+  })
+
+  it("reports the listening port once the HTTP transport is up", async () => {
+    mockStatus.mockResolvedValue({ running: true, port: 4444, startedAt: Date.now() })
+    setup({ enabled: true, bearerToken: "tok_abc" })
+
+    expect(await screen.findByText("server.statusHttpListening:4444")).toBeInTheDocument()
+    expect(await screen.findByText("badgeLive")).toBeInTheDocument()
+  })
+
+  it("reports stdio mode when enabled without an HTTP listener", async () => {
+    mockStatus.mockResolvedValue({ running: false, port: null, startedAt: null })
+    setup({ enabled: true, bearerToken: "tok_abc" })
+
+    expect(await screen.findByText("server.statusStdioActive")).toBeInTheDocument()
+    expect(await screen.findByText("badgeIdle")).toBeInTheDocument()
+  })
+
+  it("reports off when disabled", async () => {
+    setup({ enabled: false })
+    expect(await screen.findByText("server.statusOff")).toBeInTheDocument()
+  })
+
+  it("shows the web badge without the mcp-runtime capability", async () => {
+    capability = false
+    setup({ enabled: true })
+
+    expect(await screen.findByText("badgeWeb")).toBeInTheDocument()
+  })
+
+  it("keeps rendering when the status probe rejects", async () => {
+    // Web mode and desktop init races both land in the swallow branch.
+    mockStatus.mockRejectedValue(new Error("not available"))
+    setup({ enabled: true })
+
+    expect(await screen.findByText("server.statusStdioActive")).toBeInTheDocument()
+  })
+
+  it("stops polling while the document is hidden", async () => {
+    setup({ enabled: true })
+    await waitFor(() => expect(mockStatus).toHaveBeenCalled())
+    const callsWhileVisible = mockStatus.mock.calls.length
+
+    Object.defineProperty(document, "visibilityState", {
+      configurable: true,
+      get: () => "hidden",
+    })
+    document.dispatchEvent(new Event("visibilitychange"))
+
+    await new Promise((r) => setTimeout(r, 50))
+    expect(mockStatus.mock.calls.length).toBe(callsWhileVisible)
+
+    Object.defineProperty(document, "visibilityState", {
+      configurable: true,
+      get: () => "visible",
+    })
+  })
+})

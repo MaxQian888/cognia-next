@@ -190,6 +190,18 @@ pub async fn gateway_list_cooldowns(
     Ok(state.cooldowns())
 }
 
+/// Run the upstream self-check for `model` and return one row per candidate.
+///
+/// Each row is a real, billable upstream call, so this is only ever invoked
+/// from an explicit user action in Settings → Gateway → Overview.
+#[tauri::command]
+pub async fn gateway_probe_upstream(
+    state: State<'_, GatewayState>,
+    model: String,
+) -> Result<Vec<super::server::UpstreamProbeResult>, String> {
+    state.probe_upstream(&model).await
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

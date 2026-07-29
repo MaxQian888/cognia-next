@@ -4481,11 +4481,22 @@ describe("resolveSendOptions — project knowledge base (project-scoped RAG)", (
 describe("resolveSendOptions — ADR-0090 execution spec stamping", () => {
   afterEach(() => {
     delete process.env.NEXT_PUBLIC_AGENT_EXECUTION_RESOLVER_V2
+    delete process.env.NEXT_PUBLIC_GATEWAY_AGENT_ROUTE_TICKETS
   })
 
-  it("leaves SendOptions unstamped while the resolver flag is off", async () => {
+  it("leaves SendOptions unstamped while both flags are off", async () => {
     const opts = await resolveSendOptions({ character: makeChar({ id: "c1" }) })
     expect(opts.execution).toBeUndefined()
+  })
+
+  it("stamps when only the route-tickets flag is on, so the switch issues tickets", async () => {
+    // The Settings → Gateway → Route tickets switch writes only this flag.
+    // While the block also demanded `agentExecutionResolverV2`, flipping it
+    // changed nothing on a default install and the tickets panel could never
+    // list anything.
+    process.env.NEXT_PUBLIC_GATEWAY_AGENT_ROUTE_TICKETS = "1"
+    const opts = await resolveSendOptions({ character: makeChar({ id: "c1" }) })
+    expect(opts.execution).toBeTruthy()
   })
 
   it("stamps the frozen, secret-free execution spec when the flag is on (legacy fields intact)", async () => {

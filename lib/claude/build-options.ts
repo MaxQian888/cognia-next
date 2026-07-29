@@ -3390,10 +3390,23 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
   // rollback is turning the flag off. A stamping failure must not break the
   // send — dispatch falls back to the provider branch and counts it as
   // `legacy_dispatch` telemetry.
+  //
+  // `gatewayAgentRouteTickets` opens the same door on its own. It is the flag
+  // the Settings → Gateway → Route tickets switch writes, and the only thing
+  // that makes `resolveAgentExecutionSpec` return a `gateway` route at all
+  // (`gatewayEligible`). Requiring `agentExecutionResolverV2` as well meant the
+  // switch changed nothing on a default install — no turn ever minted, so the
+  // panel that lists and revokes tickets stayed permanently empty while its own
+  // copy said "Turn it on above to start issuing them". Stamping here does not
+  // move execution to the unified authority; that is still
+  // `executeAgentTurnFromRenderer`, which keeps its own resolver-flag check.
   try {
     const { isAgentExecutionFlagEnabled, getAgentExecutionFlags } =
       await import("@/lib/ai/agent/execution/feature-flags")
-    if (isAgentExecutionFlagEnabled("agentExecutionResolverV2")) {
+    if (
+      isAgentExecutionFlagEnabled("agentExecutionResolverV2") ||
+      isAgentExecutionFlagEnabled("gatewayAgentRouteTickets")
+    ) {
       const { resolveAgentExecutionSpec, sendSpecFromResolved } =
         await import("@/lib/ai/agent/execution/resolve-agent-execution-spec")
       const { isTauri } = await import("@/lib/tauri")
@@ -3407,7 +3420,37 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
         legacy: { providerId: opts.provider, modelId: opts.model },
         identity: session?.id ? { sessionId: session.id } : undefined,
       })
-      opts.execution = sendSpecFromResolved(spec)
+      // A gateway route is only real once a ticket exists: without one
+      // `sendSpecFromResolved` degrades to `direct`, which is why the route
+      // ticket panel could never list anything. Minting is best-effort — a
+      // refusal falls back to the direct shape rather than failing the send.
+      const minted =
+        spec.route.kind === "gateway" && session?.id
+          ? await (
+              await import("@/lib/gateway/mint-session-ticket")
+            ).mintSessionRouteTicket({
+              sessionId: session.id,
+              executionFingerprint: spec.executionFingerprint,
+              model: opts.model ?? spec.modelBindings.primary,
+              routePolicy: spec.route.routePolicy,
+            })
+          : undefined
+      if (minted) {
+        opts.execution = sendSpecFromResolved(spec, {
+          endpoint: minted.endpoint,
+          ticketId: minted.ticketId,
+        })
+        // The shape `sidecar/dispatch/subprocess-env.mjs:validateRouteEnv`
+        // enforces: the base URL must be the ticket endpoint, and the secret
+        // rides the env overlay rather than the (secret-free) wire spec.
+        opts.env = {
+          ...opts.env,
+          ANTHROPIC_BASE_URL: minted.endpoint,
+          ANTHROPIC_API_KEY: minted.secret,
+        }
+      } else {
+        opts.execution = sendSpecFromResolved(spec)
+      }
     }
   } catch {
     // Never fail the send over spec stamping.

@@ -42,6 +42,7 @@
     "resources": [
       "../sidecar/claude-host.mjs",
       "../sidecar/a2ui-mcp.mjs",
+      "../sidecar/cognia-mcp.mjs",
       "../sidecar/mcp-oauth-helper.mjs",
       "../sidecar/package.json",
       "../sidecar/node_modules/**/*",

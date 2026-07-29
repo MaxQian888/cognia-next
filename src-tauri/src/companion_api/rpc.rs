@@ -2120,12 +2120,17 @@ pub(super) async fn dispatch(
 
             match &host {
                 crate::companion_api::dispatch_host::DispatchHost::Tauri(app) => {
-                    let sidecar_path = app
-                        .path()
-                        .home_dir()
-                        .map_err(|error| RpcError::internal(error.to_string()))?
-                        .join(".cognia")
-                        .join("cognia-mcp.js");
+                    // Same resolver the settings snippet reads, so the path we
+                    // spawn and the path we tell the user to paste cannot
+                    // diverge — they did, and neither existed.
+                    let sidecar_path =
+                        crate::mcp_server::commands::resolve_sidecar_path(app).ok_or_else(|| {
+                            RpcError::internal(
+                                "External Bridge MCP sidecar is not installed (expected \
+                                 sidecar/cognia-mcp.mjs in the app resources)"
+                                    .to_string(),
+                            )
+                        })?;
                     let automation =
                         app.state::<crate::automation::commands::AutomationState>();
                     app.state::<crate::mcp_server::McpServerState>()

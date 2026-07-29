@@ -3,23 +3,27 @@
 /**
  * Inbound LLM Gateway settings (desktop only).
  *
- * A self-contained panel that hydrates from the persisted `gateway_*` config
- * and lets the user run the listener, choose loopback vs LAN binding, tune
- * timeouts / retry / rate limits / allowlist, control model exposure, manage
- * scoped API keys (<GatewayKeysCard>), and inspect the durable request log
- * (<GatewayLogViewer>). Inspired by newapi's channel/token/log surface.
+ * A master/detail shell over the persisted `gateway_*` config. It used to be
+ * six stacked cards in one ~2000px scroll with no secondary nav; the panels now
+ * live under `./panels/` and this file owns only the shared data (config,
+ * status, cooldowns), the deep link, and the layout.
+ *
+ * Layout mirrors `appearance-section.tsx`: `md:grid-cols-[320px_1fr]`, the nav
+ * collapsing into a left Sheet below `md`, and a detail pane that owns its
+ * scroll and declares `@container/gateway-pane` so panel internals size off the
+ * pane rather than the window.
  */
 
-import { useEffect, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { useRouter, useSearchParams } from "next/navigation"
 import { useTranslations } from "next-intl"
-import { AlertTriangleIcon, CopyIcon, NetworkIcon, PlusIcon } from "lucide-react"
+import { AlertTriangleIcon, MenuIcon, NetworkIcon } from "lucide-react"
 import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { Switch } from "@/components/ui/switch"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet"
+import { PanelTransition } from "@/components/settings/common/panel-transition"
 import { isTauri } from "@/lib/tauri"
 import {
   gatewayGetConfig,
@@ -31,119 +35,66 @@ import {
 } from "@/lib/tauri/gateway"
 import {
   DEFAULT_GATEWAY_CONFIG,
-  type GatewayBindInterface,
   type GatewayConfig,
   type GatewayKeyCooldown,
   type GatewayStatus,
 } from "@/types/gateway"
+
+import { GatewayNav, type GatewayNavBadge } from "./components/gateway-nav"
+import {
+  GATEWAY_NAV_GROUPS,
+  GATEWAY_PANEL_PARAM,
+  resolveGatewayPanel,
+  type GatewayPanelId,
+} from "./nav-config"
+import { GatewayOverviewPanel } from "./panels/overview-panel"
+import { GatewayListenerPanel } from "./panels/listener-panel"
 import { GatewayKeysCard } from "./gateway-keys-card"
+import { GatewayReliabilityPanel } from "./panels/reliability-panel"
+import { GatewayUpstreamPanel } from "./panels/upstream-panel"
+import { GatewayExposurePanel } from "./panels/exposure-panel"
 import { GatewayLogViewer } from "./gateway-log-viewer"
+import { GatewayRouteTicketsPanel } from "./panels/route-tickets-panel"
 
-/** Add/remove chip list backed by a string[] — used for allowlist / exposed
- * models / retry status codes.
- *
- * The draft is controlled state, not a ref, and commits on Enter OR blur: the
- * earlier ref-backed version silently discarded anything typed but not
- * Enter-ed, which looked exactly like a save that didn't stick. */
-function ChipInput({
-  values,
-  onCommit,
-  placeholder,
-  ariaLabel,
-  addLabel,
-  removeLabel,
-}: {
-  values: string[]
-  onCommit: (next: string[]) => void
-  placeholder: string
-  ariaLabel: string
-  addLabel: string
-  removeLabel: string
-}) {
-  const [draft, setDraft] = useState("")
-
-  const commitDraft = () => {
-    const value = draft.trim()
-    if (value && !values.includes(value)) onCommit([...values, value])
-    setDraft("")
-  }
-
-  return (
-    <div className="space-y-2">
-      {values.length > 0 && (
-        <div className="flex flex-wrap gap-2">
-          {values.map((entry) => (
-            <span
-              key={entry}
-              className="flex items-center gap-1 rounded bg-muted py-1 pl-2 pr-1 font-mono text-xs"
-            >
-              {entry}
-              <button
-                type="button"
-                className="rounded-sm px-1 text-muted-foreground hover:bg-background hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                aria-label={`${removeLabel} ${entry}`}
-                onClick={() => onCommit(values.filter((e) => e !== entry))}
-              >
-                ×
-              </button>
-            </span>
-          ))}
-        </div>
-      )}
-      <div className="flex items-center gap-2">
-        <Input
-          value={draft}
-          placeholder={placeholder}
-          aria-label={ariaLabel}
-          className="font-mono text-xs"
-          onChange={(e) => setDraft(e.target.value)}
-          onBlur={commitDraft}
-          onKeyDown={(e) => {
-            if (e.key !== "Enter") return
-            e.preventDefault()
-            commitDraft()
-          }}
-        />
-        <Button
-          type="button"
-          size="sm"
-          variant="outline"
-          disabled={!draft.trim()}
-          // Qualified by the field: six buttons all named "Add" are ambiguous
-          // to a screen reader (and indistinguishable to a test).
-          aria-label={`${addLabel} ${ariaLabel}`}
-          // Commit on mousedown, NOT click: mousedown blurs the input, whose
-          // onBlur commits and clears the draft, which renders this button
-          // disabled — so an onClick handler would never fire and the button
-          // would be decorative. Ordering mousedown first makes the button the
-          // thing that actually commits; the blur that follows sees an empty
-          // draft and no-ops.
-          onMouseDown={commitDraft}
-        >
-          <PlusIcon className="h-3.5 w-3.5" />
-        </Button>
-      </div>
-    </div>
-  )
+/** Shared handles every config-editing panel needs. */
+export interface GatewayPanelContext {
+  config: GatewayConfig
+  status: GatewayStatus | null
+  persist: (patch: Partial<GatewayConfig>) => Promise<void>
 }
+
+/** How often the cooldown list is refetched so the nav badge stays honest. */
+const COOLDOWN_POLL_MS = 15_000
 
 export function GatewaySection() {
   const t = useTranslations("settings.gateway")
+  const router = useRouter()
+  const searchParams = useSearchParams()
   const desktop = isTauri()
 
   const [config, setConfig] = useState<GatewayConfig>(DEFAULT_GATEWAY_CONFIG)
   const [status, setStatus] = useState<GatewayStatus | null>(null)
   const [cooldowns, setCooldowns] = useState<GatewayKeyCooldown[]>([])
+  const [mobileSheetOpen, setMobileSheetOpen] = useState(false)
+  const [starting, setStarting] = useState(false)
 
-  const refreshStatus = () =>
-    gatewayGetStatus()
-      .then(setStatus)
-      .catch(() => {})
+  const activePanel = resolveGatewayPanel(searchParams.get(GATEWAY_PANEL_PARAM))
 
-  const refreshCooldowns = () =>
-    gatewayListCooldowns()
-      .then(setCooldowns)
-      .catch(() => {})
+  const refreshStatus = useCallback(
+    () =>
+      gatewayGetStatus()
+        .then(setStatus)
+        .catch(() => {}),
+    []
+  )
+
+  const refreshCooldowns = useCallback(
+    () =>
+      gatewayListCooldowns()
+        .then(setCooldowns)
+        .catch(() => {}),
+    []
+  )
 
   useEffect(() => {
     if (!desktop) return
@@ -152,13 +103,92 @@ export function GatewaySection() {
     gatewayGetConfig()
       .then(setConfig)
       .catch(() => {})
-    gatewayGetStatus()
-      .then(setStatus)
-      .catch(() => {})
-    gatewayListCooldowns()
-      .then(setCooldowns)
-      .catch(() => {})
-  }, [desktop])
+    void refreshStatus()
+    void refreshCooldowns()
+  }, [desktop, refreshStatus, refreshCooldowns])
+
+  useEffect(() => {
+    if (!desktop) return
+    // Cooldowns lift on their own, so the badge would otherwise sit stale until
+    // the user opened the panel and hit refresh by hand.
+    const timer = setInterval(() => void refreshCooldowns(), COOLDOWN_POLL_MS)
+    return () => clearInterval(timer)
+  }, [desktop, refreshCooldowns])
+
+  // Mirror of `config` for `persist`, which must read the *current* config
+  // synchronously without re-creating itself on every edit. Reading it out of a
+  // `setConfig` updater does not work: React only runs updaters eagerly when the
+  // fiber has no pending lanes, and the status/cooldown polls above keep one in
+  // flight — so the read fell back to DEFAULT_GATEWAY_CONFIG and a single toggle
+  // shipped `port`, `allowlist`, `exposedModels` and `disableKeywords` back to
+  // their defaults.
+  //
+  // Closing over `config` instead would drop a patch whenever two land before
+  // the next render — the second would start from the pre-first snapshot — so
+  // the ref is the coalescing point, not just a staleness dodge.
+  const configRef = useRef(config)
+  // eslint-disable-next-line react-hooks/refs -- sync during render so `persist` reads the config of the render it was called from; the same ref-tracked-async-state pattern as `components/settings/shortcuts-section.tsx`.
+  configRef.current = config
+
+  const persist = useCallback(async (patch: Partial<GatewayConfig>) => {
+    const next: GatewayConfig = { ...configRef.current, ...patch }
+    configRef.current = next
+    setConfig(next)
+    await gatewayUpdateConfig(next).catch((e) =>
+      toast.error(e instanceof Error ? e.message : String(e))
+    )
+  }, [])
+
+  const onToggleEnabled = useCallback(
+    async (nextEnabled: boolean) => {
+      if (nextEnabled && !status?.hasToken) {
+        toast.error(t("requiresKey"))
+        return
+      }
+      setStarting(true)
+      try {
+        if (nextEnabled) await gatewayStart()
+        else await gatewayStop()
+        await refreshStatus()
+      } catch (e) {
+        toast.error(e instanceof Error ? e.message : String(e))
+      } finally {
+        setStarting(false)
+      }
+    },
+    [status?.hasToken, refreshStatus, t]
+  )
+
+  const onSelect = useCallback(
+    (id: GatewayPanelId) => {
+      const next = new URLSearchParams(searchParams.toString())
+      next.set(GATEWAY_PANEL_PARAM, id)
+      router.replace(`?${next.toString()}`, { scroll: false })
+      setMobileSheetOpen(false)
+    },
+    [router, searchParams]
+  )
+
+  const badges = useMemo(() => {
+    const result: Partial<Record<GatewayPanelId, GatewayNavBadge>> = {}
+    // Without a key the listener cannot start at all — surface that from any
+    // panel rather than only on the one card that mentions it.
+    if (status && !status.hasToken) {
+      result.keys = {
+        text: "!",
+        variant: "destructive",
+        ariaLabel: t("nav.badgeNoKeyAria"),
+      }
+    }
+    if (cooldowns.length > 0) {
+      result.upstream = {
+        text: String(cooldowns.length),
+        variant: cooldowns.some((c) => c.permanent) ? "destructive" : "secondary",
+        ariaLabel: t("nav.badgeParkedKeysAria", { count: cooldowns.length }),
+      }
+    }
+    return result
+  }, [status, cooldowns, t])
 
   if (!desktop) {
     return (
@@ -168,456 +198,152 @@ export function GatewaySection() {
     )
   }
 
-  const port = status?.boundPort ?? config.port
-  const baseUrl = `http://127.0.0.1:${port}`
+  const panelContext: GatewayPanelContext = { config, status, persist }
 
-  const persist = async (patch: Partial<GatewayConfig>) => {
-    const next = { ...config, ...patch }
-    setConfig(next)
-    await gatewayUpdateConfig(next).catch((e) =>
-      toast.error(e instanceof Error ? e.message : String(e))
-    )
-  }
-
-  const onToggleEnabled = async (next: boolean) => {
-    if (next && !status?.hasToken) {
-      toast.error(t("requiresKey"))
-      return
-    }
-    try {
-      if (next) await gatewayStart()
-      else await gatewayStop()
-      await refreshStatus()
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : String(e))
-    }
-  }
-
-  const copySnippet = async (value: string) => {
-    await navigator.clipboard.writeText(value).catch(() => {})
-    toast.success(t("copied"))
-  }
+  const navNode = (
+    <GatewayNav
+      groups={GATEWAY_NAV_GROUPS}
+      activeId={activePanel}
+      onSelect={onSelect}
+      badges={badges}
+    />
+  )
 
   return (
-    <div className="space-y-6">
-      <div className="space-y-1">
-        <Label className="flex items-center gap-2">
-          <NetworkIcon className="size-4" />
-          {t("title")}
-        </Label>
-        <p className="text-xs text-muted-foreground">{t("description")}</p>
+    <div className="flex h-full min-h-0 flex-col gap-4" data-testid="gateway-section">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="space-y-1">
+          <Label className="flex items-center gap-2">
+            <NetworkIcon className="size-4" />
+            {t("title")}
+          </Label>
+          <p className="text-xs text-muted-foreground">{t("description")}</p>
+        </div>
       </div>
 
-      {/* Server */}
-      <Card>
-        <CardHeader className="pb-3">
-          <CardTitle className="text-sm font-medium">{t("serverHeading")}</CardTitle>
-          <CardDescription>{t("enabledHelp")}</CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="flex items-center justify-between gap-4">
-            <Label htmlFor="gw-enabled">{t("enabled")}</Label>
-            <Switch
-              id="gw-enabled"
-              disabled={!status?.hasToken}
-              checked={status?.running ?? false}
-              onCheckedChange={onToggleEnabled}
-            />
-          </div>
-          {!status?.hasToken && <p className="text-xs text-muted-foreground">{t("requiresKey")}</p>}
+      <div className="grid min-h-0 flex-1 grid-cols-1 gap-4 md:grid-cols-[320px_1fr]">
+        {/* Desktop nav */}
+        <div className="hidden min-h-0 md:flex md:flex-col md:overflow-hidden md:rounded-lg md:border">
+          {navNode}
+        </div>
 
-          <NumberRow
-            id="gw-port"
-            label={t("port")}
-            value={config.port}
-            min={1024}
-            max={65535}
-            fallback={DEFAULT_GATEWAY_CONFIG.port}
-            onCommit={(v) => void persist({ port: v })}
-          />
-
-          {/* Bind interface */}
-          <div className="space-y-2">
-            <Label>{t("bindInterface")}</Label>
-            <div className="flex gap-1" role="group" aria-label={t("bindInterface")}>
-              {(["loopback", "lan"] as const).map((iface) => (
-                <Button
-                  key={iface}
-                  size="sm"
-                  variant={config.bindInterface === iface ? "default" : "outline"}
-                  onClick={() => void persist({ bindInterface: iface as GatewayBindInterface })}
-                >
-                  {t(iface === "loopback" ? "bindLoopback" : "bindLan")}
-                </Button>
-              ))}
-            </div>
-            <p className="text-xs text-muted-foreground">{t("bindHelp")}</p>
-            {config.bindInterface === "lan" && (
-              <div className="flex items-start gap-2 rounded-md border border-amber-500/40 bg-amber-500/5 p-2 text-xs text-amber-700 dark:text-amber-400">
-                <AlertTriangleIcon className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-                <span>{t("lanWarning")}</span>
-              </div>
-            )}
-          </div>
-
-          {/* Connect snippets */}
-          <div className="space-y-2">
-            <p className="text-xs font-medium">{t("connectHeading")}</p>
-            <p className="text-xs text-muted-foreground">{t("connectHelp")}</p>
-            {[
-              { label: t("anthropicSnippet"), value: `ANTHROPIC_BASE_URL=${baseUrl}` },
-              { label: t("openaiSnippet"), value: `OPENAI_BASE_URL=${baseUrl}/v1` },
-            ].map((snippet) => (
-              <div key={snippet.label} className="space-y-1">
-                <p className="text-xs text-muted-foreground">{snippet.label}</p>
-                <div className="flex items-center gap-2">
-                  <code className="flex-1 truncate rounded bg-muted px-2 py-1 text-xs">
-                    {snippet.value}
-                  </code>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => void copySnippet(snippet.value)}
-                  >
-                    <CopyIcon className="mr-1.5 h-3.5 w-3.5" />
-                    {t("copy")}
-                  </Button>
-                </div>
-              </div>
-            ))}
-            <p className="text-xs text-muted-foreground">{t("authNote")}</p>
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* API keys */}
-      <GatewayKeysCard onChanged={refreshStatus} />
-
-      {/* Reliability & access */}
-      <Card>
-        <CardHeader className="pb-3">
-          <CardTitle className="text-sm font-medium">{t("reliabilityHeading")}</CardTitle>
-          <CardDescription>{t("reliabilityHelp")}</CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="space-y-2">
-            <Label>{t("allowlist")}</Label>
-            <ChipInput
-              values={config.allowlist}
-              onCommit={(next) => void persist({ allowlist: next })}
-              placeholder={t("allowlistPlaceholder")}
-              ariaLabel={t("allowlist")}
-              addLabel={t("add")}
-              removeLabel={t("remove")}
-            />
-            <p className="text-xs text-muted-foreground">{t("allowlistHelp")}</p>
-          </div>
-
-          <NumberRow
-            id="gw-rate-limit"
-            label={t("rateLimit")}
-            value={config.rateLimitPerMin}
-            min={1}
-            max={60000}
-            fallback={600}
-            onCommit={(v) => void persist({ rateLimitPerMin: v })}
-          />
-          <NumberRow
-            id="gw-connect-timeout"
-            label={t("connectTimeout")}
-            help={t("connectTimeoutHelp")}
-            value={config.connectTimeoutSecs}
-            min={1}
-            max={600}
-            fallback={30}
-            onCommit={(v) => void persist({ connectTimeoutSecs: v })}
-          />
-          <NumberRow
-            id="gw-request-timeout"
-            label={t("requestTimeout")}
-            help={t("requestTimeoutHelp")}
-            value={config.requestTimeoutSecs}
-            min={0}
-            max={3600}
-            fallback={300}
-            onCommit={(v) => void persist({ requestTimeoutSecs: v })}
-          />
-          <NumberRow
-            id="gw-max-retries"
-            label={t("maxRetries")}
-            help={t("maxRetriesHelp")}
-            value={config.maxRetries}
-            min={0}
-            max={20}
-            fallback={0}
-            onCommit={(v) => void persist({ maxRetries: v })}
-          />
-
-          <div className="space-y-2">
-            <Label>{t("retryStatusCodes")}</Label>
-            <ChipInput
-              values={config.retryStatusCodes.map(String)}
-              onCommit={(next) =>
-                void persist({
-                  retryStatusCodes: next
-                    .map((s) => Number.parseInt(s, 10))
-                    .filter((n) => Number.isFinite(n) && n >= 100 && n <= 599),
-                })
-              }
-              placeholder={t("retryStatusCodesPlaceholder")}
-              ariaLabel={t("retryStatusCodes")}
-              addLabel={t("add")}
-              removeLabel={t("remove")}
-            />
-            <p className="text-xs text-muted-foreground">{t("retryStatusCodesHelp")}</p>
-          </div>
-
-          <p className="text-xs text-muted-foreground">{t("restartHint")}</p>
-        </CardContent>
-      </Card>
-
-      {/* Model exposure */}
-      <Card>
-        <CardHeader className="pb-3">
-          <CardTitle className="text-sm font-medium">{t("exposureHeading")}</CardTitle>
-          <CardDescription>{t("exposureHelp")}</CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="space-y-2">
-            <Label>{t("exposedModels")}</Label>
-            <ChipInput
-              values={config.exposedModels}
-              onCommit={(next) => void persist({ exposedModels: next })}
-              placeholder={t("exposedModelsPlaceholder")}
-              ariaLabel={t("exposedModels")}
-              addLabel={t("add")}
-              removeLabel={t("remove")}
-            />
-            <p className="text-xs text-muted-foreground">
-              {config.exposedModels.length === 0 ? t("exposedModelsAll") : t("exposedModelsHelp")}
-            </p>
-          </div>
-          <div className="flex items-center justify-between gap-4">
-            <div className="space-y-0.5">
-              <Label htmlFor="gw-hide-raw">{t("hideRawModels")}</Label>
-              <p className="text-xs text-muted-foreground">{t("hideRawModelsHelp")}</p>
-            </div>
-            <Switch
-              id="gw-hide-raw"
-              checked={config.hideRawProviderModels}
-              onCheckedChange={(v) => void persist({ hideRawProviderModels: v })}
-            />
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* Upstream protection (cooldown + concurrency + field stripping) */}
-      <Card>
-        <CardHeader className="pb-3">
-          <CardTitle className="text-sm font-medium">{t("concurrencyHeading")}</CardTitle>
-          <CardDescription>{t("concurrencyHelp")}</CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <NumberRow
-            id="gw-cc-per-key"
-            label={t("maxConcurrentPerKey")}
-            help={t("maxConcurrentPerKeyHelp")}
-            value={config.maxConcurrentPerKey}
-            min={0}
-            max={1000}
-            fallback={0}
-            onCommit={(v) => void persist({ maxConcurrentPerKey: v })}
-          />
-          <NumberRow
-            id="gw-cc-per-upstream"
-            label={t("maxConcurrentPerUpstreamKey")}
-            help={t("maxConcurrentPerUpstreamKeyHelp")}
-            value={config.maxConcurrentPerUpstreamKey}
-            min={0}
-            max={1000}
-            fallback={0}
-            onCommit={(v) => void persist({ maxConcurrentPerUpstreamKey: v })}
-          />
-          <NumberRow
-            id="gw-cc-wait"
-            label={t("concurrencyWait")}
-            help={t("concurrencyWaitHelp")}
-            value={config.concurrencyWaitMs}
-            min={0}
-            max={120000}
-            fallback={10000}
-            onCommit={(v) => void persist({ concurrencyWaitMs: v })}
-          />
-          <NumberRow
-            id="gw-cooldown-fallback"
-            label={t("cooldownFallback")}
-            help={t("cooldownFallbackHelp")}
-            value={config.cooldownFallbackSecs}
-            min={0}
-            max={3600}
-            fallback={20}
-            onCommit={(v) => void persist({ cooldownFallbackSecs: v })}
-          />
-          <NumberRow
-            id="gw-overload-cooldown"
-            label={t("overloadCooldown")}
-            help={t("overloadCooldownHelp")}
-            value={config.overloadCooldownSecs}
-            min={0}
-            max={3600}
-            fallback={600}
-            onCommit={(v) => void persist({ overloadCooldownSecs: v })}
-          />
-
-          <div className="space-y-2">
-            <Label>{t("disableKeywords")}</Label>
-            <ChipInput
-              values={config.disableKeywords}
-              onCommit={(next) => void persist({ disableKeywords: next })}
-              placeholder={t("disableKeywordsPlaceholder")}
-              ariaLabel={t("disableKeywords")}
-              addLabel={t("add")}
-              removeLabel={t("remove")}
-            />
-            <p className="text-xs text-muted-foreground">{t("disableKeywordsHelp")}</p>
-          </div>
-
-          <div className="space-y-2">
-            <Label>{t("strippedFields")}</Label>
-            <ChipInput
-              values={config.strippedRequestFields}
-              onCommit={(next) => void persist({ strippedRequestFields: next })}
-              placeholder={t("strippedFieldsPlaceholder")}
-              ariaLabel={t("strippedFields")}
-              addLabel={t("add")}
-              removeLabel={t("remove")}
-            />
-            <p className="text-xs text-muted-foreground">{t("strippedFieldsHelp")}</p>
-          </div>
-
-          <div className="space-y-2">
-            <Label>{t("fieldStripAllow")}</Label>
-            <ChipInput
-              values={config.fieldStripAllow}
-              onCommit={(next) => void persist({ fieldStripAllow: next })}
-              placeholder={t("fieldStripAllowPlaceholder")}
-              ariaLabel={t("fieldStripAllow")}
-              addLabel={t("add")}
-              removeLabel={t("remove")}
-            />
-            <p className="text-xs text-muted-foreground">{t("fieldStripAllowHelp")}</p>
-          </div>
-
-          {/* Parked upstream accounts (W3.1 visibility) */}
-          <div className="space-y-2">
-            <div className="flex items-center justify-between gap-2">
-              <Label>{t("cooldownsHeading")}</Label>
-              <Button size="sm" variant="outline" onClick={() => void refreshCooldowns()}>
-                {t("cooldownsRefresh")}
+        {/* Below md the nav lives in a Sheet; the bar shows where you are. */}
+        <div className="flex items-center gap-2 md:hidden">
+          <Sheet open={mobileSheetOpen} onOpenChange={setMobileSheetOpen}>
+            <SheetTrigger asChild>
+              <Button
+                variant="outline"
+                size="sm"
+                className="shrink-0 gap-1.5"
+                data-testid="gateway-mobile-nav-trigger"
+              >
+                <MenuIcon className="size-4" />
+                {t("nav.mobileTrigger")}
               </Button>
-            </div>
-            <p className="text-xs text-muted-foreground">{t("cooldownsHelp")}</p>
-            {cooldowns.length === 0 ? (
-              <p className="text-xs text-muted-foreground">{t("cooldownsEmpty")}</p>
-            ) : (
-              <ul className="space-y-1">
-                {cooldowns.map((c) => (
-                  <li
-                    key={`${c.providerId}-${c.keyHint}`}
-                    className="flex items-center justify-between gap-2 rounded bg-muted px-2 py-1 text-xs"
-                  >
-                    <span className="font-mono">
-                      {c.providerId} · {c.keyHint}
-                    </span>
-                    <span
-                      className={
-                        c.permanent ? "text-destructive" : "text-amber-600 dark:text-amber-400"
-                      }
-                    >
-                      {c.permanent
-                        ? t("cooldownsPermanent")
-                        : t("cooldownsCoolingUntil", {
-                            time: new Date(c.untilMs).toLocaleTimeString(),
-                          })}
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            )}
+            </SheetTrigger>
+            <SheetContent side="left" className="w-[300px] p-0">
+              <SheetHeader className="px-3 pt-3">
+                <SheetTitle className="text-sm">{t("nav.title")}</SheetTitle>
+              </SheetHeader>
+              {navNode}
+            </SheetContent>
+          </Sheet>
+          <p className="min-w-0 flex-1 truncate text-sm font-medium">
+            {t(`nav.items.${activePanel}.label`)}
+          </p>
+        </div>
+
+        {/* `@container/gateway-pane`: the detail pane is a fraction of the
+            window, so anything multi-column inside a panel must size off this
+            box rather than the viewport. */}
+        <div className="flex min-h-0 flex-col overflow-hidden rounded-lg border">
+          <div
+            className="min-h-0 flex-1 overflow-y-auto p-3 @container/gateway-pane"
+            data-testid="gateway-panel-body"
+          >
+            <PanelTransition activeKey={activePanel}>
+              {/* A component, not a `renderPanel(...)` call: `panelContext`
+                  carries `persist`, which reads `configRef`, and calling a
+                  plain function here makes that a render-phase ref access.
+                  Letting React own the call also gives each panel its own
+                  fiber, which is what `PanelTransition` keys on anyway. */}
+              <GatewayPanelBody
+                panel={activePanel}
+                panelContext={panelContext}
+                cooldowns={cooldowns}
+                starting={starting}
+                onToggleEnabled={onToggleEnabled}
+                refreshStatus={refreshStatus}
+                refreshCooldowns={refreshCooldowns}
+              />
+            </PanelTransition>
           </div>
-        </CardContent>
-      </Card>
-
-      {/* Request log */}
-      <GatewayLogViewer />
-    </div>
-  )
-}
-
-/** Label + bounded number input, committed on blur / Enter rather than on every
- * keystroke.
- *
- * Clamping per keystroke made these fields unusable: with `min` 1024 the port
- * box turned the first digit of "8080" into 1024 and typing could never recover,
- * and an empty field parsed as NaN and snapped back to the default so the value
- * could not be cleared and retyped. Deferring the clamp to commit also collapses
- * one Tauri IPC + disk write per keystroke into one per edit. */
-function NumberRow({
-  id,
-  label,
-  help,
-  value,
-  min,
-  max,
-  fallback,
-  onCommit,
-}: {
-  id: string
-  label: string
-  help?: string
-  value: number
-  min: number
-  max: number
-  fallback: number
-  onCommit: (v: number) => void
-}) {
-  const [draft, setDraft] = useState<string | null>(null)
-
-  const commitDraft = () => {
-    if (draft === null) return
-    const raw = Number.parseInt(draft, 10)
-    const next = Number.isFinite(raw) ? Math.min(max, Math.max(min, raw)) : fallback
-    setDraft(null)
-    if (next !== value) onCommit(next)
-  }
-
-  return (
-    <div className="space-y-1">
-      <div className="flex items-center justify-between gap-4">
-        <Label htmlFor={id} className="flex-1">
-          {label}
-        </Label>
-        <Input
-          id={id}
-          type="number"
-          min={min}
-          max={max}
-          className="w-28"
-          // `draft` is null while not editing, so the field tracks external
-          // config reloads; once the user types it owns the value verbatim.
-          value={draft ?? String(value)}
-          onChange={(e) => setDraft(e.target.value)}
-          onBlur={commitDraft}
-          onKeyDown={(e) => {
-            if (e.key !== "Enter") return
-            e.preventDefault()
-            commitDraft()
-          }}
-        />
+        </div>
       </div>
-      {help && <p className="text-xs text-muted-foreground">{help}</p>}
     </div>
   )
 }
 
-export default GatewaySection
+interface RenderArgs {
+  panel: GatewayPanelId
+  panelContext: GatewayPanelContext
+  cooldowns: GatewayKeyCooldown[]
+  starting: boolean
+  onToggleEnabled: (next: boolean) => Promise<void>
+  refreshStatus: () => Promise<void>
+  refreshCooldowns: () => Promise<void>
+}
+
+function GatewayPanelBody(args: RenderArgs) {
+  const {
+    panel,
+    panelContext,
+    cooldowns,
+    starting,
+    onToggleEnabled,
+    refreshStatus,
+    refreshCooldowns,
+  } = args
+  switch (panel) {
+    case "overview":
+      return (
+        <GatewayOverviewPanel
+          ctx={panelContext}
+          starting={starting}
+          onToggleEnabled={onToggleEnabled}
+          onRefreshStatus={refreshStatus}
+        />
+      )
+    case "listener":
+      return <GatewayListenerPanel ctx={panelContext} onRestarted={refreshStatus} />
+    case "keys":
+      // Rendered directly: these two cards predate the master/detail split
+      // and are self-contained, so a `*-panel.tsx` around them would be a
+      // file whose entire contribution is a wrapping div.
+      return (
+        <div className="space-y-4">
+          <GatewayKeysCard onChanged={() => void refreshStatus()} />
+        </div>
+      )
+    case "reliability":
+      return <GatewayReliabilityPanel ctx={panelContext} />
+    case "upstream":
+      return (
+        <GatewayUpstreamPanel
+          ctx={panelContext}
+          cooldowns={cooldowns}
+          onRefreshCooldowns={refreshCooldowns}
+        />
+      )
+    case "exposure":
+      return <GatewayExposurePanel ctx={panelContext} />
+    case "logs":
+      return (
+        <div className="space-y-4">
+          <GatewayLogViewer />
+        </div>
+      )
+    case "tickets":
+      return <GatewayRouteTicketsPanel />
+  }
+}

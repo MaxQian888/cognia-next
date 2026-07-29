@@ -144,6 +144,10 @@ rustc-ice-*.txt
 # Code-graph tree-sitter grammars are build artifacts copied from
 # tree-sitter-wasms by scripts/build/copy-codegraph-grammars.mjs.
 sidecar/builtin-tools/code/grammars/*.wasm
+# External Bridge stdio MCP sidecar — bundled from
+# lib/external-bridge/mcp-server/standalone-entry.ts by
+# scripts/build/build-mcp-sidecar.mjs (prebuild), not authored here.
+sidecar/cognia-mcp.mjs
 # Root-only scratch screenshots. Anchored: unanchored, these matched at any
 # depth and silently swallowed web/public/og/workflows-{en,zh}.png, whose paths
 # web/lib/metadata.ts still advertises as og:image.

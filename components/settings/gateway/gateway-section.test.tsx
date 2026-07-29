@@ -1,22 +1,71 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
+
 import { GatewaySection } from "./gateway-section"
 import { DEFAULT_GATEWAY_CONFIG, type GatewayConfig, type GatewayStatus } from "@/types/gateway"
 
 // Echo the interpolation values too — otherwise a test that means to assert an
-// interpolated value (e.g. a cooldown's recovery time) silently asserts only
-// the key and passes no matter what was interpolated.
+// interpolated value silently asserts only the key and passes regardless.
 jest.mock("next-intl", () => ({
   useTranslations: () => (key: string, values?: Record<string, unknown>) =>
     values ? `${key}:${Object.values(values).join(",")}` : key,
 }))
 
-// Child cards are covered by their own tests — stub them here.
+let searchString = ""
+const replace = jest.fn()
+jest.mock("next/navigation", () => ({
+  useRouter: () => ({ replace }),
+  useSearchParams: () => new URLSearchParams(searchString),
+}))
+
+// Every panel has its own test; the shell only needs to prove the right one
+// renders.
+// The overview stub re-exposes the shell's own callbacks so the start/stop and
+// config-write paths stay covered without dragging the real panel in.
+jest.mock("./panels/overview-panel", () => ({
+  GatewayOverviewPanel: ({
+    ctx,
+    onToggleEnabled,
+  }: {
+    ctx: { config: { port: number }; persist: (p: Record<string, unknown>) => void }
+    onToggleEnabled: (next: boolean) => void
+  }) => (
+    <div data-testid="panel-overview">
+      <button type="button" data-testid="stub-start" onClick={() => onToggleEnabled(true)}>
+        start
+      </button>
+      <button type="button" data-testid="stub-stop" onClick={() => onToggleEnabled(false)}>
+        stop
+      </button>
+      <button type="button" data-testid="stub-persist" onClick={() => ctx.persist({ port: 50001 })}>
+        persist
+      </button>
+      <span data-testid="stub-port">{ctx.config.port}</span>
+    </div>
+  ),
+}))
+jest.mock("./panels/listener-panel", () => ({
+  GatewayListenerPanel: () => <div data-testid="panel-listener" />,
+}))
+// The keys and logs panels were wrapper divs around these two self-contained
+// cards, so the section renders them directly now.
 jest.mock("./gateway-keys-card", () => ({
-  GatewayKeysCard: () => <div data-testid="keys-card" />,
+  GatewayKeysCard: () => <div data-testid="panel-keys" />,
+}))
+jest.mock("./panels/reliability-panel", () => ({
+  GatewayReliabilityPanel: () => <div data-testid="panel-reliability" />,
+}))
+jest.mock("./panels/upstream-panel", () => ({
+  GatewayUpstreamPanel: () => <div data-testid="panel-upstream" />,
+}))
+jest.mock("./panels/exposure-panel", () => ({
+  GatewayExposurePanel: () => <div data-testid="panel-exposure" />,
 }))
 jest.mock("./gateway-log-viewer", () => ({
-  GatewayLogViewer: () => <div data-testid="log-viewer" />,
+  GatewayLogViewer: () => <div data-testid="panel-logs" />,
+}))
+jest.mock("./panels/route-tickets-panel", () => ({
+  GatewayRouteTicketsPanel: () => <div data-testid="panel-tickets" />,
 }))
 
 let tauri = true
@@ -59,331 +108,250 @@ const config = (over: Partial<GatewayConfig> = {}): GatewayConfig => ({
 
 beforeEach(() => {
   tauri = true
+  searchString = ""
+  replace.mockReset()
   mockGetConfig.mockReset().mockResolvedValue(config())
   mockGetStatus.mockReset().mockResolvedValue(status())
   mockStart.mockReset().mockResolvedValue(undefined)
   mockStop.mockReset().mockResolvedValue(undefined)
   mockUpdate.mockReset().mockResolvedValue(undefined)
   mockListCooldowns.mockReset().mockResolvedValue([])
-  Object.defineProperty(navigator, "clipboard", {
-    configurable: true,
-    value: { writeText: jest.fn().mockResolvedValue(undefined) },
-  })
 })
 
 describe("GatewaySection", () => {
   it("shows the desktop-only notice outside Tauri", () => {
     tauri = false
     render(<GatewaySection />)
+
     expect(screen.getByText("desktopOnlyNotice")).toBeInTheDocument()
+    expect(screen.queryByTestId("gateway-section")).not.toBeInTheDocument()
   })
 
-  it("hydrates config + status and renders the base-URL snippets", async () => {
+  it("does no IPC outside Tauri", () => {
+    tauri = false
     render(<GatewaySection />)
+
+    expect(mockGetConfig).not.toHaveBeenCalled()
+    expect(mockGetStatus).not.toHaveBeenCalled()
+  })
+
+  it("hydrates config, status and cooldowns on mount", async () => {
+    render(<GatewaySection />)
+
     await waitFor(() => expect(mockGetConfig).toHaveBeenCalled())
     expect(mockGetStatus).toHaveBeenCalled()
-    expect(screen.getByText(/ANTHROPIC_BASE_URL=http:\/\/127\.0\.0\.1:47823/)).toBeInTheDocument()
-    expect(screen.getByText(/OPENAI_BASE_URL=http:\/\/127\.0\.0\.1:47823\/v1/)).toBeInTheDocument()
-    expect(screen.getByTestId("keys-card")).toBeInTheDocument()
-    expect(screen.getByTestId("log-viewer")).toBeInTheDocument()
+    expect(mockListCooldowns).toHaveBeenCalled()
   })
 
-  it("starts the gateway when the enable switch is toggled on", async () => {
+  it("lands on the overview panel by default", async () => {
+    render(<GatewaySection />)
+    expect(await screen.findByTestId("panel-overview")).toBeInTheDocument()
+  })
+
+  it.each([
+    ["listener", "panel-listener"],
+    ["keys", "panel-keys"],
+    ["reliability", "panel-reliability"],
+    ["upstream", "panel-upstream"],
+    ["exposure", "panel-exposure"],
+    ["logs", "panel-logs"],
+    ["tickets", "panel-tickets"],
+  ])("deep-links straight to the %s panel", async (panel, testId) => {
+    searchString = `gatewayPanel=${panel}`
+    render(<GatewaySection />)
+
+    expect(await screen.findByTestId(testId)).toBeInTheDocument()
+  })
+
+  it("falls back to the overview for an unknown deep link", async () => {
+    searchString = "gatewayPanel=nonsense"
+    render(<GatewaySection />)
+
+    expect(await screen.findByTestId("panel-overview")).toBeInTheDocument()
+  })
+
+  it("writes the selected panel into the URL without scrolling", async () => {
     const user = userEvent.setup()
     render(<GatewaySection />)
-    await waitFor(() => expect(mockGetStatus).toHaveBeenCalled())
-    await user.click(screen.getByRole("switch", { name: "enabled" }))
-    expect(mockStart).toHaveBeenCalled()
+    await screen.findByTestId("panel-overview")
+
+    await user.click(screen.getByTestId("gateway-nav-item-upstream"))
+
+    expect(replace).toHaveBeenCalledWith("?gatewayPanel=upstream", { scroll: false })
   })
 
-  it("disables the enable switch without a usable key", async () => {
+  it("preserves unrelated query params when switching panels", async () => {
+    // The settings shell keeps its own `?section=` param in the same URL.
+    searchString = "section=gateway"
+    const user = userEvent.setup()
+    render(<GatewaySection />)
+    await screen.findByTestId("panel-overview")
+
+    await user.click(screen.getByTestId("gateway-nav-item-logs"))
+
+    expect(replace).toHaveBeenCalledWith(expect.stringContaining("section=gateway"), {
+      scroll: false,
+    })
+  })
+
+  it("badges the keys panel when no usable key exists", async () => {
     mockGetStatus.mockResolvedValue(status({ hasToken: false }))
     render(<GatewaySection />)
-    await waitFor(() => expect(mockGetStatus).toHaveBeenCalled())
-    expect(screen.getByRole("switch", { name: "enabled" })).toBeDisabled()
-    expect(screen.getAllByText("requiresKey").length).toBeGreaterThan(0)
+
+    expect(await screen.findByTestId("gateway-nav-badge-keys")).toHaveTextContent("!")
   })
 
-  it("persists a port change", async () => {
-    const user = userEvent.setup()
-    render(<GatewaySection />)
-    await waitFor(() => expect(mockGetConfig).toHaveBeenCalled())
-    // Real clear+type now works: the field no longer clamps per keystroke, so
-    // an empty draft and a below-`min` prefix both survive until commit.
-    const input = screen.getByLabelText("port")
-    await user.clear(input)
-    await user.type(input, "50001")
-    await user.tab()
-    expect(mockUpdate).toHaveBeenCalledWith(expect.objectContaining({ port: 50001 }))
-  })
-
-  it("shows the LAN warning and switches the bind interface", async () => {
-    const user = userEvent.setup()
-    render(<GatewaySection />)
-    await waitFor(() => expect(mockGetConfig).toHaveBeenCalled())
-    // loopback by default → no warning
-    expect(screen.queryByText("lanWarning")).not.toBeInTheDocument()
-    await user.click(screen.getByRole("button", { name: "bindLan" }))
-    expect(mockUpdate).toHaveBeenCalledWith(expect.objectContaining({ bindInterface: "lan" }))
-    expect(await screen.findByText("lanWarning")).toBeInTheDocument()
-  })
-
-  it("adds a retry status code chip", async () => {
-    const user = userEvent.setup()
-    render(<GatewaySection />)
-    await waitFor(() => expect(mockGetConfig).toHaveBeenCalled())
-    const input = screen.getByLabelText("retryStatusCodes")
-    await user.type(input, "418{Enter}")
-    expect(mockUpdate).toHaveBeenCalledWith(
-      expect.objectContaining({ retryStatusCodes: expect.arrayContaining([418]) })
-    )
-  })
-
-  it("toggles hide-raw-provider-models exposure", async () => {
-    const user = userEvent.setup()
-    render(<GatewaySection />)
-    await waitFor(() => expect(mockGetConfig).toHaveBeenCalled())
-    await user.click(screen.getByRole("switch", { name: "hideRawModels" }))
-    expect(mockUpdate).toHaveBeenCalledWith(
-      expect.objectContaining({ hideRawProviderModels: true })
-    )
-  })
-
-  // Number fields commit on blur / Enter, not per keystroke — clamping every
-  // keystroke made them unusable (see the port regression below).
-  it("persists a request-timeout change", async () => {
-    render(<GatewaySection />)
-    await waitFor(() => expect(mockGetConfig).toHaveBeenCalled())
-    const input = screen.getByLabelText("requestTimeout")
-    fireEvent.change(input, { target: { value: "0" } })
-    fireEvent.blur(input)
-    expect(mockUpdate).toHaveBeenCalledWith(expect.objectContaining({ requestTimeoutSecs: 0 }))
-  })
-
-  it("persists a per-gateway-key concurrency cap", async () => {
-    render(<GatewaySection />)
-    await waitFor(() => expect(mockGetConfig).toHaveBeenCalled())
-    const input = screen.getByLabelText("maxConcurrentPerKey")
-    fireEvent.change(input, { target: { value: "4" } })
-    fireEvent.blur(input)
-    expect(mockUpdate).toHaveBeenCalledWith(expect.objectContaining({ maxConcurrentPerKey: 4 }))
-  })
-
-  it("persists a rate-limit cooldown fallback change", async () => {
-    render(<GatewaySection />)
-    await waitFor(() => expect(mockGetConfig).toHaveBeenCalled())
-    const input = screen.getByLabelText("cooldownFallback")
-    fireEvent.change(input, { target: { value: "0" } })
-    fireEvent.blur(input)
-    expect(mockUpdate).toHaveBeenCalledWith(expect.objectContaining({ cooldownFallbackSecs: 0 }))
-  })
-
-  it("lets a port below the clamp floor be typed out before committing", async () => {
-    // Regression: clamping per keystroke turned the first digit of "8080" into
-    // 1024 (the `min`), so most ports were literally unreachable by typing.
-    render(<GatewaySection />)
-    await waitFor(() => expect(mockGetConfig).toHaveBeenCalled())
-    const input = screen.getByLabelText("port")
-    fireEvent.change(input, { target: { value: "8" } })
-    expect(mockUpdate).not.toHaveBeenCalled()
-    expect(input).toHaveValue(8)
-
-    fireEvent.change(input, { target: { value: "8080" } })
-    fireEvent.blur(input)
-    expect(mockUpdate).toHaveBeenCalledWith(expect.objectContaining({ port: 8080 }))
-  })
-
-  it("clamps an out-of-range port only once the edit is committed", async () => {
-    render(<GatewaySection />)
-    await waitFor(() => expect(mockGetConfig).toHaveBeenCalled())
-    const input = screen.getByLabelText("port")
-    fireEvent.change(input, { target: { value: "70000" } })
-    // The "only once committed" half of the claim — the old per-keystroke
-    // implementation clamped to the same 65535 right here.
-    expect(mockUpdate).not.toHaveBeenCalled()
-    fireEvent.blur(input)
-    expect(mockUpdate).toHaveBeenCalledWith(expect.objectContaining({ port: 65535 }))
-  })
-
-  it("keeps a chip typed but never Enter-ed instead of dropping it on blur", async () => {
-    // Regression: the draft lived in a ref and was discarded on blur, so a
-    // typed-but-uncommitted allowlist entry vanished with no feedback.
-    render(<GatewaySection />)
-    await waitFor(() => expect(mockGetConfig).toHaveBeenCalled())
-    const input = screen.getByLabelText("allowlist")
-    fireEvent.change(input, { target: { value: "10.0.0.0/8" } })
-    fireEvent.blur(input)
-    expect(mockUpdate).toHaveBeenCalledWith(
-      expect.objectContaining({ allowlist: expect.arrayContaining(["10.0.0.0/8"]) })
-    )
-  })
-
-  it("stops the listener when the switch is toggled off", async () => {
-    mockGetStatus.mockResolvedValue(status({ running: true, boundPort: 47823 }))
-    const user = userEvent.setup()
-    render(<GatewaySection />)
-    await waitFor(() => expect(screen.getByRole("switch", { name: "enabled" })).toBeChecked())
-
-    await user.click(screen.getByRole("switch", { name: "enabled" }))
-    expect(mockStop).toHaveBeenCalled()
-    expect(mockStart).not.toHaveBeenCalled()
-  })
-
-  it("surfaces a start failure instead of leaving the switch half-flipped", async () => {
-    const { toast } = jest.requireMock("sonner")
-    mockStart.mockRejectedValue(new Error("address already in use"))
-    const user = userEvent.setup()
-    render(<GatewaySection />)
-    await waitFor(() => expect(mockGetStatus).toHaveBeenCalled())
-
-    await user.click(screen.getByRole("switch", { name: "enabled" }))
-    await waitFor(() => expect(toast.error).toHaveBeenCalledWith("address already in use"))
-    // The switch mirrors real status, so a failed start leaves it off.
-    expect(screen.getByRole("switch", { name: "enabled" })).not.toBeChecked()
-  })
-
-  it("copies a client base-URL snippet", async () => {
-    const writeText = jest.fn().mockResolvedValue(undefined)
-    // `navigator.clipboard` is a read-only accessor in jsdom, and
-    // `userEvent.setup()` installs its own stub — so define it directly and
-    // drive the click with fireEvent.
-    Object.defineProperty(navigator, "clipboard", {
-      value: { writeText },
-      configurable: true,
-    })
-    render(<GatewaySection />)
-    await waitFor(() => expect(mockGetConfig).toHaveBeenCalled())
-
-    fireEvent.click(screen.getAllByRole("button", { name: "copy" })[0])
-    await waitFor(() =>
-      expect(writeText).toHaveBeenCalledWith(
-        expect.stringContaining(`http://127.0.0.1:${DEFAULT_GATEWAY_CONFIG.port}`)
-      )
-    )
-  })
-
-  it("commits a number field on Enter without waiting for blur", async () => {
-    render(<GatewaySection />)
-    await waitFor(() => expect(mockGetConfig).toHaveBeenCalled())
-    const input = screen.getByLabelText("maxRetries")
-    fireEvent.change(input, { target: { value: "3" } })
-    fireEvent.keyDown(input, { key: "Enter" })
-    expect(mockUpdate).toHaveBeenCalledWith(expect.objectContaining({ maxRetries: 3 }))
-  })
-
-  // Every remaining control, walked once. Beyond coverage this pins the
-  // label → config-key wiring, which is the obvious copy-paste hazard in a
-  // panel with seventeen near-identical rows.
-  it.each([
-    ["rateLimit", "120", { rateLimitPerMin: 120 }],
-    ["connectTimeout", "15", { connectTimeoutSecs: 15 }],
-    ["maxConcurrentPerUpstreamKey", "6", { maxConcurrentPerUpstreamKey: 6 }],
-    ["concurrencyWait", "2500", { concurrencyWaitMs: 2500 }],
-    ["overloadCooldown", "90", { overloadCooldownSecs: 90 }],
-  ])("persists the %s number field", async (label, typed, expected) => {
-    render(<GatewaySection />)
-    await waitFor(() => expect(mockGetConfig).toHaveBeenCalled())
-    const input = screen.getByLabelText(label)
-    fireEvent.change(input, { target: { value: typed } })
-    fireEvent.blur(input)
-    expect(mockUpdate).toHaveBeenCalledWith(expect.objectContaining(expected))
-  })
-
-  it.each([
-    ["exposedModels", "gpt-4o", "exposedModels"],
-    ["disableKeywords", "billing_hard_limit_reached", "disableKeywords"],
-    ["strippedFields", "metadata.user_id", "strippedRequestFields"],
-    ["fieldStripAllow", "openai:store", "fieldStripAllow"],
-  ])("appends to the %s chip list", async (label, typed, configKey) => {
-    render(<GatewaySection />)
-    await waitFor(() => expect(mockGetConfig).toHaveBeenCalled())
-    const input = screen.getByLabelText(label)
-    fireEvent.change(input, { target: { value: typed } })
-    fireEvent.blur(input)
-    expect(mockUpdate).toHaveBeenCalledWith(
-      expect.objectContaining({ [configKey]: expect.arrayContaining([typed]) })
-    )
-  })
-
-  it("commits a chip from the add button's own handler", async () => {
-    // The add button commits on mousedown, not click: mousedown blurs the
-    // input, the blur commits and clears the draft, and the button then renders
-    // disabled — so an onClick handler could never fire. Driving mousedown ALONE
-    // isolates the button's own path; an onClick-based button fails this
-    // outright, and no blur is involved to mask the difference.
-    render(<GatewaySection />)
-    await waitFor(() => expect(mockGetConfig).toHaveBeenCalled())
-    const input = screen.getByLabelText("exposedModels")
-    fireEvent.change(input, { target: { value: "gpt-4o" } })
-    fireEvent.mouseDown(screen.getByRole("button", { name: "add exposedModels" }))
-
-    expect(mockUpdate).toHaveBeenCalledTimes(1)
-    expect(mockUpdate).toHaveBeenCalledWith(expect.objectContaining({ exposedModels: ["gpt-4o"] }))
-  })
-
-  it("does not double-add when the add button's mousedown is followed by a blur", async () => {
-    const user = userEvent.setup()
-    render(<GatewaySection />)
-    await waitFor(() => expect(mockGetConfig).toHaveBeenCalled())
-    await user.type(screen.getByLabelText("exposedModels"), "gpt-4o")
-    // Full pointer sequence: mousedown commits, the ensuing blur sees an empty
-    // draft and must no-op rather than committing a second time.
-    await user.click(screen.getByRole("button", { name: "add exposedModels" }))
-    expect(mockUpdate).toHaveBeenCalledTimes(1)
-  })
-
-  it("removes a chip", async () => {
-    const user = userEvent.setup()
-    render(<GatewaySection />)
-    await waitFor(() => expect(mockGetConfig).toHaveBeenCalled())
-    // The default allowlist ships one entry.
-    await user.click(screen.getByRole("button", { name: "remove 127.0.0.1/32" }))
-    expect(mockUpdate).toHaveBeenCalledWith(expect.objectContaining({ allowlist: [] }))
-  })
-
-  it("surfaces a config-write failure", async () => {
-    const { toast } = jest.requireMock("sonner")
-    mockUpdate.mockRejectedValue(new Error("disk full"))
-    render(<GatewaySection />)
-    await waitFor(() => expect(mockGetConfig).toHaveBeenCalled())
-    const input = screen.getByLabelText("maxRetries")
-    fireEvent.change(input, { target: { value: "2" } })
-    fireEvent.blur(input)
-    await waitFor(() => expect(toast.error).toHaveBeenCalledWith("disk full"))
-  })
-
-  it("renders a temporary cooldown with its recovery time", async () => {
-    const untilMs = Date.UTC(2026, 6, 21, 10, 32, 11)
+  it("badges the upstream panel with the parked-key count from any panel", async () => {
     mockListCooldowns.mockResolvedValue([
-      {
-        providerId: "openai",
-        keyHint: "…9999",
-        untilMs,
-        permanent: false,
-        reason: "rate limited",
-      },
+      { providerId: "openai", keyHint: "…1", untilMs: 0, permanent: false, reason: "429" },
+      { providerId: "groq", keyHint: "…2", untilMs: 0, permanent: false, reason: "429" },
     ])
     render(<GatewaySection />)
-    // Assert the interpolated clock, not just the key — the row is useless if
-    // it renders "Cooling until {time}" with the wrong field.
-    expect(
-      await screen.findByText(`cooldownsCoolingUntil:${new Date(untilMs).toLocaleTimeString()}`)
-    ).toBeInTheDocument()
-    expect(screen.queryByText("cooldownsPermanent")).not.toBeInTheDocument()
+
+    expect(await screen.findByTestId("gateway-nav-badge-upstream")).toHaveTextContent("2")
   })
 
-  it("lists parked upstream accounts and refreshes on demand", async () => {
-    const user = userEvent.setup()
-    mockListCooldowns
-      .mockResolvedValueOnce([]) // initial mount → empty
-      .mockResolvedValueOnce([
-        { providerId: "openai", keyHint: "…1234", untilMs: 0, permanent: true, reason: "quota" },
-      ])
+  it("has no cooldown badge when nothing is parked", async () => {
     render(<GatewaySection />)
-    await waitFor(() => expect(mockListCooldowns).toHaveBeenCalled())
-    expect(screen.getByText("cooldownsEmpty")).toBeInTheDocument()
-    await user.click(screen.getByRole("button", { name: "cooldownsRefresh" }))
-    expect(await screen.findByText(/openai · …1234/)).toBeInTheDocument()
-    expect(screen.getByText("cooldownsPermanent")).toBeInTheDocument()
+    await screen.findByTestId("panel-overview")
+
+    expect(screen.queryByTestId("gateway-nav-badge-upstream")).not.toBeInTheDocument()
+  })
+
+  it("renders the mobile nav trigger for the sub-md layout", async () => {
+    render(<GatewaySection />)
+    expect(await screen.findByTestId("gateway-mobile-nav-trigger")).toBeInTheDocument()
+  })
+
+  describe("shared callbacks handed to the panels", () => {
+    it("starts the listener and re-reads status", async () => {
+      const user = userEvent.setup()
+      render(<GatewaySection />)
+      await screen.findByTestId("panel-overview")
+      mockGetStatus.mockClear()
+
+      await user.click(screen.getByTestId("stub-start"))
+
+      expect(mockStart).toHaveBeenCalled()
+      await waitFor(() => expect(mockGetStatus).toHaveBeenCalled())
+    })
+
+    it("stops the listener", async () => {
+      const user = userEvent.setup()
+      render(<GatewaySection />)
+      await screen.findByTestId("panel-overview")
+
+      await user.click(screen.getByTestId("stub-stop"))
+
+      expect(mockStop).toHaveBeenCalled()
+      expect(mockStart).not.toHaveBeenCalled()
+    })
+
+    it("refuses to start without a usable key", async () => {
+      const { toast } = jest.requireMock("sonner")
+      mockGetStatus.mockResolvedValue(status({ hasToken: false }))
+      const user = userEvent.setup()
+      render(<GatewaySection />)
+      await screen.findByTestId("panel-overview")
+
+      await user.click(screen.getByTestId("stub-start"))
+
+      expect(mockStart).not.toHaveBeenCalled()
+      expect(toast.error).toHaveBeenCalledWith("requiresKey")
+    })
+
+    it("surfaces a start failure rather than leaving the UI half-flipped", async () => {
+      const { toast } = jest.requireMock("sonner")
+      mockStart.mockRejectedValue(new Error("address already in use"))
+      const user = userEvent.setup()
+      render(<GatewaySection />)
+      await screen.findByTestId("panel-overview")
+
+      await user.click(screen.getByTestId("stub-start"))
+
+      await waitFor(() => expect(toast.error).toHaveBeenCalledWith("address already in use"))
+    })
+
+    it("merges a patch into the full config before writing it", async () => {
+      // Rust replaces the whole config document, so a partial write would reset
+      // every field the panel did not touch.
+      const user = userEvent.setup()
+      render(<GatewaySection />)
+      await screen.findByTestId("panel-overview")
+
+      await user.click(screen.getByTestId("stub-persist"))
+
+      expect(mockUpdate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          port: 50001,
+          rateLimitPerMin: DEFAULT_GATEWAY_CONFIG.rateLimitPerMin,
+          retryStatusCodes: DEFAULT_GATEWAY_CONFIG.retryStatusCodes,
+        })
+      )
+    })
+
+    it("merges into the LOADED config, not the defaults, while a poll is in flight", async () => {
+      // The regression: `persist` read the current config out of a `setConfig`
+      // updater. React only runs updaters eagerly when the fiber has no pending
+      // lanes, and this component independently schedules the status and
+      // cooldown polls — so with one in flight the read fell through to
+      // `DEFAULT_GATEWAY_CONFIG` and a single toggle shipped every untouched
+      // field back to its default.
+      mockGetConfig.mockResolvedValue(
+        config({ port: 9999, allowlist: ["10.0.0.0/8"], exposedModels: ["claude-opus-5"] })
+      )
+      const user = userEvent.setup()
+      render(<GatewaySection />)
+      await screen.findByTestId("panel-overview")
+      await waitFor(() => expect(screen.getByTestId("stub-port")).toHaveTextContent("9999"))
+
+      await user.click(screen.getByTestId("stub-persist"))
+
+      expect(mockUpdate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          port: 50001,
+          allowlist: ["10.0.0.0/8"],
+          exposedModels: ["claude-opus-5"],
+        })
+      )
+    })
+
+    it("carries an earlier edit into the next write", async () => {
+      // Two edits in a row must compose; the second used to start from the
+      // defaults again and undo the first.
+      mockGetConfig.mockResolvedValue(config({ allowlist: ["10.0.0.0/8"] }))
+      const user = userEvent.setup()
+      render(<GatewaySection />)
+      await screen.findByTestId("panel-overview")
+
+      await user.click(screen.getByTestId("stub-persist"))
+      await user.click(screen.getByTestId("stub-persist"))
+
+      expect(mockUpdate).toHaveBeenLastCalledWith(
+        expect.objectContaining({ port: 50001, allowlist: ["10.0.0.0/8"] })
+      )
+    })
+
+    it("reflects the persisted value back into the panels", async () => {
+      const user = userEvent.setup()
+      render(<GatewaySection />)
+      await screen.findByTestId("panel-overview")
+
+      await user.click(screen.getByTestId("stub-persist"))
+
+      await waitFor(() => expect(screen.getByTestId("stub-port")).toHaveTextContent("50001"))
+    })
+
+    it("surfaces a config-write failure", async () => {
+      const { toast } = jest.requireMock("sonner")
+      mockUpdate.mockRejectedValue(new Error("disk full"))
+      const user = userEvent.setup()
+      render(<GatewaySection />)
+      await screen.findByTestId("panel-overview")
+
+      await user.click(screen.getByTestId("stub-persist"))
+
+      await waitFor(() => expect(toast.error).toHaveBeenCalledWith("disk full"))
+    })
   })
 })

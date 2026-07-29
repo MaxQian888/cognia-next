@@ -52,6 +52,11 @@ export interface GatewayConfig {
   maxConcurrentPerUpstreamKey: number
   /** Wait (ms) for a concurrency slot before rejecting with 429; `0` = no queue. */
   concurrencyWaitMs: number
+  /** Seconds an SSE pump tolerates TOTAL upstream silence before abandoning the
+   * stream; `0` = wait forever. Streaming skips `requestTimeoutSecs` (a long
+   * generation is not a hung one), so without this a silent upstream parks the
+   * pump and leaks its concurrency slots + in-flight tally. */
+  streamIdleTimeoutSecs: number
 
   // ---- W3.2 outbound field stripping ----------------------------------------
   /** Dotted-path fields stripped from every upstream request body. */
@@ -83,6 +88,7 @@ export const DEFAULT_GATEWAY_CONFIG: GatewayConfig = {
   maxConcurrentPerKey: 0,
   maxConcurrentPerUpstreamKey: 0,
   concurrencyWaitMs: 10_000,
+  streamIdleTimeoutSecs: 300,
   strippedRequestFields: [
     "service_tier",
     "store",
@@ -303,6 +309,19 @@ export interface GatewayKeyCooldown {
   untilMs: number
   permanent: boolean
   reason: string
+}
+
+/** One candidate's result from the upstream self-check (`gateway_probe_upstream`,
+ * the IPC path onto the loopback-only `/healthz/upstream` route). Mirrors Rust
+ * `UpstreamProbeResult`. */
+export interface GatewayUpstreamProbeResult {
+  providerId: string
+  modelId: string
+  ok: boolean
+  /** Upstream HTTP status; `null` when the connection itself failed. */
+  status: number | null
+  latencyMs: number
+  error: string | null
 }
 
 export const GATEWAY_REQUEST_LOG_EVENT = "gateway://request-log"

@@ -54,7 +54,7 @@ use api_keys::{ApiKeyPatch, GatewayApiKey, RedactedApiKey};
 use concurrency::ConcurrencyLimiter;
 use cooldown::{CooldownRow, KeyCooldownMap};
 use execute::KeyRotationMap;
-use server::{RequestObserver, ServerHandle};
+use server::{RequestObserver, ServerHandle, UpstreamProbeOutcome, UpstreamProbeResult};
 use snapshot::{RoutingSnapshot, SnapshotEntry};
 
 /// Successful [`GatewayState::try_set_snapshot`] ingest.
@@ -163,6 +163,34 @@ impl GatewayState {
     pub fn cooldowns(&self) -> Vec<CooldownRow> {
         let now = chrono::Utc::now().timestamp_millis();
         cooldown::snapshot_rows(&self.key_cooldown, now)
+    }
+
+    /// Run the `/healthz/upstream` self-check against the running listener.
+    ///
+    /// The endpoint itself is loopback-only and the renderer cannot reach it —
+    /// the app CSP's `connect-src` admits no loopback origin — so the settings
+    /// surface goes through this instead. Probing requires a running server so
+    /// the calls draw on the same rotation cursors, cooldown map and in-flight
+    /// tally as live traffic; probing a stopped gateway would report against
+    /// throwaway state and mislead.
+    pub async fn probe_upstream(&self, model: &str) -> Result<Vec<UpstreamProbeResult>, String> {
+        // Detach the probe INSIDE the guard's scope, then drop the guard: this
+        // is a parking_lot mutex and holding it across the await below would
+        // deadlock any concurrent status read.
+        let probe = {
+            let inner = self.inner.lock();
+            inner.server.as_ref().map(|handle| handle.probe_handle())
+        };
+        let Some(probe) = probe else {
+            return Err("gateway is not running".into());
+        };
+        match probe.run(model).await {
+            UpstreamProbeOutcome::NoSnapshot => Err("no routing snapshot yet".into()),
+            UpstreamProbeOutcome::NoCandidate => {
+                Err(format!("model \"{model}\" resolves to no candidate"))
+            }
+            UpstreamProbeOutcome::Probed(results) => Ok(results),
+        }
     }
 
     /// Point the state at its on-disk config mirror and load it (Tauri setup

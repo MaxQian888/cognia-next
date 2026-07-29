@@ -11,7 +11,7 @@
     "postinstall": "node scripts/postinstall.mjs",
     "predev": "node scripts/build/download-cubism-core.mjs && node scripts/build/clean-stale-turbopack-cache.mjs && node scripts/build/copy-monaco-assets.mjs && node scripts/build/copy-ocr-assets.mjs && node scripts/build/copy-codegraph-grammars.mjs && node scripts/build/build-builtin-skills.mjs && node scripts/dev/ensure-cognia-cli.mjs",
     "cli:rust:build": "cargo build -p cognia-cli",
-    "prebuild": "node scripts/build/download-cubism-core.mjs && node scripts/build/copy-monaco-assets.mjs && node scripts/build/copy-ocr-assets.mjs && node scripts/build/copy-codegraph-grammars.mjs && node scripts/build/build-vscode-ext-host-sidecar.mjs && node scripts/build/build-webclone-sidecar.mjs && node scripts/build/build-builtin-skills.mjs",
+    "prebuild": "node scripts/build/download-cubism-core.mjs && node scripts/build/copy-monaco-assets.mjs && node scripts/build/copy-ocr-assets.mjs && node scripts/build/copy-codegraph-grammars.mjs && node scripts/build/build-vscode-ext-host-sidecar.mjs && node scripts/build/build-webclone-sidecar.mjs && node scripts/build/build-mcp-sidecar.mjs && node scripts/build/build-builtin-skills.mjs",
     "skills:build": "node scripts/build/build-builtin-skills.mjs",
     "skills:check": "node scripts/build/build-builtin-skills.mjs --check",
     "skills:build:test": "node --test scripts/build/build-builtin-skills.test.mjs",

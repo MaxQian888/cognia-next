@@ -296,6 +296,11 @@ const FILL_HEIGHT_SECTIONS = new Set<SettingsSectionId>([
   "appearance",
   "subscription",
   "subagents",
+  // Both became master/detail panes that own their own scroll; in the capped
+  // ScrollArea branch they would render at max-w-5xl with the nav rail and the
+  // detail pane fighting over 1024px.
+  "gateway",
+  "external-bridge",
 ])
 
 function isSection(value: string | null): value is SettingsSectionId {

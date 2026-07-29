@@ -130,6 +130,13 @@ interface SettingsRowProps {
   children: ReactNode
   className?: string
   disabled?: boolean
+  /**
+   * Id of the control this row labels. Without it the row's `<Label>` is
+   * associated with nothing, so the control it describes has no accessible
+   * name — `getByRole("switch", { name })` finds nothing and a screen reader
+   * announces a bare "switch".
+   */
+  htmlFor?: string
 }
 
 export function SettingsRow({
@@ -139,6 +146,7 @@ export function SettingsRow({
   children,
   className,
   disabled,
+  htmlFor,
 }: SettingsRowProps) {
   return (
     <div
@@ -155,7 +163,9 @@ export function SettingsRow({
           </div>
         )}
         <div className="min-w-0 flex-1 space-y-0.5">
-          <Label className="text-xs sm:text-sm font-medium">{label}</Label>
+          <Label htmlFor={htmlFor} className="text-xs sm:text-sm font-medium">
+            {label}
+          </Label>
           {description && (
             <p className="text-[10px] sm:text-[11px] text-muted-foreground line-clamp-2">
               {description}
@@ -199,6 +209,7 @@ export function SettingsToggle({
       description={description}
       disabled={disabled}
       className={className}
+      htmlFor={id}
     >
       <Switch id={id} checked={checked} onCheckedChange={onCheckedChange} disabled={disabled} />
     </SettingsRow>

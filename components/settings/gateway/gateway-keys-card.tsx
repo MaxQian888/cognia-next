@@ -30,7 +30,8 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
 import { Badge } from "@/components/ui/badge"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { MotionCollapse, MotionReveal } from "@/components/chat/motion/motion-reveal"
+import { SettingsCard } from "@/components/settings/common/settings-section"
 import {
   gatewayCreateKey,
   gatewayDeleteKey,
@@ -229,16 +230,17 @@ export function GatewayKeysCard({ onChanged }: { onChanged?: () => void }) {
   }
 
   return (
-    <Card>
-      <CardHeader className="pb-3">
-        <CardTitle className="flex items-center gap-2 text-sm font-medium">
-          <KeyRoundIcon className="h-4 w-4" />
-          {t("keysHeading")}
-        </CardTitle>
-        <CardDescription>{t("keysHelp")}</CardDescription>
-      </CardHeader>
-      <CardContent className="space-y-4">
-        {freshKey && (
+    <SettingsCard
+      icon={<KeyRoundIcon className="size-4" />}
+      title={t("keysHeading")}
+      description={t("keysHelp")}
+      badge={keys.length > 0 ? String(keys.length) : undefined}
+    >
+      {/* The freshly-minted secret is shown exactly once, so it slides in
+          rather than popping — the entrance is what draws the eye to the one
+          thing on this screen that cannot be recovered later. */}
+      <MotionCollapse open={freshKey !== null}>
+        {freshKey ? (
           <div
             className="space-y-2 rounded-md border border-emerald-500/40 bg-emerald-500/5 p-3"
             data-testid="gateway-fresh-key"
@@ -258,19 +260,21 @@ export function GatewayKeysCard({ onChanged }: { onChanged?: () => void }) {
             </div>
             <p className="text-xs text-amber-600 dark:text-amber-400">{t("newKeyReveal")}</p>
           </div>
-        )}
+        ) : null}
+      </MotionCollapse>
 
-        {/* Key list */}
-        {keys.length === 0 ? (
-          <p className="text-xs text-muted-foreground">{t("keysEmpty")}</p>
-        ) : (
-          <ul className="space-y-2" data-testid="gateway-keys">
-            {keys.map((k) => {
-              const expired = k.expiresAtMs != null && k.expiresAtMs <= now
-              const overQuota = k.quotaTokens != null && k.quotaUsedTokens >= k.quotaTokens
-              const isEditing = editId === k.id
-              return (
-                <li key={k.id} className="rounded-md border p-3">
+      {/* Key list */}
+      {keys.length === 0 ? (
+        <p className="text-xs text-muted-foreground">{t("keysEmpty")}</p>
+      ) : (
+        <ul className="space-y-2" data-testid="gateway-keys">
+          {keys.map((k, index) => {
+            const expired = k.expiresAtMs != null && k.expiresAtMs <= now
+            const overQuota = k.quotaTokens != null && k.quotaUsedTokens >= k.quotaTokens
+            const isEditing = editId === k.id
+            return (
+              <MotionReveal key={k.id} index={index} className="rounded-md border p-3">
+                <li>
                   <div className="flex items-center justify-between gap-3">
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-2">
@@ -349,183 +353,196 @@ export function GatewayKeysCard({ onChanged }: { onChanged?: () => void }) {
                       >
                         <EyeIcon className="h-3.5 w-3.5" />
                       </Button>
-                      {confirmDeleteId === k.id ? (
-                        <Button size="sm" variant="destructive" onClick={() => void onDelete(k.id)}>
-                          {t("deleteKey")}
-                        </Button>
-                      ) : (
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          onClick={() => setConfirmDeleteId(k.id)}
-                          aria-label={`${t("deleteKey")} ${k.name}`}
-                        >
-                          <Trash2Icon className="h-3.5 w-3.5" />
-                        </Button>
-                      )}
+                      {/* The trigger stays put whether or not the confirmation
+                          is open. It used to be REPLACED by a wide destructive
+                          button, so asking to delete visibly re-flowed the row
+                          and moved every other control under the cursor. */}
+                      <Button
+                        size="sm"
+                        variant={confirmDeleteId === k.id ? "secondary" : "ghost"}
+                        onClick={() => setConfirmDeleteId((cur) => (cur === k.id ? null : k.id))}
+                        aria-label={`${t("deleteKey")} ${k.name}`}
+                        aria-expanded={confirmDeleteId === k.id}
+                      >
+                        <Trash2Icon className="h-3.5 w-3.5" />
+                      </Button>
                     </div>
                   </div>
-                  {confirmDeleteId === k.id && (
-                    <p className="mt-2 text-xs text-destructive">{t("deleteKeyConfirm")}</p>
-                  )}
-                  {isEditing && editDraft && (
-                    <div
-                      className="mt-3 grid gap-2 rounded-md border border-dashed p-3 sm:grid-cols-2"
-                      data-testid={`gateway-key-edit-${k.id}`}
-                    >
-                      <div className="space-y-1">
-                        <Label htmlFor={`edit-name-${k.id}`} className="text-xs">
-                          {t("keyName")}
-                        </Label>
-                        <Input
-                          id={`edit-name-${k.id}`}
-                          value={editDraft.name}
-                          onChange={(e) => setEditDraft({ ...editDraft, name: e.target.value })}
-                        />
-                      </div>
-                      <div className="space-y-1">
-                        <Label htmlFor={`edit-models-${k.id}`} className="text-xs">
-                          {t("keyModels")}
-                        </Label>
-                        <Input
-                          id={`edit-models-${k.id}`}
-                          value={editDraft.models}
-                          placeholder={t("keyModelsPlaceholder")}
-                          onChange={(e) => setEditDraft({ ...editDraft, models: e.target.value })}
-                        />
-                      </div>
-                      <div className="space-y-1">
-                        <Label htmlFor={`edit-expiry-${k.id}`} className="text-xs">
-                          {t("keyExpiry")}
-                        </Label>
-                        <Input
-                          id={`edit-expiry-${k.id}`}
-                          type="date"
-                          value={editDraft.expiry}
-                          onChange={(e) => setEditDraft({ ...editDraft, expiry: e.target.value })}
-                        />
-                      </div>
-                      <div className="space-y-1">
-                        <Label htmlFor={`edit-rate-${k.id}`} className="text-xs">
-                          {t("keyRateLimit")}
-                        </Label>
-                        <Input
-                          id={`edit-rate-${k.id}`}
-                          type="number"
-                          min={1}
-                          value={editDraft.rate}
-                          placeholder={t("keyRateLimitNone")}
-                          onChange={(e) => setEditDraft({ ...editDraft, rate: e.target.value })}
-                        />
-                      </div>
-                      <div className="space-y-1">
-                        <Label htmlFor={`edit-quota-${k.id}`} className="text-xs">
-                          {t("keyQuota")}
-                        </Label>
-                        <Input
-                          id={`edit-quota-${k.id}`}
-                          type="number"
-                          min={1}
-                          value={editDraft.quota}
-                          placeholder={t("keyQuotaNone")}
-                          onChange={(e) => setEditDraft({ ...editDraft, quota: e.target.value })}
-                        />
-                        <p className="text-[10px] text-muted-foreground">{t("keyQuotaHelp")}</p>
-                      </div>
-                      <div className="flex items-center gap-2 sm:col-span-2">
-                        <Button size="sm" onClick={() => void onSaveEdit(k.id)}>
-                          {t("save")}
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          onClick={() => {
-                            setEditId(null)
-                            setEditDraft(null)
-                          }}
-                        >
-                          {t("cancel")}
-                        </Button>
-                      </div>
+                  <MotionCollapse open={confirmDeleteId === k.id}>
+                    <div className="mt-2 flex flex-wrap items-center gap-2">
+                      <p className="flex-1 text-xs text-destructive">{t("deleteKeyConfirm")}</p>
+                      <Button size="sm" variant="destructive" onClick={() => void onDelete(k.id)}>
+                        {t("deleteKey")}
+                      </Button>
+                      <Button size="sm" variant="ghost" onClick={() => setConfirmDeleteId(null)}>
+                        {t("cancel")}
+                      </Button>
                     </div>
-                  )}
+                  </MotionCollapse>
+                  <MotionCollapse open={isEditing && editDraft !== null}>
+                    {isEditing && editDraft ? (
+                      <div
+                        // `@lg/gateway-pane`, not `sm:` — this sits inside the
+                        // detail pane, which is a fraction of the window, so a
+                        // viewport breakpoint would split it into two columns
+                        // while the pane itself is still narrow.
+                        className="mt-3 grid gap-2 rounded-md border border-dashed p-3 @lg/gateway-pane:grid-cols-2"
+                        data-testid={`gateway-key-edit-${k.id}`}
+                      >
+                        <div className="space-y-1">
+                          <Label htmlFor={`edit-name-${k.id}`} className="text-xs">
+                            {t("keyName")}
+                          </Label>
+                          <Input
+                            id={`edit-name-${k.id}`}
+                            value={editDraft.name}
+                            onChange={(e) => setEditDraft({ ...editDraft, name: e.target.value })}
+                          />
+                        </div>
+                        <div className="space-y-1">
+                          <Label htmlFor={`edit-models-${k.id}`} className="text-xs">
+                            {t("keyModels")}
+                          </Label>
+                          <Input
+                            id={`edit-models-${k.id}`}
+                            value={editDraft.models}
+                            placeholder={t("keyModelsPlaceholder")}
+                            onChange={(e) => setEditDraft({ ...editDraft, models: e.target.value })}
+                          />
+                        </div>
+                        <div className="space-y-1">
+                          <Label htmlFor={`edit-expiry-${k.id}`} className="text-xs">
+                            {t("keyExpiry")}
+                          </Label>
+                          <Input
+                            id={`edit-expiry-${k.id}`}
+                            type="date"
+                            value={editDraft.expiry}
+                            onChange={(e) => setEditDraft({ ...editDraft, expiry: e.target.value })}
+                          />
+                        </div>
+                        <div className="space-y-1">
+                          <Label htmlFor={`edit-rate-${k.id}`} className="text-xs">
+                            {t("keyRateLimit")}
+                          </Label>
+                          <Input
+                            id={`edit-rate-${k.id}`}
+                            type="number"
+                            min={1}
+                            value={editDraft.rate}
+                            placeholder={t("keyRateLimitNone")}
+                            onChange={(e) => setEditDraft({ ...editDraft, rate: e.target.value })}
+                          />
+                        </div>
+                        <div className="space-y-1">
+                          <Label htmlFor={`edit-quota-${k.id}`} className="text-xs">
+                            {t("keyQuota")}
+                          </Label>
+                          <Input
+                            id={`edit-quota-${k.id}`}
+                            type="number"
+                            min={1}
+                            value={editDraft.quota}
+                            placeholder={t("keyQuotaNone")}
+                            onChange={(e) => setEditDraft({ ...editDraft, quota: e.target.value })}
+                          />
+                          <p className="text-[10px] text-muted-foreground">{t("keyQuotaHelp")}</p>
+                        </div>
+                        <div className="flex items-center gap-2 @lg/gateway-pane:col-span-2">
+                          <Button size="sm" onClick={() => void onSaveEdit(k.id)}>
+                            {t("save")}
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            onClick={() => {
+                              setEditId(null)
+                              setEditDraft(null)
+                            }}
+                          >
+                            {t("cancel")}
+                          </Button>
+                        </div>
+                      </div>
+                    ) : null}
+                  </MotionCollapse>
                 </li>
-              )
-            })}
-          </ul>
-        )}
+              </MotionReveal>
+            )
+          })}
+        </ul>
+      )}
 
-        {/* Create form */}
-        <div className="grid gap-2 rounded-md border border-dashed p-3 sm:grid-cols-2">
-          <div className="space-y-1">
-            <Label htmlFor="gw-key-name" className="text-xs">
-              {t("keyName")}
-            </Label>
-            <Input
-              id="gw-key-name"
-              value={name}
-              placeholder={t("keyNamePlaceholder")}
-              onChange={(e) => setName(e.target.value)}
-            />
-          </div>
-          <div className="space-y-1">
-            <Label htmlFor="gw-key-models" className="text-xs">
-              {t("keyModels")}
-            </Label>
-            <Input
-              id="gw-key-models"
-              value={models}
-              placeholder={t("keyModelsPlaceholder")}
-              onChange={(e) => setModels(e.target.value)}
-            />
-          </div>
-          <div className="space-y-1">
-            <Label htmlFor="gw-key-expiry" className="text-xs">
-              {t("keyExpiry")}
-            </Label>
-            <Input
-              id="gw-key-expiry"
-              type="date"
-              value={expiry}
-              onChange={(e) => setExpiry(e.target.value)}
-            />
-          </div>
-          <div className="space-y-1">
-            <Label htmlFor="gw-key-rate" className="text-xs">
-              {t("keyRateLimit")}
-            </Label>
-            <Input
-              id="gw-key-rate"
-              type="number"
-              min={1}
-              value={rate}
-              placeholder={t("keyRateLimitNone")}
-              onChange={(e) => setRate(e.target.value)}
-            />
-          </div>
-          <div className="space-y-1">
-            <Label htmlFor="gw-key-quota" className="text-xs">
-              {t("keyQuota")}
-            </Label>
-            <Input
-              id="gw-key-quota"
-              type="number"
-              min={1}
-              value={quota}
-              placeholder={t("keyQuotaNone")}
-              onChange={(e) => setQuota(e.target.value)}
-            />
-            <p className="text-[10px] text-muted-foreground">{t("keyQuotaHelp")}</p>
-          </div>
-          <div className="sm:col-span-2">
-            <Button size="sm" onClick={() => void onCreate()}>
-              <PlusIcon className="mr-1.5 h-4 w-4" />
-              {t("createKey")}
-            </Button>
-          </div>
+      {/* Create form */}
+      <div className="grid gap-2 rounded-md border border-dashed p-3 @lg/gateway-pane:grid-cols-2">
+        <div className="space-y-1">
+          <Label htmlFor="gw-key-name" className="text-xs">
+            {t("keyName")}
+          </Label>
+          <Input
+            id="gw-key-name"
+            value={name}
+            placeholder={t("keyNamePlaceholder")}
+            onChange={(e) => setName(e.target.value)}
+          />
         </div>
-      </CardContent>
-    </Card>
+        <div className="space-y-1">
+          <Label htmlFor="gw-key-models" className="text-xs">
+            {t("keyModels")}
+          </Label>
+          <Input
+            id="gw-key-models"
+            value={models}
+            placeholder={t("keyModelsPlaceholder")}
+            onChange={(e) => setModels(e.target.value)}
+          />
+        </div>
+        <div className="space-y-1">
+          <Label htmlFor="gw-key-expiry" className="text-xs">
+            {t("keyExpiry")}
+          </Label>
+          <Input
+            id="gw-key-expiry"
+            type="date"
+            value={expiry}
+            onChange={(e) => setExpiry(e.target.value)}
+          />
+        </div>
+        <div className="space-y-1">
+          <Label htmlFor="gw-key-rate" className="text-xs">
+            {t("keyRateLimit")}
+          </Label>
+          <Input
+            id="gw-key-rate"
+            type="number"
+            min={1}
+            value={rate}
+            placeholder={t("keyRateLimitNone")}
+            onChange={(e) => setRate(e.target.value)}
+          />
+        </div>
+        <div className="space-y-1">
+          <Label htmlFor="gw-key-quota" className="text-xs">
+            {t("keyQuota")}
+          </Label>
+          <Input
+            id="gw-key-quota"
+            type="number"
+            min={1}
+            value={quota}
+            placeholder={t("keyQuotaNone")}
+            onChange={(e) => setQuota(e.target.value)}
+          />
+          <p className="text-[10px] text-muted-foreground">{t("keyQuotaHelp")}</p>
+        </div>
+        <div className="@lg/gateway-pane:col-span-2">
+          <Button size="sm" onClick={() => void onCreate()}>
+            <PlusIcon className="mr-1.5 h-4 w-4" />
+            {t("createKey")}
+          </Button>
+        </div>
+      </div>
+    </SettingsCard>
   )
 }
 

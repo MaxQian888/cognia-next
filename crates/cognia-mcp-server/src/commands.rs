@@ -171,6 +171,54 @@ pub async fn mcp_server_status(
     Ok(state.status())
 }
 
+/// Env override for the stdio sidecar, for dev trees and packagers.
+pub const MCP_SIDECAR_PATH_ENV: &str = "COGNIA_MCP_SIDECAR_PATH";
+
+/// Pick the first candidate that exists on disk.
+///
+/// Split out from the command so the ordering is testable without an
+/// `AppHandle`. Returning `None` rather than a best guess is the point: the
+/// renderer used to synthesise `~/.cognia/cognia-mcp.js` — a path no build
+/// step, installer or first-run task has ever written — and both spawned the
+/// server against it and printed it in the client setup snippet.
+pub fn first_existing_sidecar(candidates: &[std::path::PathBuf]) -> Option<std::path::PathBuf> {
+    candidates.iter().find(|path| path.is_file()).cloned()
+}
+
+/// Resolve the stdio sidecar the HTTP server will spawn, or `None` when it is
+/// not installed.
+///
+/// Single source of truth for the spawn path and the client setup snippet —
+/// they disagreed before, and neither pointed at a real file.
+#[tauri::command]
+pub async fn mcp_server_sidecar_path(app: tauri::AppHandle) -> Result<Option<String>, McpServerError> {
+    Ok(resolve_sidecar_path(&app).map(|path| path.to_string_lossy().into_owned()))
+}
+
+/// Candidate order: explicit env override, the bundled resource
+/// (`tauri.conf.json` → `resources`), then the `~/.cognia` user-install
+/// convention that predates the bundling.
+pub fn resolve_sidecar_path<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+) -> Option<std::path::PathBuf> {
+    use tauri::Manager;
+
+    let mut candidates: Vec<std::path::PathBuf> = Vec::new();
+    if let Some(explicit) = std::env::var_os(MCP_SIDECAR_PATH_ENV) {
+        candidates.push(explicit.into());
+    }
+    if let Ok(resource) = app
+        .path()
+        .resolve("sidecar/cognia-mcp.mjs", tauri::path::BaseDirectory::Resource)
+    {
+        candidates.push(resource);
+    }
+    if let Ok(home) = app.path().home_dir() {
+        candidates.push(home.join(".cognia").join("cognia-mcp.js"));
+    }
+    first_existing_sidecar(&candidates)
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -195,6 +243,31 @@ mod tests {
         let state = McpServerState::new();
         let err = state.stop().unwrap_err();
         assert!(matches!(err, McpServerError::NotRunning));
+    }
+
+    #[test]
+    fn sidecar_resolution_takes_the_first_candidate_that_exists() {
+        let dir = std::env::temp_dir().join("cognia-mcp-sidecar-resolve-test");
+        std::fs::create_dir_all(&dir).unwrap();
+        let missing = dir.join("not-installed.mjs");
+        let present = dir.join("cognia-mcp.mjs");
+        let _ = std::fs::remove_file(&missing);
+        std::fs::write(&present, b"// bundled").unwrap();
+
+        // Earlier candidates win only when they are actually on disk — the
+        // whole defect was synthesising a path and trusting it.
+        assert_eq!(
+            first_existing_sidecar(&[missing.clone(), present.clone()]),
+            Some(present.clone())
+        );
+        // A directory is not a spawnable script.
+        assert_eq!(first_existing_sidecar(&[dir.clone()]), None);
+        // Nothing installed → None, so the caller can say so instead of
+        // printing a path that is not there.
+        assert_eq!(first_existing_sidecar(&[missing]), None);
+        assert_eq!(first_existing_sidecar(&[]), None);
+
+        let _ = std::fs::remove_file(&present);
     }
 
     #[test]

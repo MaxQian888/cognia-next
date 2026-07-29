@@ -22627,9 +22627,16 @@
         "clearConfirm": "清空日志",
         "clearConfirmDesc": "将删除全部 {count} 条审计记录，无法恢复。",
         "clearConfirmTitle": "确认清空 MCP 审计日志？",
+        "deniedOnly": "仅看拒绝",
         "description": "最近 50 条调用记录。总计上限 5000 条 — 超出后自动清理旧记录。",
+        "detailAria": "展开或收起 {tool} 的详情",
         "empty": "暂无调用记录。",
+        "filterToolPlaceholder": "按工具筛选…",
         "latency": "延迟",
+        "latencyMs": "{ms} 毫秒",
+        "reason": "原因",
+        "rowLimit": "行数",
+        "rowLimitValue": "{count} 行",
         "scope": "范围",
         "status": "状态",
         "statusDeny": "拒绝",
@@ -22642,7 +22649,40 @@
       "badgeIdle": "空闲",
       "badgeLive": "运行中",
       "badgeWeb": "web",
+      "description": "把本应用的知识与运行时能力开放给外部 MCP 客户端。",
       "loading": "加载中…",
+      "nav": {
+        "badgeScopesAria": "已授予 {total} 项权限范围中的 {granted} 项",
+        "groups": {
+          "accessGroup": "接入",
+          "contentGroup": "内容",
+          "serviceGroup": "服务"
+        },
+        "items": {
+          "audit": {
+            "description": "桥接处理过的每一次调用",
+            "label": "审计日志"
+          },
+          "scopes": {
+            "description": "外部客户端可以调用的能力",
+            "label": "权限范围"
+          },
+          "server": {
+            "description": "启用桥接并管理其令牌",
+            "label": "服务与令牌"
+          },
+          "setup": {
+            "description": "MCP 客户端的配置片段",
+            "label": "客户端接入"
+          },
+          "wiki": {
+            "description": "重建与检查计划",
+            "label": "Wiki 维护"
+          }
+        },
+        "mobileTrigger": "面板",
+        "title": "外部桥接设置"
+      },
       "scopeDescriptions": {
         "agent:dispatch": "⚠ 允许外部代理无界面运行你的内置/插件子代理或角色（工具循环 + 模型调用）。返回文本经 PII 脱敏。默认关闭。",
         "agent:team": "⚠ 允许外部代理无界面启动智能体团队——它们本无法触及的多智能体编排。默认关闭。",
@@ -22666,6 +22706,20 @@
       },
       "scopes": {
         "description": "每个范围默认关闭，需手动启用。默认安装仅开启公开代码 Wiki 相关范围。",
+        "grantedCount": "已授予 {granted}/{total}",
+        "groups": {
+          "agent": "Agent",
+          "inbound": "入站",
+          "inbox": "收件箱",
+          "mcp": "计算机操作",
+          "memory": "记忆",
+          "plugin": "插件",
+          "rag": "检索",
+          "runtime": "运行时",
+          "wiki": "Wiki"
+        },
+        "plannedBadge": "规划中",
+        "plannedReason": "已推迟到 Phase 1 之后：访问用户仓库需要逐仓库授权，该机制尚未实现。此范围保留在 API 中以便处理器继续编译，但无法被授予。",
         "title": "权限范围",
         "toggleAria": "切换 {scope}"
       },
@@ -22673,6 +22727,9 @@
         "bearerTokenLabel": "Bearer Token（仅 HTTP）",
         "copyTokenAria": "复制 Token",
         "hide": "隐藏",
+        "httpPort": "HTTP 端口",
+        "httpPortDiverged": "监听器仍在端口 {bound} 上。重启外部桥接以切换端口。",
+        "httpPortHelp": "HTTP 传输监听的端口，下方的接入片段会使用该值。",
         "regenerateWarning": "⚠ 重新生成将立即作废旧 Token。",
         "rotateConfirmAction": "轮换 Token",
         "rotateConfirmCancel": "取消",
@@ -22686,18 +22743,24 @@
         "title": "MCP 服务器",
         "toastServerStarted": "MCP HTTP 服务器已在 127.0.0.1:{port} 启动",
         "toastServerStopped": "MCP 服务器已停止。",
+        "toastSidecarMissing": "MCP sidecar 未安装，无法启动外部桥接。",
         "toastTokenCopied": "Token 已复制到剪贴板。",
         "toastTokenRegenerated": "新 Token 已生成，旧 Token 立即失效。",
         "toggleAriaLabel": "启用 MCP 服务器",
-        "tokenNone": "（无）"
+        "tokenNone": "（无）",
+        "tokenRotatedAt": "令牌最近轮换于 {time}"
       },
       "setup": {
         "clientLabel": "客户端",
         "copy": "复制",
         "copyAria": "复制代码片段到剪贴板",
         "description": "选择客户端并将代码片段粘贴到其 MCP 配置文件中。HTTP 传输需要 Tauri 侧车进程正在运行。",
+        "sidecarMissing": "stdio sidecar 未安装，此配置片段没有可执行的命令。请改用 HTTP 传输，或重新安装应用以恢复随包分发的 sidecar。",
+        "sidecarMissingPlaceholder": "'<'sidecar 未安装>",
+        "sidecarResolving": "'<'正在解析 sidecar 路径…>",
         "title": "配置代码片段",
         "toastCopied": "代码片段已复制。",
+        "tokenPlaceholder": "'<'粘贴 bearer token>",
         "variantHelp": {
           "claude-desktop-http": "编辑 Claude Desktop 的 claude_desktop_config.json，并确认 Bridge HTTP 传输已启动。上方的「重新生成」按钮会更新 Bearer Token。",
           "claude-desktop-stdio": "编辑 ~/Library/Application Support/Claude/claude_desktop_config.json（macOS）或 %APPDATA%/Claude/claude_desktop_config.json（Windows），保存后重启 Claude Desktop。",
@@ -22711,6 +22774,7 @@
           "goose": "Goose"
         }
       },
+      "title": "外部桥接",
       "wikiIndex": {
         "articleCount": "文章数",
         "description": "为外部 Agent 索引 Cognia 代码库，使其可通过 MCP 查询。",
@@ -22960,6 +23024,7 @@
       "copied": "已复制",
       "copy": "复制",
       "copyKey": "复制密钥",
+      "costUnknown": "—",
       "createKey": "创建密钥",
       "deleteKey": "删除密钥",
       "deleteKeyConfirm": "删除此密钥？正在使用它的工具会立即失效。",
@@ -23012,6 +23077,7 @@
       "keysHeading": "API 密钥",
       "keysHelp": "为每个外部工具签发一把作用域密钥。每把可限制可用模型、设定有效期与独立限流，并可单独停用或删除。",
       "lanWarning": "开启局域网绑定会把网关暴露到本地网络。请收紧 IP 白名单并为每个密钥设定作用域——只有白名单内、且持有效密钥的 IP 才能通过。",
+      "latencyMs": "{ms} 毫秒",
       "listenerHeading": "监听器",
       "listenerHelp": "网关绑定的位置，以及谁可以访问它。",
       "liveBadge": "立即生效",
@@ -23032,6 +23098,8 @@
       "maxRetries": "最大尝试数",
       "maxRetriesHelp": "每个请求尝试的候选上限。0 = 走完整条回退链。",
       "nav": {
+        "badgeNoKeyAria": "没有可用的 API 密钥",
+        "badgeParkedKeysAria": "{count} 个上游密钥已停用",
         "groups": {
           "observabilityGroup": "可观测",
           "routingGroup": "路由与保护",

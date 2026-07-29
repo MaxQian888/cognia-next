@@ -74,8 +74,10 @@ const DECIDE_TIMEOUT_MS: u64 = 800;
 /// being a memory hazard.
 const BODY_LIMIT_BYTES: usize = 16 * 1024 * 1024;
 
-/// How long an SSE pump tolerates total silence from the upstream before giving
-/// up on the stream.
+/// Default for how long an SSE pump tolerates total silence from the upstream
+/// before giving up on the stream. Overridable per-install via
+/// `GatewayConfig::stream_idle_timeout_secs`; this is the value that field
+/// defaults to.
 ///
 /// Streaming requests deliberately skip `apply_timeout` (a long generation is
 /// not a hung one) and `reqwest` here sets only a connect timeout, so an
@@ -91,10 +93,70 @@ const BODY_LIMIT_BYTES: usize = 16 * 1024 * 1024;
 /// connection.
 const STREAM_IDLE_TIMEOUT: Duration = Duration::from_secs(300);
 
+/// Why a stream was abandoned, in terms of the timeout that actually fired.
+///
+/// Formatting `STREAM_IDLE_TIMEOUT` here reported 300s regardless of what
+/// `streamIdleTimeoutSecs` was configured to — the gating already honoured the
+/// config, so only the message lied.
+fn stall_reason(idle_timeout: Option<Duration>) -> String {
+    match idle_timeout {
+        Some(limit) => format!("upstream stream stalled: no data for {}s", limit.as_secs()),
+        // Not reachable through the idle path (`None` parks forever), but the
+        // same flag is set by a transport-level break on the pump.
+        None => "upstream stream stalled".to_string(),
+    }
+}
+
+/// Pull the next chunk from an upstream byte stream, bounded by the configured
+/// idle timeout.
+///
+/// `Ok(Some(chunk))` = data, `Ok(None)` = clean end of stream, `Err(())` = the
+/// upstream went silent for longer than `idle`. `idle == None` (config `0`)
+/// waits forever, restoring the pre-timeout park-forever behaviour — kept
+/// reachable because a deliberately slow self-hosted upstream is a legitimate,
+/// if unwise, configuration.
+async fn next_chunk_before_idle<S>(stream: &mut S, idle: Option<Duration>) -> Result<Option<S::Item>, ()>
+where
+    S: futures_util::Stream + Unpin,
+{
+    match idle {
+        Some(limit) => tokio::time::timeout(limit, stream.next()).await.map_err(|_| ()),
+        None => Ok(stream.next().await),
+    }
+}
+
 #[derive(Clone)]
 pub struct ServerHandle {
     pub bound_port: u16,
     pub shutdown: watch::Sender<()>,
+    /// The live server's state, so out-of-band callers (the settings
+    /// self-check, via Tauri IPC) probe through the SAME rotation cursors,
+    /// cooldown map and in-flight tally the serving path uses. Private: the
+    /// only supported access is [`ServerHandle::probe_handle`].
+    state: AppState,
+}
+
+impl ServerHandle {
+    /// Detach a probe bound to the running server's state.
+    ///
+    /// Returned as its own value rather than exposing `AppState` so callers can
+    /// drop the lock guard that produced this handle before awaiting the probe.
+    pub fn probe_handle(&self) -> UpstreamProbe {
+        UpstreamProbe {
+            state: self.state.clone(),
+        }
+    }
+}
+
+/// A detached handle for running an upstream self-check against a live server.
+pub struct UpstreamProbe {
+    state: AppState,
+}
+
+impl UpstreamProbe {
+    pub async fn run(&self, model: &str) -> UpstreamProbeOutcome {
+        run_upstream_probe(&self.state, model).await
+    }
 }
 
 /// Hook fired on every request (post-middleware / on reject) for the durable
@@ -233,6 +295,9 @@ pub async fn spawn_server(
         leases,
         http,
     };
+    // Cloned before the router consumes `state`; both share the same Arcs, so a
+    // probe run through this sees the live cooldown / in-flight state.
+    let probe_state = state.clone();
 
     let protected = Router::new()
         .route("/v1/models", get(list_models))
@@ -294,6 +359,7 @@ pub async fn spawn_server(
     Ok(ServerHandle {
         bound_port,
         shutdown: tx,
+        state: probe_state,
     })
 }
 
@@ -318,15 +384,69 @@ struct UpstreamProbeRequest {
     model: String,
 }
 
-#[derive(serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct UpstreamProbeResult {
-    provider_id: String,
-    model_id: String,
-    ok: bool,
-    status: Option<u16>,
-    latency_ms: u64,
-    error: Option<String>,
+pub struct UpstreamProbeResult {
+    pub provider_id: String,
+    pub model_id: String,
+    pub ok: bool,
+    pub status: Option<u16>,
+    pub latency_ms: u64,
+    pub error: Option<String>,
+}
+
+/// Why a self-check could not produce per-candidate results, or the results.
+///
+/// Kept as a typed enum rather than baked into an HTTP response so the same
+/// probe can serve the axum `/healthz/upstream` route AND the Tauri command the
+/// settings UI calls. The renderer cannot reach the listener over HTTP — the
+/// app CSP's `connect-src` admits no loopback origin — so without an IPC path
+/// this endpoint stays the dead code it has been since it was written.
+pub enum UpstreamProbeOutcome {
+    /// No routing snapshot has been published yet.
+    NoSnapshot,
+    /// The model resolved to zero candidates.
+    NoCandidate,
+    Probed(Vec<UpstreamProbeResult>),
+}
+
+/// Fire a minimal upstream call for every candidate `model` resolves to.
+///
+/// Each probe is a real, billable request, so callers must gate this behind an
+/// explicit user action.
+async fn run_upstream_probe(state: &AppState, model: &str) -> UpstreamProbeOutcome {
+    let cfg = state.config.read().clone();
+    let Some(snapshot) = state.snapshot.read().clone() else {
+        return UpstreamProbeOutcome::NoSnapshot;
+    };
+    let now_ms = chrono::Utc::now().timestamp_millis();
+    let candidates = expand_key_pools(
+        resolve_candidates(&snapshot, model),
+        &state.key_rotation,
+        &state.key_cooldown,
+        now_ms,
+    );
+    if candidates.is_empty() {
+        return UpstreamProbeOutcome::NoCandidate;
+    }
+    let mut results = Vec::new();
+    for candidate in candidates.iter().take(cfg.attempt_budget(candidates.len())) {
+        let started = Instant::now();
+        // A probe is a real (billable) upstream call, so it counts toward the
+        // in-flight tally that now drives least-busy routing — otherwise a
+        // self-check would be invisible to the very decisions it runs beside.
+        let _in_flight = state.in_flight.enter(&candidate.provider.id);
+        let (ok, status, error) = probe_candidate(state, &cfg, candidate).await;
+        results.push(UpstreamProbeResult {
+            provider_id: candidate.provider.id.clone(),
+            model_id: candidate.model_id.clone(),
+            ok,
+            status,
+            latency_ms: started.elapsed().as_millis() as u64,
+            error,
+        });
+    }
+    UpstreamProbeOutcome::Probed(results)
 }
 
 async fn healthz_upstream(
@@ -343,46 +463,21 @@ async fn healthz_upstream(
         )
             .into_response();
     }
-    let cfg = state.config.read().clone();
-    let Some(snapshot) = state.snapshot.read().clone() else {
-        return (
+    match run_upstream_probe(&state, &req.model).await {
+        UpstreamProbeOutcome::NoSnapshot => (
             StatusCode::SERVICE_UNAVAILABLE,
             Json(json!({ "error": "no routing snapshot yet" })),
         )
-            .into_response();
-    };
-    let now_ms = chrono::Utc::now().timestamp_millis();
-    let candidates = expand_key_pools(
-        resolve_candidates(&snapshot, &req.model),
-        &state.key_rotation,
-        &state.key_cooldown,
-        now_ms,
-    );
-    if candidates.is_empty() {
-        return (
+            .into_response(),
+        UpstreamProbeOutcome::NoCandidate => (
             StatusCode::NOT_FOUND,
             Json(json!({ "error": format!("model \"{}\" resolves to no candidate", req.model) })),
         )
-            .into_response();
+            .into_response(),
+        UpstreamProbeOutcome::Probed(results) => {
+            Json(json!({ "model": req.model, "results": results })).into_response()
+        }
     }
-    let mut results = Vec::new();
-    for candidate in candidates.iter().take(cfg.attempt_budget(candidates.len())) {
-        let started = Instant::now();
-        // A probe is a real (billed) upstream call, so it counts toward the
-        // in-flight tally that now drives least-busy routing — otherwise a
-        // self-check would be invisible to the very decisions it runs beside.
-        let _in_flight = state.in_flight.enter(&candidate.provider.id);
-        let (ok, status, error) = probe_candidate(&state, &cfg, candidate).await;
-        results.push(UpstreamProbeResult {
-            provider_id: candidate.provider.id.clone(),
-            model_id: candidate.model_id.clone(),
-            ok,
-            status,
-            latency_ms: started.elapsed().as_millis() as u64,
-            error,
-        });
-    }
-    Json(json!({ "model": req.model, "results": results })).into_response()
 }
 
 /// Fire one minimal upstream call for a candidate and classify the outcome.
@@ -412,16 +507,32 @@ async fn probe_candidate(
             if status < 400 {
                 (true, Some(status), None)
             } else {
-                let text = resp.text().await.unwrap_or_default();
-                (
-                    false,
-                    Some(status),
-                    Some(text.chars().take(200).collect::<String>()),
-                )
+                classify_probe_failure(status, &resp.text().await.unwrap_or_default())
             }
         }
         Err(err) => (false, None, Some(format!("connect error: {err}"))),
     }
+}
+
+/// How much of an upstream error body the probe row carries.
+///
+/// Bounded because this string reaches the settings UI verbatim, and an
+/// upstream that answers a rejected request with an HTML error page would
+/// otherwise put the whole page in a table cell.
+const PROBE_ERROR_CHARS: usize = 200;
+
+/// Classify a >=400 probe response. Split out from `probe_candidate` so the
+/// truncation and the shape of the row are testable without standing up an
+/// upstream — the network half of the probe is not, and is what kept this path
+/// at one covered function.
+fn classify_probe_failure(status: u16, body: &str) -> (bool, Option<u16>, Option<String>) {
+    (
+        false,
+        Some(status),
+        // `chars`, not bytes: a multi-byte boundary would panic on slicing, and
+        // upstream error bodies are routinely non-ASCII.
+        Some(body.chars().take(PROBE_ERROR_CHARS).collect::<String>()),
+    )
 }
 
 /// A one-token probe body in the candidate's wire protocol.
@@ -2183,6 +2294,9 @@ async fn stream_response(
     up_slot: Slot,
     in_flight: InFlightGuard,
 ) -> Response {
+    // Resolved here, not inside the pump tasks: the guard is a parking_lot read
+    // lock and must never be held across an `.await`.
+    let idle_timeout = state.config.read().stream_idle_timeout();
     let passthrough = candidate.provider.protocol == format.protocol_name();
     if passthrough {
         // Forward upstream bytes to the client UNCHANGED while sniffing the SSE
@@ -2204,7 +2318,7 @@ async fn stream_response(
             let mut upstream = resp.bytes_stream();
             let mut stalled = false;
             'pump: loop {
-                let chunk = match tokio::time::timeout(STREAM_IDLE_TIMEOUT, upstream.next()).await {
+                let chunk = match next_chunk_before_idle(&mut upstream, idle_timeout).await {
                     Ok(Some(chunk)) => chunk,
                     Ok(None) => break 'pump, // clean end of stream
                     Err(_) => {
@@ -2233,12 +2347,7 @@ async fn stream_response(
             // A stall is a provider failure, not a completed turn — reporting it
             // as success would both mis-train the breaker and leave a stuck
             // upstream looking healthy.
-            let stall_error = stalled.then(|| {
-                format!(
-                    "upstream stream stalled: no data for {}s",
-                    STREAM_IDLE_TIMEOUT.as_secs()
-                )
-            });
+            let stall_error = stalled.then(|| stall_reason(idle_timeout));
             emit_outcome(
                 task_state.host.as_ref(),
                 &candidate,
@@ -2289,7 +2398,7 @@ async fn stream_response(
         let mut upstream = resp.bytes_stream();
         let mut stalled = false;
         'pump: loop {
-            let chunk = match tokio::time::timeout(STREAM_IDLE_TIMEOUT, upstream.next()).await {
+            let chunk = match next_chunk_before_idle(&mut upstream, idle_timeout).await {
                 Ok(Some(chunk)) => chunk,
                 Ok(None) => break 'pump, // clean end of stream
                 Err(_) => {
@@ -2325,12 +2434,7 @@ async fn stream_response(
             }
         }
         let usage = transcoder.usage();
-        let stall_error = stalled.then(|| {
-            format!(
-                "upstream stream stalled: no data for {}s",
-                STREAM_IDLE_TIMEOUT.as_secs()
-            )
-        });
+        let stall_error = stalled.then(|| stall_reason(idle_timeout));
         emit_outcome(
             task_state.host.as_ref(),
             &candidate,
@@ -2778,14 +2882,154 @@ mod tests {
     }
 
     #[tokio::test(start_paused = true)]
+    async fn next_chunk_before_idle_passes_data_and_clean_end_through() {
+        let mut with_data =
+            futures_util::stream::iter(vec![Ok::<_, ()>(Bytes::from_static(b"hi"))]);
+        assert_eq!(
+            next_chunk_before_idle(&mut with_data, Some(STREAM_IDLE_TIMEOUT)).await,
+            Ok(Some(Ok(Bytes::from_static(b"hi"))))
+        );
+        // Same stream, now drained — a clean end is `Ok(None)`, distinct from
+        // the `Err(())` a stall produces, because only the latter must be
+        // reported as a failed outcome.
+        assert_eq!(
+            next_chunk_before_idle(&mut with_data, Some(STREAM_IDLE_TIMEOUT)).await,
+            Ok(None)
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_zero_idle_timeout_waits_forever_rather_than_aborting_instantly() {
+        // `streamIdleTimeoutSecs = 0` is the documented opt-out. The risk to
+        // guard against is the opposite reading — treating 0 as a zero-length
+        // timeout, which would abort every stream before its first byte.
+        let mut silent = futures_util::stream::pending::<Result<Bytes, ()>>();
+        let outcome = tokio::time::timeout(
+            Duration::from_secs(3600),
+            next_chunk_before_idle(&mut silent, None),
+        )
+        .await;
+        assert!(
+            outcome.is_err(),
+            "an unset idle timeout must keep waiting, not resolve"
+        );
+    }
+
+    #[test]
+    fn a_probe_failure_carries_the_status_and_a_bounded_error_body() {
+        let (ok, status, error) = classify_probe_failure(401, "invalid x-api-key");
+        assert!(!ok);
+        assert_eq!(status, Some(401));
+        assert_eq!(error.as_deref(), Some("invalid x-api-key"));
+    }
+
+    #[test]
+    fn a_probe_error_body_is_truncated_before_it_reaches_the_settings_table() {
+        // An upstream that answers with an HTML error page would otherwise put
+        // the entire page into one table cell.
+        let (_, _, error) = classify_probe_failure(500, &"x".repeat(5_000));
+        assert_eq!(error.as_deref().map(str::len), Some(PROBE_ERROR_CHARS));
+    }
+
+    #[test]
+    fn a_probe_error_body_truncates_on_char_boundaries() {
+        // Byte slicing would panic here; upstream error bodies are routinely
+        // non-ASCII.
+        let body = "错误".repeat(500);
+        let (_, _, error) = classify_probe_failure(429, &body);
+        let error = error.expect("a failure always carries a body");
+        assert_eq!(error.chars().count(), PROBE_ERROR_CHARS);
+        assert!(body.starts_with(&error));
+    }
+
+    #[test]
+    fn an_empty_upstream_error_body_still_produces_a_row_rather_than_none() {
+        // `Some("")` and `None` render differently: the latter reads as "no
+        // error", which is exactly wrong for a 502.
+        let (ok, status, error) = classify_probe_failure(502, "");
+        assert!(!ok);
+        assert_eq!(status, Some(502));
+        assert_eq!(error.as_deref(), Some(""));
+    }
+
+    #[test]
+    fn the_upstream_probe_outcome_distinguishes_no_snapshot_from_no_candidate() {
+        // The route maps these to 503 and 404 respectively — collapsing them
+        // would tell an operator with an unpublished snapshot that their model
+        // name is wrong.
+        assert!(matches!(
+            UpstreamProbeOutcome::NoSnapshot,
+            UpstreamProbeOutcome::NoSnapshot
+        ));
+        assert!(matches!(
+            UpstreamProbeOutcome::NoCandidate,
+            UpstreamProbeOutcome::NoCandidate
+        ));
+        let probed = UpstreamProbeOutcome::Probed(vec![UpstreamProbeResult {
+            provider_id: "groq".into(),
+            model_id: "llama-3.3-70b".into(),
+            ok: true,
+            status: Some(200),
+            latency_ms: 12,
+            error: None,
+        }]);
+        match probed {
+            UpstreamProbeOutcome::Probed(rows) => {
+                assert_eq!(rows.len(), 1);
+                assert!(rows[0].ok);
+                assert!(rows[0].error.is_none());
+            }
+            _ => panic!("expected Probed"),
+        }
+    }
+
+    #[test]
+    fn a_probe_result_serializes_camel_case_for_the_settings_panel() {
+        // The renderer reads `providerId` / `latencyMs`; snake_case here would
+        // render an empty row rather than fail.
+        let json = serde_json::to_value(UpstreamProbeResult {
+            provider_id: "groq".into(),
+            model_id: "llama-3.3-70b".into(),
+            ok: false,
+            status: Some(401),
+            latency_ms: 34,
+            error: Some("invalid key".into()),
+        })
+        .unwrap();
+        assert_eq!(json["providerId"], "groq");
+        assert_eq!(json["modelId"], "llama-3.3-70b");
+        assert_eq!(json["latencyMs"], 34);
+        assert_eq!(json["status"], 401);
+        assert_eq!(json["error"], "invalid key");
+    }
+
+    #[test]
+    fn the_stall_message_quotes_the_configured_timeout_not_the_default() {
+        // The gating already read `streamIdleTimeoutSecs`; the message did not,
+        // so a 60s configuration still told the operator "no data for 300s".
+        assert_eq!(
+            stall_reason(Some(Duration::from_secs(60))),
+            "upstream stream stalled: no data for 60s"
+        );
+        assert_eq!(
+            stall_reason(Some(STREAM_IDLE_TIMEOUT)),
+            "upstream stream stalled: no data for 300s"
+        );
+        // Wait-forever has no duration to quote — naming one would be a lie.
+        assert_eq!(stall_reason(None), "upstream stream stalled");
+    }
+
+    #[tokio::test(start_paused = true)]
     async fn a_silent_upstream_stream_is_abandoned_rather_than_parked_forever() {
         // Streaming skips `apply_timeout` and reqwest sets no read timeout, so
         // without this the pump task would park forever holding its concurrency
         // slots AND its in-flight tally — and the tally drives least-busy, so
         // one hung stream would steer traffic off that provider permanently.
+        // Exercised through the helper both pumps call, so this stays honest if
+        // the timeout source moves again.
         let mut silent = futures_util::stream::pending::<Result<Bytes, ()>>();
         assert!(
-            tokio::time::timeout(STREAM_IDLE_TIMEOUT, silent.next())
+            next_chunk_before_idle(&mut silent, Some(STREAM_IDLE_TIMEOUT))
                 .await
                 .is_err(),
             "a stream that never yields must time out, not park the pump"
