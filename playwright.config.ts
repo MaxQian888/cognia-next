@@ -69,6 +69,16 @@ export default defineConfig({
   // assumed "mounts fast" and made every heavyweight spec fail in its
   // beforeEach the moment workers competed; 60s reflects the measured cost.
   timeout: Number(process.env.PLAYWRIGHT_TEST_TIMEOUT ?? 60_000),
+  // The same measurement applies to the FIRST assertion of a `beforeEach`,
+  // which is what actually waits for that boot — typically
+  // `expect(...).toBeVisible()` on a landmark of the route under test. Raising
+  // only the test budget above left that assertion on Playwright's 5s default,
+  // so a spec would fail its beforeEach at 5s while 55s of its own budget went
+  // unused, and the failure looked like a broken page (the app was still on
+  // AccountGate's loading shell) rather than a clock that was set too tight.
+  // Measured here: gate-open is ~1.9s with one worker and ~9-10s at seven,
+  // against the config's documented 10-25s band under heavier contention.
+  expect: { timeout: Number(process.env.PLAYWRIGHT_EXPECT_TIMEOUT ?? 20_000) },
   forbidOnly: isCI,
   // A retry is diagnostic evidence, not permission to merge an unstable test.
   retries: isCI ? 1 : 0,
