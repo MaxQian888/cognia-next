@@ -124,6 +124,7 @@ const REGISTRY = [
   { script: "audit:e2e-governance", group: "audit" },
   { script: "audit:docs-links", group: "audit" },
   { script: "audit:colocated-tests", group: "audit" },
+  { script: "audit:loading-states", group: "audit" },
   { script: "audit:unreachable-components", group: "audit" },
   { script: "lint:static-export", group: "audit" },
   { script: "lint:plugin-sdk-wit", group: "audit" },

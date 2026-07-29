@@ -68,6 +68,7 @@ export const EXEMPTIONS = {
   "lint:fix": "writer — the gate is `lint`",
   "lint:i18n:baseline": "writer — regenerates the i18n baseline",
   "audit:colocated-tests:baseline": "writer — regenerates the co-located-test baseline",
+  "audit:loading-states:baseline": "writer — regenerates the loading-state baseline",
   "audit:unreachable-components:baseline":
     "writer — regenerates the unreachable-component baseline",
   "rust:clippy:baseline": "writer — regenerates the clippy baseline",
@@ -118,6 +119,7 @@ export const EXEMPTIONS = {
   "audit:e2e-governance:test": "covered by scripts:test:gates",
   "audit:pii-boundaries:test": "covered by scripts:test:gates",
   "audit:silent-flags:test": "covered by scripts:test:gates",
+  "audit:loading-states:test": "covered by scripts:test:gates",
   "audit:unreachable-components:test": "covered by scripts:test:gates",
   "lint:static-export:test": "covered by scripts:test:gates",
   "clean:cache:test": "covered by scripts:test:build",
