@@ -78,7 +78,18 @@ export const SECTION_OWNED_KEYS: Partial<Record<SettingsSectionId, (keyof AppSet
   subscription: ["limitsQueryEnabledAccounts", "customLimitsSources"],
   about: ["updates"],
   desktop: ["browserCookieImportEnabled"],
-  companion: ["remoteBrowserEnabled"],
+  // The WebRTC card lives in this section too, and its five keys were missing
+  // from every section — so "reset this section" skipped them and the
+  // changed-settings review never listed them, even though the card writes
+  // them like any other control.
+  companion: [
+    "remoteBrowserEnabled",
+    "webrtcEnabled",
+    "signalingUrl",
+    "iceServers",
+    "turnServers",
+    "turnProvider",
+  ],
   data: ["telemetryEnabled", "behaviorTelemetry", "storageRetention"],
   appearance: [
     "theme",

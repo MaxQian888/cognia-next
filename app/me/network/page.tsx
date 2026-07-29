@@ -19,6 +19,7 @@ import { MonitorSmartphoneIcon } from "lucide-react"
 
 import { MeSection } from "@/components/mobile/me/me-section"
 import { PairedOnly } from "@/components/mobile/me/paired-only"
+import { RendezvousCard } from "@/components/mobile/me/rendezvous-card"
 import { SubPageShell } from "@/components/mobile/me/sub-page-shell"
 import { Badge } from "@/components/ui/badge"
 import { Item, ItemContent, ItemDescription, ItemTitle } from "@/components/ui/item"
@@ -75,6 +76,8 @@ function NetworkBody() {
           <Badge variant="secondary">{t(`connectionType.${type}`)}</Badge>
         </Item>
       </MeSection>
+
+      <RendezvousCard />
 
       <MeSection title={t("proxy.title")} testid="me-section-network-proxy">
         <Item size="sm" className="px-0">

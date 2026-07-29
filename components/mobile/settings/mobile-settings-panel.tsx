@@ -5,9 +5,9 @@
  *
  * Surfaces a small subset of `AppSettings` that's safe + useful from a
  * phone: theme, language, font scale, default model, biometric toggles.
- * Optimistic local Dexie write via the shared settings store, then
- * enqueues `app_settings_update` so the desktop reflects the same change
- * on next sync.
+ * Optimistic local Dexie write via the shared settings store, which mirrors
+ * host-writable keys up to a paired desktop on its way through
+ * `lib/settings/mirror-to-host.ts`.
  *
  * The server-side allowlist (`APP_SETTINGS_MOBILE_ALLOWED_KEYS` in
  * `companion_api/rpc.rs`) rejects keys outside the safe list, so any
@@ -32,7 +32,6 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Input } from "@/components/ui/input"
-import { enqueue } from "@/lib/db/mobile-outbound-queue"
 import type { AppLanguage, AppTheme, BiometricGuardPolicy } from "@cognia/agent-config-types"
 import { DEFAULT_BIOMETRIC_GUARD } from "@cognia/agent-config-types"
 import { localeNames, locales } from "@/lib/i18n/config"
@@ -50,14 +49,12 @@ export function MobileSettingsPanel() {
   const defaultModel = settings?.defaultModel ?? ""
   const policy: BiometricGuardPolicy = settings?.biometricRequiredFor ?? DEFAULT_BIOMETRIC_GUARD
 
+  // The `app_settings_update` enqueue that used to live here now happens inside
+  // the persistence funnel (`lib/db/settings.ts` → `lib/settings/mirror-to-host.ts`),
+  // so every surface gets it — including the desktop sections this shell embeds.
+  // Repeating it here would queue each edit twice.
   const update = async (patch: Partial<NonNullable<typeof settings>>) => {
     await save(patch as never)
-    const keys = Object.keys(patch ?? {}).join(", ")
-    await enqueue({
-      command: "app_settings_update",
-      payload: { patch },
-      label: t("queueLabel", { keys }),
-    })
   }
 
   const updateBiometric = (patch: Partial<BiometricGuardPolicy>) =>

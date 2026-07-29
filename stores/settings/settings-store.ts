@@ -723,7 +723,10 @@ export const useSettingsStore = create<SettingsState>((rawSet, get) => {
           patch.modelMappings = s.modelMappings
         }
         if (Object.keys(patch).length > 0) {
-          await saveSettings(patch)
+          // A repair, not an edit — the user never asked for it, so a paired
+          // client must not replay it onto its host (dropping an orphaned
+          // imported-theme row locally should not delete it on the desktop).
+          await saveSettings(patch, { mirrorToHost: false })
         }
         set({ settings: s, loaded: true, loadFailed: false, loadError: null })
         // Push the API key to the Rust process on first load. The user expects

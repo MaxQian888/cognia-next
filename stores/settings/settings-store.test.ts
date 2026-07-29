@@ -331,7 +331,11 @@ describe("load", () => {
     expect(dbSettings.saveSettings).toHaveBeenCalledWith(
       expect.objectContaining({
         importedVscodeThemes: [expect.objectContaining({ customThemeId: "ct-keep" })],
-      })
+      }),
+      // Opted out of host mirroring: the user did not ask for this cleanup, so
+      // a paired client must not replay it onto its host as an edit — dropping
+      // an orphaned row locally should not delete it on the desktop.
+      { mirrorToHost: false }
     )
   })
 })

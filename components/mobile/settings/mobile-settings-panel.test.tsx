@@ -85,7 +85,6 @@ jest.mock("@/lib/tauri", () => ({
 }))
 
 import { MobileSettingsPanel } from "./mobile-settings-panel"
-import type { BiometricGuardPolicy } from "@cognia/agent-config-types"
 
 // ---------------------------------------------------------------------------
 
@@ -129,7 +128,7 @@ describe("<MobileSettingsPanel />", () => {
     expect(trigger).toHaveTextContent(/English/)
   })
 
-  it("updates the defaultModel field and enqueues a server-bound write", async () => {
+  it("updates the defaultModel field through the store", async () => {
     render(<MobileSettingsPanel />)
     const input = screen.getByTestId("settings-default-model") as HTMLInputElement
 
@@ -138,17 +137,16 @@ describe("<MobileSettingsPanel />", () => {
     // keystrokes, which userEvent.type() relies on.
     fireEvent.change(input, { target: { value: "claude-sonnet-4-6" } })
     // `update()` is fire-and-forget (`void update(...)`); flush the
-    // microtask queue so `enqueue` resolves before we assert.
+    // microtask queue before asserting.
     await Promise.resolve()
     await Promise.resolve()
 
     expect(saveMock).toHaveBeenCalledWith({ defaultModel: "claude-sonnet-4-6" })
-    expect(enqueueMock).toHaveBeenCalled()
-    const lastEnqueue = enqueueMock.mock.calls.at(-1)?.[0] as Record<string, unknown>
-    expect(lastEnqueue.command).toBe("app_settings_update")
-    expect((lastEnqueue.payload as { patch: Record<string, unknown> }).patch).toEqual({
-      defaultModel: "claude-sonnet-4-6",
-    })
+    // This panel used to enqueue `app_settings_update` itself. Host mirroring
+    // now happens inside the persistence funnel (`lib/settings/mirror-to-host.ts`)
+    // so it covers the desktop sections this shell embeds too; enqueuing here
+    // as well would send every edit twice.
+    expect(enqueueMock).not.toHaveBeenCalled()
   })
 
   it("clearing the model input writes undefined (not empty string)", async () => {
@@ -203,18 +201,11 @@ describe("<MobileSettingsPanel />", () => {
         signOut: true,
       },
     })
-    const lastEnqueue = enqueueMock.mock.calls.at(-1)?.[0] as Record<string, unknown>
-    expect(lastEnqueue.command).toBe("app_settings_update")
-    expect(
-      (lastEnqueue.payload as { patch: { biometricRequiredFor: BiometricGuardPolicy } }).patch
-        .biometricRequiredFor
-    ).toEqual({
-      deletePairing: true,
-      escalatePermissionMode: true,
-      exportBackup: true,
-      revealSecrets: false,
-      signOut: true,
-    })
+    // Biometric gating is device-local now: it is a property of *this* device's
+    // authenticator, so pushing the phone's policy onto a paired desktop (which
+    // may have no biometric hardware at all) is wrong rather than useful. The
+    // switch still works locally; nothing goes on the wire.
+    expect(enqueueMock).not.toHaveBeenCalled()
   })
 })
 

@@ -345,7 +345,22 @@ function mergeBuiltinTools(stored: BuiltinToolsConfig | undefined): BuiltinTools
 // us a strict per-process write order without needing a mutex library.
 let saveQueue: Promise<unknown> = Promise.resolve()
 
-export async function saveSettings(patch: Partial<Omit<AppSettings, "id">>): Promise<AppSettings> {
+export interface SaveSettingsOptions {
+  /**
+   * Whether a paired client should also enqueue this patch for its host.
+   *
+   * Defaults to `true`: every call site is a user edit, and mirroring is what
+   * makes a setting changed on the phone actually reach the desktop. Pass
+   * `false` for writes the user did not make — boot-time repairs and seeds —
+   * so a local cleanup is not replayed onto the host as an intentional edit.
+   */
+  mirrorToHost?: boolean
+}
+
+export async function saveSettings(
+  patch: Partial<Omit<AppSettings, "id">>,
+  options: SaveSettingsOptions = {}
+): Promise<AppSettings> {
   // Same connection-close exposure as the read, with a worse failure: a patch
   // dropped mid-boot is a setting the user watched themselves change and then
   // lose. The whole read-modify-write retries as a unit — re-reading `current`
@@ -370,6 +385,20 @@ export async function saveSettings(patch: Partial<Omit<AppSettings, "id">>): Pro
         } catch {
           // The profile store is a re-derivable projection; a failed sync is
           // recovered by the next provider-touching save.
+        }
+      }
+      // Mirror the host-writable subset up to the paired host. Outside the
+      // retry's critical section in spirit but inside it in code, because the
+      // enqueue must not happen if the local write never landed. Failures are
+      // swallowed: the local save is the user-visible outcome, and a queue that
+      // could not be written is reported by the offline banner, not by making
+      // the settings save look like it failed.
+      if (options.mirrorToHost !== false) {
+        try {
+          const { mirrorSettingsPatchToHost } = await import("@/lib/settings/mirror-to-host")
+          await mirrorSettingsPatchToHost(patch)
+        } catch {
+          // Non-fatal — see above.
         }
       }
       return merged
