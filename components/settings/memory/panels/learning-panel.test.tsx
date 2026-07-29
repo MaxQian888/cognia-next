@@ -8,7 +8,7 @@ import { DEFAULT_MEMORY_CONFIG } from "@/types/memory/memory"
 import { LearningPanel } from "./learning-panel"
 
 jest.mock("@/components/chat/motion/motion-reveal", () => ({
-  useFlowMotion: () => ({ reduce: true, speed: 1 }),
+  useFlowMotion: () => ({ reduce: true, durationScale: 1 }),
 }))
 
 describe("LearningPanel", () => {

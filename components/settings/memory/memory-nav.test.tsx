@@ -7,7 +7,7 @@ import { fireEvent, render, screen } from "@testing-library/react"
 import { MemoryNav } from "./memory-nav"
 
 jest.mock("@/components/chat/motion/motion-reveal", () => ({
-  useFlowMotion: () => ({ reduce: true, speed: 1 }),
+  useFlowMotion: () => ({ reduce: true, durationScale: 1 }),
 }))
 
 describe("MemoryNav", () => {

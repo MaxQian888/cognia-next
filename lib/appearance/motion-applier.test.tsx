@@ -1,6 +1,6 @@
 import { act, render } from "@testing-library/react"
 import { useSettingsStore } from "@/stores/settings"
-import { MotionApplier, resolveMotionState } from "./motion-applier"
+import { MotionApplier, resolveMotionState, speedToDurationScale } from "./motion-applier"
 import { DEFAULT_BUILTIN_TOOLS } from "@cognia/agent-config-types"
 import type { MotionSettings } from "@/types/appearance"
 
@@ -32,17 +32,42 @@ describe("resolveMotionState", () => {
   })
 
   it("flips the class when reduce is true regardless of speed", () => {
+    // 0.5x speed is the SLOW end, so durations double.
     expect(resolveMotionState({ speed: 0.5, reduce: true })).toEqual({
       reduceClass: true,
-      cssVarValue: "0.5",
+      cssVarValue: "2",
     })
   })
 
-  it("exposes 1.5x speed without touching the class", () => {
+  it("inverts 1.5x speed into a 0.667x duration scale without touching the class", () => {
     expect(resolveMotionState({ speed: 1.5, reduce: false })).toEqual({
       reduceClass: false,
-      cssVarValue: "1.5",
+      cssVarValue: "0.667",
     })
+  })
+})
+
+describe("speedToDurationScale", () => {
+  it("is the reciprocal of the user-facing speed multiplier", () => {
+    // The whole point of the function: the settings UI labels 1.5x as "Fast",
+    // and a faster animation is a SHORTER one.
+    expect(speedToDurationScale(1)).toBe(1)
+    expect(speedToDurationScale(0.5)).toBe(2)
+    expect(speedToDurationScale(1.5)).toBe(0.667)
+  })
+
+  it("falls back to neutral for a missing or non-finite preference", () => {
+    expect(speedToDurationScale(undefined)).toBe(1)
+    expect(speedToDurationScale(Number.NaN)).toBe(1)
+    expect(speedToDurationScale(Number.POSITIVE_INFINITY)).toBe(1)
+  })
+
+  it("clamps a corrupt persisted speed instead of emitting Infinity", () => {
+    // A 0 would divide to Infinity and silently invalidate every calc() that
+    // reads the var, which fails far away from the cause.
+    expect(speedToDurationScale(0)).toBe(4)
+    expect(speedToDurationScale(-2)).toBe(4)
+    expect(speedToDurationScale(1000)).toBe(0.25)
   })
 })
 
@@ -51,7 +76,7 @@ describe("MotionApplier", () => {
     setMotion({ speed: 0.5, reduce: true })
     const { unmount } = render(<MotionApplier />)
     const root = document.documentElement
-    expect(root.style.getPropertyValue("--motion-duration-scale")).toBe("0.5")
+    expect(root.style.getPropertyValue("--motion-duration-scale")).toBe("2")
     expect(root.classList.contains("reduce-motion")).toBe(true)
     unmount()
     expect(root.style.getPropertyValue("--motion-duration-scale")).toBe("")

@@ -11,7 +11,7 @@ jest.mock("next-intl", () => ({
   useTranslations: () => (key: string) => key,
 }))
 jest.mock("@/components/chat/motion/motion-reveal", () => ({
-  useFlowMotion: () => ({ reduce: true, speed: 1 }),
+  useFlowMotion: () => ({ reduce: true, durationScale: 1 }),
 }))
 
 const baseProps = (over: Partial<SubagentsNavProps> = {}): SubagentsNavProps => ({

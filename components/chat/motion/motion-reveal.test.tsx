@@ -15,17 +15,18 @@ import {
 import { useSettingsStore } from "@/stores/settings/settings-store"
 
 describe("useFlowMotion", () => {
-  it("reads reduce + speed from settings", () => {
+  it("reads reduce from settings and inverts speed into a duration scale", () => {
     useSettingsStore.setState({ settings: { motion: { reduce: true, speed: 1.5 } } as never })
     const { result } = renderHook(() => useFlowMotion())
-    expect(result.current).toEqual({ reduce: true, speed: 1.5 })
+    // 1.5x *speed* is 0.667x *duration* — the reciprocal, not the raw value.
+    expect(result.current).toEqual({ reduce: true, durationScale: 0.667 })
   })
 
-  it("defaults to no-reduce + default speed when unset", () => {
+  it("defaults to no-reduce + a neutral duration scale when unset", () => {
     useSettingsStore.setState({ settings: {} as never })
     const { result } = renderHook(() => useFlowMotion())
     expect(result.current.reduce).toBe(false)
-    expect(result.current.speed).toBe(1)
+    expect(result.current.durationScale).toBe(1)
   })
 })
 

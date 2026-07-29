@@ -46,7 +46,7 @@ export function TerminalTabStrip({
 }: TerminalTabStripProps) {
   // Tabs fade+slide in on open and out on close instead of popping. The strip
   // is chrome-only (no xterm), so animating it never touches terminal layout.
-  const { reduce, speed } = useFlowMotion()
+  const { reduce, durationScale } = useFlowMotion()
   return (
     <div
       className={
@@ -62,7 +62,7 @@ export function TerminalTabStrip({
             initial={reduce ? false : { opacity: 0, y: -4 }}
             animate={{ opacity: 1, y: 0 }}
             exit={reduce ? { opacity: 0 } : { opacity: 0, y: -4 }}
-            transition={{ duration: reduce ? 0 : 0.16 * speed, ease: "easeOut" }}
+            transition={{ duration: reduce ? 0 : 0.16 * durationScale, ease: "easeOut" }}
           >
             <TerminalTab
               row={row}

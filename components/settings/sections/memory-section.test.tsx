@@ -39,7 +39,7 @@ jest.mock("@/hooks/memory/use-memory-insights", () => ({
   useMemoryInsights: () => mockInsights,
 }))
 jest.mock("@/components/chat/motion/motion-reveal", () => ({
-  useFlowMotion: () => ({ reduce: true, speed: 1 }),
+  useFlowMotion: () => ({ reduce: true, durationScale: 1 }),
   MotionCollapse: ({ open, children }: { open: boolean; children: React.ReactNode }) =>
     open ? <div>{children}</div> : null,
 }))

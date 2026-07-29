@@ -16,12 +16,14 @@ afterEach(() => {
 })
 
 describe("jumpFlashHoldMs", () => {
-  it("scales the base hold by the motion-speed preference", () => {
+  it("scales the base hold by the motion duration scale", () => {
     expect(jumpFlashHoldMs(1)).toBe(JUMP_FLASH_BASE_MS)
+    // A 2x *duration* scale is the SLOW end of the preference, so it holds
+    // longer. Passing the raw speed multiplier here would invert that.
     expect(jumpFlashHoldMs(2)).toBe(JUMP_FLASH_BASE_MS * 2)
   })
 
-  it("floors absurdly small speeds so the mark is never instantaneous", () => {
+  it("floors absurdly small scales so the mark is never instantaneous", () => {
     // The settings slider bottoms out at 0.25; anything lower (or zero) would
     // otherwise clear the mark in the same tick it was set.
     expect(jumpFlashHoldMs(0)).toBe(JUMP_FLASH_BASE_MS * 0.25)
@@ -85,17 +87,25 @@ describe("useJumpFlash", () => {
     expect(result.current.flashId).toBe("m2")
   })
 
-  it("follows the motion-speed preference for its hold", () => {
+  it("shortens the hold when the motion-speed preference is faster", () => {
+    // 2x speed is a 0.5x duration scale, so the mark holds for half as long.
     useSettingsStore.setState({ settings: { motion: { reduce: false, speed: 2 } } as never })
     const { result } = renderHook(() => useJumpFlash())
-    expect(result.current.holdMs).toBe(JUMP_FLASH_BASE_MS * 2)
+    expect(result.current.holdMs).toBe(JUMP_FLASH_BASE_MS * 0.5)
 
     act(() => result.current.flash("m1"))
-    act(() => jest.advanceTimersByTime(JUMP_FLASH_BASE_MS))
+    act(() => jest.advanceTimersByTime(JUMP_FLASH_BASE_MS * 0.25))
     expect(result.current.flashId).toBe("m1")
 
-    act(() => jest.advanceTimersByTime(JUMP_FLASH_BASE_MS))
+    act(() => jest.advanceTimersByTime(JUMP_FLASH_BASE_MS * 0.25))
     expect(result.current.flashId).toBeNull()
+  })
+
+  it("lengthens the hold when the motion-speed preference is slower", () => {
+    // 0.5x speed is a 2x duration scale — the reciprocal of the case above.
+    useSettingsStore.setState({ settings: { motion: { reduce: false, speed: 0.5 } } as never })
+    const { result } = renderHook(() => useJumpFlash())
+    expect(result.current.holdMs).toBe(JUMP_FLASH_BASE_MS * 2)
   })
 
   it("drops its pending timer on unmount", () => {

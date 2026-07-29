@@ -35,7 +35,7 @@ export function OverviewPanel({
   const t = useTranslations("settings.memory.overview")
   const tTypes = useTranslations("memory.types")
   const tScopes = useTranslations("memory.scopes")
-  const { reduce, speed } = useFlowMotion()
+  const { reduce, durationScale } = useFlowMotion()
   const { corpus } = insights
 
   const coveragePct = Math.round(corpus.vector.coverage * 100)
@@ -138,7 +138,7 @@ export function OverviewPanel({
             transition={
               reduce
                 ? { duration: 0 }
-                : { duration: MOBILE_DURATION.slow * speed, ease: MOBILE_EASE }
+                : { duration: MOBILE_DURATION.slow * durationScale, ease: MOBILE_EASE }
             }
             data-testid="memory-coverage-bar"
           />

@@ -15,8 +15,18 @@ import { DEFAULT_MOTION, type MotionSettings } from "@/types/appearance"
  *    the OS hint; the applier does not need to mirror it into the class.
  *
  * Speed:
- *  - Tied to `--motion-duration-scale`, which animations multiply by their
- *    base duration (e.g. `transition-duration: calc(0.2s * var(--motion-duration-scale))`).
+ *  - `MotionSettings.speed` is a *speed* multiplier, the way the settings UI
+ *    labels it ("Fast (1.5×)"). `--motion-duration-scale` is a *duration*
+ *    multiplier: consumers write `calc(0.2s * var(--motion-duration-scale))`.
+ *    The two are reciprocals — 1.5× speed must yield a 0.667× duration.
+ *    Writing `speed` straight into the var inverted the whole setting (picking
+ *    "Fast" made every animation 50% slower), so the reciprocal is taken here,
+ *    at the single writer, and every CSS `calc()` consumer stays untouched.
+ *  - Rounded to 3 decimals: 1/1.5 is non-terminating and the raw float would
+ *    land in the inline `style` attribute of every page.
+ *  - `speed` is clamped before dividing. It arrives from persisted settings, so
+ *    a corrupt 0 would otherwise produce `Infinity` and silently invalidate
+ *    every `calc()` that reads the var.
  *  - When the user has enabled `reduce`, speed becomes meaningless — we still
  *    write the var so a future toggle-off reverts cleanly.
  */
@@ -27,8 +37,25 @@ export function resolveMotionState(motion: MotionSettings | undefined): {
   const m = { ...DEFAULT_MOTION, ...(motion ?? {}) }
   return {
     reduceClass: m.reduce === true,
-    cssVarValue: String(m.speed),
+    cssVarValue: String(speedToDurationScale(m.speed)),
   }
+}
+
+/** Smallest / largest speed multiplier accepted from persisted settings. */
+const MIN_SPEED = 0.25
+const MAX_SPEED = 4
+
+/**
+ * Convert a user-facing *speed* multiplier into the *duration* multiplier that
+ * `--motion-duration-scale` and every JS `transition` consumer expect. Exported
+ * so the JS-side motion primitives derive their scale from the same function
+ * rather than re-deriving (and re-inverting) it.
+ */
+export function speedToDurationScale(speed: number | undefined): number {
+  const safe = Number.isFinite(speed)
+    ? Math.min(Math.max(speed as number, MIN_SPEED), MAX_SPEED)
+    : 1
+  return Number((1 / safe).toFixed(3))
 }
 
 /**

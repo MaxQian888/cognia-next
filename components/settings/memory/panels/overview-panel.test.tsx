@@ -8,7 +8,7 @@ import type { MemoryInsights } from "@/hooks/memory/use-memory-insights"
 import { OverviewPanel } from "./overview-panel"
 
 jest.mock("@/components/chat/motion/motion-reveal", () => ({
-  useFlowMotion: () => ({ reduce: true, speed: 1 }),
+  useFlowMotion: () => ({ reduce: true, durationScale: 1 }),
 }))
 
 const insights: MemoryInsights = {

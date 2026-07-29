@@ -1,6 +1,6 @@
 import { render } from "@testing-library/react"
 
-const flowMotion = { reduce: false, speed: 1 }
+const flowMotion = { reduce: false, durationScale: 1 }
 jest.mock("@/components/chat/motion/motion-reveal", () => ({
   useFlowMotion: () => flowMotion,
 }))
@@ -10,7 +10,7 @@ import { ThinkingTips } from "./thinking-tips"
 describe("ThinkingTips", () => {
   beforeEach(() => {
     flowMotion.reduce = false
-    flowMotion.speed = 1
+    flowMotion.durationScale = 1
   })
 
   it("renders nothing when there are no tips", () => {

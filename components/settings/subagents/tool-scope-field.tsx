@@ -78,7 +78,7 @@ export function ToolScopeField({
   testId = "tool-scope",
 }: ToolScopeFieldProps) {
   const t = useTranslations("settings.subagents.toolScope")
-  const { reduce, speed } = useFlowMotion()
+  const { reduce, durationScale } = useFlowMotion()
   const [catalogOpen, setCatalogOpen] = useState(false)
   // Survives a round-trip through "inherit" / "none" so the list is not lost.
   const [remembered, setRemembered] = useState<string[]>(value ?? [])
@@ -145,7 +145,7 @@ export function ToolScopeField({
             transition={
               reduce
                 ? { duration: 0 }
-                : { duration: MOBILE_DURATION.fast * speed, ease: MOBILE_EASE }
+                : { duration: MOBILE_DURATION.fast * durationScale, ease: MOBILE_EASE }
             }
             className="overflow-hidden"
           >

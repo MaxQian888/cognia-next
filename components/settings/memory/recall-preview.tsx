@@ -55,7 +55,7 @@ export interface RecallPreviewProps {
 
 export function RecallPreview({ config, averageTokens, activeCount }: RecallPreviewProps) {
   const t = useTranslations("settings.memory.preview")
-  const { reduce, speed } = useFlowMotion()
+  const { reduce, durationScale } = useFlowMotion()
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState("")
   const [running, setRunning] = useState(false)
@@ -242,7 +242,7 @@ export function RecallPreview({ config, averageTokens, activeCount }: RecallPrev
                         reduce
                           ? { duration: 0 }
                           : {
-                              duration: MOBILE_DURATION.fast * speed,
+                              duration: MOBILE_DURATION.fast * durationScale,
                               ease: MOBILE_EASE,
                               delay: index * STAGGER_INTERVAL,
                             }

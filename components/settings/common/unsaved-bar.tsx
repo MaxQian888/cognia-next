@@ -37,7 +37,7 @@ export interface UnsavedBarProps {
 
 export function UnsavedBar({ status, count, onSave, onDiscard, className }: UnsavedBarProps) {
   const t = useTranslations("settings.common.unsavedBar")
-  const { reduce, speed } = useFlowMotion()
+  const { reduce, durationScale } = useFlowMotion()
 
   const visible = status !== "clean"
 
@@ -111,7 +111,7 @@ export function UnsavedBar({ status, count, onSave, onDiscard, className }: Unsa
           initial={{ opacity: 0, y: 12 }}
           animate={{ opacity: 1, y: 0 }}
           exit={{ opacity: 0, y: 12 }}
-          transition={{ duration: MOBILE_DURATION.fast * speed, ease: MOBILE_EASE }}
+          transition={{ duration: MOBILE_DURATION.fast * durationScale, ease: MOBILE_EASE }}
         >
           {body}
         </motion.div>

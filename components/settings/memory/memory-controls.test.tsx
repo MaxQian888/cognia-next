@@ -7,7 +7,7 @@ import { fireEvent, render, screen } from "@testing-library/react"
 import { GatedGroup, MemoryToggleRow } from "./memory-controls"
 
 jest.mock("@/components/chat/motion/motion-reveal", () => ({
-  useFlowMotion: () => ({ reduce: true, speed: 1 }),
+  useFlowMotion: () => ({ reduce: true, durationScale: 1 }),
 }))
 
 describe("MemoryToggleRow", () => {

@@ -72,7 +72,7 @@ export function SubagentFlightGhost({
   children,
   onFlightChange,
 }: SubagentFlightGhostProps) {
-  const { reduce, speed } = useFlowMotion()
+  const { reduce, durationScale } = useFlowMotion()
   const [flight, setFlight] = useState<FlightState | null>(null)
   const previousPanel = useRef<string | null>(null)
   const flightSeq = useRef(0)
@@ -136,12 +136,14 @@ export function SubagentFlightGhost({
       }}
       transition={{
         ...MOBILE_SPRING,
-        // `speed` is the user's motion multiplier; a higher setting means a
-        // snappier spring, so it scales stiffness rather than a duration.
+        // A faster preference means a snappier spring, so it scales stiffness
+        // rather than a duration. `durationScale` is the reciprocal of the
+        // user's speed multiplier, hence the divide — this is the one call site
+        // that was already pointing the right way, so it flips with the rest to
+        // stay that way.
         ...(typeof (MOBILE_SPRING as { stiffness?: number }).stiffness === "number"
           ? {
-              stiffness:
-                (MOBILE_SPRING as { stiffness?: number }).stiffness! * Math.max(speed, 0.25),
+              stiffness: (MOBILE_SPRING as { stiffness?: number }).stiffness! / durationScale,
             }
           : {}),
       }}

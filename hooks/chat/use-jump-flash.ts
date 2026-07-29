@@ -20,16 +20,20 @@ import { useCallback, useEffect, useRef, useState } from "react"
 
 import { useFlowMotion } from "@/components/chat/motion/motion-reveal"
 
-/** How long the landing mark stays up, before the motion-speed multiplier. */
+/** How long the landing mark stays up, before the motion-duration multiplier. */
 export const JUMP_FLASH_BASE_MS = 1200
 
 /**
- * Hold time scaled by the user's motion-speed preference, so the pulse and the
- * unmount stay in step. Mirrors the `duration * speed` convention the other
- * chat motion primitives use (see `motion-reveal.tsx`).
+ * Hold time scaled by the user's motion preference, so the pulse and the
+ * unmount stay in step. Takes the *duration* scale from `useFlowMotion`, not
+ * the raw speed multiplier: a faster preference must SHORTEN the hold, and
+ * multiplying by speed did the opposite.
  */
-export function jumpFlashHoldMs(speed: number): number {
-  return JUMP_FLASH_BASE_MS * Math.max(speed, 0.25)
+export function jumpFlashHoldMs(durationScale: number): number {
+  // Floored independently of `speedToDurationScale`'s own clamp: this is
+  // exported and callable with a raw number, and a 0ms hold would unmount the
+  // mark before it ever painted.
+  return JUMP_FLASH_BASE_MS * Math.max(durationScale, 0.25)
 }
 
 export interface JumpFlashState {
@@ -48,8 +52,8 @@ export interface JumpFlashState {
 }
 
 export function useJumpFlash(): JumpFlashState {
-  const { speed } = useFlowMotion()
-  const holdMs = jumpFlashHoldMs(speed)
+  const { durationScale } = useFlowMotion()
+  const holdMs = jumpFlashHoldMs(durationScale)
   const [state, setState] = useState<{ id: string | null; nonce: number }>({ id: null, nonce: 0 })
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 

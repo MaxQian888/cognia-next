@@ -17,7 +17,7 @@ jest.mock("@cognia/logging", () => ({
   createLogger: () => ({ info: jest.fn(), error: jest.fn(), warn: jest.fn(), debug: jest.fn() }),
 }))
 jest.mock("@/components/chat/motion/motion-reveal", () => ({
-  useFlowMotion: () => ({ reduce: true, speed: 1 }),
+  useFlowMotion: () => ({ reduce: true, durationScale: 1 }),
 }))
 jest.mock("@/stores/settings", () => {
   const hook = (selector: (s: unknown) => unknown) => selector({ settings: storeSettings, save })

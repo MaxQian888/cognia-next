@@ -8,8 +8,8 @@
  *
  * Reuses `useFlowMotion` — the app-wide motion preference — so it collapses to
  * a plain wrapper when motion is reduced (OS hint or the user opt-in) and
- * scales the fade duration by the user's motion speed (the same multiplier the
- * global `--motion-duration-scale` var uses elsewhere). Mirrors
+ * scales the fade duration by `durationScale` (the same multiplier the global
+ * `--motion-duration-scale` var carries). Mirrors
  * `MotionStatusSwap`, the glyph-level equivalent, for a consistent house feel.
  */
 
@@ -26,7 +26,7 @@ export interface PanelTransitionProps {
 }
 
 export function PanelTransition({ activeKey, children, className }: PanelTransitionProps) {
-  const { reduce, speed } = useFlowMotion()
+  const { reduce, durationScale } = useFlowMotion()
 
   if (reduce) {
     return <div className={className}>{children}</div>
@@ -40,7 +40,7 @@ export function PanelTransition({ activeKey, children, className }: PanelTransit
         initial={{ opacity: 0, y: 6 }}
         animate={{ opacity: 1, y: 0 }}
         exit={{ opacity: 0, y: 6 }}
-        transition={{ duration: 0.18 * speed, ease: "easeOut" }}
+        transition={{ duration: 0.18 * durationScale, ease: "easeOut" }}
       >
         {children}
       </motion.div>

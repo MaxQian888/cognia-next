@@ -11,7 +11,7 @@ jest.mock("next-intl", () => ({
   useTranslations: () => (key: string) => key,
 }))
 
-let flowMotion = { reduce: false, speed: 1 }
+let flowMotion = { reduce: false, durationScale: 1 }
 jest.mock("@/components/chat/motion/motion-reveal", () => ({
   useFlowMotion: () => flowMotion,
 }))
@@ -19,7 +19,7 @@ jest.mock("@/components/chat/motion/motion-reveal", () => ({
 const noop = () => {}
 
 beforeEach(() => {
-  flowMotion = { reduce: false, speed: 1 }
+  flowMotion = { reduce: false, durationScale: 1 }
 })
 
 describe("UnsavedBar", () => {
@@ -59,13 +59,13 @@ describe("UnsavedBar", () => {
   })
 
   it("still renders its content under reduced motion", () => {
-    flowMotion = { reduce: true, speed: 1 }
+    flowMotion = { reduce: true, durationScale: 1 }
     render(<UnsavedBar status="dirty" count={1} onSave={noop} onDiscard={noop} />)
     expect(screen.getByTestId("unsaved-bar")).toBeInTheDocument()
   })
 
   it("renders nothing under reduced motion while clean", () => {
-    flowMotion = { reduce: true, speed: 1 }
+    flowMotion = { reduce: true, durationScale: 1 }
     render(<UnsavedBar status="clean" count={0} onSave={noop} onDiscard={noop} />)
     expect(screen.queryByTestId("unsaved-bar")).not.toBeInTheDocument()
   })

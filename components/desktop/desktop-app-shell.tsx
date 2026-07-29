@@ -98,7 +98,7 @@ export function DesktopAppShell({ children }: { children: React.ReactNode }) {
   // instead of popping. Only the wrapper's transform animates — the height is
   // reserved instantly so the editor above settles once and xterm fits once,
   // never per-frame. Collapses to an instant show/hide under reduced motion.
-  const { reduce: motionReduce, speed: motionSpeed } = useFlowMotion()
+  const { reduce: motionReduce, durationScale: motionDurationScale } = useFlowMotion()
 
   // Bridge native-menu `menu://<id>` events into renderer actions. Must run
   // even when the in-app Menubar would render in its hamburger form so the
@@ -184,7 +184,7 @@ export function DesktopAppShell({ children }: { children: React.ReactNode }) {
                 animate={{ y: 0 }}
                 exit={{ y: motionReduce ? 0 : "100%", opacity: motionReduce ? 0 : 1 }}
                 transition={{
-                  duration: motionReduce ? 0 : 0.2 * motionSpeed,
+                  duration: motionReduce ? 0 : 0.2 * motionDurationScale,
                   ease: [0.32, 0.72, 0, 1],
                 }}
               >

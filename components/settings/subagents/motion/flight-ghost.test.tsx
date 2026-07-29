@@ -7,7 +7,7 @@ import { act, render, screen } from "@testing-library/react"
 
 import { FLIGHT_TARGET_ATTR, SubagentFlightGhost } from "./flight-ghost"
 
-let flowMotion = { reduce: false, speed: 1 }
+let flowMotion = { reduce: false, durationScale: 1 }
 jest.mock("@/components/chat/motion/motion-reveal", () => ({
   useFlowMotion: () => flowMotion,
 }))
@@ -47,7 +47,7 @@ function Harness({ initial = "a" }: { initial?: string }) {
 }
 
 beforeEach(() => {
-  flowMotion = { reduce: false, speed: 1 }
+  flowMotion = { reduce: false, durationScale: 1 }
 })
 
 afterEach(() => {
@@ -92,7 +92,7 @@ describe("SubagentFlightGhost", () => {
   })
 
   it("honours reduced motion by never taking off", () => {
-    flowMotion = { reduce: true, speed: 1 }
+    flowMotion = { reduce: true, durationScale: 1 }
     stubRects({ a: rect(10, 10), b: rect(30, 10), __target__: rect(50, 300) })
     render(<Harness />)
     act(() => {

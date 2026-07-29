@@ -75,7 +75,7 @@ export interface GatedGroupProps {
  * clicked — a dimmed-but-live control is worse than no animation at all.
  */
 export function GatedGroup({ gated, reason, children, className }: GatedGroupProps) {
-  const { reduce, speed } = useFlowMotion()
+  const { reduce, durationScale } = useFlowMotion()
 
   return (
     <div className={className}>
@@ -95,7 +95,9 @@ export function GatedGroup({ gated, reason, children, className }: GatedGroupPro
         animate={reduce ? undefined : { opacity: gated ? 0.5 : 1 }}
         initial={false}
         transition={
-          reduce ? undefined : { duration: MOBILE_DURATION.normal * speed, ease: MOBILE_EASE }
+          reduce
+            ? undefined
+            : { duration: MOBILE_DURATION.normal * durationScale, ease: MOBILE_EASE }
         }
         className={cn(reduce && gated && "opacity-50")}
       >

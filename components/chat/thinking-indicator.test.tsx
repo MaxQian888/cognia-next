@@ -28,7 +28,7 @@ jest.mock("@/hooks/chat/use-thinking-phase", () => ({
 }))
 
 // Control reduced-motion for the indicator's own animate-pulse / dots classes.
-const flowMotion = { reduce: false, speed: 1 }
+const flowMotion = { reduce: false, durationScale: 1 }
 jest.mock("@/components/chat/motion/motion-reveal", () => {
   const actual = jest.requireActual("@/components/chat/motion/motion-reveal")
   return { ...actual, useFlowMotion: () => flowMotion }
@@ -43,7 +43,7 @@ describe("ChatThinkingIndicator", () => {
     phase.tipIndex = 0
     phase.verbIndex = 0
     flowMotion.reduce = false
-    flowMotion.speed = 1
+    flowMotion.durationScale = 1
     rawState.tips = ["Tip A", "Tip B", "Tip C"]
     rawState.verbs = []
     rawState.throws = false

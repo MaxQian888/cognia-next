@@ -15,7 +15,7 @@ jest.mock("next-intl", () => ({
 // Default to the reduced-motion branch so the body renders synchronously
 // without AnimatePresence wrappers — deterministic. Individual tests can flip
 // `mockMotion.reduce` to exercise the animated path.
-const mockMotion = { reduce: true, speed: 1 }
+const mockMotion = { reduce: true, durationScale: 1 }
 jest.mock("@/components/chat/motion/motion-reveal", () => ({
   useFlowMotion: () => mockMotion,
   MotionCollapse: ({ open, children }: { open: boolean; children: unknown }) =>

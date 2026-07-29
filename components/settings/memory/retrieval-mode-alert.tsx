@@ -38,7 +38,7 @@ export function RetrievalModeAlert({
   quietWhenHealthy,
 }: RetrievalModeAlertProps) {
   const t = useTranslations("settings.memory.retrievalMode")
-  const { reduce, speed } = useFlowMotion()
+  const { reduce, durationScale } = useFlowMotion()
 
   if (mode === undefined) {
     return <Skeleton className="h-16 w-full rounded-lg" data-testid="memory-retrieval-probing" />
@@ -109,7 +109,7 @@ export function RetrievalModeAlert({
         initial={{ opacity: 0, y: -4 }}
         animate={{ opacity: 1, y: 0 }}
         exit={{ opacity: 0, y: -4 }}
-        transition={{ duration: MOBILE_DURATION.fast * speed, ease: MOBILE_EASE }}
+        transition={{ duration: MOBILE_DURATION.fast * durationScale, ease: MOBILE_EASE }}
       >
         {body}
       </motion.div>

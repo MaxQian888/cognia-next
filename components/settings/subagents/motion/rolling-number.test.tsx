@@ -6,7 +6,7 @@ import { render, screen } from "@testing-library/react"
 
 import { RollingNumber } from "./rolling-number"
 
-let flowMotion = { reduce: false, speed: 1 }
+let flowMotion = { reduce: false, durationScale: 1 }
 jest.mock("@/components/chat/motion/motion-reveal", () => ({
   useFlowMotion: () => flowMotion,
 }))
@@ -23,7 +23,7 @@ jest.mock("motion/react", () => ({
 }))
 
 beforeEach(() => {
-  flowMotion = { reduce: false, speed: 1 }
+  flowMotion = { reduce: false, durationScale: 1 }
   animateCalls.length = 0
   stop.mockClear()
 })
@@ -69,7 +69,7 @@ describe("RollingNumber", () => {
   })
 
   it("snaps instead of animating under reduced motion", () => {
-    flowMotion = { reduce: true, speed: 1 }
+    flowMotion = { reduce: true, durationScale: 1 }
     const { rerender } = render(<RollingNumber value={100} data-testid="n" />)
     rerender(<RollingNumber value={250} data-testid="n" />)
     expect(animateCalls).toEqual([])

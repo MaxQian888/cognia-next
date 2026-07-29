@@ -70,7 +70,7 @@ jest.mock("@/components/settings/subscription/limits-meters-card", () => ({
 // Motion primitives → deterministic passthrough; reduce=true also disables
 // recharts/count-up animation for stable jsdom output.
 jest.mock("@/components/chat/motion/motion-reveal", () => ({
-  useFlowMotion: () => ({ reduce: true, speed: 1 }),
+  useFlowMotion: () => ({ reduce: true, durationScale: 1 }),
   MotionReveal: ({ children }: { children: React.ReactNode }) => <>{children}</>,
   MotionCollapse: ({ open, children }: { open: boolean; children: React.ReactNode }) =>
     open ? <>{children}</> : null,

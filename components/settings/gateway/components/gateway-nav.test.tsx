@@ -13,7 +13,7 @@ jest.mock("next-intl", () => ({
 
 let reduce = true
 jest.mock("@/components/chat/motion/motion-reveal", () => ({
-  useFlowMotion: () => ({ reduce, speed: 1 }),
+  useFlowMotion: () => ({ reduce, durationScale: 1 }),
 }))
 
 beforeEach(() => {

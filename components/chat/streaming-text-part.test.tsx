@@ -25,7 +25,7 @@ jest.mock("@/components/ai-elements/message", () => ({
 }))
 
 // Control reduced-motion so we can assert the caret's blink toggles.
-const flowMotion = { reduce: false, speed: 1 }
+const flowMotion = { reduce: false, durationScale: 1 }
 jest.mock("@/components/chat/motion/motion-reveal", () => ({
   useFlowMotion: () => flowMotion,
 }))
@@ -35,7 +35,7 @@ import { StreamingTextPart } from "./streaming-text-part"
 describe("StreamingTextPart", () => {
   beforeEach(() => {
     flowMotion.reduce = false
-    flowMotion.speed = 1
+    flowMotion.durationScale = 1
     mockMessageResponse.mockClear()
     mockStreamdownParser.mockClear()
   })

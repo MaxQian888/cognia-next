@@ -26,7 +26,7 @@ export interface ThinkingTipsProps {
 }
 
 export function ThinkingTips({ tips, index, className }: ThinkingTipsProps) {
-  const { reduce, speed } = useFlowMotion()
+  const { reduce, durationScale } = useFlowMotion()
 
   if (tips.length === 0) return null
   const tip = tips[((index % tips.length) + tips.length) % tips.length]
@@ -54,7 +54,7 @@ export function ThinkingTips({ tips, index, className }: ThinkingTipsProps) {
             initial={{ opacity: 0, y: 4 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -4 }}
-            transition={{ duration: 0.2 * speed, ease: "easeOut" }}
+            transition={{ duration: 0.2 * durationScale, ease: "easeOut" }}
           >
             {body}
           </motion.span>

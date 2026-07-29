@@ -12,22 +12,29 @@
  *
  * Motion respects user preferences: it collapses to a plain wrapper when the
  * appearance `motion.reduce` flag is set OR the OS `prefers-reduced-motion`
- * hint is on, and scales duration by `motion.speed` (the same multiplier the
- * global `--motion-duration-scale` var uses elsewhere).
+ * hint is on, and scales duration by `durationScale` — the same multiplier the
+ * global `--motion-duration-scale` var carries, derived from the user's speed
+ * preference through the one shared `speedToDurationScale`.
  */
 
 import { AnimatePresence, motion, useReducedMotion } from "motion/react"
 import type { CSSProperties, ReactNode } from "react"
 
 import { useSettingsStore } from "@/stores/settings"
+import { speedToDurationScale } from "@/lib/appearance/motion-applier"
 import { MOBILE_DURATION, MOBILE_EASE, MOBILE_SPRING } from "@/lib/ui/motion"
-import { DEFAULT_MOTION } from "@/types/appearance"
 
 export interface FlowMotion {
   /** True when all motion should be suppressed (user opt-in or OS hint). */
   reduce: boolean
-  /** Duration multiplier (matches `--motion-duration-scale`). */
-  speed: number
+  /**
+   * Duration multiplier — matches `--motion-duration-scale`. Multiply a base
+   * duration by it; do NOT use the raw `motion.speed` preference, which is its
+   * reciprocal (1.5× *speed* means 0.667× *duration*). Exposing only this
+   * direction is deliberate: the two were previously conflated, which inverted
+   * every JS-side animation exactly as it inverted the CSS ones.
+   */
+  durationScale: number
 }
 
 /** Resolve the active motion preference for the agent-flow surfaces. */
@@ -36,7 +43,7 @@ export function useFlowMotion(): FlowMotion {
   const motionPref = useSettingsStore((s) => s.settings?.motion)
   return {
     reduce: osReduce === true || (motionPref?.reduce ?? false),
-    speed: motionPref?.speed ?? DEFAULT_MOTION.speed,
+    durationScale: speedToDurationScale(motionPref?.speed),
   }
 }
 
@@ -50,15 +57,18 @@ export interface MotionRevealProps {
 }
 
 export function MotionReveal({ children, index = 0, className, disabled }: MotionRevealProps) {
-  const { reduce, speed } = useFlowMotion()
+  const { reduce, durationScale } = useFlowMotion()
 
   if (disabled || reduce) {
     return className ? <div className={className}>{children}</div> : <>{children}</>
   }
 
   // Staggered spring entrance — newly streamed cards/rows settle in with a
-  // little bounce instead of a flat fade. `speed` scales the perceived pace by
-  // adjusting damping (lower speed ⇒ slower settle).
+  // little bounce instead of a flat fade. Damping carries the pace: dividing by
+  // `durationScale` means a *faster* preference raises damping (snappier, no
+  // overshoot) and a slower one lowers it (a longer, lazier settle). At the 1×
+  // default this is damping 30 against stiffness 320 — just under critical, so
+  // the intended hint of bounce survives unchanged.
   const delay = Math.min(Math.max(index, 0), 6) * 0.03
 
   return (
@@ -70,8 +80,8 @@ export function MotionReveal({ children, index = 0, className, disabled }: Motio
         delay,
         type: "spring",
         stiffness: 320,
-        damping: 30 / Math.max(speed, 0.25),
-        opacity: { duration: 0.18 * speed, ease: "easeOut", delay },
+        damping: 30 / durationScale,
+        opacity: { duration: 0.18 * durationScale, ease: "easeOut", delay },
       }}
     >
       {children}
@@ -99,7 +109,7 @@ export interface MotionCollapseProps {
  * before, this was a fourth hand-tuned curve. Opacity keeps its quick ease-out.
  */
 export function MotionCollapse({ open, children, className }: MotionCollapseProps) {
-  const { reduce, speed } = useFlowMotion()
+  const { reduce, durationScale } = useFlowMotion()
 
   if (reduce) {
     return open ? <div className={className}>{children}</div> : null
@@ -115,8 +125,8 @@ export function MotionCollapse({ open, children, className }: MotionCollapseProp
           animate={{ height: "auto", opacity: 1 }}
           exit={{ height: 0, opacity: 0 }}
           transition={{
-            height: { duration: MOBILE_DURATION.normal * speed, ease: MOBILE_EASE },
-            opacity: { duration: MOBILE_DURATION.fast * speed, ease: "easeOut" },
+            height: { duration: MOBILE_DURATION.normal * durationScale, ease: MOBILE_EASE },
+            opacity: { duration: MOBILE_DURATION.fast * durationScale, ease: "easeOut" },
           }}
           style={{ overflow: "hidden" }}
         >
@@ -189,7 +199,7 @@ export interface MotionStatusSwapProps {
  * avoiding a double-glyph flash. Plain passthrough when motion is reduced.
  */
 export function MotionStatusSwap({ swapKey, children, className }: MotionStatusSwapProps) {
-  const { reduce, speed } = useFlowMotion()
+  const { reduce, durationScale } = useFlowMotion()
 
   if (reduce) {
     return <span className={className}>{children}</span>
@@ -203,7 +213,7 @@ export function MotionStatusSwap({ swapKey, children, className }: MotionStatusS
         initial={{ opacity: 0, scale: 0.6 }}
         animate={{ opacity: 1, scale: 1 }}
         exit={{ opacity: 0, scale: 0.6 }}
-        transition={{ duration: 0.14 * speed, ease: "easeOut" }}
+        transition={{ duration: 0.14 * durationScale, ease: "easeOut" }}
         style={{ display: "inline-flex" }}
       >
         {children}
@@ -249,7 +259,7 @@ export interface MotionPopoverProps {
  * parent can toggle `open` while always rendering `<MotionPopover>`. Only
  * `opacity`/`transform` animate (no layout, no backdrop-filter) to stay on the
  * compositor. Collapses to a plain show/hide when motion is reduced (OS hint or
- * user opt-in) and scales duration by `motion.speed`.
+ * user opt-in) and scales duration by `durationScale`.
  *
  * Deliberately NOT used for the high-frequency, follow-the-cursor overlays
  * (ghost text, completion popup, sticky scroll, command decorations): those
@@ -257,7 +267,7 @@ export interface MotionPopoverProps {
  * would flicker rather than polish.
  */
 export function MotionPopover({ open, children, className, style, from }: MotionPopoverProps) {
-  const { reduce, speed } = useFlowMotion()
+  const { reduce, durationScale } = useFlowMotion()
 
   if (reduce) {
     return open ? (
@@ -279,7 +289,7 @@ export function MotionPopover({ open, children, className, style, from }: Motion
           initial={offset}
           animate={{ opacity: 1, scale: 1, x: 0, y: 0 }}
           exit={offset}
-          transition={{ duration: 0.15 * speed, ease: "easeOut" }}
+          transition={{ duration: 0.15 * durationScale, ease: "easeOut" }}
         >
           {children}
         </motion.div>

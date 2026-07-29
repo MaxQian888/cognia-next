@@ -71,7 +71,7 @@ export function ConversationJumpPill({
   className,
 }: ConversationJumpPillProps) {
   const t = useTranslations("chat.jump")
-  const { reduce, speed } = useFlowMotion()
+  const { reduce, durationScale } = useFlowMotion()
 
   const label =
     mode === "return"
@@ -137,8 +137,8 @@ export function ConversationJumpPill({
             transition={{
               type: "spring",
               stiffness: 420,
-              damping: 32 / Math.max(speed, 0.25),
-              opacity: { duration: 0.14 * speed, ease: "easeOut" },
+              damping: 32 / durationScale,
+              opacity: { duration: 0.14 * durationScale, ease: "easeOut" },
             }}
           >
             {button}
