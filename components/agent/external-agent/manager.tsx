@@ -1165,6 +1165,15 @@ export function ExternalAgentManager({ className }: ExternalAgentManagerProps) {
   const activeEcosystem =
     activeAgentValidity?.ecosystem ??
     (activeAgent ? getExternalAgentEcosystemReadiness(activeAgent.config) : undefined)
+  // Entries are either a `{ id, params }` message reference this app generated
+  // or prose persisted before that shape existed / supplied by a third-party
+  // preset. Prose is shown as-is: there is no key to translate it by, and
+  // dropping it would lose the only advice such a preset offers.
+  const activeRecommendedActions = (activeEcosystem?.recommendedActions ?? []).map((action) => {
+    if (typeof action === "string") return action
+    const key = `recommendedAction.${action.id}`
+    return tDiagnostics.has(key) ? tDiagnostics(key, action.params ?? {}) : action.id
+  })
   const correlationSessionId = activeAgentValidity?.correlation?.sessionId
   const correlationTurnId = activeAgentValidity?.correlation?.turnId
   const benchmarkEntries = activeBenchmarkCapabilities || []
@@ -1683,11 +1692,9 @@ export function ExternalAgentManager({ className }: ExternalAgentManagerProps) {
                   {tDiag("recoveryHints", { hints: recoveryHints.join(" | ") })}
                 </p>
               )}
-              {activeEcosystem?.recommendedActions?.length ? (
+              {activeRecommendedActions.length > 0 ? (
                 <p className="sm:col-span-2">
-                  {tDiag("recommendedActions", {
-                    actions: activeEcosystem.recommendedActions.join(" | "),
-                  })}
+                  {tDiag("recommendedActions", { actions: activeRecommendedActions.join(" | ") })}
                 </p>
               ) : null}
             </div>

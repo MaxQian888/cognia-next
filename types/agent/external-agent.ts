@@ -115,8 +115,29 @@ export interface ExternalAgentEcosystemReadinessSnapshot {
   limitationNote?: string
   prerequisiteStatus?: ExternalAgentEcosystemPrerequisiteStatus
   prerequisites?: ExternalAgentEcosystemPrerequisite[]
-  recommendedActions?: string[]
+  recommendedActions?: ExternalAgentRecommendedAction[]
 }
+
+/**
+ * One line of "what to do about it" under an agent's readiness panel.
+ *
+ * Two shapes, because this array is persisted. Entries this app generates are
+ * `{ id }` references into `externalAgent.manager.diagnostics.recommendedAction.*`
+ * and are rendered in the reader's language; a bare string is either a value
+ * persisted before that existed or prose supplied by a third-party preset,
+ * and is rendered as-is because there is no key to look up.
+ *
+ * Mirrors how `recoveryHints` already carries key ids rather than prose — see
+ * `resolveRecoveryHints` in `canonical-contract.ts`.
+ */
+export type ExternalAgentRecommendedAction =
+  | string
+  | {
+      /** Key under `externalAgent.manager.diagnostics.recommendedAction`. */
+      id: string
+      /** ICU interpolation values for that message. */
+      params?: Record<string, string>
+    }
 
 /**
  * Correlation metadata shared across manager/hook/router diagnostics.

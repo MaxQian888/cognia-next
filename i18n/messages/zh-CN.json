@@ -6607,6 +6607,14 @@
       "showParsed": "显示摘要",
       "showRaw": "显示原始错误"
     },
+    "recommendedAction": {
+      "codexWsl2": "在 Windows 上，尽量把 Codex ACP 路由放在 WSL2 工作区中运行，体验最佳。",
+      "installCommand": "请先安装 \"{command}\"，或把该 agent 的命令设为绝对路径，然后再连接。",
+      "installHintClaude": "安装 Claude Code CLI：`npm install -g @anthropic-ai/claude-code`，然后重新连接。",
+      "installHintCodex": "安装 OpenAI Codex CLI：`npm install -g @openai/codex`（或 `brew install codex`），然后重新连接。",
+      "installHintGemini": "安装 Gemini CLI：`npm install -g @google/gemini-cli`，然后重新连接。",
+      "installHintOpencode": "安装 OpenCode CLI：`npm install -g opencode-ai`，然后重新连接。"
+    },
     "recoveryHint": {
       "adjustPermissionMode": "调整智能体的权限模式，或批准它请求的操作。",
       "checkCommandAndArgs": "检查智能体的启动命令和参数。",
@@ -22563,15 +22571,9 @@
         "clearConfirm": "清空日志",
         "clearConfirmDesc": "将删除全部 {count} 条审计记录，无法恢复。",
         "clearConfirmTitle": "确认清空 MCP 审计日志？",
-        "deniedOnly": "仅看拒绝",
         "description": "最近 50 条调用记录。总计上限 5000 条 — 超出后自动清理旧记录。",
-        "detailAria": "展开或收起 {tool} 的详情",
         "empty": "暂无调用记录。",
-        "filterToolPlaceholder": "按工具筛选…",
         "latency": "延迟",
-        "reason": "原因",
-        "rowLimit": "行数",
-        "rowLimitValue": "{count} 行",
         "scope": "范围",
         "status": "状态",
         "statusDeny": "拒绝",
@@ -22584,39 +22586,7 @@
       "badgeIdle": "空闲",
       "badgeLive": "运行中",
       "badgeWeb": "web",
-      "description": "把本应用的知识与运行时能力开放给外部 MCP 客户端。",
       "loading": "加载中…",
-      "nav": {
-        "groups": {
-          "accessGroup": "接入",
-          "contentGroup": "内容",
-          "serviceGroup": "服务"
-        },
-        "items": {
-          "audit": {
-            "description": "桥接处理过的每一次调用",
-            "label": "审计日志"
-          },
-          "scopes": {
-            "description": "外部客户端可以调用的能力",
-            "label": "权限范围"
-          },
-          "server": {
-            "description": "启用桥接并管理其令牌",
-            "label": "服务与令牌"
-          },
-          "setup": {
-            "description": "MCP 客户端的配置片段",
-            "label": "客户端接入"
-          },
-          "wiki": {
-            "description": "重建与检查计划",
-            "label": "Wiki 维护"
-          }
-        },
-        "mobileTrigger": "面板",
-        "title": "外部桥接设置"
-      },
       "scopeDescriptions": {
         "agent:dispatch": "⚠ 允许外部代理无界面运行你的内置/插件子代理或角色（工具循环 + 模型调用）。返回文本经 PII 脱敏。默认关闭。",
         "agent:team": "⚠ 允许外部代理无界面启动智能体团队——它们本无法触及的多智能体编排。默认关闭。",
@@ -22640,20 +22610,6 @@
       },
       "scopes": {
         "description": "每个范围默认关闭，需手动启用。默认安装仅开启公开代码 Wiki 相关范围。",
-        "grantedCount": "已授予 {granted}/{total}",
-        "groups": {
-          "agent": "Agent",
-          "inbound": "入站",
-          "inbox": "收件箱",
-          "mcp": "计算机操作",
-          "memory": "记忆",
-          "plugin": "插件",
-          "rag": "检索",
-          "runtime": "运行时",
-          "wiki": "Wiki"
-        },
-        "plannedBadge": "规划中",
-        "plannedReason": "已推迟到 Phase 1 之后：访问用户仓库需要逐仓库授权，该机制尚未实现。此范围保留在 API 中以便处理器继续编译，但无法被授予。",
         "title": "权限范围",
         "toggleAria": "切换 {scope}"
       },
@@ -22661,8 +22617,6 @@
         "bearerTokenLabel": "Bearer Token（仅 HTTP）",
         "copyTokenAria": "复制 Token",
         "hide": "隐藏",
-        "httpPort": "HTTP 端口",
-        "httpPortHelp": "HTTP 传输监听的端口，下方的接入片段会使用该值。",
         "regenerateWarning": "⚠ 重新生成将立即作废旧 Token。",
         "rotateConfirmAction": "轮换 Token",
         "rotateConfirmCancel": "取消",
@@ -22679,8 +22633,7 @@
         "toastTokenCopied": "Token 已复制到剪贴板。",
         "toastTokenRegenerated": "新 Token 已生成，旧 Token 立即失效。",
         "toggleAriaLabel": "启用 MCP 服务器",
-        "tokenNone": "（无）",
-        "tokenRotatedAt": "令牌最近轮换于 {time}"
+        "tokenNone": "（无）"
       },
       "setup": {
         "clientLabel": "客户端",
@@ -22702,7 +22655,6 @@
           "goose": "Goose"
         }
       },
-      "title": "外部桥接",
       "wikiIndex": {
         "articleCount": "文章数",
         "description": "为外部 Agent 索引 Cognia 代码库，使其可通过 MCP 查询。",

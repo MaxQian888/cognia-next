@@ -6607,6 +6607,14 @@
       "showParsed": "Show summary",
       "showRaw": "Show raw error"
     },
+    "recommendedAction": {
+      "codexWsl2": "For the best Windows experience, run the Codex ACP route inside a WSL2 workspace when possible.",
+      "installCommand": "Install \"{command}\", or set an absolute path as this agent's command, before connecting.",
+      "installHintClaude": "Install the Claude Code CLI: `npm install -g @anthropic-ai/claude-code`, then reconnect.",
+      "installHintCodex": "Install the OpenAI Codex CLI: `npm install -g @openai/codex` (or `brew install codex`), then reconnect.",
+      "installHintGemini": "Install the Gemini CLI: `npm install -g @google/gemini-cli`, then reconnect.",
+      "installHintOpencode": "Install the OpenCode CLI: `npm install -g opencode-ai`, then reconnect."
+    },
     "recoveryHint": {
       "adjustPermissionMode": "Adjust the agent's permission mode, or approve the action it asked for.",
       "checkCommandAndArgs": "Check the agent's command and startup arguments.",
@@ -22563,15 +22571,9 @@
         "clearConfirm": "Clear log",
         "clearConfirmDesc": "This removes all {count} rows from the audit log. The history cannot be recovered.",
         "clearConfirmTitle": "Clear MCP audit log?",
-        "deniedOnly": "Denied only",
         "description": "Newest 50 calls. Capped at 5000 total — older rows are pruned automatically.",
-        "detailAria": "Toggle details for {tool}",
         "empty": "No calls yet.",
-        "filterToolPlaceholder": "Filter by tool…",
         "latency": "Latency",
-        "reason": "Reason",
-        "rowLimit": "Rows",
-        "rowLimitValue": "{count} rows",
         "scope": "Scope",
         "status": "Status",
         "statusDeny": "DENY",
@@ -22584,39 +22586,7 @@
       "badgeIdle": "idle",
       "badgeLive": "live",
       "badgeWeb": "web",
-      "description": "Expose this app's knowledge and runtime to external MCP clients.",
       "loading": "Loading…",
-      "nav": {
-        "groups": {
-          "accessGroup": "Access",
-          "contentGroup": "Content",
-          "serviceGroup": "Service"
-        },
-        "items": {
-          "audit": {
-            "description": "Every call the bridge handled",
-            "label": "Audit log"
-          },
-          "scopes": {
-            "description": "What external clients may call",
-            "label": "Permission scopes"
-          },
-          "server": {
-            "description": "Enable the bridge and manage its token",
-            "label": "Server & token"
-          },
-          "setup": {
-            "description": "Config snippets for MCP clients",
-            "label": "Client setup"
-          },
-          "wiki": {
-            "description": "Rebuild and lint schedules",
-            "label": "Wiki maintenance"
-          }
-        },
-        "mobileTrigger": "Panels",
-        "title": "External Bridge settings"
-      },
       "scopeDescriptions": {
         "agent:dispatch": "⚠ Lets external agents run your built-in/plugin subagents or characters headlessly (tool loop + model calls). Returned text is PII-redacted. Default OFF.",
         "agent:team": "⚠ Lets external agents start an Agent Team headlessly — a multi-agent orchestration they couldn't otherwise reach. Default OFF.",
@@ -22640,20 +22610,6 @@
       },
       "scopes": {
         "description": "Each scope is opt-in. Default install ships with only the public-code wiki scopes enabled.",
-        "grantedCount": "{granted}/{total} granted",
-        "groups": {
-          "agent": "Agents",
-          "inbound": "Inbound",
-          "inbox": "Inbox",
-          "mcp": "Computer use",
-          "memory": "Memory",
-          "plugin": "Plugins",
-          "rag": "Retrieval",
-          "runtime": "Runtime",
-          "wiki": "Wiki"
-        },
-        "plannedBadge": "Planned",
-        "plannedReason": "Deferred past Phase 1: user-repository access needs per-repository consent, which does not exist yet. The scope stays in the API so handlers keep compiling, but it cannot be granted.",
         "title": "Permission scopes",
         "toggleAria": "Toggle {scope}"
       },
@@ -22661,8 +22617,6 @@
         "bearerTokenLabel": "Bearer token (HTTP only)",
         "copyTokenAria": "Copy token",
         "hide": "Hide",
-        "httpPort": "HTTP port",
-        "httpPortHelp": "Port the HTTP transport listens on. Used in the setup snippets below.",
         "regenerateWarning": "⚠ Regenerating invalidates the old token immediately.",
         "rotateConfirmAction": "Rotate token",
         "rotateConfirmCancel": "Cancel",
@@ -22679,8 +22633,7 @@
         "toastTokenCopied": "Token copied to clipboard.",
         "toastTokenRegenerated": "New token generated. Old token is now invalid.",
         "toggleAriaLabel": "Enable MCP server",
-        "tokenNone": "(none)",
-        "tokenRotatedAt": "Token last rotated {time}"
+        "tokenNone": "(none)"
       },
       "setup": {
         "clientLabel": "Client",
@@ -22702,7 +22655,6 @@
           "goose": "Goose"
         }
       },
-      "title": "External Bridge",
       "wikiIndex": {
         "articleCount": "Articles",
         "description": "Index the Cognia codebase so external agents can query it via MCP.",

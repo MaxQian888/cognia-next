@@ -75,6 +75,35 @@ describe("normalizeExternalAgentValiditySnapshot — reason resolution", () => {
     expect(out.recoveryHints).toEqual(["useOfficialWorkflow", "selectLocalSurface"])
   })
 
+  it("skips a message-reference action when reaching for a prose reason", () => {
+    // `canonicalReason` is prose by contract. A `{ id }` entry is a message
+    // key, so taking [0] blindly would put a raw id — or `[object Object]` —
+    // in front of the user.
+    const out = normalizeExternalAgentValiditySnapshot({
+      executable: false,
+      ecosystem: {
+        adapterId: "codex",
+        supportTier: "documented-only",
+        recommendedActions: [{ id: "installHintCodex" }, "Read the runbook first."],
+      },
+    })
+    expect(out.canonicalReason).toBe("Read the runbook first.")
+  })
+
+  it("falls through to the documented-only default when every action is a reference", () => {
+    const out = normalizeExternalAgentValiditySnapshot({
+      executable: false,
+      ecosystem: {
+        adapterId: "codex",
+        supportTier: "documented-only",
+        recommendedActions: [{ id: "installHintCodex" }, { id: "codexWsl2" }],
+      },
+    })
+    expect(out.canonicalReason).toBe(
+      "This official surface is documented but not directly executable in Cognia yet."
+    )
+  })
+
   it("uses the documented-only fallback string when no other hint exists", () => {
     const out = normalizeExternalAgentValiditySnapshot({
       executable: false,

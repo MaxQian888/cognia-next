@@ -386,5 +386,13 @@
       "retrying": "正在重试…",
       "title": "正在以默认设置运行"
     }
+  },
+  "recommendedAction": {
+    "installCommand": "请先安装 \"{command}\"，或把该 agent 的命令设为绝对路径，然后再连接。",
+    "installHintCodex": "安装 OpenAI Codex CLI：`npm install -g @openai/codex`（或 `brew install codex`），然后重新连接。",
+    "installHintClaude": "安装 Claude Code CLI：`npm install -g @anthropic-ai/claude-code`，然后重新连接。",
+    "installHintOpencode": "安装 OpenCode CLI：`npm install -g opencode-ai`，然后重新连接。",
+    "installHintGemini": "安装 Gemini CLI：`npm install -g @google/gemini-cli`，然后重新连接。",
+    "codexWsl2": "在 Windows 上，尽量把 Codex ACP 路由放在 WSL2 工作区中运行，体验最佳。"
   }
 }

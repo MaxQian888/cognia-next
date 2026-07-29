@@ -302,8 +302,10 @@ describe("probeExternalAgentEcosystemReadiness", () => {
       }
     )
     expect(out?.prerequisites?.find((p) => p.id === "local-command")?.status).toBe("missing")
+    // The command name rides in `params` now — the sentence itself lives in
+    // the message catalogue, so it is no longer asserted here as English.
     expect(out?.recommendedActions).toEqual(
-      expect.arrayContaining([expect.stringMatching(/Install "fake"/)])
+      expect.arrayContaining([{ id: "installCommand", params: { command: "fake" } }])
     )
   })
 
@@ -316,9 +318,7 @@ describe("probeExternalAgentEcosystemReadiness", () => {
       },
       { runtimeIsTauri: true, checkCommandExists: async () => false }
     )
-    expect(out?.recommendedActions).toEqual(
-      expect.arrayContaining([expect.stringMatching(/@openai\/codex/)])
-    )
+    expect(out?.recommendedActions).toEqual(expect.arrayContaining([{ id: "installHintCodex" }]))
   })
 
   it("probes the command for a hand-written stdio config with no ecosystem identity", async () => {
@@ -389,9 +389,7 @@ describe("probeExternalAgentEcosystemReadiness", () => {
         platform: "win32",
       }
     )
-    expect(out?.recommendedActions).toEqual(
-      expect.arrayContaining([expect.stringMatching(/WSL2/i)])
-    )
+    expect(out?.recommendedActions).toEqual(expect.arrayContaining([{ id: "codexWsl2" }]))
   })
 
   it("returns undefined when readiness cannot be derived", async () => {
@@ -575,5 +573,82 @@ describe("normalizeExternalAgentConfigInput", () => {
     )
     expect(cfg.validitySnapshot?.executable).toBe(false)
     expect(cfg.validitySnapshot?.blockingReasonCode).toBe("transport_blocked")
+  })
+})
+
+describe("recommended actions — persisted shape", () => {
+  it("keeps prose an older build (or a third-party preset) persisted", async () => {
+    const out = await probeExternalAgentEcosystemReadiness(
+      {
+        metadata: {
+          preset: "codex-app-server",
+          ecosystemReadiness: { recommendedActions: ["Read the vendor runbook first."] },
+        },
+        transport: "stdio",
+        process: { command: "codex", args: ["app-server"] },
+      },
+      { runtimeIsTauri: true, checkCommandExists: async () => true }
+    )
+    expect(out?.recommendedActions).toContain("Read the vendor runbook first.")
+  })
+
+  it("drops persisted entries that are neither prose nor a message reference", async () => {
+    // This array round-trips through config metadata, so it is untrusted:
+    // an unchecked value reaches the renderer and prints [object Object].
+    const out = await probeExternalAgentEcosystemReadiness(
+      {
+        metadata: {
+          preset: "codex-app-server",
+          ecosystemReadiness: {
+            recommendedActions: [42, null, { params: { a: "b" } }, ["nested"], { id: "  " }, "  "],
+          },
+        },
+        transport: "stdio",
+        process: { command: "codex", args: ["app-server"] },
+      },
+      { runtimeIsTauri: true, checkCommandExists: async () => true }
+    )
+    expect(out?.recommendedActions ?? []).toEqual([])
+  })
+
+  it("keeps non-string params out of a message reference", async () => {
+    const out = await probeExternalAgentEcosystemReadiness(
+      {
+        metadata: {
+          preset: "codex-app-server",
+          ecosystemReadiness: {
+            recommendedActions: [{ id: "installCommand", params: { command: "x", bad: 7 } }],
+          },
+        },
+        transport: "stdio",
+        process: { command: "codex", args: ["app-server"] },
+      },
+      { runtimeIsTauri: true, checkCommandExists: async () => true }
+    )
+    expect(out?.recommendedActions).toEqual([{ id: "installCommand", params: { command: "x" } }])
+  })
+
+  it("does not collapse two message references that differ only in params", async () => {
+    const out = await probeExternalAgentEcosystemReadiness(
+      {
+        metadata: {
+          preset: "codex-app-server",
+          ecosystemReadiness: {
+            recommendedActions: [
+              { id: "installCommand", params: { command: "a" } },
+              { id: "installCommand", params: { command: "b" } },
+              { id: "installCommand", params: { command: "a" } },
+            ],
+          },
+        },
+        transport: "stdio",
+        process: { command: "codex", args: ["app-server"] },
+      },
+      { runtimeIsTauri: true, checkCommandExists: async () => true }
+    )
+    expect(out?.recommendedActions).toEqual([
+      { id: "installCommand", params: { command: "a" } },
+      { id: "installCommand", params: { command: "b" } },
+    ])
   })
 })

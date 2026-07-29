@@ -6,6 +6,7 @@ import type {
   ExternalAgentEcosystemReadinessSnapshot,
   ExternalAgentExecutionEligibility,
   ExternalAgentLifecycleCompletenessStage,
+  ExternalAgentRecommendedAction,
   ExternalAgentSessionExtensionSupport,
   ExternalAgentValiditySnapshot,
 } from "@/types/agent/external-agent"
@@ -45,6 +46,19 @@ function resolveCanonicalReasonCode(
   )
 }
 
+/**
+ * The first plain-prose entry of a recommended-action list.
+ *
+ * `canonicalReason` is a prose sentence, but a recommended action may instead
+ * be a `{ id }` message reference — taking `[0]` blindly would put a raw key
+ * id (or `[object Object]`) into the reason a user reads.
+ */
+function firstProseAction(
+  actions: ExternalAgentRecommendedAction[] | undefined
+): string | undefined {
+  return actions?.find((action): action is string => typeof action === "string")
+}
+
 function resolveCanonicalReason(
   snapshot: Partial<ExternalAgentValiditySnapshot>
 ): string | undefined {
@@ -52,7 +66,7 @@ function resolveCanonicalReason(
     if (snapshot.ecosystem?.supportTier === "documented-only") {
       return (
         snapshot.ecosystem.limitationNote ??
-        snapshot.ecosystem.recommendedActions?.[0] ??
+        firstProseAction(snapshot.ecosystem.recommendedActions) ??
         "This official surface is documented but not directly executable in Cognia yet."
       )
     }
@@ -63,7 +77,7 @@ function resolveCanonicalReason(
       return (
         missingPrerequisite?.detail ??
         missingPrerequisite?.label ??
-        snapshot.ecosystem.recommendedActions?.[0]
+        firstProseAction(snapshot.ecosystem.recommendedActions)
       )
     }
   }

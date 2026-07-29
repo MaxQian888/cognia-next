@@ -198,7 +198,10 @@ describe("ExternalAgentManager", () => {
           surfaceName: "Cognia Desktop",
           supportTier: "guided",
           prerequisiteStatus: "action-required",
-          recommendedActions: ["Install the CLI"],
+          recommendedActions: [
+            { id: "installCommand", params: { command: "claude" } },
+            "Install the CLI",
+          ],
         },
         correlation: { sessionId: "sess-abc", turnId: "turn-9", observedAt: new Date() },
         recoveryHints: ["Restart the agent", "Re-run health check"],
@@ -221,12 +224,19 @@ describe("ExternalAgentManager", () => {
       screen.getByText(/Canonical reason: Not supported by this agent — Listing unsupported/)
     ).toBeInTheDocument()
     expect(screen.queryByText(/extension_unsupported/)).not.toBeInTheDocument()
+    // A `{ id }` entry resolves through the message catalogue; a legacy prose
+    // entry is shown as-is, because there is no key to translate it by.
+    expect(screen.getByText(/Install "claude"/)).toBeInTheDocument()
+    expect(screen.getByText(/Install the CLI/)).toBeInTheDocument()
+    expect(screen.queryByText(/installCommand/)).not.toBeInTheDocument()
     expect(screen.getByText(/Auth methods: oauth/)).toBeInTheDocument()
     expect(screen.getByText(/Correlation — session sess-abc, turn turn-9/)).toBeInTheDocument()
     expect(
       screen.getByText(/Recovery hints: Restart the agent \| Re-run health check/)
     ).toBeInTheDocument()
-    expect(screen.getByText(/Recommended actions: Install the CLI/)).toBeInTheDocument()
+    expect(
+      screen.getByText(/Recommended actions: Install "claude", .* \| Install the CLI/)
+    ).toBeInTheDocument()
     // No label may fall back to its raw i18n key path.
     expect(screen.queryByText(/externalAgent\.manager\.diagnostics\./)).not.toBeInTheDocument()
   })

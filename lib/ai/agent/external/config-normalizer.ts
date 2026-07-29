@@ -8,6 +8,7 @@ import type {
   ExternalAgentEcosystemPrerequisiteStatus,
   ExternalAgentEcosystemReadinessSnapshot,
   ExternalAgentProtocol,
+  ExternalAgentRecommendedAction,
   ExternalAgentTransport,
 } from "@/types/agent/external-agent"
 import { normalizeExternalAgentValiditySnapshot } from "./canonical-contract"
@@ -72,10 +73,78 @@ function asRecord(value: unknown): Record<string, unknown> | undefined {
   return value as Record<string, unknown>
 }
 
-function dedupeActions(values: Array<string | undefined>): string[] {
-  return Array.from(
-    new Set(values.map((value) => value?.trim()).filter((value): value is string => Boolean(value)))
-  )
+/**
+ * Drop duplicates while preserving order, across both entry shapes.
+ *
+ * A structured entry is keyed by its id AND its params: two `installCommand`
+ * lines naming different commands are different advice, and collapsing them
+ * would silently hide one of them.
+ */
+function dedupeActions(
+  values: Array<ExternalAgentRecommendedAction | undefined>
+): ExternalAgentRecommendedAction[] {
+  const seen = new Set<string>()
+  const out: ExternalAgentRecommendedAction[] = []
+  for (const value of values) {
+    if (!value) continue
+    if (typeof value === "string") {
+      const trimmed = value.trim()
+      if (!trimmed || seen.has(trimmed)) continue
+      seen.add(trimmed)
+      out.push(trimmed)
+      continue
+    }
+    if (!value.id) continue
+    const key = `${value.id}\u0000${JSON.stringify(value.params ?? {})}`
+    if (seen.has(key)) continue
+    seen.add(key)
+    out.push(value)
+  }
+  return out
+}
+
+/**
+ * Coerce persisted entries into the union, dropping anything that is neither.
+ *
+ * This array round-trips through config metadata, so it is untrusted input:
+ * a hand-edited config or a third-party preset can put any JSON here, and an
+ * unchecked cast would reach the renderer and print `[object Object]`.
+ */
+function sanitizeStoredActions(value: unknown): ExternalAgentRecommendedAction[] | undefined {
+  if (!Array.isArray(value)) return undefined
+  const out: ExternalAgentRecommendedAction[] = []
+  for (const entry of value) {
+    if (typeof entry === "string") {
+      const trimmed = entry.trim()
+      if (trimmed) out.push(trimmed)
+      continue
+    }
+    if (entry && typeof entry === "object" && !Array.isArray(entry)) {
+      const record = entry as { id?: unknown; params?: unknown }
+      if (typeof record.id !== "string" || !record.id.trim()) continue
+      const params =
+        record.params && typeof record.params === "object" && !Array.isArray(record.params)
+          ? Object.fromEntries(
+              Object.entries(record.params as Record<string, unknown>)
+                .filter(([, v]) => typeof v === "string")
+                .map(([k, v]) => [k, v as string])
+            )
+          : undefined
+      out.push(
+        params && Object.keys(params).length > 0
+          ? { id: record.id.trim(), params }
+          : { id: record.id.trim() }
+      )
+    }
+  }
+  return out.length > 0 ? out : undefined
+}
+
+/** The first plain-prose entry, if any — structured ids are not prose. */
+function firstProseAction(
+  actions: ExternalAgentRecommendedAction[] | undefined
+): string | undefined {
+  return actions?.find((action): action is string => typeof action === "string")
 }
 
 function resolveRuntimePlatform(platform?: string): string | undefined {
@@ -119,16 +188,23 @@ function upsertPrerequisite(
  * Install instruction for the agent CLIs Cognia ships a preset for, so a
  * missing binary reports *how* to get it instead of only that it is absent.
  */
-function installHintForCommand(command: string): string | undefined {
+/**
+ * The per-CLI install recipe, as a message key rather than prose.
+ *
+ * One key per CLI instead of one parameterised key, because the recipes differ
+ * in more than the package name — Codex also offers Homebrew — and a
+ * translator needs the whole sentence to render it naturally.
+ */
+function installHintForCommand(command: string): ExternalAgentRecommendedAction | undefined {
   switch (command) {
     case "codex":
-      return "Install the OpenAI Codex CLI: `npm install -g @openai/codex` (or `brew install codex`), then reconnect."
+      return { id: "installHintCodex" }
     case "claude":
-      return "Install the Claude Code CLI: `npm install -g @anthropic-ai/claude-code`, then reconnect."
+      return { id: "installHintClaude" }
     case "opencode":
-      return "Install the OpenCode CLI: `npm install -g opencode-ai`, then reconnect."
+      return { id: "installHintOpencode" }
     case "gemini":
-      return "Install the Gemini CLI: `npm install -g @google/gemini-cli`, then reconnect."
+      return { id: "installHintGemini" }
     default:
       return undefined
   }
@@ -188,9 +264,9 @@ export function getExternalAgentEcosystemReadiness(
     ? (storedReadiness?.prerequisites as ExternalAgentEcosystemPrerequisite[])
     : undefined
   const storedRecommendedActions = Array.isArray(storedReadiness?.recommendedActions)
-    ? (storedReadiness?.recommendedActions as string[])
+    ? sanitizeStoredActions(storedReadiness?.recommendedActions)
     : Array.isArray(metadata.ecosystemRecommendedActions)
-      ? (metadata.ecosystemRecommendedActions as string[])
+      ? sanitizeStoredActions(metadata.ecosystemRecommendedActions)
       : undefined
 
   // A config with no ecosystem identity still gets a snapshot once a probe has
@@ -318,9 +394,7 @@ export async function probeExternalAgentEcosystemReadiness(
     })
 
     if (!commandExists) {
-      recommendedActions.push(
-        `Install "${command}", or set an absolute path as this agent's command, before connecting.`
-      )
+      recommendedActions.push({ id: "installCommand", params: { command } })
       const installHint = installHintForCommand(command)
       if (installHint) {
         recommendedActions.push(installHint)
@@ -333,9 +407,7 @@ export async function probeExternalAgentEcosystemReadiness(
     readiness.surfaceId === "acp-stdio" &&
     isWindowsPlatform(runtimePlatform)
   ) {
-    recommendedActions.push(
-      "For the best Windows experience, run the Codex ACP route inside a WSL2 workspace when possible."
-    )
+    recommendedActions.push({ id: "codexWsl2" })
   }
 
   return {
@@ -467,7 +539,9 @@ export function getExternalAgentExecutionBlock(
       code: "ecosystem_documented_only",
       reason:
         ecosystemReadiness.limitationNote ??
-        ecosystemReadiness.recommendedActions?.[0] ??
+        // Only a legacy prose entry can stand in for a reason string; a
+        // structured entry is a message key and would render as its id.
+        firstProseAction(ecosystemReadiness.recommendedActions) ??
         "This official surface is documented but not directly executable in Cognia yet.",
     }
   }
