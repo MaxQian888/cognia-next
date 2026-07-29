@@ -18,6 +18,7 @@ jest.mock("@/lib/plugin/messaging/hooks-system", () => ({
 }))
 
 import {
+  remoteCapabilityUnion,
   CAPABILITY_MISSING_CODE_PREFIX,
   formatPreflightFailures,
   preflightCapabilities,
@@ -189,5 +190,83 @@ describe("runWorkflow capability preflight integration", () => {
     ])
     const result = await runWorkflow({ workflow: wf, trigger })
     expect(result.status).toBe("succeeded")
+  })
+})
+
+describe("remoteCapabilityUnion", () => {
+  const HOST_ID = "host-1"
+
+  afterEach(async () => {
+    const store = await import("@/stores/remote-host/remote-host-store")
+    store.useRemoteHostStore.setState({ hosts: [], activeHostId: null })
+    const { getDb } = await import("@/lib/db/schema")
+    await getDb().pairedDevices.clear()
+  })
+
+  it("includes capabilities reported by paired devices", async () => {
+    const { addPairedDevice, recordDeviceCapabilities } = await import("@/lib/db/paired-devices")
+    await addPairedDevice({
+      deviceId: "phone-1",
+      label: "Phone",
+      platform: "ios",
+      pubkey: "k",
+      appVersion: "0.1.0",
+      nowMs: 1,
+    })
+    await recordDeviceCapabilities("phone-1", ["camera"])
+    expect(await remoteCapabilityUnion()).toContain("camera")
+  })
+
+  it("includes the host this client is driving, which is not a paired device", async () => {
+    // The gap this closes: a remote cloud server is never in `pairedDevices`
+    // (pairing runs client -> host), so preflight judged it by the local
+    // baseline and rejected always-on / headless work it could have run.
+    const store = await import("@/stores/remote-host/remote-host-store")
+    store.useRemoteHostStore.setState({
+      activeHostId: HOST_ID,
+      hosts: [
+        {
+          id: HOST_ID,
+          label: "cloud",
+          config: { baseUrl: "https://h", deviceJwt: "j", deviceId: "d", serverVersion: "1" },
+          addedAt: 1,
+          capabilities: ["always-on", "headless"],
+        },
+      ] as never,
+    })
+    const union = await remoteCapabilityUnion()
+    expect(union).toEqual(expect.arrayContaining(["always-on", "headless"]))
+  })
+
+  it("ignores a remembered host that is not active", async () => {
+    // Capabilities of a host you are not driving are not reachable from here.
+    const store = await import("@/stores/remote-host/remote-host-store")
+    store.useRemoteHostStore.setState({
+      activeHostId: null,
+      hosts: [
+        {
+          id: HOST_ID,
+          label: "cloud",
+          config: { baseUrl: "https://h", deviceJwt: "j", deviceId: "d", serverVersion: "1" },
+          addedAt: 1,
+          capabilities: ["always-on"],
+        },
+      ] as never,
+    })
+    expect(await remoteCapabilityUnion()).not.toContain("always-on")
+  })
+
+  it("still reports paired devices when the remote-host store contributes nothing", async () => {
+    const { addPairedDevice, recordDeviceCapabilities } = await import("@/lib/db/paired-devices")
+    await addPairedDevice({
+      deviceId: "phone-2",
+      label: "Phone",
+      platform: "ios",
+      pubkey: "k",
+      appVersion: "0.1.0",
+      nowMs: 1,
+    })
+    await recordDeviceCapabilities("phone-2", ["barcode-scan"])
+    expect(await remoteCapabilityUnion()).toEqual(["barcode-scan"])
   })
 })

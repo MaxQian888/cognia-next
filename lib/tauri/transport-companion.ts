@@ -36,6 +36,7 @@ const READ_ONLY_COMMANDS: ReadonlySet<string> = new Set([
   // from any client. It is grantable now (ADR-0097), so the two lists have to
   // agree or a client sends an idempotency key the server discards.
   "get_external_agent_status",
+  "host_capabilities",
   "claude_has_api_key",
   "claude_has_oauth_bearer",
   "skills_load_registry",

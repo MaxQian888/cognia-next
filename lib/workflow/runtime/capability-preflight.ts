@@ -83,18 +83,29 @@ export function preflightCapabilities(
  * strict local checking).
  */
 export async function remoteCapabilityUnion(): Promise<CapabilityId[]> {
+  const union = new Set<CapabilityId>()
   try {
     const { listPairedDevices } = await import("@/lib/db/paired-devices")
     const rows = await listPairedDevices()
-    const union = new Set<CapabilityId>()
     for (const row of rows) {
       if (row.revokedAt !== undefined || row.pausedAt !== undefined) continue
       for (const cap of row.capabilities ?? []) union.add(cap as CapabilityId)
     }
-    return [...union]
   } catch {
-    return []
+    // Dexie unavailable — fall through; the remote host below may still count.
   }
+  try {
+    // The host this client is *driving* (ADR-0082), which is not a paired
+    // device and therefore invisible to the loop above. Without it a run
+    // preflighted against a cloud server was judged by the desktop's own
+    // baseline, so `always-on` / `headless` work the server could have run was
+    // rejected before it started.
+    const { activeHostCapabilities } = await import("@/stores/remote-host/remote-host-store")
+    for (const cap of activeHostCapabilities()) union.add(cap as CapabilityId)
+  } catch {
+    // No remote-host store in this runtime (mobile, headless) — nothing to add.
+  }
+  return [...union]
 }
 
 /** One-line human summary used as the run failure message. */

@@ -41,6 +41,17 @@ export interface RemoteHost {
   addedAt: number
   /** Epoch ms this host was last activated, if ever. */
   lastActiveAt?: number
+  /**
+   * What the host reported it can do, from its last activation.
+   *
+   * Without this a client judged a remote host by its OWN baseline: workflow
+   * preflight would reject `always-on` / `headless` work that a cloud server
+   * could run, because `remoteCapabilityUnion` only aggregates devices paired
+   * *into* this machine and can never see the host being driven.
+   */
+  capabilities?: string[]
+  /** Epoch ms the capabilities above were fetched. */
+  capabilitiesAt?: number
 }
 
 export interface RemoteHostState {
@@ -78,6 +89,43 @@ let transportFactory: RemoteTransportFactory = defaultTransportFactory
 /** Test-only override of the remote transport factory. */
 export function __setRemoteTransportFactoryForTests(factory: RemoteTransportFactory | null): void {
   transportFactory = factory ?? defaultTransportFactory
+}
+
+interface HostCapabilitiesReply {
+  platform?: string
+  capabilities?: string[]
+}
+
+/**
+ * Fetch and store the active host's capability list.
+ *
+ * Routed through the shared `transport`, which at this point is already pointed
+ * at the host, so this is the host answering about itself rather than the
+ * desktop guessing.
+ */
+export async function refreshHostCapabilities(id: string): Promise<string[] | null> {
+  try {
+    const reply = await transport.call<HostCapabilitiesReply>("host_capabilities", {})
+    const capabilities = Array.isArray(reply?.capabilities) ? reply.capabilities : []
+    useRemoteHostStore.setState((state) => ({
+      hosts: state.hosts.map((h) =>
+        h.id === id ? { ...h, capabilities, capabilitiesAt: Date.now() } : h
+      ),
+    }))
+    return capabilities
+  } catch {
+    // An older host, or one that is momentarily unreachable. Keeping the last
+    // known list is better than blanking it: a stale answer still beats
+    // silently judging the host by the local baseline, which is the bug.
+    return null
+  }
+}
+
+/** Capabilities of the host currently being driven, or `[]` when local. */
+export function activeHostCapabilities(): string[] {
+  const state = useRemoteHostStore.getState()
+  if (!state.activeHostId) return []
+  return state.hosts.find((h) => h.id === state.activeHostId)?.capabilities ?? []
 }
 
 export const useRemoteHostStore = create<RemoteHostState>()(
@@ -141,6 +189,10 @@ export const useRemoteHostStore = create<RemoteHostState>()(
           activeHostId: id,
           hosts: get().hosts.map((h) => (h.id === id ? { ...h, lastActiveAt: Date.now() } : h)),
         })
+        // Ask the host what it can do. Fire-and-forget: activation must not
+        // block on it, and a host too old to know the command simply keeps
+        // whatever it reported last (or none).
+        void refreshHostCapabilities(id)
       },
 
       deactivate: () => {

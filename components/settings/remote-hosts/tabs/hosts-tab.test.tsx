@@ -108,3 +108,27 @@ it("removes a host", async () => {
   await user.click(screen.getByRole("button", { name: /settings.remoteHosts.list.removeA11y/ }))
   expect(useRemoteHostStore.getState().hosts).toHaveLength(0)
 })
+
+it("lists the capabilities a host reported", () => {
+  // Visibility is the point: before this a client had no way to know what the
+  // host it drives can do, so workflow preflight judged a cloud server by the
+  // desktop's own baseline.
+  const host = seedHost("Cloud", "https://cloud.example")
+  useRemoteHostStore.setState({
+    hosts: useRemoteHostStore
+      .getState()
+      .hosts.map((h) => (h.id === host.id ? { ...h, capabilities: ["always-on", "headless"] } : h)),
+  })
+
+  render(<HostsTab />)
+  const row = screen.getByTestId(`remote-host-capabilities-${host.id}`)
+  expect(row).toHaveTextContent("always-on")
+  expect(row).toHaveTextContent("headless")
+})
+
+it("says so plainly when a host has not been asked yet", () => {
+  const host = seedHost("Cloud", "https://cloud.example")
+  render(<HostsTab />)
+  expect(screen.queryByTestId(`remote-host-capabilities-${host.id}`)).toBeNull()
+  expect(screen.getByText("settings.remoteHosts.list.capabilitiesUnknown")).toBeInTheDocument()
+})

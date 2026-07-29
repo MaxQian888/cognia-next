@@ -24597,6 +24597,7 @@
         "activeBadge": "Connected",
         "activeBanner": "Driving {label} — new terminals, file, and git operations target this host.",
         "cancel": "Cancel",
+        "capabilitiesUnknown": "Capabilities unknown — connect once to ask this host",
         "capabilityNote": "Reads (open files, git status, diff, log) work once paired. Writing files, commits, and pushes need the host to grant this device control in its allow-list.",
         "connect": "Connect",
         "disconnect": "Disconnect",

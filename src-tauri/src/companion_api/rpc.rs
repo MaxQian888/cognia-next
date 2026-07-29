@@ -231,6 +231,10 @@ const KNOWN_COMMANDS: &[&str] = &[
     "app_settings_update",
     // Wave 2 read-only projection routed through desktop_writes_bridge.
     "twin_profile_get",
+    // ADR-0097 — what this host can do, answered by the host's own TS layer
+    // (renderer on desktop, brain on headless) so the capability vocabulary
+    // stays single-sourced in `lib/platform/capabilities.ts`.
+    "host_capabilities",
     // ADR-0056 Wave 4 — external-agent config (Zustand/localStorage on the
     // desktop, not Dexie). `external_agent_list` is a read-only projection;
     // `external_agent_update` (enable/disable + permission mode) round-trips
@@ -711,6 +715,7 @@ const READ_ONLY_COMMANDS: &[&str] = &[
     "message_get_by_session",
     // Wave 2 read-only twin profile projection.
     "twin_profile_get",
+    "host_capabilities",
     // ADR-0056 Wave 4 — read-only external-agent list projection.
     "external_agent_list",
     // ADR-0059 R11 — read-only status probe on the headless exec backend.
@@ -2328,6 +2333,7 @@ pub(super) async fn dispatch(
         | "plugin_set_enabled"
         | "adapter_update_policy"
         | "twin_profile_get"
+        | "host_capabilities"
         // Mobile outbound-queue RPCs — same generic bridge, different
         // TS-side dispatch arms in `lib/companion/desktop-write-source.ts`.
         | "connector_send"

@@ -99,6 +99,26 @@ export function HostsTab() {
                       ? new Date(host.lastActiveAt).toLocaleString()
                       : t("list.neverConnected")}
                   </p>
+                  {/* What the host told us it can do, asked on activation.
+                      Before this a client had no way to know, so workflow
+                      preflight judged a cloud server by the desktop's own
+                      baseline and refused work the server could have run. */}
+                  {host.capabilities && host.capabilities.length > 0 ? (
+                    <div
+                      className="mt-1 flex flex-wrap gap-1"
+                      data-testid={`remote-host-capabilities-${host.id}`}
+                    >
+                      {host.capabilities.map((cap) => (
+                        <Badge key={cap} variant="secondary" className="font-mono text-[10px]">
+                          {cap}
+                        </Badge>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="mt-1 text-xs text-muted-foreground/70">
+                      {t("list.capabilitiesUnknown")}
+                    </p>
+                  )}
                 </div>
 
                 {!isEditing ? (

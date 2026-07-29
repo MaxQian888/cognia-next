@@ -24597,6 +24597,7 @@
         "activeBadge": "已连接",
         "activeBanner": "正在驱动 {label}——新的终端、文件与 git 操作都指向该主机。",
         "cancel": "取消",
+        "capabilitiesUnknown": "能力未知——连接一次以向该主机查询",
         "capabilityNote": "读取(打开文件、git status、diff、log)在配对后即可用。写入文件、commit 与 push 需要主机在其 allow-list 中授权本设备控制。",
         "connect": "连接",
         "disconnect": "断开",

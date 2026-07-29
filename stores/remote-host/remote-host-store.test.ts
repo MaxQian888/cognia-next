@@ -9,7 +9,13 @@ import {
   getActiveRemoteTransport,
 } from "@/lib/tauri/transport-routing"
 import type { Transport } from "@/lib/tauri/transport-types"
-import { __setRemoteTransportFactoryForTests, useRemoteHostStore } from "./remote-host-store"
+import {
+  __setRemoteTransportFactoryForTests,
+  activeHostCapabilities,
+  refreshHostCapabilities,
+  useRemoteHostStore,
+} from "./remote-host-store"
+import { transport } from "@/lib/tauri"
 
 function makeConfig(overrides: Partial<CompanionConfig> = {}): CompanionConfig {
   return {
@@ -196,5 +202,74 @@ describe("re-pair while active", () => {
     useRemoteHostStore.getState().activateHost(host.id)
     useRemoteHostStore.getState().addHost({ config: makeConfig({ deviceJwt: "new" }) })
     expect(getActiveRemoteEndpoint()?.deviceJwt).toBe("new")
+  })
+})
+
+describe("host capabilities", () => {
+  // A remote host is never a row in `pairedDevices` — pairing runs client to
+  // host, not the other way — so asking it directly is the only way a client
+  // can know what it can do. Without it, workflow preflight judged a cloud
+  // server by the desktop's own baseline.
+  function seedActive(capabilities?: string[]) {
+    useRemoteHostStore.setState({
+      activeHostId: "h1",
+      hosts: [
+        {
+          id: "h1",
+          label: "cloud",
+          config: makeConfig(),
+          addedAt: 1,
+          ...(capabilities ? { capabilities } : {}),
+        },
+      ],
+    })
+  }
+
+  it("stores what the host reports", async () => {
+    seedActive()
+    const spy = jest
+      .spyOn(transport, "call")
+      .mockResolvedValue({ platform: "headless", capabilities: ["always-on", "headless"] } as never)
+
+    await expect(refreshHostCapabilities("h1")).resolves.toEqual(["always-on", "headless"])
+    expect(spy).toHaveBeenCalledWith("host_capabilities", {})
+    expect(useRemoteHostStore.getState().hosts[0].capabilities).toEqual(["always-on", "headless"])
+    expect(useRemoteHostStore.getState().hosts[0].capabilitiesAt).toEqual(expect.any(Number))
+    spy.mockRestore()
+  })
+
+  it("keeps the last known list when the host cannot answer", async () => {
+    // An older host, or one momentarily unreachable. Blanking the list would
+    // silently fall back to judging it by the local baseline — the bug.
+    seedActive(["always-on"])
+    const spy = jest.spyOn(transport, "call").mockRejectedValue(new Error("unknown_command"))
+
+    await expect(refreshHostCapabilities("h1")).resolves.toBeNull()
+    expect(useRemoteHostStore.getState().hosts[0].capabilities).toEqual(["always-on"])
+    spy.mockRestore()
+  })
+
+  it("treats a malformed reply as no capabilities rather than trusting it", async () => {
+    seedActive(["always-on"])
+    const spy = jest.spyOn(transport, "call").mockResolvedValue({ capabilities: "nope" } as never)
+
+    await expect(refreshHostCapabilities("h1")).resolves.toEqual([])
+    spy.mockRestore()
+  })
+
+  it("reports nothing while driving locally", () => {
+    useRemoteHostStore.setState({ activeHostId: null, hosts: [] })
+    expect(activeHostCapabilities()).toEqual([])
+  })
+
+  it("reports only the active host's capabilities", () => {
+    useRemoteHostStore.setState({
+      activeHostId: "h1",
+      hosts: [
+        { id: "h1", label: "a", config: makeConfig(), addedAt: 1, capabilities: ["headless"] },
+        { id: "h2", label: "b", config: makeConfig(), addedAt: 1, capabilities: ["camera"] },
+      ],
+    })
+    expect(activeHostCapabilities()).toEqual(["headless"])
   })
 })

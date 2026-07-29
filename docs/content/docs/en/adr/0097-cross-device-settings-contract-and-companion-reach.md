@@ -197,6 +197,30 @@ default-deny env) and every allow *and* deny is audited with the caller's
 device id and scope. That check runs on the request, not the caller, so a
 granted device gets exactly the same treatment as the brain.
 
+### D11 — A host answers for its own capabilities
+
+ADR-0061's `remoteCapabilityUnion` aggregates `pairedDevices` — devices that
+paired *into* this machine. Pairing runs client → host, so the host a client is
+**driving** is structurally absent from that list, and there was no other way to
+ask. Workflow preflight therefore judged a remote cloud server by the local
+baseline and rejected `always-on` / `headless` work the server could have run.
+
+`host_capabilities` is a READ-tier RPC routed through `desktop_writes_bridge`,
+so the host's own TypeScript layer answers — the renderer on a desktop, the
+brain on a headless server, both of which already install
+`installDesktopWriteSource`. Answering in Rust would have meant a second copy of
+the capability vocabulary, which is the exact failure D1 exists to prevent.
+
+The client asks on activation, stores the answer on the `RemoteHost` row, and
+`remoteCapabilityUnion` unions it. A host that cannot answer keeps its last
+known list rather than being blanked: a stale answer still beats silently
+falling back to the local baseline. The Hosts list shows what came back, or says
+plainly that it has not asked yet.
+
+This is the visibility half of ADR-0061 P5. Placement — routing a cron or
+webhook trigger to the cloud node when the desktop is offline — is **not** done;
+see below.
+
 ## Consequences
 
 - The Rust constant and the OpenAPI enum are generated artifacts. Editing them
@@ -210,6 +234,15 @@ granted device gets exactly the same treatment as the brain.
   That is new surface area on a runtime that previously did neither.
 
 ## Not done
+
+- **Workflow placement (ADR-0061 P5 proper).** Nothing chooses *where* a run
+  executes. A cron or webhook trigger fires in whichever process received it —
+  `trigger-bridge` calls `runWorkflow()` in place — and there is no
+  desktop-liveness probe, no executor election and no handoff. D11 makes the
+  cloud host's capabilities visible; it does not make anything run there when
+  the desktop is off. That needs distributed-scheduling semantics (who counts as
+  offline, after how long, what happens when both sides believe they should run)
+  on top of the existing `run-lease`, and was deliberately scoped out.
 
 - **Companion settings master/detail.** The section is still one scroll of
   collapsible groups rather than a nav + panel split like Gateway or Appearance.

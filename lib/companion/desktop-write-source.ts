@@ -187,6 +187,8 @@ export async function dispatchCommand(
       return appSettingsUpdate(payload)
     case "twin_profile_get":
       return twinProfileGet(payload)
+    case "host_capabilities":
+      return hostCapabilities()
     // Mobile outbound-queue commands (Gap 3 reconciliation) — these go
     // through the same generic desktop_writes_bridge but land in
     // subsystem-specific dispatch arms below. Production callers:
@@ -733,6 +735,28 @@ async function twinProfileGet(payload: Record<string, unknown>): Promise<unknown
   if (!twinId) throw new Error("twin_profile_get.twinId is required")
   const profile = await getDb().twinProfile.get(twinId)
   return { profile: profile ?? null }
+}
+
+/**
+ * What this host can do, from the host's own point of view.
+ *
+ * A client driving a remote host had no way to ask this. `remoteCapabilityUnion`
+ * aggregates devices that paired *into* this machine, so it structurally cannot
+ * see the host you are driving — which meant workflow preflight judged a remote
+ * cloud server by the desktop's own baseline and rejected `always-on` /
+ * `headless` work the server could have run.
+ *
+ * Answered here rather than in Rust deliberately: the capability vocabulary
+ * lives in `lib/platform/capabilities.ts`, and this handler is installed by both
+ * the desktop renderer and the headless brain, so one implementation serves both
+ * kinds of host and there is no second list to drift.
+ */
+async function hostCapabilities(): Promise<unknown> {
+  const [{ detectLocalCapabilities }, { detectPlatform }] = await Promise.all([
+    import("@/lib/platform/capabilities"),
+    import("@/lib/platform/detect"),
+  ])
+  return { platform: detectPlatform(), capabilities: detectLocalCapabilities() }
 }
 
 // ---------------------------------------------------------------------------

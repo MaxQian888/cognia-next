@@ -2864,6 +2864,38 @@ paths:
   # rpc — twin
   # ─────────────────────────────────────────────────────────────────────────
 
+  /api/v1/_rpc/host_capabilities:
+    post:
+      operationId: rpcHostCapabilities
+      tags: [rpc-data]
+      summary: Ask this host what it can do.
+      description: |
+        ADR-0097. Read-only — skips the idempotency cache. Routed through
+        desktop_writes_bridge, so the host's own TypeScript layer answers: the
+        renderer on a desktop, the brain on a headless server. That keeps the
+        capability vocabulary single-sourced in `lib/platform/capabilities.ts`
+        rather than duplicated in Rust.
+
+        A client driving a remote host previously had no way to ask this, so
+        workflow preflight judged the host by the client's own baseline and
+        rejected `always-on` / `headless` work a cloud server could have run.
+      responses:
+        "200":
+          description: The host's platform and its capability ids.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  platform: { type: string, enum: [tauri, mobile, web, headless] }
+                  capabilities: { type: array, items: { type: string } }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "503":
+          {
+            description: the host's TS layer is not attached,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
   /api/v1/_rpc/twin_profile_get:
     post:
       operationId: rpcTwinProfileGet
