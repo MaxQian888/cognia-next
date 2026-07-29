@@ -24,7 +24,7 @@ test.describe("workflow engine — real failure path", () => {
     await resetCogniaDb(page)
   })
 
-  test("a node that throws drives the run to a failed status", async ({ page }) => {
+  test("@critical a node that throws drives the run to a failed status", async ({ page }) => {
     // Seed via the bridge (runs in the app bundle) — a page.evaluate
     // `import("@/lib/db/workflows")` does not resolve under Turbopack dev.
     const id = await page.evaluate(async () => {
