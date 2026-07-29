@@ -183,6 +183,7 @@ import { rootsFromLegacy } from "@/lib/workspace/roots"
 import { isTauri } from "@/lib/platform/detect"
 import { backfillProjectScopeV86 } from "./project-scope-backfill"
 import { backfillTriggeredBySourceV91 } from "./triggered-by-source-backfill"
+import { backfillSessionLineageV131 } from "./session-lineage-backfill"
 
 /**
  * Idempotently backfill `roots` on a project row from the legacy
@@ -2826,6 +2827,71 @@ export class CogniaDB extends Dexie {
       messageMedia: "&hash, createdAt, lastUsedAt",
     })
 
+    // 129 is deliberately skipped. A concurrent branch was mid-flight over this
+    // same working tree when this block was written, and schema numbers have
+    // been lost to that twice before (v66, v69). Leaving the next number free
+    // costs nothing — Dexie only requires versions to increase — and removes
+    // the chance of two branches shipping different definitions of the same
+    // version to users who ran both.
+    //
+    // Sync cursors become per-host. Their primary key was the table name
+    // alone, with nothing anywhere recording WHICH host a watermark came from,
+    // and nothing clearing them when a client paired to a different one. A
+    // client that re-paired elsewhere therefore resumed from the previous
+    // host's watermark and asked the new host for "everything since <a
+    // timestamp that means nothing here>" — blending two machines' sessions,
+    // messages and characters into one local store, silently.
+    //
+    // Keyed on the device id the host issued at pair time rather than the
+    // host's own `serverId`: it is unique per (client, host) pair, present from
+    // the moment of pairing (no first-connect round-trip), already persisted in
+    // `CompanionConfig`, and it changes exactly when a fresh pull is the safe
+    // answer. Old rows are dropped rather than migrated — a cursor whose host
+    // is unknown cannot be attributed to one, and re-pulling is always safe.
+    // Dexie cannot change an existing table's primary key — attempting it
+    // breaks every multi-version upgrade path, not just this one. So the
+    // per-host cursors live in a new store and the old one is dropped.
+    // Losing the watermarks costs a single full re-pull and is the safe
+    // direction regardless: a cursor with no host recorded cannot be
+    // attributed to one after the fact.
+    this.version(130).stores({
+      syncCursors: null,
+      hostSyncCursors: "&[serverKey+table], table, lastSyncAt, since",
+    })
+
+    // v131 — Session lineage repair + an indexable surface binding.
+    //
+    // Claimed as 130+1 rather than taking the 129 left free above: 129 is a
+    // LOWER number than a version already declared in this tree, so any profile
+    // that ran the v130 branch is already past it and would never execute a 129
+    // upgrade callback. A backfill that silently skips exactly the users who ran
+    // both branches is worse than no backfill.
+    //
+    // Two writers create session rows without going through `createSession` —
+    // the only helper that resolves a workspace: conversation branching
+    // (`buildChildRow`) and the workbench sidechat
+    // (`ensureResourceWorkbenchSession`). Both `put` a hand-built row, and both
+    // omitted `projectId`. Because `listScopedSessions` reads through
+    // `[projectId+updatedAt]` and Dexie omits rows whose key path contains
+    // `undefined` from a compound index, those rows were not mis-filed — they
+    // were absent. Branches vanished from the sidebar on the first reload after
+    // creation, and sidechats sat outside `deleteProjectCascade`, outliving the
+    // workspace they belonged to along with all of their messages.
+    //
+    // `surfaceBindingKey` denormalises `surfaceBinding` so an embedded session
+    // can be looked up by binding without `db.sessions.toArray()` — a full scan
+    // of every session, which is what each workbench open paid until now. The
+    // sessions index list is restated in full because Dexie replaces, not
+    // merges, a table's index list.
+    //
+    // See `lib/db/session-lineage-backfill.ts` for the attribution rules.
+    this.version(131)
+      .stores({
+        sessions:
+          "id, updatedAt, createdAt, kind, characterId, teamId, parentSessionId, platformConversationKey, projectId, [projectId+updatedAt], surfaceBindingKey",
+      })
+      .upgrade(backfillSessionLineageV131)
+
     // First full-chain construction under Jest: cache the merged spec so every
     // later construction in this worker takes the collapsed fast path above.
     if (isSchemaCollapseEnabled() && !collapsedSchemaCacheSlot().__cogniaCollapsedSchema) {
@@ -2841,7 +2907,11 @@ export class CogniaDB extends Dexie {
   // that can grant a prompt-free spawn. See `lib/db/approved-binaries.ts`.
   approvedBinaries!: Table<ApprovedBinaryRow, [string, string]>
   // v44 — companion sync cursors (Wave 4 / ADR-0026). See `lib/sync/types.ts`.
-  syncCursors!: Table<SyncCursorRow, string>
+  // One cursor per host per table (v130), so a client that pairs elsewhere
+  // cannot resume from the previous host's watermark. Replaces `syncCursors`,
+  // which was keyed by table alone; Dexie cannot change a primary key in
+  // place, hence the new name.
+  hostSyncCursors!: Table<SyncCursorRow, [string, string]>
   // v62 — Workspaces (project model persistence). See `lib/db/projects.ts`.
   projects!: Table<Project, string>
   // v100 — Project-scoped RAG chunks (workspace knowledge base). See

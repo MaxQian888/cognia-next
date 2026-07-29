@@ -102,14 +102,24 @@ export interface SyncFailure {
 export type SyncOutcome = { ok: true; result: SyncResult } | { ok: false; failure: SyncFailure }
 
 /**
- * Persisted sync state per table (Dexie `syncCursors`, v44 / Wave 4).
+ * Persisted sync state per table (Dexie `hostSyncCursors`, v130 (was `syncCursors`, v44)).
  *
  * Pre-v44 installs ran with cursors only in memory; this table makes a
  * cold-started phone resume from the last successful `since` instead of
  * re-pulling the whole snapshot.
  */
 export interface SyncCursorRow {
-  /** Primary key — the SyncableTable name. */
+  /**
+   * Which host this watermark belongs to — the device id that host issued at
+   * pair time (v130). Part of the compound primary key `[serverKey+table]`.
+   *
+   * Before this existed the cursor was keyed by table alone, so a client that
+   * paired to a different host resumed from the previous host's watermark and
+   * asked the new one for everything since a timestamp that meant nothing
+   * there, blending two machines' data into one local store.
+   */
+  serverKey: string
+  /** Part of the compound primary key — the SyncableTable name. */
   table: SyncableTable
   /** Last successful `next_since` cursor returned by the server. */
   since: number

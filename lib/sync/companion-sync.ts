@@ -27,6 +27,7 @@
 import { subscribeResume } from "@/lib/capacitor/app"
 import { subscribe as subscribeNetwork } from "@/lib/capacitor/network"
 import { transport } from "@/lib/tauri"
+import { loadCompanionConfig } from "@/lib/tauri/transport-companion"
 import type { Transport } from "@/lib/tauri/transport-types"
 
 import { clearCursors, loadCursors, saveCursor } from "./cursor-store"
@@ -122,10 +123,33 @@ const stateMap = new Map<SyncableTable, SyncState>()
  */
 let hydratePromise: Promise<void> | null = null
 
+/**
+ * Which host these cursors belong to — the device id it issued at pair time.
+ *
+ * Unpaired clients get `""`, which is a real key: it keeps their (empty)
+ * cursors from colliding with any host's, and the moment they pair, the key
+ * changes and the reset below runs.
+ */
+function currentServerKey(): string {
+  return loadCompanionConfig()?.deviceId ?? ""
+}
+
+/** The host whose cursors `stateMap` currently holds. */
+let hydratedServerKey: string | null = null
+
 async function ensureHydrated(): Promise<void> {
+  const serverKey = currentServerKey()
+  // The host changed under us — a re-pair, or (later) a switch. Everything in
+  // memory belongs to the previous one.
+  if (hydratedServerKey !== null && hydratedServerKey !== serverKey) {
+    hydratePromise = null
+    stateMap.clear()
+    await resetMirrorsForHostChange(hydratedServerKey)
+  }
   if (hydratePromise) return hydratePromise
+  hydratedServerKey = serverKey
   hydratePromise = (async () => {
-    const persisted = await loadCursors()
+    const persisted = await loadCursors(serverKey)
     for (const [table, row] of persisted) {
       stateMap.set(table, {
         since: row.since,
@@ -135,6 +159,44 @@ async function ensureHydrated(): Promise<void> {
     }
   })()
   return hydratePromise
+}
+
+/**
+ * Drop the mirrored rows when the client starts talking to a different host.
+ *
+ * Partitioning the cursors alone is not enough. It stops a client resuming
+ * from the wrong watermark, but the *rows* pulled from the previous host are
+ * still sitting in the same tables, so the two hosts' sessions, messages and
+ * characters would simply pile up together. These tables are a cache of a
+ * host's state, not the client's own data, so clearing and re-pulling loses
+ * nothing.
+ *
+ * Failures are swallowed: a wipe that could not run leaves a stale cache,
+ * which is what the user had before, whereas throwing here would break sync
+ * entirely.
+ */
+async function resetMirrorsForHostChange(previousServerKey: string): Promise<void> {
+  try {
+    const { getDb } = await import("@/lib/db/schema")
+    const db = getDb()
+    await Promise.all(
+      SYNC_HANDLER_TABLES.map(async (table) => {
+        // `settings` is a singleton the client also writes locally; clearing it
+        // would throw away device-local preferences the host never had. The
+        // mirrored subset is overwritten by the first pull anyway.
+        if (table === "settings") return
+        try {
+          await (db as unknown as Record<string, { clear: () => Promise<void> }>)[table]?.clear()
+        } catch {
+          // One table failing must not stop the rest.
+        }
+      })
+    )
+    const { clearCursorsForServer } = await import("./cursor-store")
+    await clearCursorsForServer(previousServerKey)
+  } catch {
+    // See jsdoc.
+  }
 }
 
 function getState(table: SyncableTable): SyncState {
@@ -221,6 +283,7 @@ export function runSyncDown(opts: RunSyncDownOptions = {}): Promise<SyncOutcome[
       // Fire-and-forget Dexie persistence so the next cold start can resume
       // from this cursor. Failures are swallowed by `cursor-store.saveCursor`.
       void saveCursor({
+        serverKey: hydratedServerKey ?? "",
         table,
         since: state.since,
         lastSyncAt: state.lastSyncAt,
@@ -306,5 +369,9 @@ export function __resetSyncStateForTests(): void {
   stateMap.clear()
   inflight = null
   hydratePromise = null
+  // Also forget which host we were hydrated for, or the next test's first
+  // `ensureHydrated` would see a "host change" and wipe the tables it just
+  // seeded.
+  hydratedServerKey = null
   void clearCursors()
 }

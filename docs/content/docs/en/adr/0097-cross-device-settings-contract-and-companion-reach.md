@@ -233,8 +233,47 @@ see below.
 - A browser companion now negotiates WebRTC and fails over between channels.
   That is new surface area on a runtime that previously did neither.
 
+### D12 — Sync state is scoped to the host it came from
+
+`syncCursors` was keyed by table name alone. Nothing recorded which host a
+watermark came from and nothing cleared it on a re-pair, so a client that paired
+elsewhere resumed from the previous host's watermark and asked the new one for
+everything since a timestamp that meant nothing there — blending two machines'
+sessions, messages and characters into one local store, silently.
+
+Cursors are keyed `[serverKey+table]` (v130), where `serverKey` is the **device
+id the host issued at pair time** rather than the host's own `serverId`: it is
+unique per (client, host) pair, present from the moment of pairing with no
+first-connect round-trip, already persisted in `CompanionConfig`, and it changes
+exactly when a fresh pull is the safe answer.
+
+Partitioning cursors is necessary but not sufficient — the *rows* pulled from
+the previous host stay in the same tables. The orchestrator therefore clears the
+mirrored tables when it observes the host key change. `settings` is excluded: it
+is the one mirrored table the client also writes locally, and clearing it would
+discard device-local preferences the host never had.
+
+Two implementation notes worth keeping:
+
+- Dexie **cannot change an existing table's primary key**; attempting it breaks
+  every multi-version upgrade path in the database, not only the new one. The
+  per-host cursors therefore live in a new store (`hostSyncCursors`) and the old
+  one is dropped in the same version.
+- Version **129 is deliberately skipped**. A concurrent branch was in flight
+  over the same working tree, and schema numbers have been lost that way twice
+  before (v66, v69). Dexie only requires versions to increase, so leaving the
+  next number free costs nothing and removes the chance of two branches shipping
+  different definitions of one version.
+
 ## Not done
 
+- **Multi-credential book on the phone.** A client still holds exactly one
+  `CompanionConfig`, so moving between a home desktop and a cloud server means
+  re-pairing. D12 makes that *safe* — which is what made it a bug rather than
+  merely inconvenient — but not convenient. Storing several hosts' credentials
+  and switching between them is a separate change; the isolation had to land
+  first, because fast switching without it would have turned a rare corruption
+  into an everyday one.
 - **Workflow placement (ADR-0061 P5 proper).** Nothing chooses *where* a run
   executes. A cron or webhook trigger fires in whichever process received it —
   `trigger-bridge` calls `runWorkflow()` in place — and there is no
@@ -247,10 +286,3 @@ see below.
 - **Companion settings master/detail.** The section is still one scroll of
   collapsible groups rather than a nav + panel split like Gateway or Appearance.
   Deliberately deferred: it is navigational form, not a broken mechanism.
-- **Multi-credential book on the phone.** A client still holds exactly one
-  `CompanionConfig`, so switching between a home desktop and a cloud server
-  means re-pairing. Worse, sync cursors are keyed by table alone
-  (`schema.ts` `syncCursors: "&table"`) with no server dimension, and nothing
-  clears them or the mirror tables on a re-pair — so switching hosts today
-  resumes from the previous host's cursor and blends two machines' sessions into
-  one local store. Fixing this needs a Dexie version and is tracked separately.
