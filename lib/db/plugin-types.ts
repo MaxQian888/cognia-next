@@ -103,6 +103,18 @@ export interface PluginMarketplaceSourceRow {
   name: string
   /** Wall-clock ms the source was added. */
   addedAt: number
+  /**
+   * Sync health, written by `recordSourceSync` after every catalog fetch. All
+   * optional and un-indexed, so rows written before these existed keep loading
+   * and no Dexie version bump is needed — a row with none of them has simply
+   * never synced, which is a state the UI renders rather than guesses at.
+   */
+  /** Entry count from the last successful catalog fetch. */
+  pluginCount?: number
+  /** Wall-clock ms of the last **successful** fetch. */
+  lastSyncedAt?: number
+  /** Failure message from the most recent fetch; cleared once one succeeds. */
+  lastError?: string
 }
 
 /**

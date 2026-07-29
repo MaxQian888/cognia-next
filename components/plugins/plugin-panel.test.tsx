@@ -98,6 +98,14 @@ jest.mock("@/lib/db/schema", () => ({
     pluginPermissions: {
       where: () => ({ equals: () => ({ delete: async () => undefined }) }),
     },
+    // The marketplace-sources hook writes each catalog fetch's outcome back to
+    // its row, so this stub has to cover the table too.
+    pluginMarketplaceSources: {
+      get: async () => undefined,
+      put: async () => undefined,
+      orderBy: () => ({ toArray: async () => [] }),
+      delete: async () => undefined,
+    },
   }),
 }))
 

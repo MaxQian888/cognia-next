@@ -2,129 +2,202 @@
 
 // Manage GitHub "marketplace repo" sources (Claude-Code-style plugin
 // dispatch). Add a repo that ships a marketplace.json catalog; its plugins
-// then appear in the browse grid. Lists saved sources with a remove action.
+// then appear in the browse grid.
+//
+// Container only: it owns the input/preview state machine, the hook, the
+// GitHub calls and the toasts. Everything visual lives in
+// `sources/sources-dialog-view.tsx` — see the comment there for why the split
+// is load-bearing rather than decorative.
 
 import { useState } from "react"
 import { useTranslations } from "next-intl"
-import { AlertTriangleIcon, Loader2Icon, PlusIcon, Trash2Icon, GitBranchIcon } from "lucide-react"
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog"
-import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
-import { Card } from "@/components/ui/card"
+import { toast } from "sonner"
+
+import { openUrl } from "@/lib/native/opener"
 import { useGithubMarketplaceSources } from "@/hooks/plugins/use-github-marketplace-sources"
+import { githubRepoUrl, parseGithubPluginRef } from "@/lib/plugin/package/github-source"
+import type { MarketplaceCatalog } from "@/lib/plugin/package/github-marketplace"
+import { RECOMMENDED_MARKETPLACE_SOURCES } from "@/lib/plugin/package/recommended-marketplace-sources"
+import type { PluginMarketplaceSourceRow } from "@/lib/db/plugin-types"
+
+import { PluginMarketplaceSourcesDialogView } from "./sources/sources-dialog-view"
+import type { SourcePreviewState } from "./sources/sources-dialog-view"
+import type { MarketplaceSourceItem, SourceSyncState } from "./sources/types"
 
 interface Props {
   open: boolean
   onOpenChange: (open: boolean) => void
 }
 
+/** `owner/repo[@ref]` for display, or null when the input can't be parsed yet. */
+function resolveRef(input: string): string | null {
+  const trimmed = input.trim()
+  if (!trimmed) return null
+  try {
+    const ref = parseGithubPluginRef(trimmed)
+    return `${ref.owner}/${ref.repo}${ref.ref ? `@${ref.ref}` : ""}`
+  } catch {
+    return null
+  }
+}
+
+/** Best-effort repo URL; falls back to a search-free github.com root. */
+function rowRepoUrl(row: PluginMarketplaceSourceRow): string {
+  try {
+    return githubRepoUrl(parseGithubPluginRef(row.repoRef))
+  } catch {
+    return "https://github.com"
+  }
+}
+
+/**
+ * Row + in-flight state → the row's sync status.
+ *
+ * `lastError` outranks `lastSyncedAt`: a source that synced yesterday and
+ * failed this morning is failing, and showing yesterday's healthy count as the
+ * headline would bury the thing the user needs to act on.
+ */
+function toSyncState(row: PluginMarketplaceSourceRow, syncing: boolean): SourceSyncState {
+  if (syncing) return { kind: "syncing" }
+  if (row.lastError)
+    return { kind: "error", message: row.lastError, lastSyncedAt: row.lastSyncedAt }
+  if (row.lastSyncedAt !== undefined && row.pluginCount !== undefined) {
+    return { kind: "ok", pluginCount: row.pluginCount, lastSyncedAt: row.lastSyncedAt }
+  }
+  return { kind: "never" }
+}
+
 export function PluginMarketplaceSourcesDialog({ open, onOpenChange }: Props) {
   const t = useTranslations("plugins.marketplaceSources")
-  const { sources, add, remove } = useGithubMarketplaceSources()
-  const [repoRef, setRepoRef] = useState("")
-  const [busy, setBusy] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  const { sources, syncingIds, preview, commitPreview, add, remove, refresh, refreshSource } =
+    useGithubMarketplaceSources()
 
-  const handleAdd = async () => {
-    const trimmed = repoRef.trim()
+  const [input, setInput] = useState("")
+  const [previewState, setPreviewState] = useState<SourcePreviewState>({ kind: "idle" })
+  const [adding, setAdding] = useState(false)
+  const [refreshingAll, setRefreshingAll] = useState(false)
+  const [busyRecommendedRef, setBusyRecommendedRef] = useState<string | null>(null)
+  // The catalog behind the current preview, kept so confirming costs no second
+  // fetch — the whole point of previewing is that we already paid for it.
+  const [previewCatalog, setPreviewCatalog] = useState<MarketplaceCatalog | null>(null)
+
+  const items: MarketplaceSourceItem[] = sources.map((row) => ({
+    id: row.id,
+    name: row.name,
+    repoRef: row.repoRef,
+    repoUrl: rowRepoUrl(row),
+    sync: toSyncState(row, syncingIds.has(row.id)),
+  }))
+  const addedIds = new Set(sources.map((s) => s.id))
+
+  const dismissPreview = () => {
+    setPreviewState({ kind: "idle" })
+    setPreviewCatalog(null)
+  }
+
+  const handleInputChange = (value: string) => {
+    setInput(value)
+    // Any preview on screen described the previous text; keeping it while the
+    // user edits would let them confirm a source they are no longer looking at.
+    if (previewState.kind !== "idle") dismissPreview()
+  }
+
+  const runPreview = async () => {
+    const trimmed = input.trim()
     if (!trimmed) {
-      setError(t("emptyError"))
+      setPreviewState({ kind: "error", message: t("emptyError") })
       return
     }
-    setBusy(true)
-    setError(null)
+    setPreviewState({ kind: "loading" })
+    setPreviewCatalog(null)
     try {
-      await add(trimmed)
-      setRepoRef("")
+      const catalog = await preview(trimmed)
+      setPreviewCatalog(catalog)
+      setPreviewState({
+        kind: "ready",
+        preview: {
+          id: catalog.id,
+          name: catalog.name,
+          owner: catalog.owner,
+          catalogPath: catalog.catalogPath,
+          repoUrl: catalog.repoUrl,
+          alreadyAdded: addedIds.has(catalog.id),
+          entries: catalog.entries.map((entry) => ({
+            id: entry.id,
+            name: entry.name,
+            version: entry.version,
+            description: entry.description,
+          })),
+        },
+      })
     } catch (err) {
-      setError(t("addError", { message: err instanceof Error ? err.message : String(err) }))
+      setPreviewState({
+        kind: "error",
+        message: t("fetchError", { message: err instanceof Error ? err.message : String(err) }),
+      })
+    }
+  }
+
+  const confirmAdd = async () => {
+    if (!previewCatalog) return
+    setAdding(true)
+    try {
+      await commitPreview(input.trim(), previewCatalog)
+      setInput("")
+      dismissPreview()
+    } catch (err) {
+      setPreviewState({
+        kind: "error",
+        message: t("addError", { message: err instanceof Error ? err.message : String(err) }),
+      })
     } finally {
-      setBusy(false)
+      setAdding(false)
+    }
+  }
+
+  const addRecommended = async (repoRef: string) => {
+    setBusyRecommendedRef(repoRef)
+    try {
+      await add(repoRef)
+    } catch (err) {
+      // No preview card is on screen for this path, so the error has nowhere
+      // inline to live.
+      toast.error(t("addError", { message: err instanceof Error ? err.message : String(err) }))
+    } finally {
+      setBusyRecommendedRef(null)
+    }
+  }
+
+  const refreshAll = async () => {
+    setRefreshingAll(true)
+    try {
+      await refresh()
+    } finally {
+      setRefreshingAll(false)
     }
   }
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="w-[95vw] sm:max-w-lg">
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
-            <GitBranchIcon className="size-4" />
-            {t("title")}
-          </DialogTitle>
-          <DialogDescription>{t("description")}</DialogDescription>
-        </DialogHeader>
-
-        <div className="space-y-2">
-          <Label htmlFor="marketplace-source-ref">{t("label")}</Label>
-          <div className="flex gap-2">
-            <Input
-              id="marketplace-source-ref"
-              placeholder={t("placeholder")}
-              value={repoRef}
-              onChange={(e) => setRepoRef(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && !busy) void handleAdd()
-              }}
-              disabled={busy}
-            />
-            <Button
-              onClick={() => void handleAdd()}
-              disabled={busy}
-              aria-label={t("add")}
-              data-testid="add-source-submit"
-            >
-              {busy ? (
-                <Loader2Icon className="size-3.5 animate-spin" />
-              ) : (
-                <PlusIcon className="size-3.5" />
-              )}
-            </Button>
-          </div>
-          {error && (
-            <p role="alert" className="flex items-center gap-1.5 text-sm text-destructive">
-              <AlertTriangleIcon className="size-3.5 shrink-0" />
-              {error}
-            </p>
-          )}
-        </div>
-
-        <div className="space-y-2">
-          {sources.length === 0 ? (
-            <p className="text-sm text-muted-foreground">{t("empty")}</p>
-          ) : (
-            sources.map((source) => (
-              <Card
-                key={source.id}
-                className="flex items-center justify-between gap-2 p-2.5"
-                data-testid={`marketplace-source-${source.id}`}
-              >
-                <div className="min-w-0">
-                  <div className="text-sm font-medium truncate">{source.name}</div>
-                  <div className="text-xs text-muted-foreground font-mono truncate">
-                    {source.repoRef}
-                  </div>
-                </div>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="size-7 shrink-0"
-                  aria-label={t("remove", { name: source.name })}
-                  onClick={() => void remove(source.id)}
-                >
-                  <Trash2Icon className="size-3.5" />
-                </Button>
-              </Card>
-            ))
-          )}
-        </div>
-      </DialogContent>
-    </Dialog>
+    <PluginMarketplaceSourcesDialogView
+      open={open}
+      onOpenChange={onOpenChange}
+      input={input}
+      onInputChange={handleInputChange}
+      resolvedRef={resolveRef(input)}
+      previewState={previewState}
+      onPreview={() => void runPreview()}
+      onDismissPreview={dismissPreview}
+      onConfirmAdd={() => void confirmAdd()}
+      adding={adding}
+      sources={items}
+      onRefreshAll={() => void refreshAll()}
+      refreshingAll={refreshingAll}
+      onRefreshSource={(id) => void refreshSource(id)}
+      onRemoveSource={(id) => void remove(id)}
+      onOpenRepo={(url) => void openUrl(url)}
+      recommended={RECOMMENDED_MARKETPLACE_SOURCES}
+      busyRecommendedRef={busyRecommendedRef}
+      onAddRecommended={(repoRef) => void addRecommended(repoRef)}
+    />
   )
 }

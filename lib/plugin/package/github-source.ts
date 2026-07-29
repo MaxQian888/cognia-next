@@ -132,6 +132,19 @@ export function parseGithubPluginRef(input: string): GithubPluginRef {
   return { owner, repo, ref, subdir }
 }
 
+/**
+ * Browser URL for a parsed reference — what "Open on GitHub" navigates to.
+ * A pinned `ref` becomes a `/tree/<ref>` path (plus the subdir when present),
+ * which is the form GitHub itself produces, so the round trip
+ * `parseGithubPluginRef(githubRepoUrl(r))` yields `r` back.
+ */
+export function githubRepoUrl(ref: GithubPluginRef): string {
+  const base = `https://github.com/${ref.owner}/${ref.repo}`
+  if (!ref.ref) return ref.subdir ? `${base}/tree/HEAD/${ref.subdir}` : base
+  const tree = `${base}/tree/${ref.ref}`
+  return ref.subdir ? `${tree}/${ref.subdir}` : tree
+}
+
 function refQuery(ref?: string): string {
   return ref ? `?ref=${encodeURIComponent(ref)}` : ""
 }

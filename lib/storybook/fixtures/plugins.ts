@@ -7,6 +7,11 @@
 // Stories that read plugins via Dexie live queries seed rows with
 // `seedDb(async (db) => { await db.plugins.bulkPut(samplePluginRows()) })`.
 import type { PluginRow } from "@/lib/db/plugin-types"
+import type {
+  MarketplaceSourceItem,
+  MarketplaceSourcePreview,
+  RecommendedMarketplaceSource,
+} from "@/components/plugins/marketplace/sources/types"
 
 /** A full, realistic installed-plugin row. Override any field per story. */
 export function makePluginRow(over: Partial<PluginRow> = {}): PluginRow {
@@ -99,5 +104,104 @@ export function samplePluginRows(): PluginRow[] {
         requires: { binaries: [{ name: "tesseract", minVersion: "5.0" }] },
       },
     }),
+  ]
+}
+
+/**
+ * A previewed marketplace catalog — what the add-source dialog shows before
+ * anything is persisted. Twelve entries so the "…and N more" expander has
+ * something to expand.
+ */
+export function sampleSourcePreview(
+  over: Partial<MarketplaceSourcePreview> = {}
+): MarketplaceSourcePreview {
+  const names: Array<[string, string, string]> = [
+    ["web-tools", "1.2.0", "Fetch pages and extract readable content."],
+    ["ocr-pro", "0.4.1", "On-device OCR over images and PDFs."],
+    ["clipboard-x", "2.0.0", "Searchable clipboard history with pinning."],
+    ["shell-runner", "1.1.4", "Run shell commands from chat with approval."],
+    ["gh-triage", "0.7.2", "Triage GitHub issues and draft replies."],
+    ["notion-sync", "3.0.1", "Two-way sync between notes and Notion."],
+    ["figma-peek", "0.2.0", "Inspect Figma frames without leaving chat."],
+    ["sql-lens", "1.5.0", "Explain and lint SQL against a live schema."],
+    ["pdf-split", "0.9.0", "Split, merge, and reorder PDF pages."],
+    ["translate-kit", "2.2.3", "Batch translation with a glossary."],
+    ["mermaid-fix", "0.3.1", "Repair malformed mermaid diagrams."],
+    ["cron-buddy", "1.0.0", "Explain and build cron expressions."],
+  ]
+  return {
+    id: "acme/plugins",
+    name: "Acme Plugins",
+    owner: "Acme Labs",
+    catalogPath: ".claude-plugin/marketplace.json",
+    repoUrl: "https://github.com/acme/plugins",
+    alreadyAdded: false,
+    entries: names.map(([name, version, description]) => ({
+      id: `acme/plugins:${name}`,
+      name,
+      version,
+      description,
+    })),
+    ...over,
+  }
+}
+
+/** Saved sources covering every sync state the row can render. */
+export function sampleMarketplaceSources(): MarketplaceSourceItem[] {
+  const now = Date.now()
+  return [
+    {
+      id: "cognia/community-plugins",
+      name: "Cognia Community",
+      repoRef: "cognia/community-plugins",
+      repoUrl: "https://github.com/cognia/community-plugins",
+      sync: { kind: "ok", pluginCount: 8, lastSyncedAt: now - 2 * 60_000 },
+    },
+    {
+      id: "acme/plugins",
+      name: "Acme Plugins",
+      repoRef: "github.com/acme/plugins",
+      repoUrl: "https://github.com/acme/plugins",
+      sync: { kind: "syncing" },
+    },
+    {
+      id: "beta/labs@next",
+      name: "Beta Labs",
+      repoRef: "beta/labs@next",
+      repoUrl: "https://github.com/beta/labs/tree/next",
+      sync: {
+        kind: "error",
+        message: "GitHub API 403 for marketplace.json (rate limit)",
+        lastSyncedAt: now - 26 * 60 * 60_000,
+      },
+    },
+    {
+      id: "solo/first-marketplace",
+      name: "solo/first-marketplace",
+      repoRef: "solo/first-marketplace",
+      repoUrl: "https://github.com/solo/first-marketplace",
+      sync: { kind: "never" },
+    },
+  ]
+}
+
+/**
+ * Placeholder curated marketplaces for the empty state. These repo references
+ * are illustrative — the shipped list lives in
+ * `lib/plugin/package/recommended-marketplace-sources.ts` and is empty until
+ * real repositories exist.
+ */
+export function sampleRecommendedSources(): RecommendedMarketplaceSource[] {
+  return [
+    {
+      repoRef: "cognia/plugins",
+      name: "Cognia official plugins",
+      description: "First-party plugins maintained alongside the app.",
+    },
+    {
+      repoRef: "cognia/community-plugins",
+      name: "Community picks",
+      description: "Community-built plugins reviewed for basic quality.",
+    },
   ]
 }

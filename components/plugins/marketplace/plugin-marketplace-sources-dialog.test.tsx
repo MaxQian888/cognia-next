@@ -1,75 +1,259 @@
 import { render, screen, fireEvent, waitFor } from "@testing-library/react"
-import { NextIntlClientProvider } from "next-intl"
 import { PluginMarketplaceSourcesDialog } from "./plugin-marketplace-sources-dialog"
+import type { PluginMarketplaceSourceRow } from "@/lib/db/plugin-types"
 
+const preview = jest.fn()
+const commitPreview = jest.fn()
 const add = jest.fn()
 const remove = jest.fn()
-let sources: Array<{ id: string; repoRef: string; name: string; addedAt: number }> = []
+const refresh = jest.fn()
+const refreshSource = jest.fn()
+let sources: PluginMarketplaceSourceRow[] = []
+let syncingIds: Set<string> = new Set()
 jest.mock("@/hooks/plugins/use-github-marketplace-sources", () => ({
   useGithubMarketplaceSources: () => ({
     sources,
+    syncingIds,
+    preview,
+    commitPreview,
     add,
     remove,
+    refresh,
+    refreshSource,
     entries: [],
     errors: [],
     loading: false,
   }),
 }))
 
+const openUrl = jest.fn()
+jest.mock("@/lib/native/opener", () => ({ openUrl: (...a: unknown[]) => openUrl(...a) }))
+
+const toastError = jest.fn()
+jest.mock("sonner", () => ({ toast: { error: (...a: unknown[]) => toastError(...a) } }))
+
+jest.mock("@/lib/plugin/package/recommended-marketplace-sources", () => ({
+  RECOMMENDED_MARKETPLACE_SOURCES: [
+    { repoRef: "beta/labs", name: "Beta Labs", description: "Community picks." },
+  ],
+}))
+
+const CATALOG = {
+  id: "acme/plugins",
+  name: "Acme Plugins",
+  owner: "Acme Labs",
+  catalogPath: "marketplace.json",
+  repoUrl: "https://github.com/acme/plugins",
+  entries: [
+    { id: "acme/plugins:web-tools", name: "web-tools", version: "1.2.0", description: "Fetch." },
+  ],
+}
+
+function row(over: Partial<PluginMarketplaceSourceRow> = {}): PluginMarketplaceSourceRow {
+  return { id: "acme/plugins", repoRef: "acme/plugins", name: "Acme Plugins", addedAt: 1, ...over }
+}
+
 function renderDialog() {
-  return render(
-    <NextIntlClientProvider locale="en" messages={{}}>
-      <PluginMarketplaceSourcesDialog open onOpenChange={jest.fn()} />
-    </NextIntlClientProvider>
-  )
+  return render(<PluginMarketplaceSourcesDialog open onOpenChange={jest.fn()} />)
+}
+
+function type(value: string) {
+  fireEvent.change(screen.getByLabelText("Marketplace repository"), { target: { value } })
 }
 
 describe("PluginMarketplaceSourcesDialog", () => {
   beforeEach(() => {
+    preview.mockReset()
+    commitPreview.mockReset().mockResolvedValue(undefined)
     add.mockReset()
     remove.mockReset()
+    refresh.mockReset().mockResolvedValue(undefined)
+    refreshSource.mockReset()
+    openUrl.mockReset()
+    toastError.mockReset()
     sources = []
+    syncingIds = new Set()
   })
 
-  it("shows the empty state with no sources", () => {
+  it("validates an empty input before spending a request", () => {
     renderDialog()
-    expect(screen.getByText("No sources added yet.")).toBeInTheDocument()
-  })
-
-  it("validates an empty input", () => {
-    renderDialog()
-    fireEvent.click(screen.getByTestId("add-source-submit"))
+    fireEvent.click(screen.getByTestId("marketplace-source-preview-submit"))
     expect(screen.getByRole("alert")).toHaveTextContent("Please enter a repository.")
+    expect(preview).not.toHaveBeenCalled()
   })
 
-  it("adds a source and clears the input", async () => {
-    add.mockResolvedValue(undefined)
+  it("previews the catalog, then commits it without re-fetching", async () => {
+    preview.mockResolvedValue(CATALOG)
     renderDialog()
-    const input = screen.getByLabelText("Marketplace repository")
-    fireEvent.change(input, { target: { value: "acme/store" } })
-    fireEvent.keyDown(input, { key: "Enter" })
-    await waitFor(() => expect(add).toHaveBeenCalledWith("acme/store"))
-    await waitFor(() => expect((input as HTMLInputElement).value).toBe(""))
+    type("acme/plugins")
+    fireEvent.click(screen.getByTestId("marketplace-source-preview-submit"))
+
+    await screen.findByTestId("marketplace-source-preview")
+    expect(screen.getByText("Acme Plugins")).toBeInTheDocument()
+    expect(screen.getByText("web-tools")).toBeInTheDocument()
+    expect(commitPreview).not.toHaveBeenCalled()
+
+    fireEvent.click(screen.getByTestId("marketplace-source-preview-add"))
+    await waitFor(() => expect(commitPreview).toHaveBeenCalledWith("acme/plugins", CATALOG))
+    // Exactly one network call for the whole add.
+    expect(preview).toHaveBeenCalledTimes(1)
+    await waitFor(() =>
+      expect((screen.getByLabelText("Marketplace repository") as HTMLInputElement).value).toBe("")
+    )
   })
 
-  it("surfaces an add error", async () => {
-    add.mockRejectedValue(new Error("no marketplace.json found"))
+  it("offers no canonical hint for text that isn't a repository yet", () => {
     renderDialog()
-    const input = screen.getByLabelText("Marketplace repository")
-    fireEvent.change(input, { target: { value: "acme/empty" } })
-    fireEvent.keyDown(input, { key: "Enter" })
+    type("acme")
+    expect(screen.queryByText(/^Will add/)).not.toBeInTheDocument()
+  })
+
+  it("keeps a pinned ref in the canonical hint", () => {
+    renderDialog()
+    type("https://github.com/acme/plugins/tree/next/packages")
+    expect(screen.getByText("Will add acme/plugins@next")).toBeInTheDocument()
+  })
+
+  it("shows a non-Error preview rejection rather than [object Object]", async () => {
+    preview.mockRejectedValue("socket hang up")
+    renderDialog()
+    type("acme/plugins")
+    fireEvent.click(screen.getByTestId("marketplace-source-preview-submit"))
     await waitFor(() =>
       expect(screen.getByRole("alert")).toHaveTextContent(
-        "Could not add source: no marketplace.json found"
+        "Could not read this repository: socket hang up"
       )
     )
   })
 
-  it("lists sources with a remove action", () => {
-    sources = [{ id: "acme/store", repoRef: "acme/store", name: "Acme", addedAt: 1 }]
+  it("surfaces a failure to persist the previewed source", async () => {
+    preview.mockResolvedValue(CATALOG)
+    commitPreview.mockRejectedValue(new Error("db closed"))
     renderDialog()
-    expect(screen.getByTestId("marketplace-source-acme/store")).toHaveTextContent("Acme")
-    fireEvent.click(screen.getByRole("button", { name: "Remove Acme" }))
-    expect(remove).toHaveBeenCalledWith("acme/store")
+    type("acme/plugins")
+    fireEvent.click(screen.getByTestId("marketplace-source-preview-submit"))
+    await screen.findByTestId("marketplace-source-preview")
+
+    fireEvent.click(screen.getByTestId("marketplace-source-preview-add"))
+    await waitFor(() =>
+      expect(screen.getByRole("alert")).toHaveTextContent("Could not add source: db closed")
+    )
+  })
+
+  it("surfaces a preview failure", async () => {
+    preview.mockRejectedValue(new Error("no marketplace.json found"))
+    renderDialog()
+    type("acme/empty")
+    fireEvent.click(screen.getByTestId("marketplace-source-preview-submit"))
+    await waitFor(() =>
+      expect(screen.getByRole("alert")).toHaveTextContent(
+        "Could not read this repository: no marketplace.json found"
+      )
+    )
+    expect(commitPreview).not.toHaveBeenCalled()
+  })
+
+  // A preview left on screen while the text changes would let the user confirm
+  // a marketplace they are no longer looking at.
+  it("drops the preview when the reference is edited", async () => {
+    preview.mockResolvedValue(CATALOG)
+    renderDialog()
+    type("acme/plugins")
+    fireEvent.click(screen.getByTestId("marketplace-source-preview-submit"))
+    await screen.findByTestId("marketplace-source-preview")
+
+    type("acme/other")
+    expect(screen.queryByTestId("marketplace-source-preview")).not.toBeInTheDocument()
+  })
+
+  it("marks a preview of an already-saved source as added", async () => {
+    sources = [row()]
+    preview.mockResolvedValue(CATALOG)
+    renderDialog()
+    type("acme/plugins")
+    fireEvent.click(screen.getByTestId("marketplace-source-preview-submit"))
+    await screen.findByTestId("marketplace-source-preview")
+    expect(screen.getByTestId("marketplace-source-preview-add")).toBeDisabled()
+  })
+
+  it("shows a healthy row's plugin count", () => {
+    sources = [row({ pluginCount: 8, lastSyncedAt: 1_700_000_000_000 })]
+    renderDialog()
+    expect(screen.getByText(/8 plugins/)).toBeInTheDocument()
+  })
+
+  // A source that synced yesterday and failed this morning is failing; leading
+  // with yesterday's healthy count would bury what the user has to act on.
+  it("lets a stored error outrank an older successful sync", () => {
+    sources = [row({ pluginCount: 8, lastSyncedAt: 1_700_000_000_000, lastError: "API 403" })]
+    renderDialog()
+    expect(screen.getByText("Sync failed")).toBeInTheDocument()
+    expect(screen.getByRole("alert")).toHaveTextContent("API 403")
+  })
+
+  it("reads a row with no health fields as never synced", () => {
+    sources = [row()]
+    renderDialog()
+    expect(screen.getByText("Not synced yet")).toBeInTheDocument()
+  })
+
+  it("reflects an in-flight per-source refresh", () => {
+    sources = [row()]
+    syncingIds = new Set(["acme/plugins"])
+    renderDialog()
+    expect(screen.getByText("Syncing…")).toBeInTheDocument()
+  })
+
+  it("wires per-source refresh, refresh-all and open-repo", async () => {
+    sources = [row()]
+    renderDialog()
+
+    fireEvent.click(screen.getByRole("button", { name: "Refresh Acme Plugins" }))
+    expect(refreshSource).toHaveBeenCalledWith("acme/plugins")
+
+    fireEvent.click(screen.getByTestId("marketplace-sources-refresh-all"))
+    await waitFor(() => expect(refresh).toHaveBeenCalled())
+    await waitFor(() => expect(screen.getByTestId("marketplace-sources-refresh-all")).toBeEnabled())
+
+    fireEvent.click(screen.getAllByRole("button", { name: "Open on GitHub" })[0])
+    expect(openUrl).toHaveBeenCalledWith("https://github.com/acme/plugins")
+  })
+
+  // A row whose stored reference no longer parses still has to render — the
+  // only thing it loses is a precise link target.
+  it("falls back to github.com for an unparseable stored reference", () => {
+    sources = [row({ repoRef: "not a repo" })]
+    renderDialog()
+    fireEvent.click(screen.getAllByRole("button", { name: "Open on GitHub" })[0])
+    expect(openUrl).toHaveBeenCalledWith("https://github.com")
+  })
+
+  it("removes a source after the confirmation", () => {
+    sources = [row()]
+    renderDialog()
+    fireEvent.click(screen.getByRole("button", { name: "Remove Acme Plugins" }))
+    fireEvent.click(screen.getByRole("button", { name: "Remove source" }))
+    expect(remove).toHaveBeenCalledWith("acme/plugins")
+  })
+
+  it("adds a curated source in one click", async () => {
+    add.mockResolvedValue(undefined)
+    renderDialog()
+    fireEvent.click(
+      screen.getByTestId("marketplace-recommended-beta/labs").querySelector("button")!
+    )
+    await waitFor(() => expect(add).toHaveBeenCalledWith("beta/labs"))
+  })
+
+  // This path has no preview card, so the failure has nowhere inline to live.
+  it("toasts when a curated add fails", async () => {
+    add.mockRejectedValue(new Error("rate limited"))
+    renderDialog()
+    fireEvent.click(
+      screen.getByTestId("marketplace-recommended-beta/labs").querySelector("button")!
+    )
+    await waitFor(() =>
+      expect(toastError).toHaveBeenCalledWith("Could not add source: rate limited")
+    )
   })
 })
