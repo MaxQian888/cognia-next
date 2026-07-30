@@ -935,6 +935,22 @@ export const PLUGIN_CAPABILITY_CONTRACTS: readonly PluginCapabilityContract[] = 
     ],
   },
   {
+    // ADR-0100. Plugins can contribute signed, versioned template packages
+    // through the manifest or register definitions through the runtime API.
+    id: "template-package",
+    support: "supported",
+    manifestFields: ["templatePackages"],
+    runtimeBinding: "registerPluginTemplatePackages + ctx.templates.register",
+    hostBindings: ["lib/plugin/api/templates-api.ts", "lib/templates/service.ts"],
+    typescriptSdk: ["packages/plugin-sdk/src/templates/index.ts"],
+    pythonSdk: ["plugin-sdk/python/src/cognia/_generated_contract.py"],
+    docs: "docs/content/docs/en/adr/0100-unified-template-platform.md",
+    requiredTests: [
+      "lib/plugin/api/templates-api.test.ts",
+      "packages/plugin-sdk/src/templates/index.test.ts",
+    ],
+  },
+  {
     // ADR-0032. Plugins declaring this capability contribute complete agent
     // team blueprints (roster + tasks + config + requires) surfaced in the
     // team picker. The manifest carries an `agentTeamTemplates` array.
