@@ -226,6 +226,22 @@ export class ConnectorBus {
   private turnQueues = new Map<string, { tail: Promise<void>; depth: number }>()
 
   /**
+   * Per-conversation FIFO of workflow fan-outs — the same shape as
+   * {@link turnQueues} but a SEPARATE map on purpose.
+   *
+   * `dispatchTrigger` runs a whole workflow, which can be as slow as a model
+   * turn (it may contain agent nodes). Awaiting it on the transport's for-await
+   * loop head-of-line-blocked the adapter exactly the way the route handler used
+   * to: one slow inbound-subscribed workflow stalled every other conversation
+   * AND delayed the callback envelopes that a co-triggered HITL approval arrives
+   * on. Sharing `turnQueues` would instead serialise the fan-out behind a
+   * 15-minute model turn for the same conversation, which is the opposite
+   * mistake — the two are independent consumers of the same event, so they get
+   * independent lanes and keep only per-conversation ordering.
+   */
+  private fanOutQueues = new Map<string, { tail: Promise<void>; depth: number }>()
+
+  /**
    * Trigger ids currently being processed by `dispatchConnectorCallback`.
    * The persistent ledger is only written on a terminal outcome (so transient
    * failures stay retryable); this set guards against a double-fire arriving
@@ -348,11 +364,12 @@ export class ConnectorBus {
    * loop (`ctx.emit`), so an exception escaping here would kill the
    * transport permanently. Any pipeline failure is audited and swallowed.
    *
-   * The final route-handler step (the model turn) is enqueued per
-   * conversation and NOT awaited — callers get control back as soon as the
-   * synchronous pipeline (dedup → policy → mode-route → control-commands →
-   * audit → workflow fan-out) settles. Tests that assert on turn
-   * side-effects must `await flushInboundTurns()` after dispatching.
+   * The two slow tail steps — the route-handler model turn and the workflow
+   * fan-out — are each enqueued on their own per-conversation FIFO and NOT
+   * awaited, so callers get control back as soon as the synchronous pipeline
+   * (dedup → policy → mode-route → control-commands → audit) settles. Tests
+   * that assert on turn or fan-out side-effects must
+   * `await flushInboundTurns()` after dispatching.
    */
   async dispatchInboundFull(event: NormalizedInboundEvent): Promise<void> {
     try {
@@ -870,7 +887,7 @@ export class ConnectorBus {
       )
     }
 
-    // ── Step 11: workflow fan-out ────────────────────────────────────────────
+    // ── Step 11: workflow fan-out (enqueued per conversation, NOT awaited) ───
     // Workflows subscribed to `trigger.connector.inbound` get the event
     // payload regardless of the routing decision — a workflow may want
     // to react to a draft-mode message just as much as an ai-run one.
@@ -880,12 +897,70 @@ export class ConnectorBus {
     // We DO suppress fan-out for `decision === "drop"` because dropped
     // events leave no StoredMessage for the workflow to act on, and
     // every existing trigger expects a real conversation context.
+    //
+    // When no route handler owns this job, the fan-out is its only consumer, so
+    // the durable completion rides the same chain — a crash mid-workflow must
+    // still leave the job resumable by `resumeDurableInboundJobs`.
     if (!evalResult.blocked && decision !== "drop") {
-      await this.fanOutWorkflowTriggers(event)
+      const fanOutQueued = this.enqueueWorkflowFanOut(
+        event,
+        this.routeHandler ? null : inboundJob.id
+      )
+      if (!fanOutQueued && !this.routeHandler) {
+        await markConnectorInboundJobHistoryOnly(inboundJob.id, "pending_limit_exceeded")
+      }
     }
-    if (!this.routeHandler && decision !== "drop" && !evalResult.blocked) {
-      await completeConnectorInboundJob(inboundJob.id, { now: Date.now() })
+  }
+
+  /**
+   * Chain a workflow fan-out onto the conversation's fan-out FIFO and return
+   * immediately. Depth is capped at {@link MAX_TURN_QUEUE_DEPTH} (the same bound
+   * the turn queue uses); beyond it the fan-out is dropped with an audit rather
+   * than growing without limit. Entries are deleted once their tail settles.
+   *
+   * `completeJobId` is the inbound job to mark processed after the fan-out
+   * settles, or `null` when a route-handler turn already owns that lifecycle.
+   */
+  private enqueueWorkflowFanOut(
+    event: NormalizedInboundEvent,
+    completeJobId: string | null
+  ): boolean {
+    const key = event.conversationKey
+    let queue = this.fanOutQueues.get(key)
+    if (!queue) {
+      queue = { tail: Promise.resolve(), depth: 0 }
+      this.fanOutQueues.set(key, queue)
     }
+    if (queue.depth >= MAX_TURN_QUEUE_DEPTH) {
+      void appendAudit({
+        adapterId: event.adapterId,
+        kind: "adapter.error",
+        at: Date.now(),
+        conversationKey: key,
+        reason: "workflow_fanout_queue_overflow",
+        message: `dropped workflow fan-out for message ${event.messageId} (${queue.depth} fan-outs queued)`,
+      }).catch(() => undefined)
+      return false
+    }
+    queue.depth += 1
+    const step: Promise<void> = queue.tail
+      .then(() => this.fanOutWorkflowTriggers(event))
+      .then(() =>
+        completeJobId ? completeConnectorInboundJob(completeJobId, { now: Date.now() }) : undefined
+      )
+      .catch((err) => {
+        // The chain must never reject, or one failure would poison every later
+        // fan-out on this conversation. `fanOutWorkflowTriggers` already audits
+        // its own failures; this only catches the job-completion write.
+        console.error("[connector-bus] workflow fan-out chain failed", err)
+      })
+      .then(() => {
+        if (this.fanOutQueues.get(key) !== queue) return
+        queue.depth -= 1
+        if (queue.depth === 0 && queue.tail === step) this.fanOutQueues.delete(key)
+      })
+    queue.tail = step
+    return true
   }
 
   /**
@@ -1079,15 +1154,19 @@ export class ConnectorBus {
   }
 
   /**
-   * Resolve once every queued route-handler turn has settled. Loops until the
-   * queue map quiesces because a running turn may enqueue another (e.g. the
-   * `help_quick_command` synthetic re-entry). Used by tests that assert on
-   * turn side-effects after `dispatchInboundFull`, and safe to call from any
-   * shutdown path that wants to drain in-flight turns.
+   * Resolve once every queued route-handler turn AND workflow fan-out has
+   * settled. Loops until both queue maps quiesce because a running turn may
+   * enqueue another (e.g. the `help_quick_command` synthetic re-entry). Used by
+   * tests that assert on turn or fan-out side-effects after
+   * `dispatchInboundFull`, and safe to call from any shutdown path that wants to
+   * drain in-flight work.
    */
   async flushInboundTurns(): Promise<void> {
-    while (this.turnQueues.size > 0) {
-      await Promise.all(Array.from(this.turnQueues.values(), (q) => q.tail))
+    while (this.turnQueues.size > 0 || this.fanOutQueues.size > 0) {
+      await Promise.all([
+        ...Array.from(this.turnQueues.values(), (q) => q.tail),
+        ...Array.from(this.fanOutQueues.values(), (q) => q.tail),
+      ])
     }
   }
 
