@@ -5,7 +5,13 @@
 
 // Mock IndexedDB for tests
 import "fake-indexeddb/auto"
-import { schedulerDb, SCHEDULER_DB_NAME, SCHEDULER_SNAPSHOT_EXCLUDED_TABLES } from "./scheduler-db"
+import Dexie from "dexie"
+import {
+  schedulerDb,
+  SchedulerDatabase,
+  SCHEDULER_DB_NAME,
+  SCHEDULER_SNAPSHOT_EXCLUDED_TABLES,
+} from "./scheduler-db"
 import type { ScheduledTask, TaskExecution } from "@/types/scheduler"
 
 describe("SchedulerDatabase", () => {
@@ -438,6 +444,19 @@ describe("SchedulerDatabase", () => {
   })
 
   describe("Serialization", () => {
+    it("round-trips task creator provenance", async () => {
+      await schedulerDb.createTask(
+        createMockTask({
+          id: "agent-created",
+          createdBy: { kind: "agent", sessionId: "session-1" },
+        })
+      )
+      expect((await schedulerDb.getTask("agent-created"))?.createdBy).toEqual({
+        kind: "agent",
+        sessionId: "session-1",
+      })
+    })
+
     it("should correctly serialize and deserialize dates", async () => {
       const now = new Date()
       const task = createMockTask({
@@ -616,6 +635,35 @@ describe("SchedulerDatabase", () => {
       await schedulerDb.updateTask(retrieved!)
       const again = await schedulerDb.getTask("explicit-policy")
       expect(again?.config.overlapPolicy).toBe("cancel-previous")
+    })
+  })
+
+  describe("schema v3 creator migration", () => {
+    it("backfills pre-v3 tasks to user provenance", async () => {
+      const name = `CogniaSchedulerDB-v3-${crypto.randomUUID()}`
+      const legacy = new Dexie(name)
+      legacy.version(2).stores({
+        tasks: "id, name, type, status, nextRunAt, createdAt, [status+nextRunAt], [status+type]",
+        executions: "id, taskId, status, startedAt, [taskId+startedAt]",
+      })
+      await legacy.open()
+      const row = createMockTask({ id: "legacy-user" })
+      await legacy.table("tasks").add({
+        ...row,
+        trigger: JSON.stringify(row.trigger),
+        payload: JSON.stringify(row.payload),
+        config: JSON.stringify(row.config),
+        notification: JSON.stringify(row.notification),
+        createdAt: row.createdAt.toISOString(),
+        updatedAt: row.updatedAt.toISOString(),
+      })
+      legacy.close()
+
+      const upgraded = new SchedulerDatabase(name)
+      await upgraded.open()
+      expect((await upgraded.getTask("legacy-user"))?.createdBy).toEqual({ kind: "user" })
+      upgraded.close()
+      await Dexie.delete(name)
     })
   })
 

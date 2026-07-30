@@ -8773,6 +8773,8 @@
         "allowGoalDriving": "允许在此会话上启动自驱 /goal",
         "allowGoalDrivingPlatform": "仅在连接器运行时所在处运行——桌面应用（全部渠道）或 `cli serve`（webhook 渠道）。移动端无法驱动 IM 目标。",
         "allowGoalDrivingWarning": "关闭时 /goal 拒绝在该 IM 会话上启动，避免自驱循环在没人审核的情况下自动回复。默认关闭。",
+        "allowScheduleTools": "允许此会话的 Agent 管理定时任务",
+        "allowScheduleToolsWarning": "仅向此会话暴露创建、查看和取消定时任务工具；Agent 只能修改自己创建的任务。默认关闭。",
         "allowedSkills": {
           "add": "添加",
           "all": "全部允许",

@@ -114,6 +114,9 @@ export function ConversationOverrideForm(props: ConversationOverrideFormProps) {
   const [workflowId, setWorkflowId] = useState(initialRow?.workflowId ?? "")
   const [allowComputerUse, setAllowComputerUse] = useState(initialRow?.allowComputerUse ?? false)
   const [allowGoalDriving, setAllowGoalDriving] = useState(initialRow?.allowGoalDriving ?? false)
+  const [allowScheduleTools, setAllowScheduleTools] = useState(
+    initialRow?.allowScheduleTools ?? false
+  )
   // Proactive IM push opt-in (control-plane notifications). Default OFF.
   const [proactivePush, setProactivePush] = useState(initialRow?.proactivePush ?? false)
   // Live in-turn activity card (control-plane visibility). DEFAULT ON —
@@ -215,6 +218,7 @@ export function ConversationOverrideForm(props: ConversationOverrideFormProps) {
         appendActivity: appendActivity ? undefined : false,
         allowComputerUse: allowComputerUse ? true : undefined,
         allowGoalDriving: allowGoalDriving ? true : undefined,
+        allowScheduleTools: allowScheduleTools ? true : undefined,
         providerOverride: providerOverride.trim() || undefined,
         modelOverride: modelOverride.trim() || undefined,
         pinned: pinned ? true : undefined,
@@ -487,6 +491,23 @@ export function ConversationOverrideForm(props: ConversationOverrideFormProps) {
             </div>
             <p className="text-xs text-muted-foreground">{t("fields.allowGoalDrivingWarning")}</p>
             <p className="text-xs text-muted-foreground">{t("fields.allowGoalDrivingPlatform")}</p>
+          </div>
+        </div>
+        <div className="flex items-start gap-3 rounded-md border border-border bg-card p-3">
+          <ShieldAlertIcon className="mt-0.5 h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" />
+          <div className="flex-1 space-y-1">
+            <div className="flex items-center justify-between">
+              <Label htmlFor="conv-override-schedule-tools" className="cursor-pointer">
+                {t("fields.allowScheduleTools")}
+              </Label>
+              <Switch
+                id="conv-override-schedule-tools"
+                checked={allowScheduleTools}
+                onCheckedChange={setAllowScheduleTools}
+                data-testid="conv-override-schedule-tools"
+              />
+            </div>
+            <p className="text-xs text-muted-foreground">{t("fields.allowScheduleToolsWarning")}</p>
           </div>
         </div>
       </div>

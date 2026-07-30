@@ -774,6 +774,13 @@ const NEVER_PRUNE_TOOLS: ReadonlySet<string> = new Set([
   TASK_TOOL_NAME,
 ])
 
+/** Agent scheduler tools are opt-in per IM conversation; never globally offered. */
+export const SCHEDULER_AGENT_TOOL_NAMES = [
+  "mcp__cognia__schedule_task",
+  "mcp__cognia__list_scheduled_tasks",
+  "mcp__cognia__cancel_scheduled_task",
+] as const
+
 /**
  * The dispatchable-subagent list seeding the `dispatch_agent` enum + discovery.
  * `disabled` defs are already excluded by the resolver; `hidden` defs stay in
@@ -1824,6 +1831,9 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
   // Agent mode tools union in too — picking "Code Generator" should grant
   // execute_code without forcing the user to also tweak the character.
   for (const t of activeMode?.tools ?? []) allowed.add(t)
+  if (imOverrideRow?.allowScheduleTools === true) {
+    for (const tool of SCHEDULER_AGENT_TOOL_NAMES) allowed.add(tool)
+  }
   // A2UI: when the active scope opts in, fold the 4 bridge tools into the
   // whitelist + tack the A2UI system-prompt extension onto appendSystemPrompt
   // so the model knows when to paint surfaces. Resolution order matches the

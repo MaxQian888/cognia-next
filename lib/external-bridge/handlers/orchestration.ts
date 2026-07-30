@@ -362,6 +362,11 @@ const hostOperationLoaders: Record<string, () => Promise<HostOperation>> = {
   teamRun: async () => teamRunCore as HostOperation,
   teamList: async () => teamListCore as HostOperation,
   pluginToolInvoke: async () => pluginToolInvokeCore as HostOperation,
+  scheduleTask: async () => (await import("./scheduling")).scheduleTaskCore as HostOperation,
+  listScheduledTasks: async () =>
+    (await import("./scheduling")).listScheduledTasksCore as HostOperation,
+  cancelScheduledTask: async () =>
+    (await import("./scheduling")).cancelScheduledTaskCore as HostOperation,
   connectorsListAdapters: async () =>
     (await import("./connectors")).connectorsListAdapters as HostOperation,
   connectorsListConversations: async () =>
@@ -426,6 +431,18 @@ export async function runOrchestrationExec(
       return teamListCore(args as unknown as TeamListInput)
     case "plugin_tool_invoke":
       return pluginToolInvokeCore(args as unknown as PluginToolInvokeInput)
+    case "schedule_task":
+      return (await import("./scheduling")).scheduleTaskCore(
+        args as unknown as import("./scheduling").ScheduleTaskInput
+      )
+    case "list_scheduled_tasks":
+      return (await import("./scheduling")).listScheduledTasksCore(
+        args as unknown as import("./scheduling").ListScheduledTasksInput
+      )
+    case "cancel_scheduled_task":
+      return (await import("./scheduling")).cancelScheduledTaskCore(
+        args as unknown as import("./scheduling").CancelScheduledTaskInput
+      )
     default:
       return { ok: false, error: `unknown orchestration command: ${command}` }
   }

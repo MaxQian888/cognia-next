@@ -76,6 +76,9 @@ describe("buildMcpServer — orchestration tools (Thread D)", () => {
     ["team_run", { teamId: "t1" }],
     ["team_list", {}],
     ["plugin_tool_invoke", { pluginId: "p", toolName: "t" }],
+    ["schedule_task", { sessionId: "s1", prompt: "hi", intervalMs: 60_000 }],
+    ["list_scheduled_tasks", { sessionId: "s1" }],
+    ["cancel_scheduled_task", { sessionId: "s1", taskId: "t1" }],
   ])("registers %s and denies it when the scope is OFF", async (toolName, args) => {
     const { client } = await makeWiredPair(settings({ enabledScopes: [] }))
     const result = await client.callTool({ name: toolName, arguments: args })

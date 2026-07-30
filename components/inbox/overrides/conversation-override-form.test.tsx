@@ -188,6 +188,7 @@ describe("ConversationOverrideForm", () => {
       characterId: "char_alpha",
       workflowId: "wf_seed",
       allowComputerUse: true,
+      allowScheduleTools: true,
       providerOverride: "codex",
       modelOverride: "gpt-5",
       pinned: true,
@@ -208,6 +209,10 @@ describe("ConversationOverrideForm", () => {
     expect(screen.getByTestId("conv-override-model")).toHaveValue("gpt-5")
     expect(screen.getByTestId("conv-override-workflow")).toHaveValue("wf_seed")
     expect(screen.getByTestId("conv-override-cu")).toHaveAttribute("data-state", "checked")
+    expect(screen.getByTestId("conv-override-schedule-tools")).toHaveAttribute(
+      "data-state",
+      "checked"
+    )
     expect(screen.getByTestId("conv-override-pinned")).toHaveAttribute("data-state", "checked")
   })
 
@@ -245,6 +250,25 @@ describe("ConversationOverrideForm", () => {
     expect(persisted?.teamId).toBe("team_research")
     expect(persisted?.workflowId).toBe("wf_nightly")
     expect(persisted?.proactivePush).toBe(true)
+  })
+
+  it("persists the explicit scheduler-tool opt-in", async () => {
+    render(
+      <ConversationOverrideForm
+        adapterId="lark-1"
+        conversationKey="lark:lark-1:oc_schedule"
+        sessionId="s_schedule"
+      />
+    )
+    fireEvent.click(screen.getByTestId("conv-override-schedule-tools"))
+    fireEvent.click(screen.getByTestId("conv-override-save"))
+    await waitFor(async () => {
+      const row = await getDb()
+        .conversationOverrides.where("conversationKey")
+        .equals("lark:lark-1:oc_schedule")
+        .first()
+      expect(row?.allowScheduleTools).toBe(true)
+    })
   })
 
   it("persists the response-SLA minutes from the form", async () => {

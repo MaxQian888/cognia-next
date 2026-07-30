@@ -666,6 +666,12 @@ export interface ConversationOverrideRow {
    */
   allowGoalDriving?: boolean
   /**
+   * Per-conversation opt-in for agent-facing scheduler MCP tools.
+   * Default OFF: an inbound prompt cannot create recurring work unless the
+   * operator explicitly enables this conversation.
+   */
+  allowScheduleTools?: boolean
+  /**
    * Per-conversation provider override (added at schema v41 in support
    * of A6). When set, takes precedence over the character / app default
    * provider in `lib/claude/build-options.ts:resolveSendOptions`. Use

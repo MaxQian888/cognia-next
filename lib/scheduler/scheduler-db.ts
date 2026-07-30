@@ -25,6 +25,7 @@ interface DBScheduledTask {
   payload?: string // JSON serialized Record<string, unknown>
   config: string // JSON serialized TaskExecutionConfig
   notification: string // JSON serialized TaskNotificationConfig
+  createdBy?: string // JSON serialized ScheduledTaskCreator (v3)
   status: string
   tags?: string // JSON serialized string[]
   endAt?: string // ISO date string
@@ -90,8 +91,8 @@ class SchedulerDatabase extends Dexie {
   tasks!: EntityTable<DBScheduledTask, "id">
   executions!: EntityTable<DBTaskExecution, "id">
 
-  constructor() {
-    super(SCHEDULER_DB_NAME)
+  constructor(name: string = SCHEDULER_DB_NAME) {
+    super(name)
 
     this.version(1).stores({
       tasks: "id, name, type, status, nextRunAt, createdAt, [status+nextRunAt]",
@@ -102,6 +103,23 @@ class SchedulerDatabase extends Dexie {
       tasks: "id, name, type, status, nextRunAt, createdAt, [status+nextRunAt], [status+type]",
       executions: "id, taskId, status, startedAt, [taskId+startedAt]",
     })
+
+    // v3 — task author provenance. Existing schedules were necessarily
+    // user-authored because no agent/plugin creation surface existed before
+    // this version, so the backfill is deterministic and idempotent.
+    this.version(3)
+      .stores({
+        tasks: "id, name, type, status, nextRunAt, createdAt, [status+nextRunAt], [status+type]",
+        executions: "id, taskId, status, startedAt, [taskId+startedAt]",
+      })
+      .upgrade((tx) =>
+        tx
+          .table<DBScheduledTask, string>("tasks")
+          .toCollection()
+          .modify((task) => {
+            if (!task.createdBy) task.createdBy = JSON.stringify({ kind: "user" })
+          })
+      )
   }
 
   // ========== Task Operations ==========
@@ -488,6 +506,7 @@ function serializeTask(task: ScheduledTask): DBScheduledTask {
     payload: task.payload !== undefined ? JSON.stringify(task.payload) : undefined,
     config: JSON.stringify(task.config),
     notification: JSON.stringify(task.notification),
+    createdBy: JSON.stringify(task.createdBy ?? { kind: "user" }),
     status: task.status,
     tags: task.tags ? JSON.stringify(task.tags) : undefined,
     endAt: task.endAt?.toISOString(),
@@ -528,6 +547,7 @@ function deserializeTask(dbTask: DBScheduledTask): ScheduledTask {
     payload: dbTask.payload !== undefined ? JSON.parse(dbTask.payload) : undefined,
     config,
     notification: JSON.parse(dbTask.notification),
+    createdBy: dbTask.createdBy ? JSON.parse(dbTask.createdBy) : { kind: "user" },
     status: dbTask.status as ScheduledTask["status"],
     tags: dbTask.tags ? JSON.parse(dbTask.tags) : undefined,
     endAt: dbTask.endAt ? new Date(dbTask.endAt) : undefined,

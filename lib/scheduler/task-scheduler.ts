@@ -746,6 +746,7 @@ class TaskSchedulerImpl {
       },
       notification: { ...DEFAULT_NOTIFICATION_CONFIG, ...input.notification },
       status: "active",
+      createdBy: input.createdBy ?? { kind: "user" },
       tags: input.tags,
       endAt: input.endAt,
       onSuccessTaskIds: input.onSuccessTaskIds,

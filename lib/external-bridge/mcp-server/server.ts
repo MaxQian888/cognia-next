@@ -33,6 +33,7 @@ import {
 import { wrapUntrusted } from "../untrusted"
 import { computerUse } from "../handlers/computer-use"
 import { agentDispatch, teamRun, teamList, pluginToolInvoke } from "../handlers/orchestration"
+import { scheduleTask, listScheduledTasks, cancelScheduledTask } from "../handlers/scheduling"
 import { ragSearch } from "../handlers/rag"
 import { parseResourceUri } from "./resource-uri"
 import { runtimeQuery, type RuntimeEntityType } from "../handlers/runtime"
@@ -371,6 +372,90 @@ function registerOrchestrationTools(server: McpServer, settingsGetter: SettingsG
         scope: "agent:dispatch",
         check: checkToolCall(await settingsGetter(), "agent_dispatch"),
         body: () => agentDispatch(args as Parameters<typeof agentDispatch>[0]),
+      })
+  )
+
+  server.registerTool(
+    "schedule_task",
+    {
+      title: "Create a scheduled task",
+      description:
+        "Create a cron or interval task owned by the calling Cognia chat session. " +
+        "The tool is absent from chat sessions until that conversation explicitly enables " +
+        "scheduler tools, and the agent may later mutate only tasks it created.",
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: true,
+      },
+      inputSchema: {
+        sessionId: z.string().describe("Owning Cognia chat session id."),
+        prompt: z.string().describe("Prompt to run when the task fires."),
+        name: z.string().optional().describe("Optional display name."),
+        intervalMs: z.number().int().min(60_000).optional(),
+        cronExpression: z.string().optional().describe("Five-field cron expression."),
+        timezone: z.string().optional().describe("IANA timezone for cron schedules."),
+      },
+    },
+    async (args) =>
+      runWithGate({
+        tool: "schedule_task",
+        scope: "agent:dispatch",
+        check: checkToolCall(await settingsGetter(), "schedule_task"),
+        body: () => scheduleTask(args as Parameters<typeof scheduleTask>[0]),
+      })
+  )
+
+  server.registerTool(
+    "list_scheduled_tasks",
+    {
+      title: "List agent-created scheduled tasks",
+      description:
+        "List only scheduled tasks owned by the supplied Cognia chat session. " +
+        "User-, plugin-, and other-session tasks are never returned.",
+      annotations: {
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false,
+      },
+      inputSchema: {
+        sessionId: z.string().describe("Owning Cognia chat session id."),
+      },
+    },
+    async (args) =>
+      runWithGate({
+        tool: "list_scheduled_tasks",
+        scope: "agent:dispatch",
+        check: checkToolCall(await settingsGetter(), "list_scheduled_tasks"),
+        body: () => listScheduledTasks(args as Parameters<typeof listScheduledTasks>[0]),
+      })
+  )
+
+  server.registerTool(
+    "cancel_scheduled_task",
+    {
+      title: "Cancel an agent-created scheduled task",
+      description:
+        "Delete one scheduled task only when it is owned by the supplied Cognia chat session.",
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: true,
+        idempotentHint: true,
+        openWorldHint: false,
+      },
+      inputSchema: {
+        sessionId: z.string().describe("Owning Cognia chat session id."),
+        taskId: z.string().describe("Exact scheduled-task id."),
+      },
+    },
+    async (args) =>
+      runWithGate({
+        tool: "cancel_scheduled_task",
+        scope: "agent:dispatch",
+        check: checkToolCall(await settingsGetter(), "cancel_scheduled_task"),
+        body: () => cancelScheduledTask(args as Parameters<typeof cancelScheduledTask>[0]),
       })
   )
 

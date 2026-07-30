@@ -3100,6 +3100,36 @@ describe("resolveSendOptions — Computer Use plugin-tool gating", () => {
     expect(names).toEqual(["bash", "computer_use", "github_pr", "text_editor"])
   })
 
+  it("withholds scheduler agent tools from IM sessions by default", async () => {
+    mReadOverride.mockResolvedValueOnce(undefined)
+    const opts = await resolveSendOptions({
+      session: makeSession({
+        id: "s1",
+        platformBinding: { adapterId: "telegram", conversationKey: "tg:123" },
+      } as ChatSession),
+      character: makeChar(),
+    })
+    expect(opts.allowedTools ?? []).not.toContain("mcp__cognia__schedule_task")
+  })
+
+  it("offers scheduler agent tools only after the conversation opts in", async () => {
+    mReadOverride.mockResolvedValueOnce({ allowScheduleTools: true })
+    const opts = await resolveSendOptions({
+      session: makeSession({
+        id: "s1",
+        platformBinding: { adapterId: "telegram", conversationKey: "tg:123" },
+      } as ChatSession),
+      character: makeChar(),
+    })
+    expect(opts.allowedTools).toEqual(
+      expect.arrayContaining([
+        "mcp__cognia__schedule_task",
+        "mcp__cognia__list_scheduled_tasks",
+        "mcp__cognia__cancel_scheduled_task",
+      ])
+    )
+  })
+
   it("disablePluginTools wipes plugin tools but the first-class web tools survive", async () => {
     const opts = await resolveSendOptions({
       session: makeSession({ id: "s1" }),

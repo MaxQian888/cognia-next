@@ -103,6 +103,15 @@ export type TaskOverlapPolicy = "allow" | "skip" | "queue-one" | "queue-all" | "
 // Task status
 export type ScheduledTaskStatus = "active" | "paused" | "disabled" | "expired"
 
+/** Provenance used to scope agent/plugin mutations to tasks they created. */
+export interface ScheduledTaskCreator {
+  kind: "user" | "agent" | "plugin"
+  /** Required for agent-authored tasks; identifies the owning chat session. */
+  sessionId?: string
+  /** Optional plugin id for plugin-authored tasks. */
+  pluginId?: string
+}
+
 /**
  * Notification channels a task can request.
  *
@@ -439,6 +448,11 @@ export interface ScheduledTask {
   config: TaskExecutionConfig
   notification: TaskNotificationConfig
   status: ScheduledTaskStatus
+  /**
+   * Who authored this task. Rows created before scheduler schema v3 are
+   * backfilled to `{ kind: "user" }`.
+   */
+  createdBy?: ScheduledTaskCreator
   /** Tags for categorization */
   tags?: string[]
   /** Auto-expire the task once this instant passes (checked lazily at arm/fire). */
@@ -521,6 +535,7 @@ export interface CreateScheduledTaskInput {
   payload?: ScheduledTaskPayload
   config?: Partial<TaskExecutionConfig>
   notification?: Partial<TaskNotificationConfig>
+  createdBy?: ScheduledTaskCreator
   tags?: string[]
   endAt?: Date
   onSuccessTaskIds?: string[]
