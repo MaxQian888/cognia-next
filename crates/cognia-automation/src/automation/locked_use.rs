@@ -170,7 +170,7 @@ pub struct LockedUseActionPermit {
 
 impl LockedUseActionPermit {
     pub fn is_cancelled(&self) -> bool {
-        *self.cancellation.borrow()
+        *self.cancellation.borrow() || self.cancellation.has_changed().is_err()
     }
 
     pub async fn cancelled(&mut self) {
@@ -299,11 +299,12 @@ fn claim_and_relock(
     }
     let should_relock = {
         let mut controller = controller.lock();
-        if controller.state() != LockedUseState::Active {
-            false
-        } else {
-            controller.relock_and_latch(cause);
-            true
+        match controller.state() {
+            LockedUseState::Ready | LockedUseState::Active => {
+                controller.relock_and_latch(cause);
+                true
+            }
+            LockedUseState::Disabled | LockedUseState::LatchedUntilManualUnlock => false,
         }
     };
     if should_relock {
@@ -391,6 +392,7 @@ impl LockedUseController {
         self.validate_sender(sender)?;
         self.validate_lease(&lease, turn, now_ms)?;
         self.used_nonces.insert(lease.claims.nonce.clone());
+        self.cancel_active_lease();
         let (cancellation, _) = watch::channel(false);
         self.active = Some(ActiveLease {
             claims: lease.claims,
@@ -646,6 +648,31 @@ mod tests {
         );
     }
 
+    #[tokio::test]
+    async fn lease_renewal_cancels_every_permit_from_the_previous_lease() {
+        let (mut controller, signing, sender, turn) = fixture();
+        controller
+            .begin_unlock(&sender, signed_lease(&signing, 100), &turn, 100)
+            .unwrap();
+        let mut old_permit = controller
+            .authorize_action("com.apple.Notes", "digest", Some("digest"), 101)
+            .unwrap();
+
+        let mut renewal = signed_lease(&signing, 200);
+        renewal.claims.lease_id = "lease-2".into();
+        renewal.claims.nonce = "nonce-2".into();
+        let message = serde_json::to_vec(&renewal.claims).unwrap();
+        renewal.signature = STANDARD_NO_PAD.encode(signing.sign(&message).to_bytes());
+        controller
+            .begin_unlock(&sender, renewal, &turn, 200)
+            .unwrap();
+
+        assert!(old_permit.is_cancelled());
+        tokio::time::timeout(Duration::from_millis(50), old_permit.cancelled())
+            .await
+            .expect("renewal did not cancel an old action permit");
+    }
+
     #[test]
     fn physical_input_relocks_and_latches_automatic_unlock() {
         let (mut controller, signing, sender, turn) = fixture();
@@ -841,6 +868,41 @@ mod tests {
             .await
             .expect("cancelled permit did not resolve immediately");
         assert_eq!(cause_receiver.await.unwrap(), RelockCause::ServiceCrash);
+    }
+
+    #[tokio::test]
+    async fn dropping_a_ready_monitor_latches_before_any_lease_can_start() {
+        let (controller, signing, sender, turn) = fixture();
+        let controller = Arc::new(Mutex::new(controller));
+        let input_monitor = InputMonitor::default();
+        let subscription = input_monitor.subscribe_safety_for_test();
+        let (cause_sender, cause_receiver) = tokio::sync::oneshot::channel();
+        let cause_sender = Arc::new(Mutex::new(Some(cause_sender)));
+        let callback_sender = cause_sender.clone();
+        let (guard, _safety) = LockedUseSafetyMonitor::from_subscription(
+            input_monitor,
+            subscription,
+            controller.clone(),
+            Arc::new(move |cause| {
+                if let Some(sender) = callback_sender.lock().take() {
+                    let _ = sender.send(cause);
+                }
+            }),
+        );
+
+        drop(guard);
+        assert_eq!(
+            controller.lock().state(),
+            LockedUseState::LatchedUntilManualUnlock
+        );
+        assert_eq!(cause_receiver.await.unwrap(), RelockCause::ServiceCrash);
+        let now = unix_time_ms();
+        assert_eq!(
+            controller
+                .lock()
+                .begin_unlock(&sender, signed_lease(&signing, now), &turn, now),
+            Err(LockedUseError::Latched)
+        );
     }
 
     #[tokio::test]
