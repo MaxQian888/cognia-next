@@ -1,4 +1,5 @@
-use std::ffi::{c_char, CStr, CString};
+use std::ffi::{c_char, c_void, CStr, CString};
+use std::sync::Mutex;
 
 use base64::Engine;
 
@@ -43,7 +44,7 @@ impl Default for NativeCaptureResult {
 }
 
 unsafe extern "C" {
-    fn cognia_sc_capture_window(
+    fn cognia_sc_stream_start_window(
         process_id: i32,
         preferred_title: *const c_char,
         has_bounds: bool,
@@ -52,7 +53,12 @@ unsafe extern "C" {
         logical_width: f64,
         logical_height: f64,
         result: *mut NativeCaptureResult,
+    ) -> *mut c_void;
+    fn cognia_sc_stream_capture_latest(
+        stream: *mut c_void,
+        result: *mut NativeCaptureResult,
     ) -> bool;
+    fn cognia_sc_stream_stop(stream: *mut c_void);
     fn cognia_sc_capture_display(
         requested_display_id: u32,
         has_region: bool,
@@ -75,7 +81,51 @@ impl Drop for NativeResultGuard {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct WindowCaptureKey {
+    process_id: u32,
+    title: Option<String>,
+    bounds: Option<Rect>,
+}
+
+impl WindowCaptureKey {
+    fn from_hint(process_id: u32, window_hint: Option<&ElementInfo>) -> Self {
+        Self {
+            process_id,
+            title: window_hint
+                .and_then(|hint| hint.window_title.as_deref().or(hint.name.as_deref()))
+                .map(str::to_owned),
+            bounds: window_hint.and_then(|hint| hint.bounding_rect),
+        }
+    }
+}
+
+pub(super) struct ActiveWindowCapture {
+    key: WindowCaptureKey,
+    native: *mut c_void,
+}
+
+impl Drop for ActiveWindowCapture {
+    fn drop(&mut self) {
+        if !self.native.is_null() {
+            unsafe {
+                cognia_sc_stream_stop(self.native);
+            }
+            self.native = std::ptr::null_mut();
+        }
+    }
+}
+
 pub fn capture_application_window(
+    process_id: u32,
+    window_hint: Option<&ElementInfo>,
+    opts: &ScreenshotOpts,
+) -> Result<ApplicationScreenshot> {
+    capture_application_window_active(&Mutex::new(None), process_id, window_hint, opts)
+}
+
+pub(super) fn capture_application_window_active(
+    active: &Mutex<Option<ActiveWindowCapture>>,
     process_id: u32,
     window_hint: Option<&ElementInfo>,
     opts: &ScreenshotOpts,
@@ -92,13 +142,30 @@ pub fn capture_application_window(
         });
     }
 
-    let title = window_hint
-        .and_then(|hint| hint.window_title.as_deref().or(hint.name.as_deref()))
+    let key = WindowCaptureKey::from_hint(process_id, window_hint);
+    let mut slot = active.lock().map_err(|_| AutomationError::Internal {
+        message: "ScreenCaptureKit stream cache lock poisoned".into(),
+    })?;
+    if slot.as_ref().is_some_and(|stream| stream.key != key) {
+        slot.take();
+    }
+    if let Some(stream) = slot.as_ref() {
+        let mut native = NativeResultGuard(NativeCaptureResult::default());
+        let success = unsafe { cognia_sc_stream_capture_latest(stream.native, &mut native.0) };
+        if success {
+            return finish_capture(&native.0, true);
+        }
+        slot.take();
+    }
+
+    let title = key
+        .title
+        .as_deref()
         .and_then(|title| CString::new(title).ok());
-    let bounds = window_hint.and_then(|hint| hint.bounding_rect);
+    let bounds = key.bounds;
     let mut native = NativeResultGuard(NativeCaptureResult::default());
-    let success = unsafe {
-        cognia_sc_capture_window(
+    let stream = unsafe {
+        cognia_sc_stream_start_window(
             i32::try_from(process_id).map_err(|_| AutomationError::BackendError {
                 message: "application process id exceeds macOS pid range".into(),
             })?,
@@ -113,10 +180,23 @@ pub fn capture_application_window(
             &mut native.0,
         )
     };
-    if !success {
+    if stream.is_null() {
         return Err(native_error(&native.0));
     }
-    finish_capture(&native.0, true)
+    let capture = match finish_capture(&native.0, true) {
+        Ok(capture) => capture,
+        Err(error) => {
+            unsafe {
+                cognia_sc_stream_stop(stream);
+            }
+            return Err(error);
+        }
+    };
+    *slot = Some(ActiveWindowCapture {
+        key,
+        native: stream,
+    });
+    Ok(capture)
 }
 
 pub fn capture_display(opts: &ScreenshotOpts) -> Result<Screenshot> {
@@ -238,6 +318,37 @@ mod tests {
     fn rounds_screen_capture_kit_points() {
         assert_eq!(round_to_i32(-100.4).unwrap(), -100);
         assert_eq!(round_to_i32(501.6).unwrap(), 502);
+    }
+
+    #[test]
+    fn active_stream_key_is_bound_to_the_exact_ax_window_surface() {
+        let hint = ElementInfo {
+            element_ref: crate::automation::types::ElementRef("window".into()),
+            name: Some("Document".into()),
+            automation_id: None,
+            control_type: Some("AXWindow".into()),
+            class_name: None,
+            bounding_rect: Some(Rect {
+                x: -100,
+                y: 20,
+                width: 800,
+                height: 600,
+            }),
+            is_enabled: true,
+            is_focused: true,
+            process_id: Some(42),
+            process_name: Some("TextEdit".into()),
+            window_title: Some("Document".into()),
+            children: None,
+        };
+        let key = WindowCaptureKey::from_hint(42, Some(&hint));
+
+        assert_eq!(key, WindowCaptureKey::from_hint(42, Some(&hint)));
+        assert_ne!(key, WindowCaptureKey::from_hint(43, Some(&hint)));
+
+        let mut moved = hint.clone();
+        moved.bounding_rect.as_mut().unwrap().x = -99;
+        assert_ne!(key, WindowCaptureKey::from_hint(42, Some(&moved)));
     }
 
     #[test]

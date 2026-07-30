@@ -72,6 +72,7 @@ pub struct AxBackend {
     events: Mutex<Option<observer::AxObserverHandle>>,
     subscriptions: Mutex<HashMap<u64, EventFilter>>,
     elements: Mutex<HashMap<String, AXUIElement>>,
+    capture_stream: Mutex<Option<screen_capture::ActiveWindowCapture>>,
     next_subscription: AtomicU64,
 }
 
@@ -264,7 +265,12 @@ impl AutomationBackend for AxBackend {
         window_hint: Option<&ElementInfo>,
         opts: ScreenshotOpts,
     ) -> Result<ApplicationScreenshot> {
-        screen_capture::capture_application_window(app.process_id, window_hint, &opts)
+        screen_capture::capture_application_window_active(
+            &self.capture_stream,
+            app.process_id,
+            window_hint,
+            &opts,
+        )
     }
 
     fn find(&self, locator: &Locator) -> Result<Option<ElementRef>> {

@@ -74,7 +74,8 @@
       "timestampUrl": ""
     },
     "macOS": {
-      "signingIdentity": "-"
+      "hardenedRuntime": true,
+      "minimumSystemVersion": "14.4"
     }
   },
   "plugins": {
