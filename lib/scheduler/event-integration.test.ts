@@ -104,6 +104,7 @@ describe("event-integration", () => {
         "backup:completed",
         "workflow:completed",
         "agent:completed",
+        "connection:housekeeping:daily",
         "custom",
       ]
 

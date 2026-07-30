@@ -119,13 +119,14 @@ jest.mock("@/lib/connectors/health/heartbeat-sweep", () => ({
   startHeartbeatSweep: (...args: unknown[]) => mockStartHeartbeatSweep(...args),
 }))
 
-// ── Mock the outbound terminal-row retention sweep (Dexie + real timers) ─────
-const mockRetentionDispose = jest.fn()
-const mockStartOutboundRetentionSweep = jest
-  .fn()
-  .mockImplementation(() => ({ dispose: mockRetentionDispose, runNow: jest.fn() }))
+// ── Mock the durable low-frequency housekeeping schedule ─────────────────────
+const mockInstallHousekeepingSchedule = jest.fn().mockResolvedValue(undefined)
+jest.mock("@/lib/connectors/housekeeping-scheduler", () => ({
+  installConnectorHousekeepingSchedule: (...args: unknown[]) =>
+    mockInstallHousekeepingSchedule(...args),
+}))
+
 jest.mock("@/lib/connectors/daily-schedule", () => ({
-  startOutboundRetentionSweep: (...args: unknown[]) => mockStartOutboundRetentionSweep(...args),
   // The Lark surface + bind-request sweeps build on the generic scheduler, so
   // a partial mock of this module leaves them calling `undefined` and takes
   // the whole runtime boot down with it.
@@ -266,10 +267,7 @@ beforeEach(() => {
   lifecycleRegistry.clear()
   suspendedLifecycleRegistry.clear()
   mockStartHeartbeatSweep.mockImplementation(() => ({ dispose: mockSweepDispose }))
-  mockStartOutboundRetentionSweep.mockImplementation(() => ({
-    dispose: mockRetentionDispose,
-    runNow: jest.fn(),
-  }))
+  mockInstallHousekeepingSchedule.mockResolvedValue(undefined)
 })
 
 afterEach(() => {
@@ -800,7 +798,7 @@ describe("installConnectorRuntime", () => {
     })
   })
 
-  it("starts the outbound terminal-row retention sweep and disposes it on teardown", async () => {
+  it("installs the durable low-frequency housekeeping schedule", async () => {
     mockedIsTauri.mockReturnValue(true)
     const row = makeTelegramRow("cai_retention")
     const adapter = makeFakeAdapter(row.id)
@@ -810,12 +808,9 @@ describe("installConnectorRuntime", () => {
     mockListAdapters.mockReturnValue([adapter])
     const dispose = install()
     await waitFor(() => {
-      expect(mockStartOutboundRetentionSweep).toHaveBeenCalledTimes(1)
+      expect(mockInstallHousekeepingSchedule).toHaveBeenCalledTimes(1)
     })
     dispose()
-    await waitFor(() => {
-      expect(mockRetentionDispose).toHaveBeenCalledTimes(1)
-    })
   })
 
   it("registers each successfully-started adapter in the lifecycle registry", async () => {

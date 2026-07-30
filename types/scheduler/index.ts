@@ -46,6 +46,13 @@ export type ScheduledTaskType =
   // in the same `tasks` Dexie store are typed properly across the codebase.
   | "connection:scheduled:digest"
   | "connection:outbound:send"
+  // One persisted daily clock fans out the three connector retention sweeps
+  // through an event trigger. These remain scheduler task types rather than
+  // growing TaskTriggerType with subsystem-specific timer variants.
+  | "connection:housekeeping:clock"
+  | "connection:housekeeping:outbound-retention"
+  | "connection:housekeeping:callback-bindings"
+  | "connection:housekeeping:execution-runs"
   // Usage-presence refresh (token-usage status on IM platforms) — registered
   // in `lib/connectors/presence/usage-status-runner.ts`.
   | "connection:presence:refresh"

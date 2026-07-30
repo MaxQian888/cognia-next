@@ -18,6 +18,7 @@
       "backupCompleted": "A backup run finished successfully.",
       "backupNeeded": "Backup interval elapsed and a new backup is due.",
       "chatCompleted": "A chat conversation finished.",
+      "connectionHousekeepingDaily": "Daily connector housekeeping was requested.",
       "connectionOutboundSend": "An outbound message was sent through a connector.",
       "connectionScheduledDigest": "A scheduled connection digest was published.",
       "custom": "Free-form event — typically posted from external tooling.",

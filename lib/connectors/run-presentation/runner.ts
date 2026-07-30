@@ -1,11 +1,7 @@
 import { liveQuery, type Subscription } from "dexie"
 import { getDb } from "@/lib/db/schema"
 import { enqueueOutbound, waitForOutboundTerminal } from "@/lib/db/outbound-jobs"
-import {
-  listExecutionRunBindings,
-  sweepExecutionRunEventRetention,
-  updateExecutionRunBinding,
-} from "@/lib/db/execution-runs"
+import { listExecutionRunBindings, updateExecutionRunBinding } from "@/lib/db/execution-runs"
 import { getRunningAdapter } from "@/lib/connectors/lifecycle"
 import type {
   ExecutionRunBinding,
@@ -498,7 +494,6 @@ const defaultDependencies: ProjectionDependencies = {
 }
 
 let subscription: Subscription | null = null
-let retentionTimer: ReturnType<typeof setInterval> | null = null
 let heartbeatTimer: ReturnType<typeof setInterval> | null = null
 const timers = new Map<string, ReturnType<typeof setTimeout>>()
 const projecting = new Map<string, Promise<void>>()
@@ -744,13 +739,6 @@ export function startExecutionRunPresentationRunner(): () => void {
       console.error("[run-presentation] subscription failed", error)
     },
   })
-  void sweepExecutionRunEventRetention().catch(() => undefined)
-  retentionTimer = setInterval(
-    () => {
-      void sweepExecutionRunEventRetention().catch(() => undefined)
-    },
-    24 * 60 * 60 * 1_000
-  )
   heartbeatTimer = setInterval(() => {
     void getDb()
       .executionRunBindings.where("status")
@@ -767,8 +755,6 @@ export function startExecutionRunPresentationRunner(): () => void {
 function stopExecutionRunPresentationRunner(): void {
   subscription?.unsubscribe()
   subscription = null
-  if (retentionTimer) clearInterval(retentionTimer)
-  retentionTimer = null
   if (heartbeatTimer) clearInterval(heartbeatTimer)
   heartbeatTimer = null
   for (const timer of timers.values()) clearTimeout(timer)

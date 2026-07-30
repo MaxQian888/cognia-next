@@ -18,6 +18,7 @@
       "backupCompleted": "备份成功完成。",
       "backupNeeded": "已到达备份周期。",
       "chatCompleted": "一次聊天对话已完成。",
+      "connectionHousekeepingDaily": "已请求执行每日连接器维护。",
       "connectionOutboundSend": "通过连接器发送了一条出站消息。",
       "connectionScheduledDigest": "定时连接摘要已发布。",
       "custom": "自定义事件——通常由外部工具发起。",

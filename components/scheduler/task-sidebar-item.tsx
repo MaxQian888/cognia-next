@@ -152,6 +152,26 @@ const taskTypeConfig: Record<
     bg: "bg-cyan-500/10",
     color: "text-cyan-500",
   },
+  "connection:housekeeping:clock": {
+    icon: <Cog className="h-3.5 w-3.5" />,
+    bg: "bg-slate-500/10",
+    color: "text-slate-500",
+  },
+  "connection:housekeeping:outbound-retention": {
+    icon: <Cog className="h-3.5 w-3.5" />,
+    bg: "bg-slate-500/10",
+    color: "text-slate-500",
+  },
+  "connection:housekeeping:callback-bindings": {
+    icon: <Cog className="h-3.5 w-3.5" />,
+    bg: "bg-slate-500/10",
+    color: "text-slate-500",
+  },
+  "connection:housekeeping:execution-runs": {
+    icon: <Cog className="h-3.5 w-3.5" />,
+    bg: "bg-slate-500/10",
+    color: "text-slate-500",
+  },
   "wiki-rebuild": {
     icon: <BookOpen className="h-3.5 w-3.5" />,
     bg: "bg-indigo-500/10",

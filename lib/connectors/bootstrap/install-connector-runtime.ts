@@ -84,14 +84,8 @@ import {
   unregisterRunningAdapter,
 } from "@/lib/connectors/lifecycle"
 import { getAdapterInstance } from "@/lib/db/adapter-instances"
-import {
-  startCallbackBindingCleanupSchedule,
-  type CallbackBindingCleanupHandle,
-} from "@/lib/connectors/callback-binding-cleanup"
-import {
-  startOutboundRetentionSweep,
-  type DailyScheduleHandle,
-} from "@/lib/connectors/daily-schedule"
+import { installConnectorHousekeepingSchedule } from "@/lib/connectors/housekeeping-scheduler"
+import type { DailyScheduleHandle } from "@/lib/connectors/daily-schedule"
 import {
   startBindRequestExpirySweep,
   startLarkSurfaceSweep,
@@ -250,8 +244,6 @@ export function installConnectorRuntime(opts: InstallConnectorRuntimeOptions = {
   // reverse-WS). Single source of truth for both "does the inbound server
   // need to start" and "which registrations to reap on teardown".
   const serverAdapterIds = new Set<string>()
-  let cleanupHandle: CallbackBindingCleanupHandle | null = null
-  let outboundRetentionSweep: DailyScheduleHandle | null = null
   let larkSurfaceSweep: DailyScheduleHandle | null = null
   let larkBindRequestSweep: DailyScheduleHandle | null = null
   let heartbeatSweep: HeartbeatSweepHandle | null = null
@@ -602,11 +594,21 @@ export function installConnectorRuntime(opts: InstallConnectorRuntimeOptions = {
       onDelivered: (conversationKey) => bus.recordBotReply(conversationKey),
     })
 
-    // Daily retention sweep for terminal outbound rows (sent / deadlettered
-    // older than 14 days) — the runner's queue soft cap only bounds the
-    // ACTIVE backlog; without this sweep terminal history grows forever.
+    // Low-frequency retention sweeps run through one durable scheduler clock.
+    // The 5-second adapter/presentation heartbeats remain local intervals:
+    // moving liveness into the scheduler would write an execution row every
+    // tick and defeat the headless dirty-table snapshot budget.
     if (!cancelled) {
-      outboundRetentionSweep = startOutboundRetentionSweep()
+      try {
+        await installConnectorHousekeepingSchedule()
+      } catch (error) {
+        log(
+          "warn",
+          `[connector-bus] durable housekeeping unavailable: ${
+            error instanceof Error ? error.message : String(error)
+          }`
+        )
+      }
     }
 
     // Single consolidated heartbeat sweep (v51) — one timer services every
@@ -636,15 +638,6 @@ export function installConnectorRuntime(opts: InstallConnectorRuntimeOptions = {
     // re-queues every running adapter through the same path as "Reconnect now".
     if (!cancelled) {
       resumeReconnect = startResumeReconnect()
-    }
-
-    // Cross-adapter housekeeping: prune expired callback bindings daily so
-    // the connectorCallbackBindings table stops growing without bound.
-    // `recordCallbackBinding` sets a 30 d default TTL; this sweep reaps
-    // anything past `expiresAt` plus legacy pre-default rows past their
-    // grace window.
-    if (!cancelled) {
-      cleanupHandle = startCallbackBindingCleanupSchedule()
     }
 
     // Source bridges write one durable execution journal; the presentation
@@ -803,10 +796,6 @@ export function installConnectorRuntime(opts: InstallConnectorRuntimeOptions = {
   return () => {
     cancelled = true
     ac.abort()
-    cleanupHandle?.dispose()
-    cleanupHandle = null
-    outboundRetentionSweep?.dispose()
-    outboundRetentionSweep = null
     larkSurfaceSweep?.dispose()
     larkSurfaceSweep = null
     larkBindRequestSweep?.dispose()

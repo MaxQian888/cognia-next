@@ -40,6 +40,7 @@ export type SchedulerEventType =
   // Platform Connectors — proactive outbound events (Task 108)
   | "connection:outbound:send"
   | "connection:scheduled:digest"
+  | "connection:housekeeping:daily"
 
 /**
  * Event data that can be passed to event-triggered tasks
@@ -121,6 +122,7 @@ export function isValidEventType(eventType: string): eventType is SchedulerEvent
     "custom",
     "connection:outbound:send",
     "connection:scheduled:digest",
+    "connection:housekeeping:daily",
   ]
   return validTypes.includes(eventType as SchedulerEventType)
 }

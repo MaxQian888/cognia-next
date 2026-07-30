@@ -50,6 +50,7 @@ const EVENT_KEY_MAP: Record<SchedulerEventType, string> = {
   "plan:completed": "planCompleted",
   "connection:outbound:send": "connectionOutboundSend",
   "connection:scheduled:digest": "connectionScheduledDigest",
+  "connection:housekeeping:daily": "connectionHousekeepingDaily",
   custom: "custom",
 }
 
