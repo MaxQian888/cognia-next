@@ -31,18 +31,29 @@ export interface MessageSearchIndexEntry {
   text: string
 }
 
-/** Occurrences of `needle` in `haystack`, both already lower-cased. */
-function countOccurrences(haystack: string, needle: string): number {
-  let count = 0
+/**
+ * Start offsets of every occurrence of `needle` in `haystack`, both already
+ * lower-cased. Exported because the history-search snippet builder
+ * (`lib/chat/search/snippet.ts`) needs the offsets, not just the count, and the
+ * two must not disagree about overlapping matches.
+ */
+export function findOccurrences(haystack: string, needle: string): number[] {
+  if (!needle) return []
+  const at: number[] = []
   let from = 0
   for (;;) {
-    const at = haystack.indexOf(needle, from)
-    if (at === -1) return count
-    count++
+    const found = haystack.indexOf(needle, from)
+    if (found === -1) return at
+    at.push(found)
     // Advance by one, not by needle.length: overlapping matches ("aa" in
     // "aaa") are still two distinct places a reader would look.
-    from = at + 1
+    from = found + 1
   }
+}
+
+/** Occurrences of `needle` in `haystack`, both already lower-cased. */
+function countOccurrences(haystack: string, needle: string): number {
+  return findOccurrences(haystack, needle).length
 }
 
 /**

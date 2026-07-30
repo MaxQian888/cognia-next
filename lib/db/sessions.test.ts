@@ -6,6 +6,7 @@
 
 import "fake-indexeddb/auto"
 import { liveQuery } from "dexie"
+import type { ChatSession } from "@cognia/agent-config-types"
 import {
   createSession,
   getSession,
@@ -13,6 +14,8 @@ import {
   listSessions,
   listScopedSessions,
   deleteSession,
+  listSessionBranches,
+  countBranchesAtMessage,
   bulkDeleteSessions,
   clearBranchSeed,
   freezeImportedSession,
@@ -504,5 +507,98 @@ describe("archive / unarchive", () => {
     const afterB = await getSession(b.id)
     expect("archivedAt" in (afterA as object)).toBe(false)
     expect("archivedAt" in (afterB as object)).toBe(false)
+  })
+})
+
+describe("branch lineage (v81 index, reverse direction)", () => {
+  const mkBranch = async (id: string, parentId: string, at?: string, createdAt = 1) => {
+    await getDb().sessions.put({
+      id,
+      title: id,
+      kind: "direct",
+      projectId: "p1",
+      parentSessionId: parentId,
+      branchedFromMessageId: at,
+      createdAt,
+      updatedAt: createdAt,
+    } as ChatSession)
+  }
+
+  it("lists a conversation's branches newest first", async () => {
+    // The v81 `parentSessionId` index existed for exactly this and had no
+    // query behind it: lineage was visible only from a child looking up.
+    await getDb().sessions.put({
+      id: "parent",
+      title: "Parent",
+      kind: "direct",
+      projectId: "p1",
+      createdAt: 1,
+      updatedAt: 1,
+    } as ChatSession)
+    await mkBranch("b1", "parent", "m1", 2)
+    await mkBranch("b2", "parent", "m1", 3)
+    await mkBranch("other", "somebody-else", "m1", 4)
+
+    expect((await listSessionBranches("parent")).map((s) => s.id)).toEqual(["b2", "b1"])
+  })
+
+  it("counts only the branches cut at a given message", async () => {
+    await mkBranch("b1", "parent", "m1", 2)
+    await mkBranch("b2", "parent", "m2", 3)
+    expect(await countBranchesAtMessage("parent", "m1")).toBe(1)
+    expect(await countBranchesAtMessage("parent", "nope")).toBe(0)
+  })
+})
+
+describe("deleteSession — branch survival", () => {
+  const mkSession = async (id: string, parentSessionId?: string) => {
+    await getDb().sessions.put({
+      id,
+      title: id,
+      kind: "direct",
+      projectId: "p1",
+      parentSessionId,
+      createdAt: 1,
+      updatedAt: 1,
+    } as ChatSession)
+  }
+
+  it("keeps the branches and re-points them at their grandparent", async () => {
+    // A branch is a standalone conversation — `direct` mode copies the messages
+    // outright — so deleting the parent must neither take it down nor strand it
+    // holding a pointer to a row that no longer exists.
+    await mkSession("grandparent")
+    await mkSession("parent", "grandparent")
+    await mkSession("child-a", "parent")
+    await mkSession("child-b", "parent")
+
+    await deleteSession("parent")
+
+    expect(await getDb().sessions.get("parent")).toBeUndefined()
+    expect((await getDb().sessions.get("child-a"))?.parentSessionId).toBe("grandparent")
+    expect((await getDb().sessions.get("child-b"))?.parentSessionId).toBe("grandparent")
+  })
+
+  it("clears the pointer entirely when the deleted session was top-level", async () => {
+    // `undefined` deletes the field — a branch of a root conversation ends up
+    // with no lineage, not a pointer to nothing.
+    await mkSession("root")
+    await mkSession("child", "root")
+
+    await deleteSession("root")
+
+    const child = await getDb().sessions.get("child")
+    expect(child).toBeDefined()
+    expect(child?.parentSessionId).toBeUndefined()
+  })
+
+  it("leaves unrelated sessions' lineage untouched", async () => {
+    await mkSession("parent")
+    await mkSession("elsewhere")
+    await mkSession("theirs", "elsewhere")
+
+    await deleteSession("parent")
+
+    expect((await getDb().sessions.get("theirs"))?.parentSessionId).toBe("elsewhere")
   })
 })

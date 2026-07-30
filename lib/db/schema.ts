@@ -156,6 +156,13 @@ import type { ContextCommentRow } from "@/types/context-comment"
 import { contextCommentRowFromCanvas } from "./context-comments-backfill"
 import type { TeamPrObservationRow } from "./team-pr-observations"
 import type { AgentTeamBoardRow } from "./agent-team-board"
+import type {
+  TemplateDefinitionRow,
+  TemplateDeviceBindingRecord,
+  TemplateInstanceRecord,
+  TemplateMigrationJournalRecord,
+  TemplatePackageRow,
+} from "./template-platform"
 import type { WasmGrantLedgerRow } from "./wasm-grant-ledger"
 import type { RunRecordRow } from "./run-records"
 import type {
@@ -183,6 +190,7 @@ import { rootsFromLegacy } from "@/lib/workspace/roots"
 import { isTauri } from "@/lib/platform/detect"
 import { backfillProjectScopeV86 } from "./project-scope-backfill"
 import { backfillTriggeredBySourceV91 } from "./triggered-by-source-backfill"
+import { backfillSessionLineageV131 } from "./session-lineage-backfill"
 
 /**
  * Idempotently backfill `roots` on a project row from the legacy
@@ -376,6 +384,10 @@ export class CogniaDB extends Dexie {
   integrationAudit!: Table<IntegrationAuditRow, string>
   // v128 — Content-addressed chat image store. See `lib/db/message-media.ts`.
   messageMedia!: Table<import("./message-media").MessageMediaRow, string>
+  // v134 — chat-history search projections + backfill watermark (ADR-0099).
+  // See `lib/db/chat-search-text.ts`.
+  chatSearchText!: Table<import("./chat-search-text").ChatSearchTextRow, string>
+  chatSearchState!: Table<import("./chat-search-text").ChatSearchStateRow, "singleton">
   // v121 — Provider Profile Store (ADR-0090 Phase 1). See `lib/db/provider-profiles.ts`.
   providerProfiles!: Table<ProviderProfile, string>
   deploymentProfiles!: Table<DeploymentProfile, string>
@@ -555,6 +567,14 @@ export class CogniaDB extends Dexie {
   // v104 — Agent-Team board projection (one-way store→Dexie mirror for mobile
   // sync). See `lib/db/agent-team-board.ts`.
   agentTeamBoard!: Table<AgentTeamBoardRow, string>
+  // v132 — Unified Template Platform. Definitions/packages/instance provenance
+  // are portable; device bindings and migration journals are intentionally
+  // local-only and never registered in `lib/sync`.
+  templateDefinitions!: Table<TemplateDefinitionRow, string>
+  templatePackages!: Table<TemplatePackageRow, string>
+  templateInstances!: Table<TemplateInstanceRecord, string>
+  templateDeviceBindings!: Table<TemplateDeviceBindingRecord, string>
+  templateMigrationJournal!: Table<TemplateMigrationJournalRecord, string>
   // v88 — Durable WASM preopen grant ledger. See `lib/db/wasm-grant-ledger.ts`.
   wasmGrantLedger!: Table<WasmGrantLedgerRow, string>
   // v89 — Per-turn Run Records (Run Panel). See `lib/db/run-records.ts`.
@@ -1373,10 +1393,10 @@ export class CogniaDB extends Dexie {
     //   audit trail that v32 corresponds to the Computer Use completion work.
     this.version(32).stores({})
 
-    // v33 — ADR-0021 WebRTC WAN transport: `PairedDeviceRow.rendezvousId` and
-    //   `PairedDeviceRow.rendezvousSecret` are minted by the desktop pair
-    //   handler and propagated through `companion://device-paired`. Both are
-    //   optional (non-indexed JSON columns), so no `.stores()` change is
+    // v33 — ADR-0021 WebRTC WAN transport originally added rendezvous
+    //   metadata. Current rows carry the public v2 room descriptor and a
+    //   native secret reference; private role keys are never stored here.
+    //   These are optional non-indexed JSON columns, so no `.stores()` change is
     //   required — IndexedDB stores the extra keys transparently. The
     //   version bump records that pre-v33 rows have neither field and the
     //   transport must therefore treat them as WebRTC-disabled until the
@@ -2826,6 +2846,122 @@ export class CogniaDB extends Dexie {
       messageMedia: "&hash, createdAt, lastUsedAt",
     })
 
+    // 129 is deliberately skipped. A concurrent branch was mid-flight over this
+    // same working tree when this block was written, and schema numbers have
+    // been lost to that twice before (v66, v69). Leaving the next number free
+    // costs nothing — Dexie only requires versions to increase — and removes
+    // the chance of two branches shipping different definitions of the same
+    // version to users who ran both.
+    //
+    // Sync cursors become per-host. Their primary key was the table name
+    // alone, with nothing anywhere recording WHICH host a watermark came from,
+    // and nothing clearing them when a client paired to a different one. A
+    // client that re-paired elsewhere therefore resumed from the previous
+    // host's watermark and asked the new host for "everything since <a
+    // timestamp that means nothing here>" — blending two machines' sessions,
+    // messages and characters into one local store, silently.
+    //
+    // Keyed on the device id the host issued at pair time rather than the
+    // host's own `serverId`: it is unique per (client, host) pair, present from
+    // the moment of pairing (no first-connect round-trip), already persisted in
+    // `CompanionConfig`, and it changes exactly when a fresh pull is the safe
+    // answer. Old rows are dropped rather than migrated — a cursor whose host
+    // is unknown cannot be attributed to one, and re-pulling is always safe.
+    // Dexie cannot change an existing table's primary key — attempting it
+    // breaks every multi-version upgrade path, not just this one. So the
+    // per-host cursors live in a new store and the old one is dropped.
+    // Losing the watermarks costs a single full re-pull and is the safe
+    // direction regardless: a cursor with no host recorded cannot be
+    // attributed to one after the fact.
+    this.version(130).stores({
+      syncCursors: null,
+      hostSyncCursors: "&[serverKey+table], table, lastSyncAt, since",
+    })
+
+    // v131 — Session lineage repair + an indexable surface binding.
+    //
+    // Claimed as 130+1 rather than taking the 129 left free above: 129 is a
+    // LOWER number than a version already declared in this tree, so any profile
+    // that ran the v130 branch is already past it and would never execute a 129
+    // upgrade callback. A backfill that silently skips exactly the users who ran
+    // both branches is worse than no backfill.
+    //
+    // Two writers create session rows without going through `createSession` —
+    // the only helper that resolves a workspace: conversation branching
+    // (`buildChildRow`) and the workbench sidechat
+    // (`ensureResourceWorkbenchSession`). Both `put` a hand-built row, and both
+    // omitted `projectId`. Because `listScopedSessions` reads through
+    // `[projectId+updatedAt]` and Dexie omits rows whose key path contains
+    // `undefined` from a compound index, those rows were not mis-filed — they
+    // were absent. Branches vanished from the sidebar on the first reload after
+    // creation, and sidechats sat outside `deleteProjectCascade`, outliving the
+    // workspace they belonged to along with all of their messages.
+    //
+    // `surfaceBindingKey` denormalises `surfaceBinding` so an embedded session
+    // can be looked up by binding without `db.sessions.toArray()` — a full scan
+    // of every session, which is what each workbench open paid until now. The
+    // sessions index list is restated in full because Dexie replaces, not
+    // merges, a table's index list.
+    //
+    // See `lib/db/session-lineage-backfill.ts` for the attribution rules.
+    this.version(131)
+      .stores({
+        sessions:
+          "id, updatedAt, createdAt, kind, characterId, teamId, parentSessionId, platformConversationKey, projectId, [projectId+updatedAt], surfaceBindingKey",
+      })
+      .upgrade(backfillSessionLineageV131)
+
+    // v132 — Unified Template Platform.
+    //
+    // Drafts and immutable releases share one definition table and carry a
+    // storage key so nullable draft versions never participate in an IndexedDB
+    // compound primary key. Package rows and instance provenance are portable.
+    // Local Twin/credential/path bindings and the rollback-capable legacy
+    // migration journal are deliberately not part of companion sync.
+    this.version(132).stores({
+      templateDefinitions: "&storageKey, id, domain, status, version, updatedAt, [id+status]",
+      templatePackages: "&key, id, version, trust, importedAt",
+      templateInstances: "&id, source.definitionId, source.version, updatedAt",
+      templateDeviceBindings: "&id, definitionId, slotId, kind, [definitionId+slotId], updatedAt",
+      templateMigrationJournal: "&id, domain, sourceKey, status, updatedAt",
+    })
+
+    // 133 is deliberately skipped, for the same reason 129 was: v132 above was
+    // uncommitted work by a concurrent session on this shared working tree when
+    // this block was written. Leaving the next number free costs nothing and
+    // removes the chance of two branches shipping different definitions of one
+    // version to users who ran both.
+    //
+    // Chat-history search (ADR-0099). `chatSearchText` holds one lean row per
+    // message carrying ONLY the projected searchable text — never `parts`. The
+    // search path must not load `parts`: a single message can carry tens of KB
+    // of tool output, and reading whole message rows to search them is precisely
+    // what made the previous `searchSessionsByContent` unusable (it read up to
+    // 5001 complete rows per keystroke, in primary-key order, which is not
+    // chronological because message ids come from several generators).
+    //
+    // There is intentionally no inverted index. Highlighting needs character
+    // offsets, so the final decision is always `indexOf` over the text; once the
+    // text is reachable, `indexOf` beats an index probe. A fixed-width
+    // fingerprint was evaluated and rejected: its entry count is min(grams,
+    // buckets) while selectivity needs buckets >> grams, so at 64 buckets a
+    // 200-gram message lights 61 of them and every query matches nearly
+    // everything. See `lib/chat/search/corpus.ts`.
+    //
+    // `[createdAt+messageId]` rather than `createdAt` alone: several messages
+    // routinely share a millisecond, and both the resident-corpus load and the
+    // older-history scan page through this index — a non-total ordering would
+    // re-read or skip the tied rows.
+    //
+    // `chatSearchState` is the descending-backfill watermark. The upgrade
+    // callback only creates tables; backfilling here would freeze boot for
+    // minutes on a large account. See `lib/db/chat-search-text.ts`.
+    this.version(134).stores({
+      chatSearchText:
+        "&messageId, sessionId, [sessionId+createdAt], [createdAt+messageId], projectId, [projectId+createdAt]",
+      chatSearchState: "id",
+    })
+
     // First full-chain construction under Jest: cache the merged spec so every
     // later construction in this worker takes the collapsed fast path above.
     if (isSchemaCollapseEnabled() && !collapsedSchemaCacheSlot().__cogniaCollapsedSchema) {
@@ -2841,7 +2977,11 @@ export class CogniaDB extends Dexie {
   // that can grant a prompt-free spawn. See `lib/db/approved-binaries.ts`.
   approvedBinaries!: Table<ApprovedBinaryRow, [string, string]>
   // v44 — companion sync cursors (Wave 4 / ADR-0026). See `lib/sync/types.ts`.
-  syncCursors!: Table<SyncCursorRow, string>
+  // One cursor per host per table (v130), so a client that pairs elsewhere
+  // cannot resume from the previous host's watermark. Replaces `syncCursors`,
+  // which was keyed by table alone; Dexie cannot change a primary key in
+  // place, hence the new name.
+  hostSyncCursors!: Table<SyncCursorRow, [string, string]>
   // v62 — Workspaces (project model persistence). See `lib/db/projects.ts`.
   projects!: Table<Project, string>
   // v100 — Project-scoped RAG chunks (workspace knowledge base). See

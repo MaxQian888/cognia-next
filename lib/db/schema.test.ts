@@ -268,6 +268,46 @@ describe("getDb", () => {
     expect(db.integrationAudit.schema.indexes.map((index) => index.name)).toContain("createdAt")
   })
 
+  it("v130 partitions sync cursors by host", async () => {
+    const db = getDb()
+    await whenSeeded()
+    expect(db.verno).toBeGreaterThanOrEqual(130)
+
+    // Same table, two hosts, both retained — the compound primary key is what
+    // stops one host's watermark being used against another.
+    await db.hostSyncCursors.bulkPut([
+      { serverKey: "host-a", table: "messages", since: 5, lastSyncAt: 1, lastError: null },
+      { serverKey: "host-b", table: "messages", since: 900, lastSyncAt: 2, lastError: null },
+    ] as never)
+    expect(await db.hostSyncCursors.count()).toBe(2)
+    expect((await db.hostSyncCursors.get(["host-b", "messages"] as never))?.since).toBe(900)
+  })
+
+  it("v134 opens the chat-history search stores", async () => {
+    const db = getDb()
+    await db.open()
+    expect(db.verno).toBeGreaterThanOrEqual(134)
+
+    // `messageId` IS the primary key, and that is what makes re-projecting the
+    // same message from two of Tauri's WebViews an overwrite instead of a
+    // duplicate — the reason no leader election is needed.
+    expect(db.chatSearchText.schema.primKey.name).toBe("messageId")
+    expect(db.chatSearchText.schema.primKey.unique).toBe(true)
+    // `[createdAt+messageId]` rather than `createdAt` alone: messages routinely
+    // share a millisecond, and both the resident-corpus load and the
+    // older-history scan page through this index.
+    expect(db.chatSearchText.schema.indexes.map((index) => index.name)).toEqual(
+      expect.arrayContaining([
+        "sessionId",
+        "[sessionId+createdAt]",
+        "[createdAt+messageId]",
+        "projectId",
+        "[projectId+createdAt]",
+      ])
+    )
+    expect(db.chatSearchState.schema.primKey.name).toBe("id")
+  })
+
   it("v128 opens the content-addressed chat media store", async () => {
     const db = getDb()
     await db.open()
@@ -1181,6 +1221,97 @@ describe("getDb", () => {
     expect(scoped.sort()).toEqual(["s-orphan", "s-owned"])
   })
 
+  // v131 — Session lineage repair. Branch sessions and workbench sidechats were
+  // written straight to Dexie without a `projectId`, which does not merely
+  // mis-scope them: `[projectId+updatedAt]` omits any row whose key path
+  // contains `undefined`, so they were absent from every scoped read (the
+  // sidebar) and from `deleteProjectCascade`. End-to-end through the production
+  // schema (v130 → v131), exercising the real index + upgrade hook.
+  it("v131 upgrade rescues orphaned branch + sidechat rows into the scoped index", async () => {
+    const Dexie = (await import("dexie")).default
+    const legacy = new Dexie("cognia-claude")
+    // Open at v130 with the pre-v131 sessions index (no surfaceBindingKey).
+    legacy.version(130).stores({
+      sessions:
+        "id, updatedAt, createdAt, kind, characterId, teamId, parentSessionId, platformConversationKey, projectId, [projectId+updatedAt]",
+      messages:
+        "id, sessionId, [sessionId+createdAt], senderId, platformMessageId, [createdAt+id], projectId, [projectId+createdAt]",
+      projects: "&id, lastAccessedAt",
+      settings: "id",
+    })
+    await legacy.open()
+    await legacy.table("projects").put({
+      id: "proj-A",
+      name: "A",
+      roots: [],
+      knowledgeBase: [],
+      sessionIds: [],
+      sessionCount: 0,
+      messageCount: 0,
+      createdAt: new Date(0),
+      updatedAt: new Date(0),
+      lastAccessedAt: new Date(0),
+    })
+    await legacy.table("settings").put({ id: "singleton", activeProjectId: "proj-A" })
+    await legacy.table("sessions").bulkPut([
+      {
+        id: "s-parent",
+        title: "parent",
+        kind: "direct",
+        projectId: "proj-A",
+        createdAt: 0,
+        updatedAt: 0,
+      },
+      // Written by `buildChildRow` — no projectId, so invisible to the sidebar.
+      {
+        id: "s-branch",
+        title: "parent (branch)",
+        kind: "direct",
+        parentSessionId: "s-parent",
+        createdAt: 1,
+        updatedAt: 1,
+      },
+      // Written by `ensureResourceWorkbenchSession` — no projectId either, so
+      // it also escaped the workspace cascade.
+      {
+        id: "resource-workbench:session:s-parent",
+        title: "aside",
+        kind: "resource-workbench",
+        visibility: "embedded",
+        surfaceBinding: { kind: "session", sessionId: "s-parent" },
+        createdAt: 2,
+        updatedAt: 2,
+      },
+    ])
+    await legacy
+      .table("messages")
+      .put({ id: "m-branch", sessionId: "s-branch", role: "user", parts: [], createdAt: 1 })
+    legacy.close()
+
+    // Re-open through production schema — v131 upgrade hook fires.
+    const db = getDb()
+    await db.open()
+    expect(db.verno).toBeGreaterThanOrEqual(131)
+
+    // Both orphans land in the PARENT's workspace, not merely the active one.
+    expect((await db.sessions.get("s-branch"))?.projectId).toBe("proj-A")
+    expect((await db.sessions.get("resource-workbench:session:s-parent"))?.projectId).toBe("proj-A")
+    expect((await db.messages.get("m-branch"))?.projectId).toBe("proj-A")
+
+    // The acceptance criterion for the whole migration: the branch is now
+    // reachable through the compound index the sidebar actually reads.
+    const scoped = await db.sessions
+      .where("[projectId+updatedAt]")
+      .between(["proj-A", Dexie.minKey], ["proj-A", Dexie.maxKey])
+      .primaryKeys()
+    expect(scoped).toContain("s-branch")
+
+    // And the sidechat is findable by binding without a full table scan.
+    expect(
+      (await db.sessions.where("surfaceBindingKey").equals("session:s-parent").first())?.id
+    ).toBe("resource-workbench:session:s-parent")
+  })
+
   // v91 — Denormalised `triggeredBySource` index on `workflowRuns`. The upgrade
   // backfills the new top-level column from `triggeredBy.source` (legacy rows
   // with no `triggeredBy` default to "ui"), and the new index resolves only the
@@ -1345,6 +1476,27 @@ describe("getDb", () => {
     expect(
       await db.teamPrObservations.where("derivedStatus").equals("ci_failed").primaryKeys()
     ).toEqual(["r1:pr1"])
+  })
+
+  // v132 — unified portable template definitions/packages/provenance plus
+  // device-local bindings and rollback journal.
+  it("v132 adds the unified template platform tables and query indexes", async () => {
+    const db = getDb()
+    await db.open()
+    expect(db.verno).toBeGreaterThanOrEqual(132)
+
+    expect(db.templateDefinitions.schema.primKey.name).toBe("storageKey")
+    expect(db.templateDefinitions.schema.indexes.map((index) => index.name)).toEqual(
+      expect.arrayContaining(["id", "domain", "status", "version", "updatedAt", "[id+status]"])
+    )
+    expect(db.templatePackages.schema.primKey.name).toBe("key")
+    expect(db.templateInstances.schema.primKey.name).toBe("id")
+    expect(db.templateDeviceBindings.schema.indexes.map((index) => index.name)).toContain(
+      "[definitionId+slotId]"
+    )
+    expect(db.templateMigrationJournal.schema.indexes.map((index) => index.name)).toEqual(
+      expect.arrayContaining(["domain", "sourceKey", "status", "updatedAt"])
+    )
   })
 
   // v104 — Agent-Team board projection (team-board CQRS). Task rows and the

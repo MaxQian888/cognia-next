@@ -26,7 +26,6 @@ import {
   onClaudeMessage,
   sendPrompt,
 } from "@/lib/claude/ipc"
-import { detectPlatform } from "@/hooks/use-platform"
 import { resolveSendOptions } from "@/lib/claude/build-options"
 import { pendingRecoveryPhase } from "@/lib/usage/compaction-metrics"
 import { runTurnMemory } from "@/lib/memory/run-turn-memory"
@@ -41,7 +40,7 @@ import {
   routeTurn,
   stripDispatches,
 } from "@/lib/claude/team-router"
-import { listMessages, persistMessages, truncateAfter } from "@/lib/db/messages"
+import { listMessages, persistMessages } from "@/lib/db/messages"
 import { getSession, touchSession, updateSession } from "@/lib/db/sessions"
 import { listCharactersByIds } from "@/lib/db/characters"
 import { recordResultUsage } from "@/lib/db/session-usage"
@@ -58,8 +57,12 @@ import type {
 } from "@cognia/agent-config-types"
 import { subSessionId, decodeSubSession } from "@/lib/claude/team-session-id"
 import { steerBlocksOf, steerTextOf, type SteerMessageMeta } from "@/lib/claude/steer"
-import { senderIdOf, tagBranchSiblings, teamBranchGroupId } from "@/lib/chat/branch-regen"
-import { mirrorTruncateToDesktop } from "@/lib/chat/mirror-truncate"
+import {
+  senderIdOf,
+  tagBranchSiblings,
+  tagEditSibling,
+  teamBranchGroupId,
+} from "@/lib/chat/branch-regen"
 import {
   appendSteerMessage,
   isSessionOpen,
@@ -99,6 +102,8 @@ export interface TeamSendOptions {
    * belong to a real user turn cannot vanish the next time one is added here.
    */
   steerDrain?: boolean
+  /** Stamp an edited replacement into the original user message's branch group. */
+  branchTag?: { groupId: string; index: number }
 }
 
 /** Neither a drain nor a regenerate writes the user turn a second time. */
@@ -416,6 +421,16 @@ export function useTeamChat() {
             senderKind: "user",
           }
         )
+        if (opts?.branchTag) {
+          ;(userMsg as { metadata?: Record<string, unknown> }).metadata = {
+            ...((userMsg as { metadata?: Record<string, unknown> }).metadata ?? {}),
+            branchGroupId: opts.branchTag.groupId,
+            branchIndex: opts.branchTag.index,
+          }
+          useChatStore
+            .getState()
+            .setSessionActiveBranch(sessionId, opts.branchTag.groupId, userMsg.id)
+        }
         const before =
           useChatStore.getState().sessions[sessionId]?.messages ?? (await listMessages(sessionId))
         const after = [...before, userMsg]
@@ -706,26 +721,27 @@ export function useTeamChat() {
   )
 
   /**
-   * Edit a previously-sent user message in the active team session and resend
-   * the whole turn. Mirrors `useClaudeChat.editAndResend` but routes through
-   * the team orchestration loop so every member re-replies under the new
-   * content.
-   *
-   * Drops `messageId` and everything after it (inclusive), then re-runs the
-   * normal team `send` path with `newContent`. Member statuses, dispatches,
-   * and supervisor rounds are reconstructed from a clean slate.
+   * Edit a previously-sent user message without destroying the team turn below
+   * it. The original question and its replies become one branch; the edited
+   * question is appended as the selected sibling and routes through the normal
+   * team orchestration loop so every member can reply to the replacement.
    */
   const editAndResend = useCallback(
     async (messageId: string, newContent: SendContent, targetSessionId?: string) => {
       const sessionId = targetSessionId ?? useChatStore.getState().activeSessionId
       if (!sessionId) return
-      if (detectPlatform() === "mobile") {
-        await mirrorTruncateToDesktop(sessionId, messageId)
-      }
-      await truncateAfter(sessionId, messageId, { inclusive: true })
-      const remaining = await listMessages(sessionId)
-      useChatStore.getState().replaceSessionMessages(sessionId, remaining)
-      await send(newContent, { sessionId })
+      const messages =
+        useChatStore.getState().sessions[sessionId]?.messages ?? (await listMessages(sessionId))
+      const editedIdx = messages.findIndex((message) => message.id === messageId)
+      if (editedIdx < 0) return
+
+      const { merged, groupId, nextIndex } = tagEditSibling(messages, editedIdx)
+      useChatStore.getState().replaceSessionMessages(sessionId, merged)
+      await persistMessages(sessionId, merged)
+      await send(newContent, {
+        sessionId,
+        branchTag: { groupId, index: nextIndex },
+      })
     },
     [send]
   )

@@ -8,8 +8,15 @@ const get = jest.fn()
 const put = jest.fn().mockResolvedValue(undefined)
 const update = jest.fn().mockResolvedValue(1)
 const toArray = jest.fn().mockResolvedValue([])
+/** Resolves the indexed `surfaceBindingKey` lookup the hook uses since v131. */
+const first = jest.fn().mockResolvedValue(undefined)
+const equals = jest.fn(() => ({ first }))
+const where = jest.fn(() => ({ equals }))
 jest.mock("@/lib/db/schema", () => ({
-  getDb: () => ({ sessions: { get, put, update, toArray } }),
+  getDb: () => ({ sessions: { get, put, update, toArray, where } }),
+}))
+jest.mock("@/lib/db/project-scope", () => ({
+  resolveScopeProjectId: jest.fn(async () => "proj-active"),
 }))
 
 beforeEach(() => {
@@ -17,7 +24,56 @@ beforeEach(() => {
   put.mockClear()
   update.mockClear()
   toArray.mockClear().mockResolvedValue([])
+  first.mockClear().mockResolvedValue(undefined)
+  equals.mockClear()
+  where.mockClear()
   useContextWorkbenchStore.setState({ sessionOverrides: {} })
+})
+
+it("finds an existing aside through the surfaceBindingKey index, not a table scan", async () => {
+  // The pre-v131 lookup was `db.sessions.toArray()` + a JSON compare per row —
+  // a full scan of every session in the profile on every workbench open.
+  first.mockResolvedValue({
+    id: "resource-workbench:session:main-1",
+    title: "aside",
+    kind: "resource-workbench",
+    visibility: "embedded",
+    surfaceBinding: { kind: "session", sessionId: "main-1" },
+    surfaceBindingKey: "session:main-1",
+    projectId: "proj-A",
+    createdAt: 1,
+    updatedAt: 1,
+  })
+  const { result } = renderHook(() =>
+    useResourceWorkbenchSession(
+      { kind: "session", capabilities: ["ai"], sessionId: "main-1" },
+      true,
+      "window-a"
+    )
+  )
+  await waitFor(() => expect(result.current?.id).toBe("resource-workbench:session:main-1"))
+  expect(where).toHaveBeenCalledWith("surfaceBindingKey")
+  expect(equals).toHaveBeenCalledWith("session:main-1")
+  expect(toArray).not.toHaveBeenCalled()
+})
+
+it("stamps a new aside with the MAIN conversation's workspace, not the active one", async () => {
+  // A row written without a projectId is absent from `[projectId+updatedAt]`
+  // entirely — invisible to the sidebar and outside `deleteProjectCascade`.
+  get.mockImplementation(async (id: string) =>
+    id === "main-1" ? { id, title: "main", projectId: "proj-parent" } : undefined
+  )
+  const { result } = renderHook(() =>
+    useResourceWorkbenchSession(
+      { kind: "session", capabilities: ["ai"], sessionId: "main-1" },
+      true,
+      "window-a"
+    )
+  )
+  await waitFor(() => expect(result.current?.projectId).toBe("proj-parent"))
+  expect(put).toHaveBeenCalledWith(
+    expect.objectContaining({ projectId: "proj-parent", surfaceBindingKey: "session:main-1" })
+  )
 })
 
 it("switches to a manually reassociated embedded session and migrates its binding", async () => {

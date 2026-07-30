@@ -39,17 +39,18 @@ describe("mirrorTruncateToDesktop", () => {
     expect(deleteMessageMock).not.toHaveBeenCalled()
   })
 
-  it("swallows per-message and top-level failures (best-effort)", async () => {
-    const warn = jest.spyOn(console, "warn").mockImplementation(() => {})
+  it("rejects when any host delete fails after attempting the whole range", async () => {
     getMock.mockResolvedValue({ id: "m2", sessionId: "s1", createdAt: 20 })
     primaryKeysMock.mockResolvedValue(["m2", "m3"])
     deleteMessageMock.mockRejectedValueOnce(new Error("rpc down"))
-    await expect(mirrorTruncateToDesktop("s1", "m2")).resolves.toBeUndefined()
-    // The second delete still ran after the first failed.
+    await expect(mirrorTruncateToDesktop("s1", "m2")).rejects.toThrow(/rpc down/)
+    // The second delete still runs so one failure does not leave later host
+    // rows untouched before the caller keeps the local transcript intact.
     expect(deleteMessageMock).toHaveBeenCalledWith("s1", "m3")
+  })
 
+  it("rejects when the local range cannot be enumerated", async () => {
     getMock.mockRejectedValueOnce(new Error("db closed"))
-    await expect(mirrorTruncateToDesktop("s1", "m2")).resolves.toBeUndefined()
-    warn.mockRestore()
+    await expect(mirrorTruncateToDesktop("s1", "m2")).rejects.toThrow("db closed")
   })
 })

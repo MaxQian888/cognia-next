@@ -52,6 +52,15 @@ jest.mock("@/stores/chat", () => {
   useChatStore.getState = () => state
   return { useChatStore }
 })
+jest.mock("./aside-switcher", () => ({
+  AsideSwitcher: (props: { activeId: string; primaryId: string }) => (
+    <div data-testid="aside-switcher" data-active={props.activeId} data-primary={props.primaryId} />
+  ),
+}))
+jest.mock("@/stores/context-workbench/context-workbench-store", () => ({
+  useContextWorkbenchStore: (selector: (s: { setSessionOverride: jest.Mock }) => unknown) =>
+    selector({ setSessionOverride: jest.fn() }),
+}))
 jest.mock("@/components/chat/chat-view", () => ({
   ChatPane: ({
     onSend,
@@ -221,5 +230,40 @@ describe("ResourceWorkbenchChatPanel", () => {
       />
     )
     expect(send).toHaveBeenCalledTimes(1)
+  })
+
+  // ── multi-aside opt-in ──────────────────────────────────────────────────────
+
+  it("renders the aside picker only when the host asks for it", () => {
+    // A conversation can own several named asides; an artifact / canvas /
+    // project-file chat is a property OF that resource and stays single, so it
+    // gets no picker.
+    const { rerender } = render(<ResourceWorkbenchChatPanel />)
+    expect(screen.queryByTestId("aside-switcher")).not.toBeInTheDocument()
+
+    rerender(<ResourceWorkbenchChatPanel multiAside />)
+    expect(screen.getByTestId("aside-switcher")).toBeInTheDocument()
+  })
+
+  it("no mobile surface hosts the aside switcher", () => {
+    // Three-axis dormancy marking (project rule 7). `components/mobile/` mounts
+    // no workbench at all — the only mobile context-workbench is the workflow
+    // editor's sheet — so the whole panel, picker included, is desktop-only.
+    // If a mobile host ever appears, this assertion is the thing that fails and
+    // forces the decision to be re-made rather than inherited by accident.
+    const fs = jest.requireActual("node:fs") as typeof import("node:fs")
+    const path = jest.requireActual("node:path") as typeof import("node:path")
+    const walk = (dir: string): string[] =>
+      fs.readdirSync(dir, { withFileTypes: true }).flatMap((e) => {
+        const p = path.join(dir, e.name)
+        return e.isDirectory() ? walk(p) : [p]
+      })
+    const mobileSources = walk(path.join(process.cwd(), "components/mobile")).filter((f) =>
+      /\.tsx?$/.test(f)
+    )
+    const hosts = mobileSources.filter((f) =>
+      /ResourceWorkbenchChatPanel|AsideSwitcher/.test(fs.readFileSync(f, "utf8"))
+    )
+    expect(hosts).toEqual([])
   })
 })

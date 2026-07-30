@@ -22,6 +22,13 @@ jest.mock("@cognia/logging", () => ({
   },
 }))
 
+// The branch count behind the delete confirm is a Dexie live query. Stubbed so
+// the count is a test input rather than a seeded database.
+let branchCount = 0
+jest.mock("dexie-react-hooks", () => ({
+  useLiveQuery: () => branchCount,
+}))
+
 import { SessionRow } from "./session-row"
 
 const baseSession: ChatSession = {
@@ -281,6 +288,32 @@ test("Delete requires confirmation before removing the session", async () => {
   expect(dialog).toHaveTextContent('deleteConfirmTitle:{"title":"Hello"}')
   await user.click(screen.getByRole("button", { name: "deleteConfirmAction" }))
   expect(onDelete).toHaveBeenCalledWith("s-1")
+})
+
+test("delete confirm says branches survive, but only when there are any", async () => {
+  // `direct` branching copies the messages outright, so a branch is a standalone
+  // conversation and deleting the parent leaves it alone. Without this sentence
+  // the sidebar count not dropping reads as a bug.
+  const user = userEvent.setup()
+  branchCount = 2
+  try {
+    setup()
+    await user.click(screen.getByRole("button", { name: "actionsMenu" }))
+    await user.click(await screen.findByText("delete"))
+    expect(await screen.findByRole("alertdialog")).toHaveTextContent(
+      'deleteConfirmBranches:{"count":2}'
+    )
+  } finally {
+    branchCount = 0
+  }
+})
+
+test("delete confirm omits the branch note for a session with no branches", async () => {
+  const user = userEvent.setup()
+  setup()
+  await user.click(screen.getByRole("button", { name: "actionsMenu" }))
+  await user.click(await screen.findByText("delete"))
+  expect(await screen.findByRole("alertdialog")).not.toHaveTextContent("deleteConfirmBranches")
 })
 
 test("cancelling delete closes the confirmation without removing the session", async () => {

@@ -12,6 +12,13 @@ import { listMessages } from "@/lib/db/messages"
 import { useChatStore } from "@/stores/chat"
 import { useContextWorkbench } from "./context-workbench"
 import { AsideTargetProvider } from "./aside-target"
+import { AsideSwitcher } from "./aside-switcher"
+import { useContextWorkbenchStore } from "@/stores/context-workbench/context-workbench-store"
+import { getContextResourceKey } from "@/types/context-workbench"
+import {
+  resourceWorkbenchSessionId,
+  surfaceBindingForContextResource,
+} from "@/lib/context-workbench/resource-session"
 import { useSingleExport } from "@/hooks/data/use-single-export"
 import { Button } from "@/components/ui/button"
 import { DownloadIcon } from "lucide-react"
@@ -34,6 +41,7 @@ export function ResourceWorkbenchChatPanel({
   onPendingPromptConsumed,
   selectionHeader,
   asideTargetSessionId,
+  multiAside = false,
 }: {
   getResourceContext?: () => string | Promise<string>
   pendingPrompt?: string | null
@@ -49,6 +57,22 @@ export function ResourceWorkbenchChatPanel({
    * panel in the same activity group, which the rail could never reach.
    */
   selectionHeader?: ReactNode
+  /**
+   * Render the aside picker + lifecycle menu.
+   *
+   * Only the session-bound sidechat opts in. An artifact / canvas / project-file
+   * chat is a property OF that resource — several parallel ones would have no
+   * meaning, and no surface to choose between them.
+   *
+   * **Desktop only, deliberately.** `components/mobile/` mounts no workbench at
+   * all (the sole mobile context-workbench is the workflow editor's sheet), so
+   * there is no mobile surface for this panel — let alone for a picker above it.
+   * This is a scoping decision, not an oversight: the mobile shell would need
+   * its own sheet-based host first. Pinned by
+   * `resource-workbench-chat-panel.test.tsx` ("no mobile surface hosts the
+   * aside switcher").
+   */
+  multiAside?: boolean
 }) {
   const t = useTranslations("contextWorkbench")
   const { sessionId } = useChatScope()
@@ -150,8 +174,29 @@ export function ResourceWorkbenchChatPanel({
       })
   }, [onPendingPromptConsumed, pendingPrompt, send])
 
+  // Selecting a different aside routes through the workbench store's existing
+  // `sessionOverrides` map — the same seam the project editor's re-linker uses,
+  // and the one `useResourceWorkbenchSession` already reads. No parallel
+  // selection state to keep in sync.
+  const resourceKey = getContextResourceKey(resource)
+  const setSessionOverride = useContextWorkbenchStore((state) => state.setSessionOverride)
+  const binding = surfaceBindingForContextResource(resource)
+  const primaryId = binding ? resourceWorkbenchSessionId(binding) : null
+
   const body = (
     <div className="flex h-full min-h-0 flex-col">
+      {multiAside && binding && primaryId ? (
+        <AsideSwitcher
+          binding={binding}
+          activeId={sessionId}
+          primaryId={primaryId}
+          onSelect={(next) =>
+            // The primary aside is the default, so clearing the override (rather
+            // than pinning its id) keeps the resource on the plain derived path.
+            setSessionOverride(resourceKey, next === primaryId ? null : next)
+          }
+        />
+      ) : null}
       <div className="flex h-9 shrink-0 items-center justify-end border-b px-2">
         <Button
           type="button"

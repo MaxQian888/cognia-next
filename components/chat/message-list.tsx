@@ -28,6 +28,7 @@ import { useJumpFlash } from "@/hooks/chat/use-jump-flash"
 import { useJumpHistory } from "@/hooks/chat/use-jump-history"
 import { JumpFlash } from "./jump-flash"
 import { ConversationJumpPill, resolveJumpPillMode } from "./conversation-jump-pill"
+import { MessageSelectionToolbar } from "./message-selection-toolbar"
 import { useAppShortcut } from "@/hooks/shortcuts/use-app-shortcut"
 import { usePlatform } from "@/hooks/use-platform"
 import { useElementWidth } from "@/hooks/use-element-width"
@@ -98,6 +99,14 @@ export function MessageList({
 }: Props) {
   const lastIndex = messages.length - 1
   const sessionId = useChatStore((s) => s.activeSessionId)
+  // The conversation a selection here belongs to. Prefer the messages' own
+  // session over the focused one so a split pane opens asides on ITS thread;
+  // an aside cannot own an aside, so the toolbar stays out of one.
+  const messageSessionId = (messages[0] as { metadata?: { sessionId?: string } } | undefined)
+    ?.metadata?.sessionId
+  const selectionSessionId = messageSessionId ?? sessionId
+  const supportsSelectionAside =
+    Boolean(selectionSessionId) && !selectionSessionId!.startsWith("resource-workbench:")
 
   // Split view mounts one MessageList per pane, and the shortcut runtime keys
   // its registry by id (last mount wins) — so without this gate the split pane
@@ -709,6 +718,13 @@ export function MessageList({
                 )}
               </div>
             </div>
+            {/* Selecting text in the transcript and asking about THAT. Scoped
+                to `contentRef` so a selection that runs into the composer or
+                the timeline rail is not treated as a question about a message.
+                Self-hides with no selection. */}
+            {supportsSelectionAside && (
+              <MessageSelectionToolbar sessionId={selectionSessionId!} containerRef={contentRef} />
+            )}
             {/* Outside the scroller on purpose — see ConversationJumpPill. */}
             <ConversationJumpPill
               mode={resolveJumpPillMode({

@@ -21,6 +21,7 @@ import {
   FocusIcon,
   PanelRightCloseIcon,
   PanelRightIcon,
+  PanelRightOpenIcon,
   MoreHorizontalIcon,
   PinIcon,
   RotateCcwIcon,
@@ -49,6 +50,7 @@ import { ChatScopeProvider } from "@/components/chat/chat-scope-provider"
 import { useResourceWorkbenchSession } from "@/hooks/chat/use-resource-workbench-session"
 import { contextPanelRegistry } from "@/lib/context-workbench/panel-registry"
 import {
+  notifyActiveContextHostVisibility,
   publishActiveContextPanels,
   setActiveContextForHost,
   touchActiveContextHost,
@@ -57,6 +59,7 @@ import { PluginExtensionSlot } from "@/components/plugins/plugin-extension-slot"
 import { PluginSurface } from "@/components/plugins/plugin-surface"
 import {
   CONTEXT_WORKBENCH_DEFAULT_WIDTH,
+  CONTEXT_WORKBENCH_MIN_WIDTH,
   useContextWorkbenchStore,
   type ContextWorkbenchLayout,
 } from "@/stores/context-workbench/context-workbench-store"
@@ -65,12 +68,15 @@ import { workbenchRailLayoutOf } from "@/components/shell/use-workbench-rail-lay
 import { isWorkbenchActivityHidden, workbenchRailIndex } from "@/lib/shell/workbench-rail"
 import {
   getContextResourceKey,
+  type ContextActivity,
   type ContextPanelDefinition,
   type ContextPanelMode,
   type ContextResource,
   type ContextWorkbenchMode,
   type ContextWorkbenchPlacement,
 } from "@/types/context-workbench"
+import { WORKBENCH_RAIL_WIDTH_PX } from "@/types/shell/workbench-rail"
+import { PANEL_SNAP_MAGNET_PX, snapPanelSize } from "@/lib/ui/panel-snap"
 
 interface ContextWorkbenchValue {
   workbenchInstanceId: string
@@ -174,6 +180,29 @@ export interface ContextWorkbenchProps {
    */
   onEnsureVisible?: () => void
   /**
+   * The host's container is shrunk to the activity rail: draw the rail, drop the
+   * panel body. The persistent-minibar state.
+   *
+   * Host-driven rather than read from `layout.mode`, because "is the right rail
+   * open" is one global fact per host while `layout` is keyed per *resource* —
+   * routing it through the store would make the dock re-open and re-close as the
+   * user moved between artifact tabs. Hosts that have no container of their own
+   * to shrink (the project editor) omit this and keep using the per-scope
+   * `mode: "collapsed"`, which this merges with rather than replaces.
+   *
+   * The body is unmounted, not hidden: the embedded browser holds a
+   * process-wide webview lease released only on unmount, so a rail that kept its
+   * panels alive would lock every other surface out of the webview.
+   */
+  railOnly?: boolean
+  /**
+   * Activity whose rail button should carry an unread dot. Hosts pass the
+   * activity owning whatever they would have revealed — the chat dock's fresh
+   * artifact lands on `preview-run`. Taken as a prop so the shared workbench
+   * never has to import a host's store to learn it has something to announce.
+   */
+  attentionActivity?: ContextActivity
+  /**
    * A panel wants the host's shell at a given width. Hosts that own the
    * workbench width themselves (`manageOwnWidth={false}` — e.g. the chat dock,
    * whose width belongs to the outer resizable panel) use this to resize their
@@ -239,7 +268,10 @@ export interface ContextWorkbenchProps {
 
 export interface ContextWorkbenchMobileSheetProps extends Omit<
   ContextWorkbenchProps,
-  "placement" | "className" | "manageOwnWidth"
+  // `railOnly` too: a Sheet has no container to shrink, and a rail-only Sheet
+  // would be a full-height modal showing nothing but six icons. The state is
+  // meaningless here, so it is a compile error rather than a runtime surprise.
+  "placement" | "className" | "manageOwnWidth" | "railOnly"
 > {
   open: boolean
   onOpenChange: (open: boolean) => void
@@ -309,6 +341,8 @@ export function ContextWorkbench({
   onExitFocus,
   onCollapse,
   onEnsureVisible,
+  railOnly = false,
+  attentionActivity,
   onModeWidthHint,
   headerLeading,
   resolvedMode,
@@ -347,20 +381,56 @@ export function ContextWorkbench({
   const storedRailLayout = useSettingsStore((state) => state.settings?.workbenchRail)
   const railLayout = useMemo(() => workbenchRailLayoutOf(storedRailLayout), [storedRailLayout])
 
+  /**
+   * The rail is showing but the panel body is not — from either of the two
+   * routes into that state:
+   *
+   * - `railOnly`, the host shrinking its own container to the rail (the chat
+   *   dock, Canvas, the workflow editor). One global fact per host.
+   * - `layout.mode === "collapsed"`, the per-scope mode used by hosts that have
+   *   no container of their own to shrink (the project editor).
+   *
+   * Everything downstream — whether the body renders, what the rail's bottom
+   * button does, whether re-clicking the active activity closes or opens —
+   * asks this rather than either source, so the two can never disagree.
+   */
+  const bodyHidden = railOnly || layout.mode === "collapsed"
+
   // Held in a ref so the host registration only churns on resource/scope
   // changes: a host passing an inline arrow would otherwise re-register on
   // every render, and one that memoised it would leave a stale closure behind.
   const ensureVisibleRef = useRef(onEnsureVisible)
+  const collapseRef = useRef(onCollapse)
+  // `bodyHidden` too: the registration below hands out a closure that has to
+  // report the *current* value, and re-registering to refresh it would restamp
+  // this host as the active one — a collapse is the opposite of claiming focus.
+  const bodyHiddenRef = useRef(bodyHidden)
   useEffect(() => {
     ensureVisibleRef.current = onEnsureVisible
-  }, [onEnsureVisible])
+    collapseRef.current = onCollapse
+    bodyHiddenRef.current = bodyHidden
+  }, [bodyHidden, onCollapse, onEnsureVisible])
   useEffect(
     () =>
       setActiveContextForHost(scopeKey, resource, {
         ensureVisible: () => ensureVisibleRef.current?.(),
+        // Only hosts that own a container advertise a collapse; the rest let
+        // `setActiveWorkbenchMode` fall through to the per-scope mode.
+        collapse: onCollapse ? () => collapseRef.current?.() : undefined,
+        isVisible: () => !bodyHiddenRef.current,
       }),
-    [resource, scopeKey]
+    // `onCollapse` by identity only decides whether the capability exists at
+    // all — the call itself goes through the ref, so an inline arrow does not
+    // churn the registration.
+    [resource, scopeKey, Boolean(onCollapse)] // eslint-disable-line react-hooks/exhaustive-deps
   )
+
+  // Visibility is read through a ref, so a flip has to be announced explicitly.
+  // A narrow notify rather than a re-registration: see the note on
+  // `notifyActiveContextHostVisibility`.
+  useEffect(() => {
+    notifyActiveContextHostVisibility(scopeKey)
+  }, [bodyHidden, scopeKey])
 
   useEffect(() => {
     let cancelled = false
@@ -589,9 +659,29 @@ export function ContextWorkbench({
     setMode(scopeKey, "collapsed")
   }
 
+  /**
+   * The inverse of {@link handleCollapse}: put the body back.
+   *
+   * Hosts that shrink their own container own the width, so ask them; the rest
+   * come out of the per-scope collapsed mode. Reaching for `layout.mode` alone
+   * would have left the rail-only hosts stuck — their mode was never `collapsed`
+   * to begin with.
+   */
+  const handleExpand = () => {
+    if (onEnsureVisible) onEnsureVisible()
+    if (layout.mode === "collapsed") setMode(scopeKey, "narrow")
+  }
+
   const handleActivate = (panel: ContextPanelDefinition, source: "rail" | "tab" = "tab") => {
     touchActiveContextHost(scopeKey)
-    if (layout.activePanelId === panel.id && layout.mode !== "collapsed") {
+    if (source === "rail" && bodyHidden) {
+      // From the rail there is nothing to toggle shut — every click opens,
+      // including a click on whatever was last in front. It then falls through
+      // to the normal activation below rather than returning early: the body is
+      // unmounted while rail-only, so re-opening really is a remount and the
+      // panel's `onRestore` has to fire for it.
+      handleExpand()
+    } else if (layout.activePanelId === panel.id && !bodyHidden) {
       // Activity-bar convention (VS Code): clicking the ALREADY-ACTIVE
       // activity toggles the surface closed. Only for the rail — re-clicking
       // the current header/group tab must stay inert.
@@ -630,19 +720,48 @@ export function ContextWorkbench({
   const handleResizeStart = (event: ReactPointerEvent<HTMLDivElement>) => {
     event.preventDefault()
     const startX = event.clientX
-    const startWidth = layout.width
+    // Dragging out of the rail starts from the rail's own width, not from the
+    // remembered `layout.width` — otherwise the first pixel of the gesture
+    // teleports the edge out to wherever the panel was last left.
+    const startWidth = bodyHidden ? WORKBENCH_RAIL_WIDTH_PX : layout.width
+    const wasCollapsed = bodyHidden
     // Attribute the drag to whatever is in front, so the width comes back with
     // that panel. Read once at pointer-down: the active panel cannot change
     // mid-drag (the pointer is captured by the separator), and re-reading per
     // move event would only risk writing the tail of one panel's drag onto the
     // next panel's memory.
     const draggedPanelId = layout.activePanelId ?? undefined
+    // The remembered width to restore when the drag opens the rail. Read at
+    // pointer-down because the moves below overwrite `layout.width` as they go.
+    const expandTo = layout.panelWidths[draggedPanelId ?? ""] ?? layout.width
+    let lastWidth = startWidth
     const handleMove = (moveEvent: PointerEvent) => {
-      setWidth(scopeKey, startWidth + startX - moveEvent.clientX, draggedPanelId)
+      lastWidth = startWidth + startX - moveEvent.clientX
+      // Only track the pointer once the drag has actually opened the panel;
+      // while it is still inside the rail there is no body to size, and writing
+      // sub-rail widths would clamp them straight back to the minimum.
+      if (!wasCollapsed || lastWidth >= CONTEXT_WORKBENCH_MIN_WIDTH) {
+        setWidth(scopeKey, lastWidth, draggedPanelId)
+      }
     }
     const handleUp = () => {
       window.removeEventListener("pointermove", handleMove)
       window.removeEventListener("pointerup", handleUp)
+      // Snap in px: this host sizes the workbench itself, so the magnet radius
+      // is already a physical distance and needs no conversion.
+      const snapped = snapPanelSize(lastWidth, {
+        presets: [CONTEXT_WORKBENCH_DEFAULT_WIDTH],
+        floor: CONTEXT_WORKBENCH_MIN_WIDTH,
+        expandTo,
+        wasCollapsed,
+        magnet: PANEL_SNAP_MAGNET_PX,
+      })
+      if (snapped.kind === "collapsed") {
+        if (!wasCollapsed) handleCollapse()
+        return
+      }
+      setWidth(scopeKey, snapped.size, draggedPanelId)
+      if (wasCollapsed) handleExpand()
     }
     window.addEventListener("pointermove", handleMove)
     window.addEventListener("pointerup", handleUp)
@@ -724,7 +843,6 @@ export function ContextWorkbench({
           // A phone can't spare 48px of its width for a vertical rail, so the
           // sheet stacks: rail across the top, panel body beneath it.
           placement === "mobile-sheet" && "w-full flex-col border-l-0",
-          layout.mode === "collapsed" && "w-12",
           className,
           // Focus used to snap straight to a full-screen takeover. Zooming it in
           // (same easing contract as Dialog) keeps the jump legible; the global
@@ -738,13 +856,17 @@ export function ContextWorkbench({
           // Non-interactive on the way out — it is no longer a modal surface.
           focusExiting && "pointer-events-none animate-out fade-out-0 zoom-out-95"
         )}
+        // Rail-only used to be a `w-12` class beside the width style — a second
+        // copy of the rail's measurement that could drift from the one the host
+        // hands its panel as `collapsedSize`. Both now read the constant.
+        // `manageOwnWidth={false}` hosts still get no width at all: theirs is
+        // the outer resizable panel's to set.
         style={
-          !manageOwnWidth ||
-          layout.mode === "collapsed" ||
-          focusTakeover ||
-          placement === "mobile-sheet"
+          !manageOwnWidth || focusTakeover || placement === "mobile-sheet"
             ? undefined
-            : { width: layout.mode === "wide" ? "clamp(640px, 50%, 960px)" : layout.width }
+            : bodyHidden
+              ? { width: WORKBENCH_RAIL_WIDTH_PX }
+              : { width: layout.mode === "wide" ? "clamp(640px, 50%, 960px)" : layout.width }
         }
         data-mode={layout.mode}
         data-placement={placement}
@@ -756,10 +878,11 @@ export function ContextWorkbench({
         onFocusCapture={() => touchActiveContextHost(scopeKey)}
         onPointerDownCapture={() => touchActiveContextHost(scopeKey)}
       >
-        {manageOwnWidth &&
-        placement !== "mobile-sheet" &&
-        layout.mode !== "collapsed" &&
-        layout.mode !== "focus" ? (
+        {/* Kept mounted while rail-only: dragging the edge outward is how the
+            minibar is opened, so disabling the separator there would leave the
+            rail with no drag affordance at all. Focus is still exempt — that
+            surface has no edge to grab. */}
+        {manageOwnWidth && placement !== "mobile-sheet" && layout.mode !== "focus" ? (
           <div
             role="separator"
             aria-orientation="vertical"
@@ -782,9 +905,15 @@ export function ContextWorkbench({
               "flex shrink-0 items-center gap-1 bg-muted/30",
               railIsHorizontal
                 ? "h-12 w-full overflow-x-auto border-b px-2"
-                : "w-12 flex-col border-r py-2"
+                : "flex-col border-r py-2"
             )}
+            // Inline width rather than `w-12`: the rail is now also what a
+            // collapsed host shrinks *to*, so its width has to be the same
+            // number the host hands its panel as `collapsedSize`. A Tailwind
+            // class and a JS constant would be two sources for one measurement.
+            style={railIsHorizontal ? undefined : { width: WORKBENCH_RAIL_WIDTH_PX }}
             aria-label={t("contextWorkbench.activityRailLabel")}
+            data-rail-only={bodyHidden || undefined}
             data-testid="context-workbench-activity-rail"
             onKeyDown={handleActivityKeyDown}
           >
@@ -828,6 +957,17 @@ export function ContextWorkbench({
                         <Badge className="absolute -right-1 -top-1 z-10 h-4 min-w-4 px-1 text-[9px]">
                           {badge > 99 ? "99+" : badge}
                         </Badge>
+                      ) : attentionActivity === activity ? (
+                        // A countless "something arrived" marker, for hosts that
+                        // know they have news but not how much of it — the chat
+                        // dock's fresh artifact. Yields to a real badge rather
+                        // than stacking on it, so one glyph never sits on
+                        // another in a 48px column.
+                        <span
+                          data-testid="context-workbench-activity-attention"
+                          aria-hidden
+                          className="absolute -right-0.5 -top-0.5 z-10 size-2 rounded-full bg-primary"
+                        />
                       ) : null}
                     </Button>
                   </TooltipTrigger>
@@ -860,27 +1000,43 @@ export function ContextWorkbench({
                   {t("contextWorkbench.actions.pinHint")}
                 </TooltipContent>
               </Tooltip>
+              {/* Flips with the surface. On a persistent rail the panel body is
+                  already shut, so a second "collapse" would be inert — the one
+                  action left is to put it back. */}
               <Tooltip>
                 <TooltipTrigger asChild>
                   <Button
                     type="button"
                     size="icon-sm"
                     variant="ghost"
-                    aria-label={t("contextWorkbench.actions.collapse")}
-                    onClick={handleCollapse}
+                    aria-label={t(
+                      bodyHidden
+                        ? "contextWorkbench.actions.expand"
+                        : "contextWorkbench.actions.collapse"
+                    )}
+                    data-testid="context-workbench-collapse-toggle"
+                    onClick={bodyHidden ? handleExpand : handleCollapse}
                   >
-                    <PanelRightCloseIcon className="size-4" />
+                    {bodyHidden ? (
+                      <PanelRightOpenIcon className="size-4" />
+                    ) : (
+                      <PanelRightCloseIcon className="size-4" />
+                    )}
                   </Button>
                 </TooltipTrigger>
                 <TooltipContent side={railIsHorizontal ? "bottom" : "left"}>
-                  {t("contextWorkbench.actions.collapse")}
+                  {t(
+                    bodyHidden
+                      ? "contextWorkbench.actions.expand"
+                      : "contextWorkbench.actions.collapse"
+                  )}
                 </TooltipContent>
               </Tooltip>
             </div>
           </nav>
         </TooltipProvider>
 
-        {layout.mode !== "collapsed" ? (
+        {!bodyHidden ? (
           <div className="flex min-w-0 flex-1 flex-col" inert={false}>
             <PluginExtensionSlot
               point="sidebar.right.top"

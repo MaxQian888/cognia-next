@@ -165,6 +165,7 @@ interface ChatStateLike {
   setSessionStatus: jest.Mock
   setSessionError: jest.Mock
   setSessionDiagnostic: jest.Mock
+  setSessionActiveBranch: jest.Mock
   enqueueSteer: jest.Mock
   clearSteerQueue: jest.Mock
   pushApproval: jest.Mock
@@ -217,6 +218,7 @@ const chatState: ChatStateLike = {
     void id
     chatState.setError(diagnostic?.message ?? null)
   }),
+  setSessionActiveBranch: jest.fn(),
   enqueueSteer: jest.fn((id: string, entry: ChatStateLike["steerQueue"][number]) => {
     void id
     chatState.steerQueue.push(entry)
@@ -318,6 +320,7 @@ beforeEach(() => {
   chatState.setSessionStatus.mockClear()
   chatState.setSessionError.mockClear()
   chatState.setSessionDiagnostic.mockClear()
+  chatState.setSessionActiveBranch.mockClear()
   chatState.enqueueSteer.mockClear()
   chatState.clearSteerQueue.mockClear()
   chatState.setActiveSession.mockClear()
@@ -451,7 +454,11 @@ describe("useTeamChat — actions", () => {
     expect(truncateAfterMock).not.toHaveBeenCalled()
   })
 
-  it("editAndResend truncates from messageId and resends", async () => {
+  it("editAndResend keeps the original team turn as a sibling branch", async () => {
+    chatState.messages = [
+      { id: "m-1", role: "user", parts: [{ type: "text", text: "original" }] },
+      { id: "a-1", role: "assistant", parts: [{ type: "text", text: "reply" }] },
+    ]
     getSessionMock.mockResolvedValueOnce({
       id: "team-1",
       kind: "team",
@@ -470,7 +477,28 @@ describe("useTeamChat — actions", () => {
     await act(async () => {
       await result.current.editAndResend("m-1", "edited")
     })
-    expect(truncateAfterMock).toHaveBeenCalledWith("team-1", "m-1", { inclusive: true })
+
+    expect(truncateAfterMock).not.toHaveBeenCalled()
+    const branchedHistory = persistMessagesMock.mock.calls[0]?.[1] as Array<{
+      id: string
+      metadata?: Record<string, unknown>
+    }>
+    expect(branchedHistory.find((message) => message.id === "m-1")?.metadata).toMatchObject({
+      branchGroupId: "edit::m-1",
+      branchIndex: 0,
+    })
+    expect(branchedHistory.find((message) => message.id === "a-1")?.metadata).toMatchObject({
+      branchOwnerId: "m-1",
+    })
+    const resentHistory = persistMessagesMock.mock.calls.at(-1)?.[1] as Array<{
+      id: string
+      metadata?: Record<string, unknown>
+    }>
+    expect(resentHistory.at(-1)?.metadata).toMatchObject({
+      branchGroupId: "edit::m-1",
+      branchIndex: 1,
+    })
+    expect(chatState.setSessionActiveBranch).toHaveBeenCalledWith("team-1", "edit::m-1", "u1")
   })
 
   it("respondToApproval allow forwards to approveTool", async () => {

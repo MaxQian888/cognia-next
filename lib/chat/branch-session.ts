@@ -30,10 +30,28 @@ import type { UIMessage } from "ai"
 import type { ChatSession } from "@cognia/agent-config-types"
 import { getDb } from "@/lib/db/schema"
 import { getSession } from "@/lib/db/sessions"
+import { resolveScopeProjectId } from "@/lib/db/project-scope"
 import { persistMessages, invalidatePersistSnapshot } from "@/lib/db/messages"
 import { extractPlainText } from "@/lib/inbox/extract-plain-text"
 
 export type BranchMode = "direct" | "summary"
+
+/**
+ * Character budget for a direct branch's one-shot transcript seed.
+ *
+ * This was previously unbounded, and it is the one seed that rides on a
+ * *stored* row: `branchSeed.content` lives on the `sessions` record, which the
+ * sidebar reads in full via `listScopedSessions().toArray()` on every render.
+ * Branching mid-way through a long conversation therefore wrote a multi-megabyte
+ * string into a row on the sidebar's hot path, and injected all of it as
+ * `appendSystemPrompt` on the first send.
+ *
+ * Matches `MAX_TRANSCRIPT_CHARS` in `lib/ai/generation/summarizer.ts` — the same
+ * ~4-chars-per-token proxy, chosen so the two paths a branch can take cost the
+ * same ceiling. Compare `ASIDE_CONTEXT_MAX_CHARS`, which is far tighter because
+ * it rides on *every* aside send rather than once.
+ */
+export const BRANCH_SEED_MAX_CHARS = 24_000
 
 export interface BranchSessionParams {
   /** Source session id. */
@@ -51,6 +69,20 @@ export interface BranchSessionParams {
    * to seed the branch with. Ignored for direct branches.
    */
   summaryText?: string
+  /**
+   * Cherry-pick: carry only these message ids across, instead of everything up
+   * to the cut-off.
+   *
+   * For a long thread where the useful part is three conclusions scattered
+   * through forty turns — taking the whole prefix would drag the dead ends
+   * along, and the model would weigh them equally. Ids outside the kept prefix
+   * are ignored, so a selection can never smuggle in content from *after* the
+   * branch point.
+   *
+   * Absent (the default) keeps the existing behaviour: everything up to and
+   * including `messageId`.
+   */
+  pickedMessageIds?: readonly string[]
 }
 
 function newMessageId(): string {
@@ -83,6 +115,45 @@ export function renderTranscript(messages: UIMessage[]): string {
 }
 
 /**
+ * Render `messages` as a transcript that fits {@link BRANCH_SEED_MAX_CHARS}.
+ *
+ * Trims from the OLDEST end, dropping whole messages rather than cutting one
+ * mid-sentence — the same rule `buildAsideContext` uses, and for the same
+ * reason: a half message reads as though the speaker was interrupted, which the
+ * model then imitates. The turns nearest the branch point are the ones the user
+ * is continuing from, so they are the ones that must survive.
+ *
+ * Returns the rendered seed plus whether anything was dropped.
+ *
+ * `truncated` is **not surfaced anywhere yet** — the only production caller
+ * (`buildChildRow`) destructures `content` alone. It is kept because the drop is
+ * otherwise invisible: a verbatim branch silently loses its earliest turns, and
+ * the branch dialog is where "a summary branch would carry that context better"
+ * belongs. Wiring it needs a string in `chat.branch.direct`, which does not
+ * exist. Pinned by the tests either way, so the trimming rule cannot regress
+ * while it waits.
+ */
+export function renderBranchSeed(
+  messages: UIMessage[],
+  maxChars: number = BRANCH_SEED_MAX_CHARS
+): { content: string; truncated: boolean } {
+  let kept = messages
+  let rendered = renderTranscript(kept)
+  if (rendered.length <= maxChars) return { content: rendered, truncated: false }
+
+  while (rendered.length > maxChars && kept.length > 1) {
+    kept = kept.slice(1)
+    rendered = renderTranscript(kept)
+  }
+  // A single message over budget is still better truncated than dropped — it is
+  // the turn immediately before the branch point.
+  return {
+    content: rendered.length > maxChars ? rendered.slice(-maxChars) : rendered,
+    truncated: true,
+  }
+}
+
+/**
  * Clone the kept messages for the new session: fresh ids, and the
  * regeneration-branch bookkeeping (`branchGroupId` / `branchIndex`) plus the
  * transient `sessionId` mirror dropped so the copy reads as a clean linear
@@ -105,6 +176,36 @@ function cloneMessages(kept: UIMessage[]): UIMessage[] {
 }
 
 /**
+ * Session kinds that only exist inside a host surface. `isEmbeddedSession`
+ * treats each as hidden from the conversation rail, global search, plugin
+ * enumeration and export, and each is reachable only through the surface that
+ * owns its `surfaceBinding`.
+ *
+ * A branch is a standalone conversation and gets neither, so copying the kind
+ * across produced a row that every list filtered out AND no workbench could
+ * render — reachable from nothing, deletable from nowhere.
+ */
+const EMBEDDED_KINDS: ReadonlySet<ChatSession["kind"]> = new Set([
+  "resource-workbench",
+  "subagent",
+  "workflow-editor",
+] as const)
+
+/**
+ * Title for a branch of `parent`, without stacking suffixes.
+ *
+ * Branching a branch used to yield "X (branch) (branch) (branch)"; the depth is
+ * already carried by `parentSessionId`, and the sidebar truncates long titles,
+ * so the repetition cost readability and told the user nothing.
+ */
+export function branchTitle(parentTitle: string): string {
+  const match = /^(.*) \(branch(?: (\d+))?\)$/.exec(parentTitle)
+  if (!match) return `${parentTitle} (branch)`
+  const [, stem, ordinal] = match
+  return `${stem} (branch ${Number(ordinal ?? "1") + 1})`
+}
+
+/**
  * Build the child session row, inheriting every per-session knob the parent
  * carried (so the branch behaves identically) plus the branching lineage.
  * Constructed directly rather than via `createSession` because that helper
@@ -113,14 +214,30 @@ function cloneMessages(kept: UIMessage[]): UIMessage[] {
 function buildChildRow(
   parent: ChatSession,
   branchedFromMessageId: string,
-  kind: BranchMode
+  kind: BranchMode,
+  projectId: string
 ): ChatSession {
   const now = Date.now()
   return {
     id: newSessionId(),
-    title: `${parent.title} (branch)`,
+    // Load-bearing, not inherited-for-tidiness. `listScopedSessions` reads
+    // through the `[projectId+updatedAt]` compound index and Dexie omits any
+    // row whose key path contains `undefined` — so a branch written without a
+    // workspace is not merely mis-scoped, it is absent from the sidebar
+    // entirely, and from the `deleteProjectCascade` sweep with it. The caller
+    // resolves the value (this stays synchronous); it inherits the parent's
+    // workspace rather than whatever is active, so branching a conversation
+    // from another workspace files the branch beside its parent.
+    projectId,
+    title: branchTitle(parent.title),
     titleAuto: parent.titleAuto,
-    kind: parent.kind,
+    // Normalised, not inherited. Branching a sidechat used to mint a
+    // `resource-workbench` row with no `visibility` and no `surfaceBinding` —
+    // filtered out of every list by `isEmbeddedSession`, and renderable by no
+    // workbench because nothing bound it. `visibility` / `surfaceBinding` /
+    // `surfaceBindingKey` are deliberately absent below, so the branch is a
+    // plain standalone conversation however it was started.
+    kind: parent.kind && EMBEDDED_KINDS.has(parent.kind) ? "direct" : parent.kind,
     characterId: parent.characterId,
     teamId: parent.teamId,
     disabledSkillIds: parent.disabledSkillIds,
@@ -164,9 +281,20 @@ export async function branchSessionAtMessage(params: BranchSessionParams): Promi
   if (cutIdx < 0) {
     throw new Error(`Cannot branch: message ${messageId} not in the visible thread`)
   }
-  const kept = visibleMessages.slice(0, cutIdx + 1)
+  const prefix = visibleMessages.slice(0, cutIdx + 1)
+  // Cherry-pick narrows the prefix; it can never widen it. Filtering the prefix
+  // rather than the whole thread is what guarantees a selection cannot carry
+  // content from after the branch point into the child.
+  const picked = params.pickedMessageIds ? new Set(params.pickedMessageIds) : null
+  const kept = picked ? prefix.filter((m) => picked.has(m.id)) : prefix
+  if (kept.length === 0) {
+    throw new Error("Cannot branch: nothing selected before the branch point")
+  }
 
-  const child = buildChildRow(source, messageId, mode)
+  // Inherit the parent's workspace; only a parent that predates the v131
+  // backfill can be missing one, in which case fall back to the active scope.
+  const projectId = source.projectId ?? (await resolveScopeProjectId())
+  const child = buildChildRow(source, messageId, mode, projectId)
 
   let seededMessages: UIMessage[]
 
@@ -187,7 +315,11 @@ export async function branchSessionAtMessage(params: BranchSessionParams): Promi
   } else {
     // direct
     seededMessages = cloneMessages(kept)
-    const isTail = cutIdx === visibleMessages.length - 1
+    // A cherry-pick never reuses the SDK fork, even at the tail: the fork
+    // reproduces the parent's context in FULL, which is the opposite of what
+    // was asked for — the child would show three messages while the model
+    // silently remembered all forty.
+    const isTail = cutIdx === visibleMessages.length - 1 && !picked
     if (isTail && source.sdkSessionId) {
       // The SDK fork reproduces the parent's full context, which — at the tail —
       // is exactly the pre-branch context. Cheapest correct option.
@@ -195,8 +327,8 @@ export async function branchSessionAtMessage(params: BranchSessionParams): Promi
     } else {
       // Mid-conversation (or no SDK session yet): re-establish the truncated
       // context explicitly on the first send.
-      const transcript = renderTranscript(kept)
-      if (transcript) child.branchSeed = { kind: "transcript", content: transcript }
+      const { content } = renderBranchSeed(kept)
+      if (content) child.branchSeed = { kind: "transcript", content }
     }
   }
 

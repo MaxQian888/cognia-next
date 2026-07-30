@@ -18,6 +18,7 @@ import type { UIMessage } from "ai"
 interface BranchMeta {
   branchGroupId?: string
   branchIndex?: number
+  branchOwnerId?: string
   [key: string]: unknown
 }
 
@@ -68,6 +69,76 @@ export function tagBranchSiblings(
  */
 export function teamBranchGroupId(anchorId: string, senderId: string, occurrence: number): string {
   return `${anchorId}::${senderId}::${occurrence}`
+}
+
+/** Branch-group key for the variants of an edited user message. */
+export function editBranchGroupId(originalMessageId: string): string {
+  return `edit::${originalMessageId}`
+}
+
+export interface TagEditSiblingResult {
+  /** The full history with the original tagged and its tail re-parented. */
+  merged: UIMessage[]
+  /** Group the original and its replacement share. */
+  groupId: string
+  /** `branchIndex` the replacement should take. */
+  nextIndex: number
+}
+
+/**
+ * Turn an in-place edit of a user message into a non-destructive branch.
+ *
+ * Editing used to `truncateAfter(..., { inclusive: true })` — the original
+ * question and every reply under it were deleted from Dexie outright, so
+ * "reword the question" was an irreversible way to lose the thread. Regenerate
+ * already kept its alternatives; this brings editing in line.
+ *
+ * Two stamps do it:
+ *   • the original user message joins a sibling group, so the replacement can
+ *     be flipped between via the BranchNavigator;
+ *   • everything after it is stamped `branchOwnerId = <original id>`, so
+ *     `selectVisibleMessages` hides that tail whenever the original is not the
+ *     selected sibling.
+ *
+ * Messages that already carry a `branchOwnerId` keep it: they hang off a
+ * *nearer* ancestor, and the transitive rule in `selectVisibleMessages` walks
+ * up from there. Overwriting would flatten a nested edit onto the outer one.
+ */
+export function tagEditSibling(
+  messages: readonly UIMessage[],
+  editedIdx: number
+): TagEditSiblingResult {
+  const original = messages[editedIdx]
+  const meta = ((original as { metadata?: BranchMeta }).metadata ?? {}) as BranchMeta
+  const groupId =
+    typeof meta.branchGroupId === "string" ? meta.branchGroupId : editBranchGroupId(original.id)
+
+  // Highest index already used in this group — a message may be edited many
+  // times, and each variant needs its own slot.
+  let maxIndex = -1
+  for (const m of messages) {
+    const mm = ((m as { metadata?: BranchMeta }).metadata ?? {}) as BranchMeta
+    if (mm.branchGroupId === groupId) maxIndex = Math.max(maxIndex, mm.branchIndex ?? 0)
+  }
+  const originalIndex =
+    typeof meta.branchIndex === "number" ? meta.branchIndex : Math.max(maxIndex, 0)
+
+  const merged = messages.map((m, i) => {
+    if (i < editedIdx) return m
+    const mm = { ...(((m as { metadata?: BranchMeta }).metadata ?? {}) as BranchMeta) }
+    if (i === editedIdx) {
+      return {
+        ...m,
+        metadata: { ...mm, branchGroupId: groupId, branchIndex: originalIndex },
+      } as UIMessage
+    }
+    // The tail now belongs to the original variant — unless it already hangs
+    // off a nearer sibling.
+    if (mm.branchOwnerId === undefined) mm.branchOwnerId = original.id
+    return { ...m, metadata: mm } as UIMessage
+  })
+
+  return { merged, groupId, nextIndex: Math.max(maxIndex, originalIndex) + 1 }
 }
 
 /** senderId a team assistant message was stamped with, or "assistant". */

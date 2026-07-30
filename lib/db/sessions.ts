@@ -333,6 +333,25 @@ export async function forkSessionFromParent(parentId: string): Promise<ChatSessi
   })
 }
 
+/**
+ * Branches derived from `parentId`, newest first.
+ *
+ * The reverse of `ChatSession.parentSessionId`, which the v81 index exists for
+ * and which nothing queried until now: lineage was visible only from a child
+ * looking up. A parent had no idea it had been branched, so a conversation you
+ * had explored three ways looked identical to one you had never touched.
+ */
+export async function listSessionBranches(parentId: string): Promise<ChatSession[]> {
+  const rows = await getDb().sessions.where("parentSessionId").equals(parentId).toArray()
+  return rows.sort((a, b) => b.createdAt - a.createdAt)
+}
+
+/** How many branches were taken at `messageId` within `parentId`. */
+export async function countBranchesAtMessage(parentId: string, messageId: string): Promise<number> {
+  const rows = await listSessionBranches(parentId)
+  return rows.filter((s) => s.branchedFromMessageId === messageId).length
+}
+
 export async function deleteSession(id: string): Promise<void> {
   const db = getDb()
   await db.transaction(
@@ -345,6 +364,25 @@ export async function deleteSession(id: string): Promise<void> {
       // Capture message ids before the cascade so we can tombstone each one —
       // the companion sync mirrors these deletions to paired phones (v61).
       const msgIds = (await db.messages.where("sessionId").equals(id).primaryKeys()) as string[]
+
+      // Re-point this session's branches at their grandparent before the row
+      // goes. A branch is a standalone conversation — `direct` mode copies the
+      // messages outright, so it does not depend on its parent for anything —
+      // and deleting the parent must not take it down or strand it. Left alone,
+      // each child kept a `parentSessionId` pointing at a row that no longer
+      // exists, so its lineage chip degraded to "a deleted conversation" and
+      // the trail up the chain was cut. Uses the v81 `parentSessionId` index.
+      const doomed = await db.sessions.get(id)
+      const children = (await db.sessions
+        .where("parentSessionId")
+        .equals(id)
+        .primaryKeys()) as string[]
+      for (const childId of children) {
+        // `undefined` deletes the field, which is what a branch of a top-level
+        // conversation should end up with — not a pointer to nothing.
+        await db.sessions.update(childId, { parentSessionId: doomed?.parentSessionId })
+      }
+
       await db.messages.where("sessionId").equals(id).delete()
       await db.sessionUsage.where("sessionId").equals(id).delete()
       await db.sessions.delete(id)

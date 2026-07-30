@@ -121,6 +121,10 @@ import { DiagnosticCard, InlineError } from "@/components/error/diagnostic-card"
 import { createDiagnostic } from "@cognia/diagnostics"
 import type { CogniaDiagnostic } from "@cognia/diagnostics"
 import type { ChatSession, SendContent } from "@cognia/agent-config-types"
+import {
+  clearComputerUsePipState,
+  publishComputerUseActivity,
+} from "@/lib/automation/computer-use-pip"
 
 const mockSession = { id: "s1", title: "Test" } as unknown as ChatSession
 
@@ -140,6 +144,24 @@ function makeProps() {
 describe("ChatPane", () => {
   beforeEach(() => {
     consumePendingChatPromptMock.mockReset().mockReturnValue(null)
+    clearComputerUsePipState()
+  })
+
+  it("mounts live Computer Use activity inside the real chat pane", async () => {
+    publishComputerUseActivity("s1", "screenshot", {
+      ok: true,
+      output: "FRAME",
+      display_width_px: 1440,
+      display_height_px: 900,
+    })
+
+    render(<ChatPane {...makeProps()} />)
+
+    expect(await screen.findByRole("region", { name: "title" })).toBeInTheDocument()
+    expect(screen.getByRole("img", { name: "screenAlt" })).toHaveAttribute(
+      "src",
+      "data:image/png;base64,FRAME"
+    )
   })
 
   it("sends a queued configuration prompt once through the normal sender", async () => {

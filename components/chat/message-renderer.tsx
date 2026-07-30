@@ -65,6 +65,7 @@ import {
 import { parseTodoInput } from "@/lib/chat/todos"
 import type { AgentFlowMode } from "@/types/appearance"
 import { BranchNavigator } from "@/components/chat/branch-navigator"
+import { BranchPointMarker } from "@/components/chat/branch-children-chip"
 import { TriggerBadge } from "@/components/chat/trigger-badge"
 import { MemoryLearnedChip, MemoryRecalledChip } from "@/components/chat/memory-chips"
 import { isSourcesPart } from "@/lib/claude/parts-extensions"
@@ -86,6 +87,7 @@ import {
   LinkIcon,
   CornerUpLeftIcon,
   GitBranchIcon,
+  ScissorsIcon,
   ImageIcon,
   PencilIcon,
   RefreshCcwIcon,
@@ -112,9 +114,12 @@ import { loggers } from "@cognia/logging"
 import { PluginExtensionSlot } from "@/components/plugins/plugin-extension-slot"
 import { MessagePluginMenu } from "@/components/chat/message-plugin-menu"
 import { BranchDialog } from "@/components/chat/branch-dialog"
+import { TruncateFromDialog } from "@/components/chat/truncate-from-dialog"
 import { SteerStatusBadge } from "@/components/chat/message-parts/steer-status-badge"
 import { dispatchComposerAppend } from "@/components/chat/composer"
 import { useAsideTarget } from "@/components/context-workbench/aside-target"
+import { useLiveQuery } from "dexie-react-hooks"
+import { getSession } from "@/lib/db/sessions"
 import {
   getMessagePartRenderer,
   subscribeMessagePartRenderers,
@@ -198,6 +203,7 @@ function MessageRendererInner({
   const [shared, setShared] = useState(false)
   const [richCopied, setRichCopied] = useState(false)
   const [branchOpen, setBranchOpen] = useState(false)
+  const [truncateOpen, setTruncateOpen] = useState(false)
   const [cardOpen, setCardOpen] = useState(false)
   // Stable "now" for messages that carry no createdAt (impure Date read kept
   // out of render via a lazy state initializer).
@@ -209,6 +215,16 @@ function MessageRendererInner({
     (typeof (message as { metadata?: { sessionId?: unknown } }).metadata?.sessionId === "string"
       ? ((message as { metadata?: { sessionId?: string } }).metadata!.sessionId as string)
       : undefined) ?? activeSessionId
+  // Where "hand this back" should land. An aside hands back to the main
+  // conversation; a branch hands back to the one it was cut from. Both are
+  // "up one level", so one action covers both rather than two that differ only
+  // in how they resolve the target. Null in an ordinary top-level conversation.
+  const branchParentId = useLiveQuery(
+    async () =>
+      branchSessionId ? ((await getSession(branchSessionId))?.parentSessionId ?? null) : null,
+    [branchSessionId]
+  )
+  const handBackTargetId = asideTargetSessionId ?? branchParentId ?? null
   const { copied, copy } = useCopy({ logger: loggers.chat, scope: "chat" })
 
   const isBookmarked = useChatStore(
@@ -693,18 +709,41 @@ function MessageRendererInner({
 
             {branchSessionId && (
               <MessageAction
-                tooltip={t("branchTooltip")}
+                tooltip={isStreaming ? t("branchStreamingTooltip") : t("branchTooltip")}
                 label={t("branchLabel")}
                 onClick={() => setBranchOpen(true)}
+                // A branch snapshots the visible thread, so taking one mid-turn
+                // would copy a half-written reply and seed the child with an
+                // unfinished exchange. Matches the regenerate action below.
+                disabled={isStreaming}
               >
                 <GitBranchIcon className="size-3.5" />
               </MessageAction>
             )}
 
-            {/* Sidechat only: quote this into the MAIN conversation's composer.
-                Deliberately not auto-sent — an aside's conclusion is usually
-                worth rewording before it costs a turn in the main thread. */}
-            {asideTargetSessionId && (
+            {/* The only remaining destructive path. Editing a user message used
+                to delete its whole tail as a side effect; now that it branches
+                instead, removing messages has to be asked for explicitly. */}
+            {branchSessionId && (
+              <MessageAction
+                tooltip={t("truncateFromTooltip")}
+                label={t("truncateFromLabel")}
+                onClick={() => setTruncateOpen(true)}
+                disabled={isStreaming}
+              >
+                <ScissorsIcon className="size-3.5" />
+              </MessageAction>
+            )}
+
+            {/* Hand a conclusion back up.
+                Two shapes of the same gesture, so they share one action and one
+                mechanism: a sidechat hands back to the MAIN conversation, a
+                branch hands back to the conversation it was cut from. Lineage
+                used to be one-way for branches — the chip could carry you to
+                the parent to look, but nothing brought a finding with you.
+                Deliberately not auto-sent — a conclusion reached elsewhere is
+                usually worth rewording before it costs a turn up there. */}
+            {handBackTargetId && (
               <MessageAction
                 tooltip={t("bringBackTooltip")}
                 label={t("bringBackLabel")}
@@ -716,7 +755,7 @@ function MessageRendererInner({
                       .split("\n")
                       .map((line) => `> ${line}`)
                       .join("\n")}\n\n`,
-                    sessionId: asideTargetSessionId,
+                    sessionId: handBackTargetId,
                   })
                   toast.success(t("bringBackDone"))
                 }}
@@ -733,7 +772,18 @@ function MessageRendererInner({
               />
             )}
 
-            {message.role === "assistant" && <BranchNavigator message={message} className="mx-1" />}
+            {/* Both roles: assistant siblings come from regenerating, user
+                siblings from editing (which keeps the original rather than
+                deleting its tail). The navigator no-ops when the message has
+                no branch group, so no role gate is needed. */}
+            <BranchNavigator message={message} className="mx-1" />
+
+            {/* Self-hides unless a cross-session branch was cut here. Shows the
+                fork where the decision was made, rather than only in the
+                header — scrolling a long thread reveals where it diverged. */}
+            {branchSessionId && (
+              <BranchPointMarker sessionId={branchSessionId} messageId={message.id} />
+            )}
 
             {message.role === "assistant" && isLastAssistant && onRegenerate && (
               <MessageAction
@@ -759,6 +809,20 @@ function MessageRendererInner({
             messageId={message.id}
             open={branchOpen}
             onOpenChange={setBranchOpen}
+          />
+        )}
+
+        {/* Mounted only while open, unlike BranchDialog above. Every message row
+            renders one of these, and a Radix AlertDialog Root per row is enough
+            overhead to disturb the message list's scroll bookkeeping (it broke
+            the jump-pill's scroll-fencing tests). Same pattern as
+            QuoteCardDialog below. */}
+        {truncateOpen && branchSessionId && (
+          <TruncateFromDialog
+            sessionId={branchSessionId}
+            messageId={message.id}
+            open
+            onOpenChange={setTruncateOpen}
           />
         )}
 

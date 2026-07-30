@@ -142,8 +142,15 @@ export function MessageActionSheet({
       ? ((message.metadata as { sessionId?: string }).sessionId as string)
       : undefined
 
+  // A branch snapshots the visible thread, so taking one mid-turn would copy a
+  // half-written reply. Read the branch target's OWN slice — the sheet can be
+  // opened on a message belonging to a session that is not the active one.
+  const branchSessionStreaming = useChatStore((s) =>
+    branchSessionId ? s.sessions[branchSessionId]?.status === "streaming" : false
+  )
+
   const onBranch = () => {
-    if (!message || !branchSessionId) return
+    if (!message || !branchSessionId || branchSessionStreaming) return
     setBranchTarget({ sessionId: branchSessionId, messageId: message.id })
     onOpenChange(false)
   }
@@ -392,7 +399,7 @@ export function MessageActionSheet({
               icon={<GitBranchIcon className="size-4" />}
               label={t("branch")}
               onClick={onBranch}
-              disabled={busy}
+              disabled={busy || branchSessionStreaming}
               testid="message-action-branch"
             />
           )}

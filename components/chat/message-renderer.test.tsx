@@ -863,6 +863,20 @@ describe("branch action", () => {
     render(<MessageRenderer message={assistantMsg("br2")} />)
     expect(screen.queryByLabelText("branchTooltip")).toBeNull()
   })
+
+  it("disables the branch action mid-turn so it cannot copy a half-written reply", () => {
+    // A branch snapshots the visible thread; taking one while the reply is still
+    // streaming would clone a truncated message and seed the child from an
+    // unfinished exchange. Matches the regenerate action's existing guard.
+    useChatStore.setState({ activeSessionId: "sess-1" })
+    render(<MessageRenderer message={assistantMsg("br3")} isStreaming />)
+    // The tooltip swaps to explain WHY it is unavailable rather than just
+    // greying out with no reason.
+    const action = screen.getByLabelText("branchStreamingTooltip")
+    expect(action).toBeDisabled()
+    fireEvent.click(action)
+    expect(screen.queryByTestId("branch-dialog")).toBeNull()
+  })
 })
 
 // ── edit flow ─────────────────────────────────────────────────────────────────

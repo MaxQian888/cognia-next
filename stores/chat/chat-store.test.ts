@@ -1210,6 +1210,88 @@ describe("selectVisibleMessages", () => {
     const result = selectVisibleMessages([u, a, b, tail], { g1: "a" })
     expect(result.map((m) => m.id)).toEqual(["u", "a", "tail"])
   })
+
+  // ── ownership (edit-as-branch) ──────────────────────────────────────────────
+  // Editing a user message keeps the original as a sibling and re-parents the
+  // replies that followed it onto that sibling. Without the ownership rule,
+  // flipping back to the original question would show it with the OTHER
+  // variant's answers underneath.
+
+  const owned = (id: string, ownerId: string, role: UIMessage["role"] = "assistant"): UIMessage =>
+    ({ id, role, parts: [], metadata: { branchOwnerId: ownerId } }) as unknown as UIMessage
+
+  const userVariant = (id: string, groupId: string, branchIndex: number): UIMessage =>
+    ({
+      id,
+      role: "user",
+      parts: [],
+      metadata: { branchGroupId: groupId, branchIndex },
+    }) as unknown as UIMessage
+
+  it("hides the tail that hangs off a deselected sibling", () => {
+    const q0 = userVariant("q0", "e1", 0)
+    const r0 = owned("r0", "q0")
+    const q1 = userVariant("q1", "e1", 1)
+    const r1 = owned("r1", "q1")
+
+    // Newest variant selected by default (highest branchIndex).
+    expect(selectVisibleMessages([q0, r0, q1, r1], {}).map((m) => m.id)).toEqual(["q1", "r1"])
+    // Flipping back brings the original question AND its own replies.
+    expect(selectVisibleMessages([q0, r0, q1, r1], { e1: "q0" }).map((m) => m.id)).toEqual([
+      "q0",
+      "r0",
+    ])
+  })
+
+  it("keeps the group in place rather than moving it to the winner's position", () => {
+    const head = withBranch("head")
+    const q0 = userVariant("q0", "e1", 0)
+    const r0 = owned("r0", "q0")
+    const q1 = userVariant("q1", "e1", 1)
+    // The selected variant renders where the group starts, not appended at the
+    // end where the newest sibling physically sits.
+    expect(selectVisibleMessages([head, q0, r0, q1], {}).map((m) => m.id)).toEqual(["head", "q1"])
+  })
+
+  it("hides a nested subtree transitively", () => {
+    // Edit q, then inside the surviving variant edit a follow-up. Flipping the
+    // OUTER edit must take the inner variant's replies with it, even though
+    // those point at the inner sibling and not at the outer one.
+    const q0 = userVariant("q0", "outer", 0)
+    const q1 = userVariant("q1", "outer", 1)
+    const f0 = {
+      ...userVariant("f0", "inner", 0),
+      metadata: { branchGroupId: "inner", branchIndex: 0, branchOwnerId: "q1" },
+    } as unknown as UIMessage
+    const fr0 = owned("fr0", "f0")
+    const f1 = {
+      ...userVariant("f1", "inner", 1),
+      metadata: { branchGroupId: "inner", branchIndex: 1, branchOwnerId: "q1" },
+    } as unknown as UIMessage
+    const fr1 = owned("fr1", "f1")
+    const all = [q0, q1, f0, fr0, f1, fr1]
+
+    // Outer variant q1 selected → inner group visible, newest inner selected.
+    expect(selectVisibleMessages(all, {}).map((m) => m.id)).toEqual(["q1", "f1", "fr1"])
+    // Flip the OUTER edit back to q0 → the entire inner subtree disappears.
+    expect(selectVisibleMessages(all, { outer: "q0" }).map((m) => m.id)).toEqual(["q0"])
+  })
+
+  it("shows an owned message when its owner is the selected sibling", () => {
+    const q0 = userVariant("q0", "e1", 0)
+    const q1 = userVariant("q1", "e1", 1)
+    const r0 = owned("r0", "q0")
+    // Ordering here puts the owned message after BOTH siblings — the rule keys
+    // off the owner id, not adjacency.
+    expect(selectVisibleMessages([q0, q1, r0], { e1: "q0" }).map((m) => m.id)).toEqual(["q0", "r0"])
+  })
+
+  it("passes an orphaned owner reference through rather than hiding the message", () => {
+    // A message whose owner was truncated away must not silently vanish; the
+    // owner simply is not in the hidden set.
+    const stray = owned("stray", "gone-forever")
+    expect(selectVisibleMessages([stray], {}).map((m) => m.id)).toEqual(["stray"])
+  })
 })
 
 describe("selectBranchSiblings", () => {

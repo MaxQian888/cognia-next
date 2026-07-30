@@ -1168,43 +1168,120 @@ export function useSessionToolTimestamps(
   )
 }
 
+interface BranchMetadata {
+  branchGroupId?: string
+  branchIndex?: number
+  /**
+   * The sibling this message hangs off. See {@link selectVisibleMessages}.
+   */
+  branchOwnerId?: string
+}
+
+function branchMeta(m: UIMessage): BranchMetadata {
+  return (m.metadata ?? {}) as BranchMetadata
+}
+
 /**
- * Filter messages so only the active branch within each `branchGroupId`
- * survives. Messages without a `branchGroupId` are passed through unchanged.
+ * The sibling that should be visible for each `branchGroupId`.
+ *
+ * Explicit user choice wins; otherwise the highest `branchIndex` — the most
+ * recently produced sibling — which is what a fresh regenerate should surface.
+ */
+function resolveBranchWinners(
+  messages: readonly UIMessage[],
+  activeBranchByGroup: Record<string, string>
+): Map<string, string> {
+  const winners = new Map<string, string>()
+  const bestIndex = new Map<string, number>()
+
+  for (const m of messages) {
+    const { branchGroupId, branchIndex } = branchMeta(m)
+    if (!branchGroupId) continue
+    if (activeBranchByGroup[branchGroupId]) {
+      winners.set(branchGroupId, activeBranchByGroup[branchGroupId])
+      continue
+    }
+    const idx = branchIndex ?? 0
+    if (!winners.has(branchGroupId) || idx > (bestIndex.get(branchGroupId) ?? -1)) {
+      winners.set(branchGroupId, m.id)
+      bestIndex.set(branchGroupId, idx)
+    }
+  }
+  return winners
+}
+
+/**
+ * Filter messages down to the currently-visible thread.
+ *
+ * Two rules compose here:
+ *
+ *  1. **Siblings** — messages sharing a `branchGroupId` are alternatives, and
+ *     exactly one is shown. Produced by regenerating a reply, and by editing a
+ *     user message (see `tagBranchSiblings`).
+ *
+ *  2. **Ownership** — a message carrying `branchOwnerId` hangs off a specific
+ *     sibling and is shown only while that sibling is. Editing a user message
+ *     mid-thread branches everything that followed it, and without this rule
+ *     flipping back to the original would show the original question with the
+ *     *other* variant's answers under it.
+ *
+ * Ownership is **transitive**: hiding a sibling hides what hangs off it, and
+ * what hangs off that. A single forward pass suffices because a message always
+ * follows the sibling it hangs off — it did not exist until that sibling did.
+ *
+ * The winner per group is resolved up front rather than during the walk. The
+ * old single-pass form retro-actively spliced a later, higher-index sibling
+ * over an earlier one, which is fine on its own but cannot work once messages
+ * hang off siblings: anything owned by the displaced message has already been
+ * emitted by the time it is displaced.
+ *
  * Pure function — safe to call from selectors and tests.
  */
 export function selectVisibleMessages(
   messages: UIMessage[],
   activeBranchByGroup: Record<string, string>
 ): UIMessage[] {
+  const winners = resolveBranchWinners(messages, activeBranchByGroup)
+  const byId = new Map<string, UIMessage>()
+  for (const m of messages) byId.set(m.id, m)
+
   const out: UIMessage[] = []
-  const lastSeenByGroup = new Map<string, UIMessage>()
+  const emittedGroups = new Set<string>()
+  const hidden = new Set<string>()
 
   for (const m of messages) {
-    const groupId = (m.metadata as { branchGroupId?: string } | undefined)?.branchGroupId
-    if (!groupId) {
+    const { branchGroupId, branchOwnerId } = branchMeta(m)
+
+    // Rule 2 first: an owner that is hidden takes its whole subtree with it,
+    // whatever this message's own sibling state is.
+    if (branchOwnerId !== undefined && hidden.has(branchOwnerId)) {
+      hidden.add(m.id)
+      continue
+    }
+
+    if (!branchGroupId) {
       out.push(m)
       continue
     }
-    const activeId = activeBranchByGroup[groupId]
-    if (activeId) {
-      if (m.id === activeId) out.push(m)
-      // Drop the non-active siblings.
+
+    const winnerId = winners.get(branchGroupId)
+    if (m.id !== winnerId) {
+      hidden.add(m.id)
+      // Emit the winner at the FIRST sibling's position, preserving where the
+      // group sits in the thread regardless of which alternative is selected.
+      if (!emittedGroups.has(branchGroupId)) {
+        const winner = winnerId ? byId.get(winnerId) : undefined
+        if (winner) {
+          out.push(winner)
+          emittedGroups.add(branchGroupId)
+        }
+      }
       continue
     }
-    // No explicit choice yet — show the highest branchIndex (or last seen).
-    const prev = lastSeenByGroup.get(groupId)
-    const prevIdx = (prev?.metadata as { branchIndex?: number } | undefined)?.branchIndex ?? -1
-    const curIdx = (m.metadata as { branchIndex?: number } | undefined)?.branchIndex ?? 0
-    if (!prev || curIdx > prevIdx) {
-      // Replace the placeholder for this group.
-      if (prev) {
-        const idx = out.indexOf(prev)
-        if (idx >= 0) out.splice(idx, 1, m)
-      } else {
-        out.push(m)
-      }
-      lastSeenByGroup.set(groupId, m)
+
+    if (!emittedGroups.has(branchGroupId)) {
+      out.push(m)
+      emittedGroups.add(branchGroupId)
     }
   }
   return out

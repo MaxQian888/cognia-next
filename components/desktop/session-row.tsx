@@ -1,5 +1,7 @@
 "use client"
 
+import { useLiveQuery } from "dexie-react-hooks"
+import { listSessionBranches } from "@/lib/db/sessions"
 import { Button, buttonVariants } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import {
@@ -152,6 +154,14 @@ function SessionRowImpl({
   const t = useTranslations("desktop.sessionRow")
   const [editing, setEditing] = useState(false)
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false)
+  // Only queried while the confirm is open — this row renders once per session
+  // in the sidebar, and an always-live count would be one index read per row on
+  // every session write.
+  const branchCount =
+    useLiveQuery(
+      async () => (deleteConfirmOpen ? (await listSessionBranches(session.id)).length : 0),
+      [deleteConfirmOpen, session.id]
+    ) ?? 0
   const [draft, setDraft] = useState(session.title)
   const [cogniaAgentStatus, setCogniaAgentStatus] = useState<
     "unknown" | "checking" | "available" | "missing"
@@ -478,7 +488,14 @@ function SessionRowImpl({
         <AlertDialogContent className="max-w-[90vw] sm:max-w-md">
           <AlertDialogHeader>
             <AlertDialogTitle>{t("deleteConfirmTitle", { title: session.title })}</AlertDialogTitle>
-            <AlertDialogDescription>{t("deleteConfirmBody")}</AlertDialogDescription>
+            <AlertDialogDescription>
+              {t("deleteConfirmBody")}
+              {/* Branches are standalone conversations — `direct` mode copies
+                  the messages outright — so deleting the parent leaves them
+                  alone and re-points them at their grandparent. Say so, or the
+                  count in the sidebar not dropping reads as a bug. */}
+              {branchCount > 0 ? ` ${t("deleteConfirmBranches", { count: branchCount })}` : ""}
+            </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter className="flex-col gap-2 sm:flex-row">
             <AlertDialogCancel className="w-full sm:w-auto">{t("cancel")}</AlertDialogCancel>

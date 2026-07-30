@@ -51,6 +51,9 @@ jest.mock("@/lib/capacitor/haptics", () => ({
 const chatState = {
   bookmarkedIds: [] as string[],
   toggleBookmark: jest.fn(),
+  // Per-session slices — the branch row reads the TARGET session's status, not
+  // the active one's, so the sheet can be opened on a background pane's message.
+  sessions: {} as Record<string, { status: string }>,
 }
 jest.mock("@/stores/chat", () => ({
   __esModule: true,
@@ -210,6 +213,7 @@ describe("MessageActionSheet", () => {
     mockTtsStop.mockClear()
     chatState.toggleBookmark.mockClear()
     chatState.bookmarkedIds = []
+    chatState.sessions = {}
     settingsState.settings.ttsEnabled = true
     readAloudStatus.isActive = false
     readAloudStatus.isLoading = false
@@ -267,6 +271,26 @@ describe("MessageActionSheet", () => {
     const dialog = screen.getByTestId("branch-dialog")
     expect(dialog).toHaveAttribute("data-session", "s9")
     expect(dialog).toHaveAttribute("data-message", "m1")
+  })
+
+  it("blocks the Branch row while the TARGET session is mid-turn", () => {
+    // A branch snapshots the visible thread, so taking one mid-turn would copy
+    // a half-written reply and seed the child with an unfinished exchange. The
+    // guard reads the target session's own slice, not the active one's — the
+    // sheet can be opened on a message belonging to a background pane.
+    chatState.sessions = { s9: { status: "streaming" } }
+    const msg = {
+      id: "m1",
+      role: "assistant",
+      parts: [{ type: "text", text: "hi" }],
+      metadata: { sessionId: "s9" },
+    } as UIMessage
+    const onOpenChange = jest.fn()
+    renderSheet(msg, onOpenChange)
+
+    expect(screen.getByTestId("message-action-branch")).toBeDisabled()
+    fireEvent.click(screen.getByTestId("message-action-branch"))
+    expect(screen.queryByTestId("branch-dialog")).not.toBeInTheDocument()
   })
 
   it("calls clipboard.writeText and closes on Copy", async () => {

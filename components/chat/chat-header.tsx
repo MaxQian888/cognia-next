@@ -15,6 +15,7 @@ import { PlanModeTasksSheet } from "@/components/agent/workspace/plan-mode-tasks
 import { PluginExtensionSlot } from "@/components/plugins/plugin-extension-slot"
 import { SessionSettingsSheet } from "@/components/chat/session-settings-sheet"
 import { BranchLineageChip } from "@/components/chat/branch-lineage-chip"
+import { BranchChildrenChip } from "@/components/chat/branch-children-chip"
 import type { ChatSession } from "@cognia/agent-config-types"
 
 interface Props {
@@ -78,6 +79,9 @@ export function ChatHeader({ session, onOpenSettings }: Props) {
         </span>
         {/* Self-hides unless this session was branched from another one. */}
         <BranchLineageChip session={session} />
+        {/* The reverse direction: self-hides unless this session HAS branches.
+            Both can show at once on a branch that was itself branched. */}
+        <BranchChildrenChip sessionId={session.id} />
         {keyOk === false && (
           <Badge variant="destructive" className="cursor-pointer gap-1" onClick={onOpenSettings}>
             <KeyRoundIcon className="size-3" />

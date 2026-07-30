@@ -43,6 +43,7 @@ const messages = {
   contextWorkbench: {
     actions: {
       collapse: "Collapse",
+      expand: "Expand",
       narrow: "Narrow",
       wide: "Wide",
       focus: "Focus",
@@ -126,10 +127,20 @@ describe("ContextWorkbench", () => {
 
     const rail = screen.getByTestId("context-workbench-activity-rail")
     expect(rail).toHaveClass("flex-col")
+    // The reconcile already put this panel in front, so the first rail click is
+    // the activity-bar toggle: it shuts the body and leaves the rail.
     fireEvent.click(screen.getByRole("button", { name: "contextWorkbench.panels.comments" }))
-    fireEvent.click(screen.getByRole("button", { name: /Collapse/ }))
+    expect(rail).toHaveAttribute("data-rail-only", "true")
+    // The bottom button flips with the surface — there is nothing left to
+    // collapse once the body is already shut.
+    expect(screen.getByTestId("context-workbench-collapse-toggle")).toHaveAccessibleName(
+      "Expand workbench"
+    )
+    // Re-opening from the rail is a real remount of the body, so the panel's
+    // restore hook fires exactly once and its first-activate does not repeat.
     fireEvent.click(screen.getByRole("button", { name: "contextWorkbench.panels.comments" }))
 
+    expect(rail).not.toHaveAttribute("data-rail-only")
     expect(onFirstActivate).toHaveBeenCalledTimes(1)
     expect(onRestore).toHaveBeenCalledTimes(1)
     expect(screen.getByText("comments:true")).toBeInTheDocument()
@@ -1101,5 +1112,205 @@ describe("ContextWorkbench — customizable activity rail", () => {
       useContextWorkbenchStore.getState().navigatePanel("window-a::artifact:a1", "ai", "narrow")
     })
     expect(screen.getByText("ai-panel")).toBeInTheDocument()
+  })
+})
+
+describe("ContextWorkbench — host-driven rail-only (persistent minibar)", () => {
+  const PANELS: ContextPanelDefinition[] = [
+    {
+      id: "review",
+      activity: "review",
+      labelKey: "contextWorkbench.panels.review",
+      appliesTo: () => true,
+      renderer: () => <div>review-panel</div>,
+      retention: "stateful",
+    },
+    {
+      id: "comments",
+      activity: "comments",
+      labelKey: "contextWorkbench.panels.comments",
+      appliesTo: () => true,
+      renderer: () => <div>comments-panel</div>,
+      retention: "stateful",
+    },
+  ]
+
+  function renderHosted(props: { railOnly: boolean; onEnsureVisible?: () => void }) {
+    return render(
+      <NextIntlClientProvider locale="en" messages={messages}>
+        <ContextWorkbench
+          workbenchInstanceId="window-a"
+          resource={resource}
+          panels={PANELS}
+          manageOwnWidth={false}
+          onCollapse={() => undefined}
+          {...props}
+        />
+      </NextIntlClientProvider>
+    )
+  }
+
+  beforeEach(() => {
+    useContextWorkbenchStore.setState({ layouts: {} })
+    useSettingsStore.setState({ settings: {} as never })
+    mockResourceSession = null
+  })
+
+  afterEach(clearAllMockExtensions)
+
+  it("keeps the rail and drops the panel body", () => {
+    renderHosted({ railOnly: true })
+
+    // The rail is the whole point of the state — it must survive.
+    expect(screen.getByTestId("context-workbench-activity-rail")).toBeInTheDocument()
+    expect(
+      screen.getByRole("button", { name: "contextWorkbench.panels.review" })
+    ).toBeInTheDocument()
+    // The body — and every panel inside it — is unmounted, not hidden. This is
+    // what releases the embedded browser's process-wide webview lease.
+    expect(screen.queryByText("review-panel")).not.toBeInTheDocument()
+    expect(screen.queryByText("comments-panel")).not.toBeInTheDocument()
+  })
+
+  it("does not write the host's collapse into the per-scope layout mode", () => {
+    renderHosted({ railOnly: true })
+    // `railOnly` is one global fact per host; routing it through the per-resource
+    // layout would make the rail re-open and re-close as the user moved between
+    // artifacts. The store must stay out of it.
+    expect(useContextWorkbenchStore.getState().layouts["window-a::canvas:doc-1"]?.mode).not.toBe(
+      "collapsed"
+    )
+  })
+
+  it("asks the host to reopen when a rail activity is clicked", () => {
+    const onEnsureVisible = jest.fn()
+    renderHosted({ railOnly: true, onEnsureVisible })
+
+    fireEvent.click(screen.getByRole("button", { name: "contextWorkbench.panels.comments" }))
+
+    expect(onEnsureVisible).toHaveBeenCalledTimes(1)
+    // …and it switches to the clicked panel in the same gesture, so opening the
+    // rail never lands on whatever happened to be in front before.
+    expect(
+      useContextWorkbenchStore.getState().layouts["window-a::canvas:doc-1"]?.activePanelId
+    ).toBe("comments")
+  })
+
+  it("reopens rather than collapsing when the already-active activity is clicked", () => {
+    const onEnsureVisible = jest.fn()
+    const onCollapse = jest.fn()
+    render(
+      <NextIntlClientProvider locale="en" messages={messages}>
+        <ContextWorkbench
+          workbenchInstanceId="window-a"
+          resource={resource}
+          panels={PANELS}
+          manageOwnWidth={false}
+          railOnly
+          onCollapse={onCollapse}
+          onEnsureVisible={onEnsureVisible}
+        />
+      </NextIntlClientProvider>
+    )
+
+    // `reconcilePanels` already put `review` in front. Clicking it from a
+    // rail-only surface must open, not run the activity-bar close toggle — the
+    // body is already shut, so closing again would be a dead click.
+    fireEvent.click(screen.getByRole("button", { name: "contextWorkbench.panels.review" }))
+
+    expect(onEnsureVisible).toHaveBeenCalledTimes(1)
+    expect(onCollapse).not.toHaveBeenCalled()
+  })
+
+  it("marks the host's chosen activity when something arrived unseen", () => {
+    render(
+      <NextIntlClientProvider locale="en" messages={messages}>
+        <ContextWorkbench
+          workbenchInstanceId="window-a"
+          resource={resource}
+          panels={PANELS}
+          manageOwnWidth={false}
+          railOnly
+          attentionActivity="comments"
+          onCollapse={() => undefined}
+        />
+      </NextIntlClientProvider>
+    )
+
+    // The marker rides the rail button for the activity the host named, so it
+    // is reachable while the body is shut — which is the only time it matters.
+    const marked = screen
+      .getByRole("button", { name: "contextWorkbench.panels.comments" })
+      .querySelector("[data-testid=context-workbench-activity-attention]")
+    expect(marked).toBeInTheDocument()
+    // …and nowhere else.
+    expect(screen.getAllByTestId("context-workbench-activity-attention")).toHaveLength(1)
+  })
+
+  it("yields the marker to a real badge rather than stacking two glyphs", () => {
+    render(
+      <NextIntlClientProvider locale="en" messages={messages}>
+        <ContextWorkbench
+          workbenchInstanceId="window-a"
+          resource={resource}
+          panels={PANELS.map((panel) =>
+            panel.id === "comments" ? { ...panel, getBadge: () => 3 } : panel
+          )}
+          manageOwnWidth={false}
+          railOnly
+          attentionActivity="comments"
+          onCollapse={() => undefined}
+        />
+      </NextIntlClientProvider>
+    )
+
+    // A 48px column has room for one glyph per button; the count says more than
+    // a bare dot, so it wins.
+    expect(screen.queryByTestId("context-workbench-activity-attention")).not.toBeInTheDocument()
+    expect(screen.getByText("3")).toBeInTheDocument()
+  })
+
+  it("draws no marker when the host has nothing to announce", () => {
+    renderHosted({ railOnly: true })
+    expect(screen.queryByTestId("context-workbench-activity-attention")).not.toBeInTheDocument()
+  })
+
+  it("flips the bottom button between collapse and expand", () => {
+    const onEnsureVisible = jest.fn()
+    const onCollapse = jest.fn()
+    const { rerender } = render(
+      <NextIntlClientProvider locale="en" messages={messages}>
+        <ContextWorkbench
+          workbenchInstanceId="window-a"
+          resource={resource}
+          panels={PANELS}
+          manageOwnWidth={false}
+          onCollapse={onCollapse}
+          onEnsureVisible={onEnsureVisible}
+        />
+      </NextIntlClientProvider>
+    )
+    const toggle = () => screen.getByTestId("context-workbench-collapse-toggle")
+    expect(toggle()).toHaveAccessibleName("Collapse workbench")
+    fireEvent.click(toggle())
+    expect(onCollapse).toHaveBeenCalledTimes(1)
+
+    rerender(
+      <NextIntlClientProvider locale="en" messages={messages}>
+        <ContextWorkbench
+          workbenchInstanceId="window-a"
+          resource={resource}
+          panels={PANELS}
+          manageOwnWidth={false}
+          railOnly
+          onCollapse={onCollapse}
+          onEnsureVisible={onEnsureVisible}
+        />
+      </NextIntlClientProvider>
+    )
+    expect(toggle()).toHaveAccessibleName("Expand workbench")
+    fireEvent.click(toggle())
+    expect(onEnsureVisible).toHaveBeenCalledTimes(1)
+    expect(onCollapse).toHaveBeenCalledTimes(1)
   })
 })
