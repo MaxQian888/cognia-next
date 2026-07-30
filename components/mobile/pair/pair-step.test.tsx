@@ -11,6 +11,25 @@ import { encodePairPayload } from "@/lib/qr/pair-payload"
 const VALID_JWT = "aaa.bbb.ccc"
 
 jest.mock("@/lib/capacitor/barcode", () => ({ scan: jest.fn() }))
+jest.mock("@/lib/tauri/transport-companion", () => ({
+  saveCompanionConfig: async (config: unknown) => {
+    window.localStorage.setItem("cognia.companion.config.v1", JSON.stringify(config))
+  },
+}))
+jest.mock("@/lib/signaling/v2-crypto", () => ({
+  generatePersistableV2SigningIdentity: async () => ({
+    privateKey: {},
+    publicKey: {},
+    privateKeyJwk: { kty: "EC", crv: "P-256", d: "private" },
+    encodedPublicKey: "mobile-signing-key",
+  }),
+  buildRoomDescriptorV2: async (input: Record<string, unknown>) => ({
+    v: 2,
+    roomId: "room-1",
+    ...input,
+  }),
+  importV2SigningPrivateKey: async () => ({}),
+}))
 const openSettingsMock = jest.fn(async () => ({ kind: "ok" as const }))
 jest.mock("@/lib/capacitor/app-settings", () => ({
   openAppSettings: () => openSettingsMock(),
@@ -74,6 +93,21 @@ jest.mock("next-intl", () => ({
 import { scan as scanBarcode } from "@/lib/capacitor/barcode"
 const mockedScanQr = scanBarcode as jest.Mock
 
+function withSignalingV2(body: Record<string, unknown>): Record<string, unknown> {
+  return {
+    ...body,
+    rendezvous_id: "room-1",
+    room_descriptor: {
+      v: 2,
+      roomId: "room-1",
+      roomNonce: "room-nonce",
+      desktopSigningKey: "desktop-signing-key",
+      mobileSigningKey: "mobile-signing-key",
+      notAfter: Date.now() + 60_000,
+    },
+  }
+}
+
 beforeEach(() => {
   window.localStorage.clear()
   ;(globalThis as unknown as { fetch: jest.Mock }).fetch = jest.fn()
@@ -125,11 +159,11 @@ describe("<PairStep />", () => {
       ok: true,
       status: 200,
       json: () =>
-        Promise.resolve({
+        Promise.resolve(withSignalingV2({
           device_id: "dev-001",
           device_jwt: "jwt.value",
           server_version: "0.1.0",
-        }),
+        })),
       text: () => Promise.resolve(""),
     })
     const user = userEvent.setup()
@@ -221,7 +255,13 @@ describe("<PairStep />", () => {
       ok: true,
       status: 200,
       json: () =>
-        Promise.resolve({ device_id: "dev-rec", device_jwt: "jwt.rec", server_version: "0.2.0" }),
+        Promise.resolve(
+          withSignalingV2({
+            device_id: "dev-rec",
+            device_jwt: "jwt.rec",
+            server_version: "0.2.0",
+          })
+        ),
       text: () => Promise.resolve(""),
     })
     const user = userEvent.setup()
@@ -295,11 +335,11 @@ describe("<PairStep />", () => {
       ok: true,
       status: 200,
       json: () =>
-        Promise.resolve({
+        Promise.resolve(withSignalingV2({
           device_id: "dev-100",
           device_jwt: "jwt.code",
           server_version: "0.1.0",
-        }),
+        })),
       text: () => Promise.resolve(""),
     })
     const onPaired = jest.fn()

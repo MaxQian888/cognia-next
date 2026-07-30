@@ -79,8 +79,6 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{mpsc, oneshot, OnceCell};
 use uuid::Uuid;
 
-#[cfg(test)]
-use super::broker_protocol::ContentLengthDecoder;
 use super::broker_protocol::{
     detect_protocol, encode_content_length, read_content_length_value, ProtocolMode,
     CODE_API_VERSION, CURRENT_PROTOCOL_VERSION, DEFAULT_CATALOG_HASH, MAX_FRAME_BYTES,
@@ -1960,36 +1958,6 @@ mod tests {
 
         let result = request.await.unwrap().unwrap();
         assert_eq!(result["opened"], true);
-    }
-
-    #[test]
-    fn content_length_decoder_handles_fragmented_and_coalesced_frames() {
-        let one = json!({
-            "jsonrpc": "2.0",
-            "id": 1,
-            "method": "editor/readActive",
-            "params": {}
-        });
-        let two = json!({
-            "jsonrpc": "2.0",
-            "method": "cognia/event",
-            "params": { "name": "documentSaved", "payload": null }
-        });
-        let mut bytes = encode_content_length(&one).unwrap();
-        bytes.extend(encode_content_length(&two).unwrap());
-
-        let mut decoder = ContentLengthDecoder::default();
-        assert!(decoder.push(&bytes[..9]).unwrap().is_empty());
-        let decoded = decoder.push(&bytes[9..]).unwrap();
-        assert_eq!(decoded, vec![one, two]);
-    }
-
-    #[test]
-    fn content_length_decoder_rejects_oversized_frames() {
-        let mut decoder = ContentLengthDecoder::default();
-        let header = format!("Content-Length: {}\r\n\r\n", MAX_FRAME_BYTES + 1);
-        let error = decoder.push(header.as_bytes()).unwrap_err();
-        assert!(error.contains("exceeds"));
     }
 
     #[tokio::test]

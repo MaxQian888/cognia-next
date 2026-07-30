@@ -36,12 +36,26 @@ use crate::headless::HeadlessServices;
 
 /// The process hosting this RPC dispatch: the desktop Tauri app, or the
 /// headless `cognia-server` service registry.
+#[derive(Clone)]
 pub enum DispatchHost {
     Tauri(tauri::AppHandle),
     Headless(Arc<HeadlessServices>),
 }
 
 impl DispatchHost {
+    /// Resolve the data directory owned by the execution host.
+    pub fn data_dir(&self) -> Result<std::path::PathBuf, String> {
+        match self {
+            Self::Tauri(app) => {
+                use tauri::Manager;
+                app.path()
+                    .app_data_dir()
+                    .map_err(|error| format!("resolve host app data directory: {error}"))
+            }
+            Self::Headless(services) => Ok(services.data_dir.clone()),
+        }
+    }
+
     /// Resolve the host for the current process: the Tauri `AppHandle` when
     /// the WebView shell is up, else the headless services registry installed
     /// by `cognia-server` at boot. `None` in bare unit-test states — the

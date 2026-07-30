@@ -14,6 +14,9 @@ const TASK_STORE_CAP: usize = 512;
 
 static TASK_STORE: once_cell::sync::Lazy<Mutex<Vec<(String, Value)>>> =
     once_cell::sync::Lazy::new(|| Mutex::new(Vec::new()));
+#[cfg(test)]
+static TEST_STORE_LOCK: once_cell::sync::Lazy<parking_lot::Mutex<()>> =
+    once_cell::sync::Lazy::new(|| parking_lot::Mutex::new(()));
 
 /// Record (or replace) the snapshot for a task id.
 pub fn record_task(task_id: &str, task: Value) {
@@ -43,12 +46,18 @@ pub fn reset_task_store_for_tests() {
 }
 
 #[cfg(test)]
+pub fn test_store_guard() -> parking_lot::MutexGuard<'static, ()> {
+    TEST_STORE_LOCK.lock()
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use serde_json::json;
 
     #[test]
     fn record_and_lookup_roundtrip() {
+        let _guard = test_store_guard();
         reset_task_store_for_tests();
         assert!(lookup_task("nope").is_none());
 
@@ -69,6 +78,7 @@ mod tests {
 
     #[test]
     fn evicts_oldest_at_cap() {
+        let _guard = test_store_guard();
         reset_task_store_for_tests();
         for i in 0..(TASK_STORE_CAP + 5) {
             record_task(&format!("t{i}"), json!({ "id": format!("t{i}") }));

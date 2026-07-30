@@ -53,6 +53,7 @@ import {
 } from "@/lib/credentials/turn-credentials"
 import {
   deleteProviderSecret,
+  clampTtl,
   provisionIceServers,
   saveProviderSecret,
   type TurnProviderSecret,
@@ -594,6 +595,7 @@ function StatusBlock({ status, devices }: StatusBlockProps): React.JSX.Element {
             {truncateId(d.deviceId)}
           </span>
           <span className="font-medium">{t(`deviceTier.${d.tier}`)}</span>
+          <span className="text-[10px] text-muted-foreground">{t("protocolMode")}</span>
           {d.lastError && d.tier === "failed" ? (
             <span className="text-[10px] text-destructive sm:ml-2" title={d.lastError}>
               {truncateError(d.lastError)}
@@ -652,7 +654,7 @@ export function parseTtl(text: string): number | undefined {
   const trimmed = text.trim()
   if (!trimmed) return undefined
   const n = Number(trimmed)
-  return Number.isFinite(n) ? n : undefined
+  return Number.isFinite(n) && n > 0 ? clampTtl(n) : undefined
 }
 
 /**
@@ -736,13 +738,13 @@ export function parseServers(text: string): ParseServersResult {
     if (!line || line.startsWith("#")) continue
     const parts = line.split("|")
     const url = parts[0]?.trim() ?? ""
-    if (!/^(stun|turn|turns):/i.test(url)) {
+    if (!isValidIceUrl(url)) {
       invalid.push(line)
       continue
     }
     const isTurn = /^turns?:/i.test(url)
     if (isTurn) {
-      if (parts.length < 3 || !parts[1] || !parts[2]) {
+      if (parts.length !== 3 || !parts[1]?.trim() || !parts[2]?.trim()) {
         invalid.push(line)
         continue
       }
@@ -751,11 +753,43 @@ export function parseServers(text: string): ParseServersResult {
         username: parts[1].trim(),
         credential: parts[2].trim(),
       })
-    } else {
+    } else if (parts.length === 1) {
       servers.push({ urls: url })
+    } else {
+      invalid.push(line)
     }
   }
   return { servers, invalid }
+}
+
+function isValidIceUrl(raw: string): boolean {
+  if (/[\s#]/.test(raw)) return false
+  let parsed: URL
+  try {
+    parsed = new URL(raw)
+  } catch {
+    return false
+  }
+  const scheme = parsed.protocol.toLowerCase()
+  if (scheme !== "stun:" && scheme !== "turn:" && scheme !== "turns:") return false
+
+  const address = parsed.pathname
+  const bracketed = address.match(/^\[[0-9a-f:.]+\](?::(\d{1,5}))?$/i)
+  const hostname = address.match(/^[a-z0-9.-]+(?::(\d{1,5}))?$/i)
+  const portText = bracketed?.[1] ?? hostname?.[1]
+  if (!bracketed && !hostname) return false
+  if (portText && (Number(portText) < 1 || Number(portText) > 65_535)) return false
+
+  const query = [...parsed.searchParams.entries()]
+  if (query.length === 0) return true
+  if (
+    query.length !== 1 ||
+    query[0][0] !== "transport" ||
+    !["udp", "tcp"].includes(query[0][1].toLowerCase())
+  ) {
+    return false
+  }
+  return scheme !== "turns:" || query[0][1].toLowerCase() === "tcp"
 }
 
 function truncateId(deviceId: string): string {

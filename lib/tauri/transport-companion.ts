@@ -1,9 +1,11 @@
 "use client"
 
 import { classifyWsHost } from "@/lib/connectivity/lan-classify"
+import { getCommandDescriptor } from "./command-descriptors"
 import { type CompanionConfig, companionStorage } from "./companion-storage"
 import type { Transport } from "./transport-types"
 import { pinnedFetch } from "./pinned-fetch"
+import { remoteEventResyncCoordinator } from "./resync-coordinator"
 import { TransportRtc, type TransportRtcOptions } from "./transport-rtc"
 
 export type { CompanionConfig } from "./companion-storage"
@@ -23,109 +25,6 @@ function encodeContentContext(context: ManagedIdeContentContext): string {
   for (const byte of bytes) binary += String.fromCharCode(byte)
   return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "")
 }
-
-// ---------------------------------------------------------------------------
-// Read-only command set — mirrors READ_ONLY_COMMANDS in rpc.rs exactly.
-// These skip the Idempotency-Key header (they are structurally idempotent).
-// ---------------------------------------------------------------------------
-
-const READ_ONLY_COMMANDS: ReadonlySet<string> = new Set([
-  "claude_sidecar_status",
-  "claude_has_api_key",
-  "claude_has_oauth_bearer",
-  "skills_load_registry",
-  "skills_scan_native",
-  "mcp_server_status",
-  "lsp_host_ensure",
-  "codeserver_supported",
-  "codeserver_status",
-  "codeserver_list_proxies",
-  "read_agent_config",
-  "session_list",
-  "message_get_by_session",
-  "companion_can_control",
-  // Channel inventory (LAN / tunnel base URLs + TLS fingerprint) — polled on
-  // connect by the endpoint refresher, so it must not be served from the
-  // 60s idempotency cache.
-  "companion_endpoints",
-  "fleet_get_snapshot",
-  "browser_capability",
-  "browser_session_get",
-  "browser_snapshot",
-  "browser_read_console",
-  "browser_read_network",
-  "browser_get_page",
-  "browser_pages",
-  "browser_wait_for",
-  "browser_wait_for_load",
-  "browser_screenshot",
-  "browser_downloads",
-  // Wave 4.1 reads — must stay in lockstep with READ_ONLY_COMMANDS in
-  // `src-tauri/src/companion_api/rpc.rs`. A write wrongly listed here would
-  // skip the Idempotency-Key header and risk double-execution on retry.
-  // Source control reads.
-  "git_is_repo",
-  "git_repo_state",
-  "git_status",
-  "git_diff_stat",
-  "git_diff_file",
-  "git_diff_commit",
-  "git_commit_files",
-  "git_log",
-  "git_file_history",
-  "git_branches",
-  "git_remotes",
-  "git_stash_list",
-  "git_conflicts",
-  "git_diff_refs_files",
-  "git_diff_refs_file",
-  "git_diff_staged_all",
-  "git_refs",
-  "git_blame",
-  "git_tags",
-  "git_worktree_list",
-  "git_rebase_commits",
-  "git_identity",
-  // Filesystem reads.
-  "read_text_file",
-  "default_export_dir",
-  "fs_search_workspace",
-  "fs_search_content_workspace",
-  "fs_read_workspace_file",
-  "fs_list_workspace_dir",
-  "fs_stat_workspace_file",
-  // Task workspace metadata and bounded/verified reads.
-  "task_workspace_status",
-  "task_workspace_get",
-  "task_workspace_list",
-  "task_workspace_list_runs",
-  "task_workspace_list_resources",
-  "task_workspace_get_resource",
-  "task_workspace_get_patch_set",
-  "task_resource_read_text",
-  "task_resource_read_diff",
-  "task_resource_download_open",
-  "task_resource_download_read_chunk",
-  "task_resource_download_close",
-  // Terminal session listings.
-  "terminal_list_all",
-  "terminal_list_for_project",
-  // Plugin registry reads.
-  "plugin_list",
-  "plugin_runtime_snapshot",
-  "plugin_permission_list",
-  "plugin_get_capabilities",
-  // Workflow run listing.
-  "workflow_run_list",
-  // Twin reads.
-  "twin_source_list",
-  "twin_job_status",
-  // App-data backup export (pure read/snapshot).
-  "backup_export",
-  // Native log read-back (bounded tail reads over on-disk log files).
-  "logs_query",
-  "logs_list_files",
-])
 
 // ---------------------------------------------------------------------------
 // Config storage
@@ -229,6 +128,10 @@ export type TransportTier =
 // unaffected; the runtime caller is [`CompanionTransport.recomputeTier`].
 export { classifyWsHost }
 
+function requiresNativePinnedWebSocket(config: CompanionConfig): boolean {
+  return Boolean(config.serverFingerprint) && classifyWsHost(config.baseUrl) === "ws-lan"
+}
+
 // ---------------------------------------------------------------------------
 // Internal types
 // ---------------------------------------------------------------------------
@@ -287,6 +190,7 @@ export class CompanionTransport implements Transport {
   private wsReconnectAttempt = 0
   private wsCloseGraceTimer: ReturnType<typeof setTimeout> | null = null
   private wsDestroyed = false
+  private wsResyncInFlight: Promise<void> | null = null
 
   /** Per-channel cursor: highest seq number seen from the server. */
   private highestSeq: Map<string, number> = new Map()
@@ -306,6 +210,8 @@ export class CompanionTransport implements Transport {
   // ── WebRTC tier (ADR-0021) ─────────────────────────────────────────────────
   /** Active `TransportRtc` once the DataChannel is open; null otherwise. */
   private rtc: TransportRtc | null = null
+  /** Peer currently negotiating, retained so credential rotation can update it. */
+  private rtcConnectingInstance: TransportRtc | null = null
   /** Tracks whether an upgrade attempt is currently in flight, so repeat
    *  calls to `enableWebRtcTier` don't stack. */
   private rtcConnecting: Promise<void> | null = null
@@ -389,7 +295,7 @@ export class CompanionTransport implements Transport {
     // available — WebRTC is consulted only when LAN is unavailable). The
     // TransportRtc surface returns the same `result` payload the HTTP path
     // would, so callers see no difference.
-    const isReadOnly = READ_ONLY_COMMANDS.has(name)
+    const isReadOnly = getCommandDescriptor(name)?.operation === "read"
     // Mint the idempotency key once and reuse it across the RTC attempt and
     // the HTTPS fallback. If the DataChannel write reached the server and ran
     // before the channel hard-failed, the fallback request carrying the same
@@ -398,7 +304,7 @@ export class CompanionTransport implements Transport {
     if (this.rtc && this.rtc.getState() === "open" && !this.isOnConnectedLan()) {
       try {
         const params = args ?? {}
-        return await this.rtc.call<T>(name, idempotencyKey ? { ...params, idempotencyKey } : params)
+        return await this.rtc.call<T>(name, params, { idempotencyKey })
       } catch (err) {
         // Hard-fail on the data channel → fall back to HTTPS. The data
         // channel teardown is handled by its own state listener; we just
@@ -497,8 +403,13 @@ export class CompanionTransport implements Transport {
     // WebRTC tier wins for ordering when both deliver the same
     // `(event, seq)` because the dispatcher only forwards once per
     // `EventBus` frame.
+    const config = this.config()
     let rtcUnsub: (() => void) | null = null
-    if (this.rtc && this.rtc.getState() === "open" && !this.isOnConnectedLan()) {
+    if (
+      this.rtc &&
+      this.rtc.getState() === "open" &&
+      (!this.isOnConnectedLan() || (config !== null && requiresNativePinnedWebSocket(config)))
+    ) {
       rtcUnsub = this.rtc.subscribe(event, handler as Handler)
     }
 
@@ -543,7 +454,10 @@ export class CompanionTransport implements Transport {
    * doesn't establish — the HTTPS+WS path stays the active transport.
    */
   public async enableWebRtcTier(
-    options: Omit<TransportRtcOptions, "rendezvousId" | "rendezvousSecret" | "deviceId"> & {
+    options: Omit<
+      TransportRtcOptions,
+      "rendezvousId" | "signalingRoomDescriptor" | "signalingPrivateKey" | "deviceId"
+    > & {
       /** Override the storage-loaded config (test injection). */
       configOverride?: CompanionConfig
     }
@@ -552,28 +466,35 @@ export class CompanionTransport implements Transport {
     // this particular call short-circuits — the tier may already be open, but
     // a future failure still needs the config to rebuild.
     this.lastEnableOptions = options
-    if (this.rtc) return // Already open or about to be.
-    if (this.rtcConnecting) return this.rtcConnecting
+    if (this.rtc) {
+      this.rtc.updateRtcConfiguration(options.rtcConfiguration)
+      return
+    }
+    if (this.rtcConnecting) {
+      this.rtcConnectingInstance?.updateRtcConfiguration(options.rtcConfiguration)
+      return this.rtcConnecting
+    }
     const config = options.configOverride ?? this.config()
     if (!config) {
       console.warn("CompanionTransport.enableWebRtcTier: companion not paired")
       return
     }
-    if (!config.rendezvousId || !config.rendezvousSecret) {
-      // Legacy device — re-pair to opt in to the WebRTC tier.
+    if (!config.rendezvousId || !config.signalingRoomDescriptor || !config.signalingPrivateKey) {
       return
     }
 
     const rtc = new TransportRtc({
       signalingUrl: options.signalingUrl,
       rendezvousId: config.rendezvousId,
-      rendezvousSecret: config.rendezvousSecret,
+      signalingRoomDescriptor: config.signalingRoomDescriptor,
+      signalingPrivateKey: config.signalingPrivateKey,
       deviceId: config.deviceId,
       rtcConfiguration: options.rtcConfiguration,
       negotiationTimeoutMs: options.negotiationTimeoutMs,
       peerConnectionFactory: options.peerConnectionFactory,
       signalingClientFactory: options.signalingClientFactory,
     })
+    this.rtcConnectingInstance = rtc
 
     this.rtcDetach = rtc.onStateChange((state) => {
       if (state === "closed" || state === "failed") {
@@ -612,6 +533,9 @@ export class CompanionTransport implements Transport {
         // Failed upgrade — tier drops back to whatever the WS path says.
         void this.recomputeTier()
       } finally {
+        if (this.rtcConnectingInstance === rtc) {
+          this.rtcConnectingInstance = null
+        }
         this.rtcConnecting = null
       }
     })()
@@ -666,6 +590,7 @@ export class CompanionTransport implements Transport {
       this.rtc = null
     }
     this.rtcConnecting = null
+    this.rtcConnectingInstance = null
     this.rtcCandidateKind = "unknown"
     // An explicit teardown (settings toggle off, LAN reachable, destroy) is
     // NOT a candidate for `reconnectRtc()`'s silent re-establish — drop the
@@ -914,6 +839,14 @@ export class CompanionTransport implements Transport {
   private openWebSocket(): void {
     const config = this.config()
     if (!config || this.wsDestroyed) return
+    if (requiresNativePinnedWebSocket(config)) {
+      // The browser WebSocket constructor cannot bind a connection to the
+      // accepted SPKI. Keep the channel closed until a native pinned WS
+      // transport exists; WebRTC remains eligible for subscriptions.
+      this.wsState = "idle"
+      this.setConnectionState("offline")
+      return
+    }
 
     // Build ?since= from the highest cursor across all active channels.
     const maxSeq = this.globalMaxSeq()
@@ -969,23 +902,7 @@ export class CompanionTransport implements Transport {
     if (!type) return
 
     if (type === "resync_required") {
-      // Clear all cursors and force a fresh reconnect.
-      this.highestSeq.clear()
-      // Dispatch synthetic event to all handlers.
-      for (const [, handlers] of this.channelHandlers) {
-        for (const h of handlers) {
-          h({ type: "resync_required" })
-        }
-      }
-      // Close current WS and reopen (openWebSocket handles since=0).
-      if (this.ws) {
-        const ws = this.ws
-        this.ws = null
-        ws.close()
-      }
-      if (!this.wsDestroyed && this.channelHandlers.size > 0) {
-        this.openWebSocket()
-      }
+      this.startWsAuthoritativeResync(frame)
       return
     }
 
@@ -1003,9 +920,8 @@ export class CompanionTransport implements Transport {
 
     // Update per-channel cursor.
     const prev = this.highestSeq.get(type) ?? 0
-    if (seq > prev) {
-      this.highestSeq.set(type, seq)
-    }
+    if (!Number.isSafeInteger(seq) || seq <= prev) return
+    this.highestSeq.set(type, seq)
 
     // Dispatch to handlers registered for this channel.
     const handlers = this.channelHandlers.get(type)
@@ -1014,6 +930,45 @@ export class CompanionTransport implements Transport {
         h(payload)
       }
     }
+  }
+
+  private startWsAuthoritativeResync(frame: Record<string, unknown>): void {
+    if (this.wsResyncInFlight) return
+    const domains = Array.isArray(frame["domains"])
+      ? frame["domains"].filter((value): value is string => typeof value === "string")
+      : ["*"]
+    const cursor = frame["cursor"]
+    this.wsResyncInFlight = remoteEventResyncCoordinator
+      .resolve(domains)
+      .then(() => {
+        if (!Number.isSafeInteger(cursor) || (cursor as number) < 0) {
+          throw new Error("resync notice omitted a valid cursor")
+        }
+        for (const event of this.channelHandlers.keys()) {
+          this.highestSeq.set(event, cursor as number)
+        }
+        for (const handlers of this.channelHandlers.values()) {
+          for (const handler of handlers) {
+            handler({ type: "resync_required", domains })
+          }
+        }
+        if (this.ws) {
+          const ws = this.ws
+          this.ws = null
+          ws.close()
+        }
+        if (!this.wsDestroyed && this.channelHandlers.size > 0) {
+          this.openWebSocket()
+        }
+      })
+      .catch((error) => {
+        console.error("CompanionTransport: authoritative event resync failed", error)
+        this.wsState = "idle"
+        this.setConnectionState("offline")
+      })
+      .finally(() => {
+        this.wsResyncInFlight = null
+      })
   }
 
   private scheduleWsReconnect(): void {

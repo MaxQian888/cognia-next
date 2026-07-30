@@ -28,6 +28,8 @@ export const TAURI_EVENTS = {
    * dialog; the close has already been prevented Rust-side.
    */
   appCloseRequested: "app://close-requested",
+  backgroundJobExited: "jobs://exited",
+  backgroundMonitorFired: "jobs://monitor-fired",
 } as const
 
 /**

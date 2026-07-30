@@ -26,6 +26,9 @@ use serde_json::json;
 use std::net::SocketAddr;
 use uuid::Uuid;
 
+use cognia_signaling_core::{proto::RoomDescriptorV2, v2::validate_room_descriptor};
+
+use super::signaling::envelope_v2::{build_room_descriptor, V2Identity, SIGNALING_KEY_NAMESPACE};
 use super::{
     jwt::{issue_device_jwt, issue_pair_jwt, verify, JwtError},
     middleware::DeviceContext,
@@ -33,6 +36,7 @@ use super::{
     pair_code_lru::{PairCodeEntry, TakeOutcome},
     SharedState,
 };
+const ROOM_DESCRIPTOR_TTL_MS: i64 = 10 * 365 * 24 * 60 * 60 * 1000;
 
 // ---------------------------------------------------------------------------
 // Request / response shapes
@@ -82,6 +86,8 @@ pub struct RedeemCodeRequest {
     pub device_platform: String,
     pub device_pubkey: String,
     pub app_version: String,
+    #[serde(alias = "mobile_signing_key")]
+    pub mobile_signing_key: String,
 }
 
 /// Request body for `POST /api/v1/auth/pair`.
@@ -93,16 +99,15 @@ pub struct PairRequest {
     pub device_platform: String,
     pub device_pubkey: String,
     pub app_version: String,
+    #[serde(alias = "mobile_signing_key")]
+    pub mobile_signing_key: String,
 }
 
 /// Response body for `POST /api/v1/auth/pair`.
 ///
-/// `rendezvous_id` and `rendezvous_secret` are minted alongside the device
-/// JWT (ADR-0021): both peers use them to authenticate signaling-server
-/// messages end-to-end without trusting the public rendezvous service. The
-/// secret is 32 random bytes encoded as URL-safe base64 (unpadded); the id is
-/// a UUIDv4. Devices that don't receive these fields (legacy pair payloads)
-/// will skip the WebRTC transport tier and continue with HTTPS+WS only.
+/// Signaling v2 role keys and a self-certifying room descriptor are minted
+/// alongside the device JWT. The desktop private key stays in the host
+/// keyring; only its reference and public descriptor leave this handler.
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PairResponse {
@@ -110,7 +115,8 @@ pub struct PairResponse {
     pub device_jwt: String,
     pub server_version: String,
     pub rendezvous_id: String,
-    pub rendezvous_secret: String,
+    pub room_descriptor: RoomDescriptorV2,
+    pub signaling_key_ref: String,
     /// Local account the pair JWT was minted for (ADR-0059 C4/F3). Clients
     /// persist it in `CompanionConfig` so multi-account servers can route.
     /// Additive - older clients ignore it.
@@ -240,6 +246,7 @@ pub async fn pair_handler(
         &req.device_platform,
         &req.device_pubkey,
         &req.app_version,
+        &req.mobile_signing_key,
     )
 }
 
@@ -314,6 +321,7 @@ pub async fn redeem_code_handler(
         &req.device_platform,
         &req.device_pubkey,
         &req.app_version,
+        &req.mobile_signing_key,
     )
 }
 
@@ -330,6 +338,7 @@ fn redeem_with_pair_jwt(
     device_platform: &str,
     device_pubkey: &str,
     app_version: &str,
+    mobile_signing_key: &str,
 ) -> Response {
     if device_label.chars().count() > 64 {
         return error_response(
@@ -402,20 +411,67 @@ fn redeem_with_pair_jwt(
         }
     };
 
-    // ADR-0021: mint a rendezvous room id and 32-byte shared HMAC secret
-    // alongside the device JWT. The rendezvous service routes signaling by
-    // `rendezvous_id`; both peers sign signaling envelopes with the secret
-    // so the service can never impersonate either side. We use the OS RNG
-    // (rand::thread_rng() seeds from getrandom) — same primitive that backs
-    // jti generation in `jwt.rs`.
-    let rendezvous_id = Uuid::new_v4().to_string();
-    let rendezvous_secret = {
-        let mut bytes = [0u8; 32];
+    let paired_at_ms = now_ms();
+    let desktop_identity = V2Identity::generate();
+    let room_nonce = {
+        let mut bytes = [0u8; 16];
         rand::thread_rng().fill_bytes(&mut bytes);
         URL_SAFE_NO_PAD.encode(bytes)
     };
-
-    let paired_at_ms = now_ms();
+    let room_descriptor = build_room_descriptor(
+        room_nonce,
+        desktop_identity.public_key_base64(),
+        mobile_signing_key.to_string(),
+        paired_at_ms.saturating_add(ROOM_DESCRIPTOR_TTL_MS),
+    );
+    if validate_room_descriptor(&room_descriptor, paired_at_ms).is_err() {
+        return error_response(
+            StatusCode::BAD_REQUEST,
+            "invalid_mobile_signing_key",
+            "mobileSigningKey must be an uncompressed P-256 public key",
+        );
+    }
+    let signaling_key_ref = device_id.clone();
+    let desktop_private_key = URL_SAFE_NO_PAD.encode(desktop_identity.private_bytes());
+    if let Err(error) = cognia_secrets::keyring_secrets::set(
+        SIGNALING_KEY_NAMESPACE,
+        &signaling_key_ref,
+        &desktop_private_key,
+    ) {
+        return error_response(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "signaling_key_store_failed",
+            &format!("failed to store signaling identity: {error}"),
+        );
+    }
+    let rendezvous_id = room_descriptor.room_id.clone();
+    if let Some(store) = super::signaling::registration_store::installed() {
+        let registration = super::signaling::DeviceRegistration {
+            device_id: device_id.clone(),
+            rendezvous_id: rendezvous_id.clone(),
+            room_descriptor: room_descriptor.clone(),
+            signaling_key_ref: signaling_key_ref.clone(),
+        };
+        if let Err(error) = store.upsert(&registration, paired_at_ms) {
+            let _ =
+                cognia_secrets::keyring_secrets::clear(SIGNALING_KEY_NAMESPACE, &signaling_key_ref);
+            return error_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "signaling_registration_store_failed",
+                &format!("failed to persist signaling registration: {error}"),
+            );
+        }
+        if let Err(error) = super::signaling::refresh_installed_hub() {
+            let _ = store.remove_device(&device_id);
+            let _ =
+                cognia_secrets::keyring_secrets::clear(SIGNALING_KEY_NAMESPACE, &signaling_key_ref);
+            return error_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "signaling_registration_activate_failed",
+                &error,
+            );
+        }
+    }
 
     if let Some(app) = &state.app_handle {
         use tauri::Emitter as _;
@@ -428,7 +484,8 @@ fn redeem_with_pair_jwt(
             "app_version": app_version,
             "account_id": account_id,
             "rendezvous_id": rendezvous_id,
-            "rendezvous_secret": rendezvous_secret,
+            "room_descriptor": room_descriptor,
+            "signaling_key_ref": signaling_key_ref,
         });
         if let Err(e) = app.emit("companion://device-paired", payload) {
             log::warn!("failed to emit companion://device-paired: {e}");
@@ -442,7 +499,8 @@ fn redeem_with_pair_jwt(
             device_jwt,
             server_version: env!("CARGO_PKG_VERSION").to_string(),
             rendezvous_id,
-            rendezvous_secret,
+            room_descriptor,
+            signaling_key_ref,
             account_id,
         }),
     )
@@ -510,6 +568,8 @@ mod tests {
 
     const SECRET: &[u8] = b"test-secret-32-bytes-exactly____";
     const ACCOUNT_ID: &str = "local_acct_a";
+    const MOBILE_SIGNING_KEY: &str =
+        "BFUPRxAD89-Xw99QaseX9nIfsaH7e49vg9IkSYplyI4kE2CT1wEuUJpzcVy9CwCjzA_0tcAbP_oZarH7MnA2uOY";
 
     /// Serializes the redeem-code tests, which share the process-global
     /// `pair_code_guard`. One test deliberately drives the guard into lockout;
@@ -591,8 +651,9 @@ mod tests {
                 .unwrap(),
         );
         let resp = router.oneshot(req).await.unwrap();
-        assert_eq!(resp.status().as_u16(), 200);
+        let status = resp.status();
         let body = body_json(resp).await;
+        assert_eq!(status.as_u16(), 200, "unexpected pair response: {body}");
         assert!(body["pairJwt"].is_string());
         assert!(body["expiresAtMs"].is_number());
         // 6-digit numeric code minted alongside the QR payload.
@@ -689,6 +750,7 @@ mod tests {
             "devicePlatform": "android",
             "devicePubkey": "abc",
             "appVersion": "0.1.0",
+            "mobileSigningKey": MOBILE_SIGNING_KEY,
         });
         let req = Request::builder()
             .method("POST")
@@ -702,7 +764,8 @@ mod tests {
         assert!(body["deviceJwt"].is_string());
         assert!(body["deviceId"].is_string());
         assert!(body["rendezvousId"].is_string());
-        assert!(body["rendezvousSecret"].is_string());
+        assert_eq!(body["roomDescriptor"]["v"], 2);
+        assert!(body["signalingKeyRef"].is_string());
     }
 
     #[tokio::test]
@@ -744,6 +807,7 @@ mod tests {
                         "devicePlatform": "android",
                         "devicePubkey": "",
                         "appVersion": "0.1.0",
+                        "mobileSigningKey": MOBILE_SIGNING_KEY,
                     }))
                     .unwrap(),
                 ))
@@ -774,6 +838,7 @@ mod tests {
                     "devicePlatform": "android",
                     "devicePubkey": "",
                     "appVersion": "0.1.0",
+                    "mobileSigningKey": MOBILE_SIGNING_KEY,
                 }))
                 .unwrap(),
             ))
@@ -801,6 +866,7 @@ mod tests {
                         "devicePlatform": "android",
                         "devicePubkey": "",
                         "appVersion": "0.1.0",
+                        "mobileSigningKey": MOBILE_SIGNING_KEY,
                     }))
                     .unwrap(),
                 ))
@@ -846,6 +912,7 @@ mod tests {
                     "devicePlatform": "android",
                     "devicePubkey": "",
                     "appVersion": "0.1.0",
+                    "mobileSigningKey": MOBILE_SIGNING_KEY,
                 }))
                 .unwrap(),
             ))
@@ -884,6 +951,7 @@ mod tests {
                         "devicePlatform": "android",
                         "devicePubkey": "",
                         "appVersion": "0.1.0",
+                        "mobileSigningKey": MOBILE_SIGNING_KEY,
                     }))
                     .unwrap(),
                 ))
@@ -919,6 +987,7 @@ mod tests {
             "devicePlatform": "ios",
             "devicePubkey": "base64pubkeyhere==",
             "appVersion": "0.1.0",
+            "mobileSigningKey": MOBILE_SIGNING_KEY,
         });
         let req = Request::builder()
             .method("POST")
@@ -928,24 +997,19 @@ mod tests {
             .unwrap();
 
         let resp = router.oneshot(req).await.unwrap();
-        assert_eq!(resp.status().as_u16(), 200);
+        let status = resp.status();
         let body = body_json(resp).await;
+        assert_eq!(status.as_u16(), 200, "unexpected pair response: {body}");
         assert!(body["deviceId"].is_string());
         assert!(body["deviceJwt"].is_string());
         assert!(body["serverVersion"].is_string());
-        // ADR-0021: rendezvous fields must be present and well-formed.
+        // Signaling v2 returns a self-certifying room and no shared secret.
         let rid = body["rendezvousId"].as_str().expect("rendezvousId string");
-        assert!(
-            Uuid::parse_str(rid).is_ok(),
-            "rendezvousId is not a UUID: {rid}"
-        );
-        let rsec = body["rendezvousSecret"]
-            .as_str()
-            .expect("rendezvousSecret string");
-        let decoded = URL_SAFE_NO_PAD
-            .decode(rsec.as_bytes())
-            .expect("rendezvousSecret decodes as base64url");
-        assert_eq!(decoded.len(), 32, "rendezvousSecret must be 32 bytes");
+        assert_eq!(rid.len(), 43);
+        assert_eq!(body["roomDescriptor"]["v"], 2);
+        assert_eq!(body["roomDescriptor"]["roomId"], rid);
+        assert!(body.get("rendezvousSecret").is_none());
+        assert!(body["signalingKeyRef"].is_string());
     }
 
     #[tokio::test]
@@ -974,6 +1038,7 @@ mod tests {
                         "devicePlatform": "ios",
                         "devicePubkey": "",
                         "appVersion": "0.1.0",
+                        "mobileSigningKey": MOBILE_SIGNING_KEY,
                     }))
                     .unwrap(),
                 ))
@@ -984,7 +1049,7 @@ mod tests {
         let body_a = send(router_a, jwt_a).await;
         let body_b = send(router_b, jwt_b).await;
         assert_ne!(body_a["rendezvousId"], body_b["rendezvousId"]);
-        assert_ne!(body_a["rendezvousSecret"], body_b["rendezvousSecret"]);
+        assert_ne!(body_a["roomDescriptor"], body_b["roomDescriptor"]);
     }
 
     // ── 401 invalid_pair_jwt ─────────────────────────────────────────────
@@ -998,6 +1063,7 @@ mod tests {
             "devicePlatform": "android",
             "devicePubkey": "abc",
             "appVersion": "0.1.0",
+            "mobileSigningKey": MOBILE_SIGNING_KEY,
         });
         let req = Request::builder()
             .method("POST")
@@ -1023,6 +1089,7 @@ mod tests {
             "devicePlatform": "android",
             "devicePubkey": "abc",
             "appVersion": "0.1.0",
+            "mobileSigningKey": MOBILE_SIGNING_KEY,
         });
         let req = Request::builder()
             .method("POST")
@@ -1048,6 +1115,7 @@ mod tests {
             "devicePlatform": "ios",
             "devicePubkey": "abc",
             "appVersion": "0.1.0",
+            "mobileSigningKey": MOBILE_SIGNING_KEY,
         });
 
         // First request succeeds.
@@ -1088,6 +1156,7 @@ mod tests {
             "devicePlatform": "ios",
             "devicePubkey": "abc",
             "appVersion": "0.1.0",
+            "mobileSigningKey": MOBILE_SIGNING_KEY,
         });
         let router = build_router(state);
         let req = Request::builder()
@@ -1113,6 +1182,7 @@ mod tests {
             "devicePlatform": "ios",
             "devicePubkey": "abc",
             "appVersion": "0.1.0",
+            "mobileSigningKey": MOBILE_SIGNING_KEY,
         });
         let router = build_router(state);
         let req = Request::builder()

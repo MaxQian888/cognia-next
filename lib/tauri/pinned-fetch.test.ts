@@ -41,7 +41,7 @@ describe("pinnedFetch", () => {
     expect(callArgs).not.toHaveProperty("serverFingerprint")
   })
 
-  it("routes through CapacitorHttp with self-signed trust for pinned LAN URLs", async () => {
+  it("routes through CapacitorHttp with strict SPKI pinning for paired LAN URLs", async () => {
     const request = jest.fn(async () => ({
       data: '{"hi":"there"}',
       status: 200,
@@ -50,7 +50,12 @@ describe("pinnedFetch", () => {
     }))
     ;(globalThis as unknown as { Capacitor?: unknown }).Capacitor = {
       isNativePlatform: () => true,
-      Plugins: { CapacitorHttp: { request } },
+      Plugins: {
+        CapacitorHttp: {
+          request,
+          getSecurityCapabilities: async () => ({ spkiPinning: true }),
+        },
+      },
     }
 
     const r = await pinnedFetch("https://192.168.1.42:7890/api/v1/whoami", {
@@ -61,8 +66,24 @@ describe("pinnedFetch", () => {
     expect(r.status).toBe(200)
     expect(request).toHaveBeenCalledTimes(1)
     const arg = (request as unknown as jest.Mock).mock.calls[0][0] as Record<string, unknown>
-    expect(arg.serverTrustMode).toBe("self-signed")
+    expect(arg.serverTrustMode).toBe("pinned")
+    expect(arg.serverFingerprint).toBe("deadbeef")
     expect(arg.url).toBe("https://192.168.1.42:7890/api/v1/whoami")
+  })
+
+  it("fails closed when the native plugin cannot attest SPKI enforcement", async () => {
+    const request = jest.fn()
+    ;(globalThis as unknown as { Capacitor?: unknown }).Capacitor = {
+      isNativePlatform: () => true,
+      Plugins: { CapacitorHttp: { request } },
+    }
+
+    await expect(
+      pinnedFetch("https://192.168.1.42:7890/api/v2/devices", {
+        serverFingerprint: "deadbeef",
+      })
+    ).rejects.toThrow("native_spki_pinning_unavailable")
+    expect(request).not.toHaveBeenCalled()
   })
 
   it("uses default trust mode for trycloudflare hosts", async () => {
@@ -74,7 +95,12 @@ describe("pinnedFetch", () => {
     }))
     ;(globalThis as unknown as { Capacitor?: unknown }).Capacitor = {
       isNativePlatform: () => true,
-      Plugins: { CapacitorHttp: { request } },
+      Plugins: {
+        CapacitorHttp: {
+          request,
+          getSecurityCapabilities: async () => ({ spkiPinning: true }),
+        },
+      },
     }
 
     await pinnedFetch("https://abc-def-ghi.trycloudflare.com/api/v1/whoami", {
@@ -94,7 +120,12 @@ describe("pinnedFetch", () => {
     }))
     ;(globalThis as unknown as { Capacitor?: unknown }).Capacitor = {
       isNativePlatform: () => true,
-      Plugins: { CapacitorHttp: { request } },
+      Plugins: {
+        CapacitorHttp: {
+          request,
+          getSecurityCapabilities: async () => ({ spkiPinning: true }),
+        },
+      },
     }
 
     await pinnedFetch("https://192.168.1.42:7890/api/v1/auth/pair/issue", { method: "POST" })
@@ -112,7 +143,12 @@ describe("pinnedFetch", () => {
     }))
     ;(globalThis as unknown as { Capacitor?: unknown }).Capacitor = {
       isNativePlatform: () => true,
-      Plugins: { CapacitorHttp: { request } },
+      Plugins: {
+        CapacitorHttp: {
+          request,
+          getSecurityCapabilities: async () => ({ spkiPinning: true }),
+        },
+      },
     }
 
     const h = new Headers()
@@ -139,7 +175,12 @@ describe("pinnedFetch", () => {
     }))
     ;(globalThis as unknown as { Capacitor?: unknown }).Capacitor = {
       isNativePlatform: () => true,
-      Plugins: { CapacitorHttp: { request } },
+      Plugins: {
+        CapacitorHttp: {
+          request,
+          getSecurityCapabilities: async () => ({ spkiPinning: true }),
+        },
+      },
     }
 
     const r = await pinnedFetch("https://192.168.1.42:7890/x", { serverFingerprint: "abc" })

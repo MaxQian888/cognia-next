@@ -59,4 +59,24 @@ describe("MobileNetworkPage", () => {
     expect(screen.queryByRole("textbox")).toBeNull()
     expect(screen.queryByRole("button", { name: /apply|test|save/i })).toBeNull()
   })
+
+  it("shows the direct-connection read-out when paired", async () => {
+    // Which signaling server this device will actually dial, and whether its
+    // STUN/TURN came from the host or the built-in defaults, was previously
+    // impossible to see — and quietly wrong, because a self-hosted signaling
+    // server or TURN relay configured on the desktop never reached the phone.
+    render(<MobileNetworkPage />)
+    await waitFor(() => expect(screen.getByText("Wi-Fi")).toBeInTheDocument())
+    expect(screen.getByTestId("rendezvous-signaling")).toBeInTheDocument()
+    expect(screen.getByTestId("rendezvous-stun")).toBeInTheDocument()
+    expect(screen.getByTestId("rendezvous-turn")).toBeInTheDocument()
+  })
+
+  it("hides the direct-connection read-out when unpaired", () => {
+    // It describes a connection to a host, so with no host it would be
+    // reporting on nothing.
+    mockPaired(false)
+    render(<MobileNetworkPage />)
+    expect(screen.queryByTestId("rendezvous-signaling")).toBeNull()
+  })
 })

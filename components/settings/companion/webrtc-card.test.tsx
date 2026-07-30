@@ -141,6 +141,31 @@ describe("parseServers", () => {
       invalid: ["http://nope"],
     })
   })
+
+  it("rejects malformed ports, unsupported query parameters, and TURN-TLS over UDP", () => {
+    const text = [
+      "turn:turn.example.com:70000?transport=udp|u|p",
+      "turn:turn.example.com:3478?foo=bar|u|p",
+      "turns:turn.example.com:5349?transport=udp|u|p",
+    ].join("\n")
+    expect(parseServers(text)).toEqual({
+      servers: [],
+      invalid: text.split("\n"),
+    })
+  })
+
+  it("accepts bracketed IPv6 and TURN-TLS over TCP", () => {
+    expect(parseServers("turns:[2001:db8::1]:5349?transport=tcp|alice|secret")).toEqual({
+      servers: [
+        {
+          urls: "turns:[2001:db8::1]:5349?transport=tcp",
+          username: "alice",
+          credential: "secret",
+        },
+      ],
+      invalid: [],
+    })
+  })
 })
 
 describe("stringifyServers", () => {
@@ -200,7 +225,7 @@ describe("WebRtcCard — form & i18n", () => {
   it("populates the default signaling URL on first paint", async () => {
     renderCard()
     const input = await screen.findByLabelText(/Signaling server/i)
-    await waitFor(() => expect(input).toHaveValue("wss://signaling.cognia.cn/v1/signaling"))
+    await waitFor(() => expect(input).toHaveValue("wss://signaling.cognia.cn/v2/signaling"))
   })
 
   it("places the TURN textarea placeholder via the translation key, not a literal", async () => {
@@ -245,7 +270,7 @@ describe("WebRtcCard — status block", () => {
       if (name === "companion_signaling_status") {
         return Promise.resolve({
           enabled: false,
-          signalingUrl: "wss://signaling.cognia.cn/v1/signaling",
+          signalingUrl: "wss://signaling.cognia.cn/v2/signaling",
           registeredDevices: [],
         })
       }
@@ -263,7 +288,7 @@ describe("WebRtcCard — status block", () => {
       if (name === "companion_signaling_status") {
         return Promise.resolve({
           enabled: true,
-          signalingUrl: "wss://signaling.cognia.cn/v1/signaling",
+          signalingUrl: "wss://signaling.cognia.cn/v2/signaling",
           registeredDevices: [],
         })
       }
@@ -303,7 +328,7 @@ describe("WebRtcCard — status block", () => {
       if (name === "companion_signaling_status") {
         return Promise.resolve({
           enabled: true,
-          signalingUrl: "wss://signaling.cognia.cn/v1/signaling",
+          signalingUrl: "wss://signaling.cognia.cn/v2/signaling",
           registeredDevices: devices.map((d) => d.rendezvousId),
         })
       }
@@ -316,6 +341,9 @@ describe("WebRtcCard — status block", () => {
     await screen.findByTestId("webrtc-device-tier-list")
     expect(screen.getByTestId("webrtc-device-row-device-apple-123456")).toHaveTextContent(
       en.mobile.companion.webrtc.deviceTier.connected
+    )
+    expect(screen.getByTestId("webrtc-device-row-device-apple-123456")).toHaveTextContent(
+      en.mobile.companion.webrtc.protocolMode
     )
     expect(screen.getByTestId("webrtc-device-row-device-banana-7890")).toHaveTextContent(
       en.mobile.companion.webrtc.deviceTier.negotiating
@@ -349,7 +377,7 @@ describe("WebRtcCard — poll-failure banner", () => {
       if (name === "companion_signaling_status") {
         return Promise.resolve({
           enabled: true,
-          signalingUrl: "wss://signaling.cognia.cn/v1/signaling",
+          signalingUrl: "wss://signaling.cognia.cn/v2/signaling",
           registeredDevices: [],
         })
       }
@@ -527,7 +555,7 @@ describe("WebRtcCard — per-device reconnect button", () => {
       if (name === "companion_signaling_status") {
         return Promise.resolve({
           enabled: true,
-          signalingUrl: "wss://signaling.cognia.cn/v1/signaling",
+          signalingUrl: "wss://signaling.cognia.cn/v2/signaling",
           registeredDevices: devices.map((d) => d.rendezvousId),
         })
       }
@@ -592,7 +620,7 @@ describe("WebRtcCard — per-device reconnect button", () => {
       if (name === "companion_signaling_status") {
         return Promise.resolve({
           enabled: true,
-          signalingUrl: "wss://signaling.cognia.cn/v1/signaling",
+          signalingUrl: "wss://signaling.cognia.cn/v2/signaling",
           registeredDevices: ["r1"],
         })
       }
@@ -639,7 +667,7 @@ class FakeProviderStore {
 
 const BASE_FORM: FormState = {
   enabled: true,
-  signalingUrl: "wss://x/v1/signaling",
+  signalingUrl: "wss://x/v2/signaling",
   iceServersText: "",
   turnServersText: "",
   turnProviderKind: "none",
@@ -651,11 +679,14 @@ const BASE_FORM: FormState = {
 }
 
 describe("parseTtl", () => {
-  it("returns undefined for blank / non-numeric, the number otherwise", () => {
+  it("returns undefined for blank / invalid and clamps numeric TTLs", () => {
     expect(parseTtl("")).toBeUndefined()
     expect(parseTtl("  ")).toBeUndefined()
     expect(parseTtl("abc")).toBeUndefined()
+    expect(parseTtl("-1")).toBeUndefined()
+    expect(parseTtl("30")).toBe(600)
     expect(parseTtl("3600")).toBe(3600)
+    expect(parseTtl("999999")).toBe(86_400)
   })
 })
 
@@ -723,7 +754,7 @@ describe("persistTurnProvider", () => {
 })
 
 describe("WebRtcCard — TURN provider UI", () => {
-  const MARKER_URL = "wss://hydrated.example/v1/signaling"
+  const MARKER_URL = "wss://hydrated.example/v2/signaling"
   beforeEach(async () => {
     __setProviderSecretStore(new FakeProviderStore() as never)
     // Keep the status poll quiet.

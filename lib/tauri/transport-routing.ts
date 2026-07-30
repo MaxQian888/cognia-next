@@ -3,11 +3,10 @@
  *
  * The desktop app is hard-wired to a local {@link TauriTransport}. To let it
  * *drive a remote Cognia host* — running terminals, files, and git on another
- * machine — the desktop transport is a {@link RoutingTransport} that delegates
- * every `call`/`subscribe` to an *active remote* transport when one is
- * installed, and otherwise passes straight through to local. With no remote
- * host active it is behaviourally identical to the wrapped local transport —
- * the zero-regression baseline.
+ * machine — the desktop transport is a {@link RoutingTransport}. Only commands
+ * explicitly classified as `execution` in the shared command manifest follow
+ * the active remote host. Client and unclassified commands stay local;
+ * host-admin and service commands require separate explicit entry points.
  *
  * Switching the active host is a single pointer swap on the module-level holder
  * below; the ~480 `transport.call` sites and the `subscribe` event stream
@@ -23,6 +22,7 @@
  */
 
 import type { Transport } from "./transport-types"
+import { getCommandDescriptor } from "./command-descriptors"
 
 /**
  * The currently-active remote transport, or `null` to route locally. `null` is
@@ -33,6 +33,23 @@ let activeRemote: Transport | null = null
 
 type ActiveRemoteListener = (remote: Transport | null) => void
 const listeners = new Set<ActiveRemoteListener>()
+
+type DisposableTransport = Transport & {
+  dispose?: () => void
+  destroy?: () => void
+}
+
+function disposeRemoteTransport(remote: Transport | null): void {
+  if (!remote) return
+  const disposable = remote as DisposableTransport
+  try {
+    if (typeof disposable.dispose === "function") disposable.dispose()
+    else if (typeof disposable.destroy === "function") disposable.destroy()
+  } catch {
+    // Disposal is best-effort at the routing boundary; the replacement must
+    // still become active even if an older transport's close hook misbehaves.
+  }
+}
 
 /**
  * Raw connection descriptor for the active remote host's WebSocket surfaces
@@ -58,30 +75,15 @@ export interface RemoteHostEndpoint {
 }
 
 /**
- * Commands which necessarily execute in the desktop shell even while the
- * project/runtime transport is pointed at a paired host. A remote companion
- * owns code-server, but it cannot create or position this desktop's child
- * webview, nor can it bind the desktop-side certificate-pinned relay.
- */
-const LOCAL_ONLY_COMMANDS = new Set([
-  "codeserver_embed_create",
-  "codeserver_embed_set_background",
-  "codeserver_embed_set_bounds",
-  "codeserver_embed_set_visible",
-  "codeserver_embed_navigate",
-  "codeserver_embed_destroy",
-  "codeserver_remote_relay_ensure",
-  "codeserver_remote_relay_stop",
-])
-
-/**
  * Install (or clear, with `null`) the active remote transport. Idempotent: a
  * no-op when the value is unchanged, so listeners only fire on real switches.
  */
 export function setActiveRemoteTransport(next: Transport | null): void {
   if (activeRemote === next) return
+  const previous = activeRemote
   activeRemote = next
   for (const listener of listeners) listener(next)
+  disposeRemoteTransport(previous)
 }
 
 /** The active remote transport, or `null` when routing locally. */
@@ -125,6 +127,7 @@ export function subscribeActiveRemoteTransport(listener: ActiveRemoteListener): 
  * without leaking listeners across cases.
  */
 export function __resetRoutingForTests(): void {
+  disposeRemoteTransport(activeRemote)
   activeRemote = null
   activeRemoteEndpoint = null
   listeners.clear()
@@ -144,8 +147,21 @@ export class RoutingTransport implements Transport {
   }
 
   call<T = unknown>(name: string, args?: Record<string, unknown>): Promise<T> {
-    if (LOCAL_ONLY_COMMANDS.has(name)) return this.local.call<T>(name, args)
-    return this.target().call<T>(name, args)
+    const descriptor = getCommandDescriptor(name)
+    if (!descriptor || descriptor.target === "client") {
+      return this.local.call<T>(name, args)
+    }
+    if (descriptor.target === "execution") {
+      return (activeRemote ?? this.local).call<T>(name, args)
+    }
+    if (descriptor.target === "host-admin") {
+      return Promise.reject(
+        new Error(`Command "${name}" requires an explicit host-admin execution context`)
+      )
+    }
+    return Promise.reject(
+      new Error(`Command "${name}" is service-only and cannot use the device routing plane`)
+    )
   }
 
   subscribe<T = unknown>(event: string, handler: (payload: T) => void): () => void {

@@ -748,10 +748,6 @@ fn profile_paths(app: &tauri::AppHandle, profile: IdeProfile) -> Result<ProfileP
 /// `<user-data>/User/settings.json` — the file VS Code hot-watches, and so the
 /// only channel that can repaint a *running* workbench. Creating the directory
 /// here is safe: it is the same one `--user-data-dir` points code-server at.
-pub fn user_settings_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
-    user_settings_path_for_profile(app, IdeProfile::Managed)
-}
-
 pub fn user_settings_path_for_profile(
     app: &tauri::AppHandle,
     profile: IdeProfile,
@@ -766,12 +762,8 @@ pub fn user_settings_path_for_profile(
 /// `settings.json`: VS Code reads `locale` from argv.json only, and only at
 /// startup, so changing it also requires restarting the instance.
 ///
-/// Same directory as {@link user_settings_path}, which is the one
+/// Same directory as {@link user_settings_path_for_profile}, which is the one
 /// `--user-data-dir` points code-server at.
-pub fn runtime_args_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
-    runtime_args_path_for_profile(app, IdeProfile::Managed)
-}
-
 pub fn runtime_args_path_for_profile(
     app: &tauri::AppHandle,
     profile: IdeProfile,

@@ -44,7 +44,9 @@ import {
   islandListMonitors,
   fleetInterruptSession,
   islandDebugGeometry,
+  islandGetHideOnFullscreen,
   islandResize,
+  islandSetHideOnFullscreen,
   islandSetMonitor,
   islandSetTucked,
   isIslandWindowOpen,
@@ -299,6 +301,19 @@ describe("on Tauri", () => {
     expect(invokeMock).toHaveBeenCalledWith("island_set_monitor", { monitor: null })
   })
 
+  it("reads and writes the hide-under-full-screen-apps preference", async () => {
+    invokeMock.mockResolvedValueOnce(true)
+    expect(await islandGetHideOnFullscreen()).toBe(true)
+    expect(invokeMock).toHaveBeenCalledWith("island_get_hide_on_fullscreen")
+
+    invokeMock.mockResolvedValueOnce(undefined)
+    expect(await islandSetHideOnFullscreen(true)).toBe(true)
+    expect(invokeMock).toHaveBeenCalledWith("island_set_hide_on_fullscreen", { hide: true })
+    invokeMock.mockResolvedValueOnce(undefined)
+    expect(await islandSetHideOnFullscreen(false)).toBe(true)
+    expect(invokeMock).toHaveBeenCalledWith("island_set_hide_on_fullscreen", { hide: false })
+  })
+
   it("swallows command failures with a warn", async () => {
     invokeMock.mockRejectedValue(new Error("boom"))
     expect(await fleetMonitorStart()).toBeNull()
@@ -312,6 +327,10 @@ describe("on Tauri", () => {
     expect(await isIslandWindowOpen()).toBe(false)
     expect(await islandResize(1, 1)).toEqual({ topInset: 0, fullscreen: false })
     expect(await islandSetTucked(true)).toBe(false)
+    // A failed read must answer `false` — "show the island everywhere" — rather
+    // than fail closed into hiding it, which is the state being fixed.
+    expect(await islandGetHideOnFullscreen()).toBe(false)
+    expect(await islandSetHideOnFullscreen(true)).toBe(false)
     expect(await islandDebugGeometry()).toBeNull()
     expect(warnSpy).toHaveBeenCalled()
   })

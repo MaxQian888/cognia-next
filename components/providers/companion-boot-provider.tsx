@@ -34,6 +34,7 @@ import {
   runSyncDown,
 } from "@/lib/sync/companion-sync"
 import { hydrateCompanionConfig } from "@/lib/tauri/transport-companion"
+import { remoteEventResyncCoordinator } from "@/lib/tauri/resync-coordinator"
 import { transport } from "@/lib/tauri/transport-instance"
 import {
   installCapabilityReporter,
@@ -260,6 +261,11 @@ export function CompanionBootProvider({ children }: { children: React.ReactNode 
       }
 
       // ── Sync ──────────────────────────────────────────────────────────
+      addCleanup(
+        remoteEventResyncCoordinator.register("*", async () => {
+          await runSyncDown()
+        })
+      )
       try {
         await runSyncDown()
       } catch (err) {

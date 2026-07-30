@@ -27,6 +27,7 @@ import {
   type CompanionConfig,
   type TransportTier,
 } from "./transport-companion"
+import { remoteEventResyncCoordinator } from "./resync-coordinator"
 
 // ---------------------------------------------------------------------------
 // Mock fetch response factory — avoids `new Response(...)` which jsdom lacks.
@@ -348,6 +349,10 @@ describe("call() — idempotency key", () => {
       "claude_has_oauth_bearer",
       "skills_load_registry",
       "skills_scan_native",
+      "skills_catalog_get",
+      "external_bridge_config_get",
+      "external_bridge_client_list",
+      "external_bridge_status",
       "mcp_server_status",
       "lsp_host_ensure",
       "codeserver_supported",
@@ -755,6 +760,15 @@ describe("subscribe() — WebSocket frame dispatch", () => {
     expect(ws.url).toContain("token=test.jwt.token")
   })
 
+  it("fails closed instead of opening an unpinned browser WebSocket to a paired LAN host", async () => {
+    await setConfig({ ...MOCK_CONFIG, serverFingerprint: "ab".repeat(32) })
+    transport = new CompanionTransport()
+    transport.subscribe("claude://message", jest.fn())
+
+    expect(wsSpy).not.toHaveBeenCalled()
+    expect(transport.getActiveTier()).toBe("offline")
+  })
+
   it("dispatches payload to handler on matching frame type", () => {
     transport = new CompanionTransport()
     const handler = jest.fn()
@@ -798,6 +812,27 @@ describe("subscribe() — WebSocket frame dispatch", () => {
 
     expect(h1).toHaveBeenCalledWith("hello")
     expect(h2).toHaveBeenCalledWith("hello")
+  })
+
+  it("does not dispatch duplicate or out-of-order WebSocket events", () => {
+    transport = new CompanionTransport()
+    const handler = jest.fn()
+    transport.subscribe("claude://message", handler)
+
+    const ws = MockWebSocket.lastInstance!
+    ws.triggerOpen()
+    ws.triggerMessage(
+      JSON.stringify({ type: "claude://message", seq: 4, payload: "fresh", ts_ms: 0 })
+    )
+    ws.triggerMessage(
+      JSON.stringify({ type: "claude://message", seq: 4, payload: "duplicate", ts_ms: 0 })
+    )
+    ws.triggerMessage(
+      JSON.stringify({ type: "claude://message", seq: 3, payload: "stale", ts_ms: 0 })
+    )
+
+    expect(handler).toHaveBeenCalledTimes(1)
+    expect(handler).toHaveBeenCalledWith("fresh")
   })
 
   it("unsubscribed handler stops receiving payloads", () => {
@@ -861,7 +896,9 @@ describe("subscribe() — ping / pong", () => {
 // ---------------------------------------------------------------------------
 
 describe("subscribe() — resync_required", () => {
-  it("clears cursors and triggers reconnect on resync_required", async () => {
+  it("runs authoritative resync, advances cursor, and reconnects", async () => {
+    const resolver = jest.fn(async () => {})
+    const removeResolver = remoteEventResyncCoordinator.register("*", resolver)
     await setConfig()
     transport = new CompanionTransport()
     const handler = jest.fn()
@@ -876,18 +913,21 @@ describe("subscribe() — resync_required", () => {
     )
 
     // Server sends resync_required.
-    ws1.triggerMessage(JSON.stringify({ type: "resync_required" }))
+    ws1.triggerMessage(JSON.stringify({ type: "resync_required", domains: ["*"], cursor: 25 }))
+    await new Promise((resolve) => setTimeout(resolve, 0))
 
     // A synthetic resync event was emitted to all handlers.
-    expect(handler).toHaveBeenCalledWith({ type: "resync_required" })
+    expect(resolver).toHaveBeenCalledTimes(1)
+    expect(handler).toHaveBeenCalledWith({ type: "resync_required", domains: ["*"] })
 
     // Old WS is closed and a new one is opened.
     expect(ws1.closed).toBe(true)
     expect(MockWebSocket.instances.length).toBe(2)
 
-    // New WS should use since= without the previous cursor (cursors cleared).
+    // New WS resumes from the authoritative snapshot high-water mark.
     const ws2 = MockWebSocket.instances[1]
-    expect(ws2.url).not.toContain("since=10")
+    expect(ws2.url).toContain("since=25")
+    removeResolver()
   })
 })
 
@@ -1319,7 +1359,7 @@ describe("reconnectRtc()", () => {
     // no-tier — it must rebuild from the cached options.
     let enableCalls = 0
     ;(transport as unknown as { lastEnableOptions: unknown }).lastEnableOptions = {
-      signalingUrl: "wss://signaling.test/v1/signaling",
+      signalingUrl: "wss://signaling.test/v2/signaling",
     }
     ;(
       transport as unknown as { enableWebRtcTier: (o: unknown) => Promise<void> }
@@ -1438,8 +1478,14 @@ describe("call() — LAN-first gate", () => {
       ok: true,
     })
     const rtcArgs = (fakeRtc.call.mock.calls as unknown[][])[0][1] as Record<string, unknown>
+    const rtcCallOptions = (fakeRtc.call.mock.calls as unknown[][])[0][2] as {
+      idempotencyKey?: string
+    }
     const [, init] = fetchSpy.mock.calls[0] as [string, RequestInit]
-    expect(rtcArgs.idempotencyKey).toBe((init.headers as Record<string, string>)["Idempotency-Key"])
+    expect(rtcCallOptions.idempotencyKey).toBe(
+      (init.headers as Record<string, string>)["Idempotency-Key"]
+    )
+    expect(rtcArgs).not.toHaveProperty("idempotencyKey")
   })
 })
 

@@ -18,10 +18,12 @@ use axum::{
         ws::{Message, WebSocket, WebSocketUpgrade},
         Query, State,
     },
-    response::Response,
+    http::StatusCode,
+    response::{IntoResponse, Response},
+    Json,
 };
 use serde::Deserialize;
-use serde_json::json;
+use serde_json::{json, Value};
 use tokio::time::{interval, Duration, Instant};
 
 use super::{event_bus::SubscribeResult, middleware::DeviceContext, SharedState};
@@ -45,6 +47,12 @@ const IDLE_TIMEOUT_SECS: u64 = 90;
 pub struct WsParams {
     /// Last sequence number the client received.  Omit (or pass `0`) for a
     /// fresh subscription with no replay.
+    pub since: Option<u64>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct WsV2Params {
+    pub ticket: String,
     pub since: Option<u64>,
 }
 
@@ -72,6 +80,71 @@ pub async fn ws_handler(
         .map(|ctx| ctx.device_id.clone())
         .unwrap_or_default();
 
+    upgrade_events_ws(ws, params.since, None, device_id, state)
+}
+
+/// Companion API v2 event stream. The 60-second socket ticket is path- and
+/// audience-bound, single-use, and re-checks the device's live revocation
+/// state in SQLite before the upgrade is accepted.
+pub async fn ws_v2_handler(
+    ws: WebSocketUpgrade,
+    Query(params): Query<WsV2Params>,
+    State(state): State<SharedState>,
+) -> Response {
+    let Some(store) = super::security_store::security_store() else {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(json!({
+                "error": {
+                    "code": "security_store_unavailable",
+                    "message": "the security database is unavailable",
+                    "requestId": uuid::Uuid::new_v4().to_string(),
+                    "retryable": true,
+                    "details": {}
+                }
+            })),
+        )
+            .into_response();
+    };
+    let identity = match store.redeem_socket_ticket(
+        &params.ticket,
+        "/ws/v2/events",
+        "events",
+        unix_time_secs(),
+    ) {
+        Ok(identity) => identity,
+        Err(_) => {
+            return (
+                StatusCode::UNAUTHORIZED,
+                Json(json!({
+                    "error": {
+                        "code": "invalid_socket_ticket",
+                        "message": "the socket ticket is invalid or already used",
+                        "requestId": uuid::Uuid::new_v4().to_string(),
+                        "retryable": false,
+                        "details": {}
+                    }
+                })),
+            )
+                .into_response();
+        }
+    };
+    upgrade_events_ws(
+        ws,
+        params.since,
+        Some(identity.tenant_id),
+        identity.device_id,
+        state,
+    )
+}
+
+fn upgrade_events_ws(
+    ws: WebSocketUpgrade,
+    since: Option<u64>,
+    tenant_id: Option<String>,
+    device_id: String,
+    state: SharedState,
+) -> Response {
     // Bound inbound frame allocation (DoS guard). The events channel only ever
     // receives tiny client frames (pongs / keep-alive text), so a small cap is
     // generous; this route is intentionally outside `RequestBodyLimitLayer`
@@ -79,7 +152,7 @@ pub async fn ws_handler(
     const MAX_WS_FRAME_BYTES: usize = 64 * 1024;
     ws.max_message_size(MAX_WS_FRAME_BYTES)
         .max_frame_size(MAX_WS_FRAME_BYTES)
-        .on_upgrade(move |socket| handle_socket(socket, params.since, device_id, state))
+        .on_upgrade(move |socket| handle_socket(socket, since, tenant_id, device_id, state))
 }
 
 // ---------------------------------------------------------------------------
@@ -90,7 +163,8 @@ pub async fn ws_handler(
 async fn handle_socket(
     mut socket: WebSocket,
     since: Option<u64>,
-    _device_id: String,
+    tenant_id: Option<String>,
+    device_id: String,
     state: SharedState,
 ) {
     let now_ms = std::time::SystemTime::now()
@@ -102,25 +176,37 @@ async fn handle_socket(
     let (mut receiver, replay) = match state.event_bus.subscribe(since, now_ms) {
         SubscribeResult::Ok { receiver, replay } => (receiver, replay),
         SubscribeResult::ResyncRequired => {
-            let msg = serde_json::to_string(&json!({ "type": "resync_required" }))
-                .unwrap_or_else(|_| r#"{"type":"resync_required"}"#.to_owned());
+            let msg = serde_json::to_string(&json!({
+                "type": "resync_required",
+                "cursor": state.event_bus.high_water_seq(),
+                "domains": ["*"],
+            }))
+            .unwrap_or_else(|_| r#"{"type":"resync_required"}"#.to_owned());
             let _ = socket.send(Message::Text(msg.into())).await;
             return;
         }
     };
 
     // Gauge for /metrics (D9): decremented on every exit path via Drop.
-    struct WsMetricGuard;
+    struct WsMetricGuard {
+        device_id: String,
+    }
     impl Drop for WsMetricGuard {
         fn drop(&mut self) {
             crate::companion_api::metrics::ws_client_disconnected();
+            super::admin_lease::revoke_device(&self.device_id);
         }
     }
     crate::companion_api::metrics::ws_client_connected();
-    let _ws_metric_guard = WsMetricGuard;
+    let _ws_metric_guard = WsMetricGuard {
+        device_id: device_id.clone(),
+    };
 
     // 2. Send replay frames.
     for frame in replay {
+        if !frame.visible_to(&device_id) {
+            continue;
+        }
         match serde_json::to_string(&frame) {
             Ok(text) => {
                 if socket.send(Message::Text(text.into())).await.is_err() {
@@ -146,6 +232,25 @@ async fn handle_socket(
             result = receiver.recv() => {
                 match result {
                     Ok(frame) => {
+                        if !frame.visible_to(&device_id) {
+                            continue;
+                        }
+                        if frame.event_type == "security://device-revoked" {
+                            let targets_this_socket =
+                                revocation_targets(&frame, tenant_id.as_deref(), &device_id);
+                            if targets_this_socket {
+                                let _ = socket
+                                    .send(Message::Close(Some(axum::extract::ws::CloseFrame {
+                                        code: 1008,
+                                        reason: "device revoked".into(),
+                                    })))
+                                    .await;
+                                return;
+                            }
+                            // Revocation notifications are control-plane data,
+                            // never part of another device's event stream.
+                            continue;
+                        }
                         match serde_json::to_string(&frame) {
                             Ok(text) => {
                                 if socket.send(Message::Text(text.into())).await.is_err() {
@@ -218,6 +323,24 @@ async fn handle_socket(
     }
 }
 
+fn revocation_targets(
+    frame: &super::event_bus::EventFrame,
+    tenant_id: Option<&str>,
+    device_id: &str,
+) -> bool {
+    tenant_id.is_some_and(|tenant_id| {
+        frame.payload.get("tenantId").and_then(Value::as_str) == Some(tenant_id)
+            && frame.payload.get("deviceId").and_then(Value::as_str) == Some(device_id)
+    })
+}
+
+fn unix_time_secs() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs() as i64
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -288,6 +411,24 @@ mod tests {
         let _ = state; // keep state alive
     }
 
+    #[test]
+    fn revocation_control_event_only_targets_the_bound_v2_identity() {
+        let frame = crate::companion_api::event_bus::EventFrame {
+            event_type: "security://device-revoked".into(),
+            seq: 1,
+            payload: json!({
+                "tenantId": "tenant-a",
+                "deviceId": "device-a",
+            }),
+            ts_ms: 1,
+            target_device_id: None,
+        };
+        assert!(revocation_targets(&frame, Some("tenant-a"), "device-a"));
+        assert!(!revocation_targets(&frame, Some("tenant-b"), "device-a"));
+        assert!(!revocation_targets(&frame, Some("tenant-a"), "device-b"));
+        assert!(!revocation_targets(&frame, None, "device-a"));
+    }
+
     // ── subscribe with valid `since` → replay frames in order ────────────────
 
     #[tokio::test]
@@ -324,7 +465,7 @@ mod tests {
         let bus = EventBus::new();
 
         // Fill the ring past capacity so old entries are evicted.
-        for _ in 0..205_usize {
+        for _ in 0..(crate::companion_api::event_bus::BUFFER_CAPACITY + 1) {
             bus.publish("ev".into(), json!({}));
         }
         // since=1 has been evicted.
@@ -373,6 +514,7 @@ mod tests {
             seq: 42,
             payload: json!({ "text": "hi" }),
             ts_ms: 1_700_000_000_000,
+            target_device_id: None,
         };
         let s = serde_json::to_string(&frame).expect("serialize");
         let v: Value = serde_json::from_str(&s).expect("parse");

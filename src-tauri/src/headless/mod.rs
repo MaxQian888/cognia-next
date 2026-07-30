@@ -112,6 +112,10 @@ pub use crate::secret_store::{
 /// binary constructs one at boot (R8) and installs it process-wide; the
 /// dispatch arms reach it through `DispatchHost::Headless`.
 pub struct HeadlessServices {
+    /// Canonical process-owned data directory. Host-side configuration and
+    /// transactional staging must derive from this path rather than from a
+    /// connected controller's filesystem.
+    pub data_dir: std::path::PathBuf,
     /// Sidecar supervisor state — same struct Tauri manages on desktop.
     pub sidecar: SidecarState,
     /// The sidecar's host seam (script resolution, env injection, event
@@ -292,6 +296,7 @@ impl HeadlessServices {
                 }
             };
         Ok(Arc::new(Self {
+            data_dir,
             sidecar: SidecarState::new(),
             sidecar_host,
             api_keys,

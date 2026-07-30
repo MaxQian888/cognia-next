@@ -2,6 +2,11 @@
 
 import { pinnedFetch as defaultPinnedFetch, type PinnedFetchInit } from "@/lib/tauri/pinned-fetch"
 import type { CompanionConfig } from "@/lib/tauri/transport-companion"
+import {
+  buildRoomDescriptorV2,
+  generatePersistableV2SigningIdentity,
+  type RoomDescriptorV2,
+} from "@/lib/signaling/v2-crypto"
 
 import { getDeviceLabel, getDevicePlatform, safeText } from "./pair-helpers"
 
@@ -32,17 +37,17 @@ export interface PairResponseBody {
   deviceId?: string
   deviceJwt?: string
   serverVersion?: string
-  /** ADR-0021 — optional for legacy desktops without WebRTC support. */
   rendezvousId?: string
-  /** ADR-0021 — 32-byte HMAC secret, URL-safe base64 (unpadded). */
-  rendezvousSecret?: string
+  roomDescriptor?: RoomDescriptorV2
+  signalingKeyRef?: string
   /** ADR-0059 C4 — local account this pairing routes to. */
   accountId?: string
   device_id?: string
   device_jwt?: string
   server_version?: string
   rendezvous_id?: string
-  rendezvous_secret?: string
+  room_descriptor?: RoomDescriptorV2
+  signaling_key_ref?: string
   account_id?: string
 }
 
@@ -135,6 +140,16 @@ async function runRedeem(
   common: PairCommonOptions,
   fetcher: PairFetcher
 ): Promise<RedeemResult> {
+  let signalingIdentity: Awaited<ReturnType<typeof generatePersistableV2SigningIdentity>>
+  try {
+    signalingIdentity = await generatePersistableV2SigningIdentity()
+  } catch (error) {
+    return {
+      kind: "network_error",
+      message: error instanceof Error ? error.message : String(error),
+    }
+  }
+  payload.mobile_signing_key = signalingIdentity.encodedPublicKey
   let response: Response
   try {
     response = await fetcher(url, {
@@ -187,11 +202,35 @@ async function runRedeem(
     config.serverFingerprint = common.serverFingerprint
   }
   const rendezvousId = body.rendezvousId ?? body.rendezvous_id
-  const rendezvousSecret = body.rendezvousSecret ?? body.rendezvous_secret
-  if (rendezvousId && rendezvousSecret) {
-    config.rendezvousId = rendezvousId
-    config.rendezvousSecret = rendezvousSecret
+  const roomDescriptor = body.roomDescriptor ?? body.room_descriptor
+  if (!rendezvousId || !roomDescriptor || roomDescriptor.v !== 2) {
+    return {
+      kind: "http_error",
+      status: response.status,
+      rawBody: "pair response missing signaling v2 room descriptor",
+    }
   }
+  const verifiedDescriptor = await buildRoomDescriptorV2({
+    roomNonce: roomDescriptor.roomNonce,
+    desktopSigningKey: roomDescriptor.desktopSigningKey,
+    mobileSigningKey: roomDescriptor.mobileSigningKey,
+    notAfter: roomDescriptor.notAfter,
+  })
+  if (
+    verifiedDescriptor.roomId !== rendezvousId ||
+    verifiedDescriptor.roomId !== roomDescriptor.roomId ||
+    roomDescriptor.mobileSigningKey !== signalingIdentity.encodedPublicKey
+  ) {
+    return {
+      kind: "http_error",
+      status: response.status,
+      rawBody: "pair response signaling v2 descriptor verification failed",
+    }
+  }
+  config.rendezvousId = rendezvousId
+  config.signalingRoomDescriptor = roomDescriptor
+  config.signalingPrivateKeyJwk = signalingIdentity.privateKeyJwk
+  config.signalingPrivateKey = signalingIdentity.privateKey
   const accountId = body.accountId ?? body.account_id
   if (accountId) {
     config.accountId = accountId

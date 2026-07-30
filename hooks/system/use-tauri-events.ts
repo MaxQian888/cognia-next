@@ -5,7 +5,9 @@ import { useRouter } from "next/navigation"
 import { useTranslations } from "next-intl"
 import { toast } from "sonner"
 import { listen } from "@tauri-apps/api/event"
-import { TAURI_EVENTS, onTauriEvent } from "@/lib/tauri"
+import { TAURI_EVENTS, onTauriEvent, transport } from "@/lib/tauri"
+import { emitSchedulerEvent } from "@/lib/scheduler/event-integration"
+import { isRemoteHostActive } from "@/lib/tauri/transport-routing"
 import { isTauri } from "@/lib/tauri"
 import { safeUnlisten } from "@/lib/tauri/safe-unlisten"
 import { useChatStore } from "@/stores/chat"
@@ -24,9 +26,21 @@ import {
 } from "@/lib/tray/tray-actions"
 import type { TrayActionPayload } from "@/lib/tray/types"
 
+function relaySchedulerEvent(
+  eventType: "job:exited" | "monitor:fired",
+  data: Record<string, unknown>
+): Promise<unknown> {
+  if (isRemoteHostActive()) {
+    return transport.call("scheduled_task_emit_event", { eventType, data })
+  }
+  return emitSchedulerEvent(eventType, data)
+}
+
 interface ParsedDeepLink {
-  kind: "chat" | "settings" | "workspace" | "unknown"
+  kind: "chat" | "im" | "scheduler" | "settings" | "workspace" | "unknown"
   chatId?: string
+  conversationKey?: string
+  taskId?: string
   workspacePath?: string
   settingsTab?: string
 }
@@ -35,6 +49,8 @@ interface ParsedDeepLink {
  * Parse a single `cognia://` URL into the action it should drive.
  *
  *   cognia://chat/<id>            → open that session
+ *   cognia://im?conversationKey=… → open the session bound to an IM conversation
+ *   cognia://scheduler/task/<id>   → open a scheduled task and its run history
  *   cognia://settings[?tab=xyz]   → open settings (optionally on a tab)
  *   cognia://workspace?path=…     → create/activate a workspace for that path
  */
@@ -55,6 +71,19 @@ function parseDeepLink(raw: string): ParsedDeepLink {
       url.searchParams.get("id") ||
       ""
     return { kind: "chat", chatId: id || undefined }
+  }
+  if (head === "im") {
+    return {
+      kind: "im",
+      conversationKey: url.searchParams.get("conversationKey") ?? undefined,
+    }
+  }
+  if (head === "scheduler") {
+    const segments = url.pathname.replace(/^\/+/, "").split("/").filter(Boolean)
+    return {
+      kind: "scheduler",
+      taskId: segments[0] === "task" ? segments[1] : url.searchParams.get("taskId") || undefined,
+    }
   }
   if (head === "settings") {
     return { kind: "settings", settingsTab: url.searchParams.get("tab") ?? undefined }
@@ -104,6 +133,30 @@ export function useTauriEvents(): void {
             if (action.chatId) {
               useChatStore.getState().setActiveSession(action.chatId)
               useUIStore.getState().setSelectedGuild({ kind: "dm" })
+            }
+            break
+          }
+          case "im": {
+            if (action.conversationKey) {
+              void import("@/lib/connectors/session-bindings")
+                .then(({ findActiveSessionForConversation }) =>
+                  findActiveSessionForConversation(action.conversationKey!)
+                )
+                .then((session) => {
+                  if (!session) return
+                  useChatStore.getState().setActiveSession(session.id)
+                  useUIStore.getState().setSelectedGuild({ kind: "dm" })
+                })
+                .catch(() => undefined)
+            }
+            break
+          }
+          case "scheduler": {
+            if (action.taskId) {
+              void import("@/stores/scheduler/scheduler-store").then(({ useSchedulerStore }) => {
+                useSchedulerStore.getState().selectTask(action.taskId!)
+                router.push("/scheduler")
+              })
             }
             break
           }
@@ -177,6 +230,22 @@ export function useTauriEvents(): void {
         if (Array.isArray(urls)) handleDeepLinks(urls)
         else handleDeepLinks([String(urls)])
       })
+      const backgroundJobExited = await onTauriEvent<Record<string, unknown>>(
+        TAURI_EVENTS.backgroundJobExited,
+        (payload) => {
+          void relaySchedulerEvent("job:exited", payload).catch((error) =>
+            console.warn("job:exited scheduler event failed", error)
+          )
+        }
+      )
+      const backgroundMonitorFired = await onTauriEvent<Record<string, unknown>>(
+        TAURI_EVENTS.backgroundMonitorFired,
+        (payload) => {
+          void relaySchedulerEvent("monitor:fired", payload).catch((error) =>
+            console.warn("monitor:fired scheduler event failed", error)
+          )
+        }
+      )
 
       // Unified tray-click event — the source-of-truth dispatch channel for
       // both built-in actions (slash + plugin commands) and items pinned by
@@ -250,6 +319,8 @@ export function useTauriEvents(): void {
         safeUnlisten(cliMatches)
         safeUnlisten(cliSecondInstance)
         safeUnlisten(deepLink)
+        safeUnlisten(backgroundJobExited)
+        safeUnlisten(backgroundMonitorFired)
         safeUnlisten(trayItemClicked)
         safeUnlisten(shortcutTriggered)
         safeUnlisten(trayOpenDataFolder)
@@ -270,6 +341,8 @@ export function useTauriEvents(): void {
         cliMatches,
         cliSecondInstance,
         deepLink,
+        backgroundJobExited,
+        backgroundMonitorFired,
         trayItemClicked,
         shortcutTriggered,
         trayOpenDataFolder,

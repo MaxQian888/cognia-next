@@ -7,6 +7,20 @@ import userEvent from "@testing-library/user-event"
 jest.mock("next-intl", () => ({
   useTranslations: (ns: string) => (key: string) => `${ns}.${key}`,
 }))
+jest.mock("@/lib/signaling/v2-crypto", () => ({
+  generatePersistableV2SigningIdentity: async () => ({
+    privateKey: {},
+    publicKey: {},
+    privateKeyJwk: { kty: "EC", crv: "P-256", d: "private" },
+    encodedPublicKey: "mobile-signing-key",
+  }),
+  buildRoomDescriptorV2: async (input: Record<string, unknown>) => ({
+    v: 2,
+    roomId: "room-1",
+    ...input,
+  }),
+  importV2SigningPrivateKey: async () => ({}),
+}))
 
 import type { PairFetcher } from "@/components/mobile/pair/pair-api"
 import { __resetRoutingForTests, getActiveRemoteTransport } from "@/lib/tauri/transport-routing"
@@ -50,7 +64,20 @@ function base64url(input: string): string {
   return btoa(input).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "")
 }
 
-const PAIR_BODY = { deviceJwt: "dev.jwt.sig", deviceId: "remote-1", serverVersion: "1.0.0" }
+const PAIR_BODY = {
+  deviceJwt: "dev.jwt.sig",
+  deviceId: "remote-1",
+  serverVersion: "1.0.0",
+  rendezvousId: "room-1",
+  roomDescriptor: {
+    v: 2 as const,
+    roomId: "room-1",
+    roomNonce: "room-nonce",
+    desktopSigningKey: "desktop-signing-key",
+    mobileSigningKey: "mobile-signing-key",
+    notAfter: Date.now() + 60_000,
+  },
+}
 
 beforeEach(() => {
   useRemoteHostStore.setState({ hosts: [], activeHostId: null })

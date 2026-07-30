@@ -29,6 +29,8 @@ mod tests {
 
     const SECRET: &[u8] = b"test-secret-32-bytes-exactly____";
     const ACCOUNT_ID: &str = "local_acct_a";
+    const MOBILE_SIGNING_KEY: &str =
+        "BFUPRxAD89-Xw99QaseX9nIfsaH7e49vg9IkSYplyI4kE2CT1wEuUJpzcVy9CwCjzA_0tcAbP_oZarH7MnA2uOY";
 
     fn test_state() -> SharedState {
         use crate::companion_api::{
@@ -118,6 +120,7 @@ mod tests {
                             "devicePlatform": "android",
                             "devicePubkey": "",
                             "appVersion": "0.1.0",
+                            "mobileSigningKey": MOBILE_SIGNING_KEY,
                         })
                         .to_string(),
                     ))
@@ -155,6 +158,7 @@ mod tests {
             "devicePlatform": "android",
             "devicePubkey": "",
             "appVersion": "0.1.0",
+            "mobileSigningKey": MOBILE_SIGNING_KEY,
         })
         .to_string();
 

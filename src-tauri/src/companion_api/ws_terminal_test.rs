@@ -10,8 +10,8 @@
 //!      `tokio::net::TcpListener` + `axum::serve`.
 //!   3. Issues a device JWT through the same `issue_device_jwt` helper
 //!      production uses.
-//!   4. Connects a `tokio_tungstenite` client to
-//!      `ws://<addr>/ws/v1/terminal?token=…&spawn=1&shell=…`.
+//!   4. Connects a `tokio_tungstenite` client with an `Authorization` header
+//!      to `ws://<addr>/ws/v1/terminal?spawn=1&shell=…`.
 //!   5. Reads the `ready` text frame, asserts `sessionId` is present.
 //!   6. Sends a binary frame ("echo hello\n" on POSIX, equivalent on
 //!      Windows), expects the echoed bytes back on the data channel.
@@ -41,7 +41,11 @@ mod tests {
     use serde_json::Value;
     use std::sync::Arc;
     use std::time::Duration;
-    use tokio_tungstenite::tungstenite::Message;
+    use tokio_tungstenite::tungstenite::{
+        client::IntoClientRequest,
+        http::{header::AUTHORIZATION, Request},
+        Message,
+    };
 
     const SECRET: &[u8] = b"test-secret-32-bytes-exactly____";
     const ACCOUNT_ID: &str = "local_acct_a";
@@ -76,6 +80,17 @@ mod tests {
                 middleware::require_device_jwt,
             ))
             .with_state(state)
+    }
+
+    fn authorized_request(url: &str, token: &str) -> Request<()> {
+        let mut request = url.into_client_request().expect("valid terminal URL");
+        request.headers_mut().insert(
+            AUTHORIZATION,
+            format!("Bearer {token}")
+                .parse()
+                .expect("valid authorization header"),
+        );
+        request
     }
 
     /// Resolve a shell binary that's available on this OS and accepts
@@ -134,20 +149,21 @@ mod tests {
 
         let token = issue_device_jwt(SECRET, DEVICE_ID, ACCOUNT_ID).expect("issue device jwt");
         let url = format!(
-            "ws://{addr}/ws/v1/terminal?token={token}&spawn=1&shell={shell_enc}&rows=24&cols=80&projectId=project-a",
+            "ws://{addr}/ws/v1/terminal?spawn=1&shell={shell_enc}&rows=24&cols=80&projectId=project-a",
             shell_enc = urlencoding::encode(&shell),
         );
 
-        let (mut ws, _resp) = match tokio_tungstenite::connect_async(&url).await {
-            Ok(pair) => pair,
-            Err(e) => {
-                // Either the route failed to register, the JWT didn't
-                // verify, or `tokio-tungstenite`'s handshake hit a TLS
-                // expectation we can't satisfy on plain `ws://`. In
-                // any case, fail loudly so the contract drift surfaces.
-                panic!("ws connect failed: {e}");
-            }
-        };
+        let (mut ws, _resp) =
+            match tokio_tungstenite::connect_async(authorized_request(&url, &token)).await {
+                Ok(pair) => pair,
+                Err(e) => {
+                    // Either the route failed to register, the JWT didn't
+                    // verify, or `tokio-tungstenite`'s handshake hit a TLS
+                    // expectation we can't satisfy on plain `ws://`. In
+                    // any case, fail loudly so the contract drift surfaces.
+                    panic!("ws connect failed: {e}");
+                }
+            };
 
         // 1. Ready frame.
         let ready = tokio::time::timeout(Duration::from_secs(5), ws.next())
@@ -251,12 +267,10 @@ mod tests {
         crate::companion_api::control_allow_list::global().disallow(uncontrolled);
 
         let token = issue_device_jwt(SECRET, uncontrolled, ACCOUNT_ID).expect("issue device jwt");
-        let url = format!(
-            "ws://{addr}/ws/v1/terminal?token={token}&spawn=1&shell=/bin/sh&rows=24&cols=80",
-        );
+        let url = format!("ws://{addr}/ws/v1/terminal?spawn=1&shell=/bin/sh&rows=24&cols=80");
         // Valid JWT, but the gate rejects the upgrade with 403 → the WS
         // handshake fails.
-        let result = tokio_tungstenite::connect_async(&url).await;
+        let result = tokio_tungstenite::connect_async(authorized_request(&url, &token)).await;
         assert!(
             result.is_err(),
             "expected handshake failure for a paired-but-uncontrolled device"
@@ -271,8 +285,8 @@ mod tests {
         // Reaches the handler, so the device needs the remote-control grant.
         crate::companion_api::control_allow_list::global().allow(DEVICE_ID.to_string());
         let token = issue_device_jwt(SECRET, DEVICE_ID, ACCOUNT_ID).expect("issue device jwt");
-        let url = format!("ws://{addr}/ws/v1/terminal?token={token}&spawn=1");
-        let (mut ws, _) = tokio_tungstenite::connect_async(&url)
+        let url = format!("ws://{addr}/ws/v1/terminal?spawn=1");
+        let (mut ws, _) = tokio_tungstenite::connect_async(authorized_request(&url, &token))
             .await
             .expect("ws connect");
         let first = tokio::time::timeout(Duration::from_secs(5), ws.next())

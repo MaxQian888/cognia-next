@@ -24,6 +24,7 @@
 
 import { makeDefaultLoader } from "@/lib/capacitor/_shared"
 import { isCapacitor } from "@/lib/platform/detect"
+import { importV2SigningPrivateKey, type RoomDescriptorV2 } from "@/lib/signaling/v2-crypto"
 
 export interface CompanionConfig {
   /** e.g. "https://192.168.1.42:7890" */
@@ -49,14 +50,16 @@ export interface CompanionConfig {
    * transport tier on this client.
    */
   rendezvousId?: string
+  /** Public, self-certifying signaling v2 room descriptor. */
+  signalingRoomDescriptor?: RoomDescriptorV2
   /**
-   * ADR-0021 — 32-byte HMAC key (URL-safe base64, unpadded — 43 chars)
-   * shared with the desktop server, used to sign signaling envelopes so the
-   * public rendezvous service can never impersonate either side. Treated as
-   * sensitive: persisted alongside `deviceJwt` in the Capacitor secure
-   * storage entry on iOS Keychain / Android Keystore.
+   * Mobile role ECDSA private key. Capacitor persists this JWK inside native
+   * secure storage; the web backend moves it into IndexedDB as a
+   * non-extractable CryptoKey before writing public config to localStorage.
    */
-  rendezvousSecret?: string
+  signalingPrivateKeyJwk?: JsonWebKey
+  /** Runtime-only non-extractable key loaded by the web identity store. */
+  signalingPrivateKey?: CryptoKey
   /**
    * ADR-0059 C4/F3 — local account the pairing was minted for. Multi-account
    * cloud servers route by it; absent on rows paired before it shipped.
@@ -93,18 +96,90 @@ export interface CompanionConfigStorage {
 }
 
 const CONFIG_KEY = "cognia.companion.config.v1"
+const SIGNALING_KEY_DB = "cognia-signaling-identity-v2"
+const SIGNALING_KEY_STORE = "keys"
+
+interface BrowserSignalingKeyStore {
+  save(deviceId: string, jwk: JsonWebKey): Promise<CryptoKey>
+  load(deviceId: string): Promise<CryptoKey | null>
+  clear(deviceId: string): Promise<void>
+}
+
+class IndexedDbSignalingKeyStore implements BrowserSignalingKeyStore {
+  async save(deviceId: string, jwk: JsonWebKey): Promise<CryptoKey> {
+    const key = await importV2SigningPrivateKey(jwk)
+    const database = await this.open()
+    await new Promise<void>((resolve, reject) => {
+      const transaction = database.transaction(SIGNALING_KEY_STORE, "readwrite")
+      transaction.objectStore(SIGNALING_KEY_STORE).put(key, deviceId)
+      transaction.oncomplete = () => resolve()
+      transaction.onerror = () => reject(transaction.error)
+      transaction.onabort = () => reject(transaction.error)
+    })
+    database.close()
+    return key
+  }
+
+  async load(deviceId: string): Promise<CryptoKey | null> {
+    const database = await this.open()
+    const key = await new Promise<CryptoKey | undefined>((resolve, reject) => {
+      const request = database
+        .transaction(SIGNALING_KEY_STORE, "readonly")
+        .objectStore(SIGNALING_KEY_STORE)
+        .get(deviceId)
+      request.onsuccess = () => resolve(request.result as CryptoKey | undefined)
+      request.onerror = () => reject(request.error)
+    })
+    database.close()
+    return key ?? null
+  }
+
+  async clear(deviceId: string): Promise<void> {
+    const database = await this.open()
+    await new Promise<void>((resolve, reject) => {
+      const transaction = database.transaction(SIGNALING_KEY_STORE, "readwrite")
+      transaction.objectStore(SIGNALING_KEY_STORE).delete(deviceId)
+      transaction.oncomplete = () => resolve()
+      transaction.onerror = () => reject(transaction.error)
+      transaction.onabort = () => reject(transaction.error)
+    })
+    database.close()
+  }
+
+  private open(): Promise<IDBDatabase> {
+    return new Promise((resolve, reject) => {
+      const request = indexedDB.open(SIGNALING_KEY_DB, 1)
+      request.onupgradeneeded = () => {
+        if (!request.result.objectStoreNames.contains(SIGNALING_KEY_STORE)) {
+          request.result.createObjectStore(SIGNALING_KEY_STORE)
+        }
+      }
+      request.onsuccess = () => resolve(request.result)
+      request.onerror = () => reject(request.error)
+    })
+  }
+}
 
 // ---------------------------------------------------------------------------
 // LocalStorage backend (web + tests)
 // ---------------------------------------------------------------------------
 
 export class LocalStorageCompanionStorage implements CompanionConfigStorage {
+  constructor(
+    private readonly signalingKeys: BrowserSignalingKeyStore = new IndexedDbSignalingKeyStore()
+  ) {}
+
   async load(): Promise<CompanionConfig | null> {
     if (typeof window === "undefined") return null
     try {
       const raw = window.localStorage.getItem(CONFIG_KEY)
       if (!raw) return null
-      return JSON.parse(raw) as CompanionConfig
+      const config = JSON.parse(raw) as CompanionConfig
+      if (config.signalingRoomDescriptor) {
+        const key = await this.signalingKeys.load(config.deviceId)
+        if (key) config.signalingPrivateKey = key
+      }
+      return config
     } catch {
       return null
     }
@@ -112,11 +187,24 @@ export class LocalStorageCompanionStorage implements CompanionConfigStorage {
 
   async save(config: CompanionConfig): Promise<void> {
     if (typeof window === "undefined") return
-    window.localStorage.setItem(CONFIG_KEY, JSON.stringify(config))
+    const publicConfig = { ...config }
+    if (config.signalingPrivateKeyJwk) {
+      publicConfig.signalingPrivateKey = await this.signalingKeys.save(
+        config.deviceId,
+        config.signalingPrivateKeyJwk
+      )
+    }
+    delete publicConfig.signalingPrivateKey
+    delete publicConfig.signalingPrivateKeyJwk
+    window.localStorage.setItem(CONFIG_KEY, JSON.stringify(publicConfig))
   }
 
   async clear(): Promise<void> {
     if (typeof window === "undefined") return
+    const existing = await this.load()
+    if (existing?.signalingRoomDescriptor) {
+      await this.signalingKeys.clear(existing.deviceId)
+    }
     window.localStorage.removeItem(CONFIG_KEY)
   }
 }
@@ -163,7 +251,11 @@ export class SecureStorageCompanionStorage implements CompanionConfigStorage {
       const plugin = await this.loader()
       const { value } = await plugin.get({ key: CONFIG_KEY })
       if (!value) return null
-      return JSON.parse(value) as CompanionConfig
+      const config = JSON.parse(value) as CompanionConfig
+      if (config.signalingPrivateKeyJwk) {
+        config.signalingPrivateKey = await importV2SigningPrivateKey(config.signalingPrivateKeyJwk)
+      }
+      return config
     } catch {
       // get() throws when the key is absent — treat as "not paired yet".
       return null
@@ -172,7 +264,9 @@ export class SecureStorageCompanionStorage implements CompanionConfigStorage {
 
   async save(config: CompanionConfig): Promise<void> {
     const plugin = await this.loader()
-    await plugin.set({ key: CONFIG_KEY, value: JSON.stringify(config) })
+    const persisted = { ...config }
+    delete persisted.signalingPrivateKey
+    await plugin.set({ key: CONFIG_KEY, value: JSON.stringify(persisted) })
   }
 
   async clear(): Promise<void> {

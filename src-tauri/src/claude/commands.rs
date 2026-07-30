@@ -600,8 +600,45 @@ pub async fn claude_restore(
     messages: Value,
 ) -> Result<(), String> {
     bump_deprecated("claude_restore");
+    claude_restore_impl(&state, session_id, messages).await
+}
+
+pub async fn claude_restore_impl(
+    state: &SidecarState,
+    session_id: String,
+    messages: Value,
+) -> Result<(), String> {
     let msg = json!({ "type": "restore", "sessionId": session_id, "messages": messages });
     state.write_command(&msg).await
+}
+
+fn build_set_mode_payload(session_id: String, mode: String) -> Result<Value, String> {
+    if !matches!(
+        mode.as_str(),
+        "default" | "plan" | "acceptEdits" | "bypassPermissions" | "dontAsk" | "auto"
+    ) {
+        return Err(format!("unsupported permission mode: {mode}"));
+    }
+    Ok(json!({ "type": "set_mode", "sessionId": session_id, "mode": mode }))
+}
+
+#[tauri::command]
+pub async fn claude_set_mode(
+    state: State<'_, SidecarState>,
+    session_id: String,
+    mode: String,
+) -> Result<(), String> {
+    claude_set_mode_impl(&state, session_id, mode).await
+}
+
+pub async fn claude_set_mode_impl(
+    state: &SidecarState,
+    session_id: String,
+    mode: String,
+) -> Result<(), String> {
+    state
+        .write_command(&build_set_mode_payload(session_id, mode)?)
+        .await
 }
 
 #[tauri::command]
@@ -773,6 +810,16 @@ pub async fn claude_plugin_tool_response(
     result: Option<Value>,
     error: Option<String>,
 ) -> Result<(), String> {
+    claude_plugin_tool_response_impl(&state, session_id, tool_use_id, result, error).await
+}
+
+pub async fn claude_plugin_tool_response_impl(
+    state: &SidecarState,
+    session_id: String,
+    tool_use_id: String,
+    result: Option<Value>,
+    error: Option<String>,
+) -> Result<(), String> {
     let payload = build_plugin_tool_response_payload(session_id, tool_use_id, result, error);
     state.write_command(&payload).await
 }
@@ -804,6 +851,15 @@ pub async fn claude_tool_result_decision(
     review_id: String,
     updated_tool_output: Option<Value>,
 ) -> Result<(), String> {
+    claude_tool_result_decision_impl(&state, session_id, review_id, updated_tool_output).await
+}
+
+pub async fn claude_tool_result_decision_impl(
+    state: &SidecarState,
+    session_id: String,
+    review_id: String,
+    updated_tool_output: Option<Value>,
+) -> Result<(), String> {
     let payload = build_tool_result_decision_payload(session_id, review_id, updated_tool_output);
     state.write_command(&payload).await
 }
@@ -816,6 +872,13 @@ pub async fn claude_tool_result_decision(
 #[tauri::command]
 pub async fn claude_protocol_adapter_message(
     state: State<'_, SidecarState>,
+    message: Value,
+) -> Result<(), String> {
+    claude_protocol_adapter_message_impl(&state, message).await
+}
+
+pub async fn claude_protocol_adapter_message_impl(
+    state: &SidecarState,
     message: Value,
 ) -> Result<(), String> {
     let kind = message.get("type").and_then(Value::as_str).unwrap_or("");
@@ -1011,6 +1074,17 @@ mod tests {
         let p = build_tool_result_decision_payload("s1".into(), "rev1".into(), None);
         assert_eq!(p["type"], "tool_result_decision");
         assert!(p["updatedToolOutput"].is_null());
+    }
+
+    #[test]
+    fn set_mode_payload_accepts_supported_modes_and_rejects_unknown_values() {
+        let payload = build_set_mode_payload("s1".into(), "dontAsk".into()).unwrap();
+        assert_eq!(payload["type"], "set_mode");
+        assert_eq!(payload["sessionId"], "s1");
+        assert_eq!(payload["mode"], "dontAsk");
+
+        let error = build_set_mode_payload("s1".into(), "owner".into()).unwrap_err();
+        assert!(error.contains("unsupported permission mode"));
     }
 
     #[test]

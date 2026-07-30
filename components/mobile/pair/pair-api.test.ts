@@ -3,11 +3,15 @@
  */
 
 import { redeemPairCode, redeemPairJwt, type PairFetcher } from "./pair-api"
+import {
+  buildRoomDescriptorV2,
+  generateV2SigningKeyPair,
+} from "@/lib/signaling/v2-crypto"
 
-function makeFetcher(handler: (url: string, init: RequestInit) => Response): PairFetcher {
-  return jest.fn((url: string, init: RequestInit) =>
-    Promise.resolve(handler(url, init))
-  ) as unknown as PairFetcher
+function makeFetcher(
+  handler: (url: string, init: RequestInit) => Response | Promise<Response>
+): PairFetcher {
+  return jest.fn((url: string, init: RequestInit) => handler(url, init)) as unknown as PairFetcher
 }
 
 function jsonResponse(status: number, body: unknown): Response {
@@ -17,12 +21,23 @@ function jsonResponse(status: number, body: unknown): Response {
   })
 }
 
-const validPairBody = {
-  device_id: "device-1",
-  device_jwt: "eyJ.device.jwt",
-  server_version: "0.1.0",
-  rendezvous_id: "rendez-1",
-  rendezvous_secret: "secret-bytes",
+async function validPairResponse(init: RequestInit): Promise<Response> {
+  const request = JSON.parse(init.body as string) as { mobile_signing_key: string }
+  const desktop = await generateV2SigningKeyPair()
+  const roomDescriptor = await buildRoomDescriptorV2({
+    roomNonce: "AAECAwQFBgcICQoLDA0ODw",
+    desktopSigningKey: desktop.encodedPublicKey,
+    mobileSigningKey: request.mobile_signing_key,
+    notAfter: Date.now() + 60_000,
+  })
+  return jsonResponse(200, {
+    device_id: "device-1",
+    device_jwt: "eyJ.device.jwt",
+    server_version: "0.1.0",
+    rendezvous_id: roomDescriptor.roomId,
+    room_descriptor: roomDescriptor,
+    signaling_key_ref: "device-1",
+  })
 }
 
 describe("redeemPairJwt", () => {
@@ -34,7 +49,10 @@ describe("redeemPairJwt", () => {
         device_label: expect.any(String),
         device_platform: expect.any(String),
       })
-      return jsonResponse(200, validPairBody)
+      expect(JSON.parse(init.body as string).mobile_signing_key).toMatch(
+        /^[A-Za-z0-9_-]{87}$/
+      )
+      return validPairResponse(init)
     })
     const result = await redeemPairJwt(
       {
@@ -47,16 +65,16 @@ describe("redeemPairJwt", () => {
     if (result.kind === "ok") {
       expect(result.config.deviceId).toBe("device-1")
       expect(result.config.deviceJwt).toBe("eyJ.device.jwt")
-      expect(result.config.rendezvousId).toBe("rendez-1")
-      expect(result.config.rendezvousSecret).toBe("secret-bytes")
+      expect(result.config.rendezvousId).toBe(result.config.signalingRoomDescriptor?.roomId)
+      expect(result.config.signalingPrivateKeyJwk?.d).toBeTruthy()
     }
   })
 
   it("strips trailing slash on baseUrl", async () => {
     const seen: string[] = []
-    const fetcher = makeFetcher((url) => {
+    const fetcher = makeFetcher((url, init) => {
       seen.push(url)
-      return jsonResponse(200, validPairBody)
+      return validPairResponse(init)
     })
     const result = await redeemPairJwt(
       { baseUrl: "https://10.0.2.2:7890///", pairJwt: "eyJ.pair.jwt" },
@@ -71,7 +89,7 @@ describe("redeemPairJwt", () => {
   it("propagates serverFingerprint into the request and config", async () => {
     const fetcher = makeFetcher((_url, init) => {
       expect((init as { serverFingerprint?: string }).serverFingerprint).toBe("ABCDEF")
-      return jsonResponse(200, validPairBody)
+      return validPairResponse(init)
     })
     const result = await redeemPairJwt(
       {
@@ -95,7 +113,7 @@ describe("redeemPairCode", () => {
         code: "123456",
         device_label: expect.any(String),
       })
-      return jsonResponse(200, validPairBody)
+      return validPairResponse(init)
     })
     const result = await redeemPairCode(
       { baseUrl: "https://10.0.2.2:7890", code: "123456" },
@@ -117,7 +135,7 @@ describe("redeemPairCode", () => {
   })
 
   it("trims whitespace before validating", async () => {
-    const fetcher = makeFetcher(() => jsonResponse(200, validPairBody))
+    const fetcher = makeFetcher((_url, init) => validPairResponse(init))
     const result = await redeemPairCode(
       { baseUrl: "https://10.0.2.2:7890", code: "  123456  " },
       fetcher
@@ -203,7 +221,7 @@ describe("redeemPairCode", () => {
     }
   })
 
-  it("omits rendezvous fields when legacy server returns none", async () => {
+  it("rejects a response without the required v2 descriptor", async () => {
     const fetcher = makeFetcher(() =>
       jsonResponse(200, {
         device_id: "d",
@@ -215,9 +233,9 @@ describe("redeemPairCode", () => {
       { baseUrl: "https://10.0.2.2:7890", code: "654321" },
       fetcher
     )
-    if (result.kind === "ok") {
-      expect(result.config.rendezvousId).toBeUndefined()
-      expect(result.config.rendezvousSecret).toBeUndefined()
+    expect(result.kind).toBe("http_error")
+    if (result.kind === "http_error") {
+      expect(result.rawBody).toMatch(/v2 room descriptor/i)
     }
   })
 })

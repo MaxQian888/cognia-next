@@ -460,6 +460,7 @@ mod tests {
 
     #[test]
     fn tasks_get_missing_and_present() {
+        let _guard = store::test_store_guard();
         store::reset_task_store_for_tests();
         let missing = handle_tasks_get(&json!({ "id": "unknown" }));
         assert_eq!(missing.unwrap_err().0, a2a_error_code::TASK_NOT_FOUND);
@@ -480,6 +481,7 @@ mod tests {
 
     #[tokio::test]
     async fn tasks_cancel_paths() {
+        let _guard = store::test_store_guard();
         store::reset_task_store_for_tests();
         let state = test_state();
 

@@ -31,6 +31,7 @@ import {
   pausePairedDevice,
   resumePairedDevice,
   revokePairedDevice,
+  setAgentControlAllowed,
   setRemoteControlAllowed,
 } from "@/lib/db/paired-devices"
 import { useBiometricGuard } from "@/hooks/use-biometric-guard"
@@ -52,6 +53,11 @@ async function setRemoteControlRustSide(deviceId: string, allowed: boolean): Pro
   await transport.call<void>("companion_set_remote_control", { deviceId, allowed })
 }
 
+async function setAgentControlRustSide(deviceId: string, allowed: boolean): Promise<void> {
+  if (!isTauri()) return
+  await transport.call<void>("companion_set_agent_control", { deviceId, allowed })
+}
+
 export function PairedDevicesCard() {
   const rows = useLiveQuery(() => listPairedDevices(), [], [])
   const guard = useBiometricGuard()
@@ -60,6 +66,7 @@ export function PairedDevicesCard() {
   const tPause = useTranslations("mobile.companion.pause")
   const tResume = useTranslations("mobile.companion.resume")
   const tRc = useTranslations("mobile.companion.remoteControl")
+  const tAc = useTranslations("mobile.companion.agentControl")
 
   const onRevoke = useCallback(
     async (deviceId: string, label: string) => {
@@ -144,6 +151,40 @@ export function PairedDevicesCard() {
     [guard, tRc]
   )
 
+  const onToggleAgentControl = useCallback(
+    async (deviceId: string, label: string, next: boolean) => {
+      // Strictly more sensitive than remote control: this lets the device start
+      // processes on this machine. The spawn policy still bounds which binary,
+      // which working directory and which environment variables — but within
+      // that, the device decides what runs. Same biometric gate on the
+      // enabling direction; disabling reduces privilege and applies at once.
+      if (!next) {
+        await setAgentControlAllowed(deviceId, false)
+        await setAgentControlRustSide(deviceId, false)
+        toast.success(tAc("disabledToast", { label }))
+        return
+      }
+      const result = await guard(
+        {
+          reason: tAc("reason", { label }),
+          title: tAc("title"),
+          description: tAc("description"),
+        },
+        async () => {
+          await setAgentControlAllowed(deviceId, true)
+          await setAgentControlRustSide(deviceId, true)
+        }
+      )
+      if (result.kind === "blocked") {
+        if (result.reason === "cancelled") return
+        toast.error(tAc("blocked", { reason: result.reason }))
+        return
+      }
+      toast.success(tAc("enabledToast", { label }))
+    },
+    [guard, tAc]
+  )
+
   const onResume = useCallback(
     async (deviceId: string, label: string) => {
       // Resume undoes the deny-list entry pause put in place — gate it on
@@ -190,6 +231,7 @@ export function PairedDevicesCard() {
                   <TableHead className="whitespace-nowrap">{t("colPaired")}</TableHead>
                   <TableHead className="whitespace-nowrap">{t("colLastSeen")}</TableHead>
                   <TableHead className="whitespace-nowrap text-center">{tRc("col")}</TableHead>
+                  <TableHead className="whitespace-nowrap text-center">{tAc("col")}</TableHead>
                   <TableHead className="w-[80px] whitespace-nowrap text-right">
                     {t("colActions")}
                   </TableHead>
@@ -247,6 +289,17 @@ export function PairedDevicesCard() {
                         }
                         aria-label={tRc("toggleAria", { label: row.label })}
                         data-testid={`paired-device-remote-control-${row.deviceId}`}
+                      />
+                    </TableCell>
+                    <TableCell className="text-center">
+                      <Switch
+                        checked={row.allowAgentControl === true}
+                        disabled={row.revokedAt !== undefined}
+                        onCheckedChange={(next) =>
+                          onToggleAgentControl(row.deviceId, row.label, next)
+                        }
+                        aria-label={tAc("toggleAria", { label: row.label })}
+                        data-testid={`paired-device-agent-control-${row.deviceId}`}
                       />
                     </TableCell>
                     <TableCell className="text-right">

@@ -820,57 +820,9 @@ describe("CompanionSection", () => {
     )
   })
 
-  it("runs reachability diagnostics and renders reachable and failed rows", async () => {
-    const user = userEvent.setup()
-    callSpy.mockImplementation(async (name: string) => {
-      if (name === "companion_server_status") return STATUS_STOPPED
-      if (name === "companion_test_local_reachability") {
-        return [
-          { url: "https://127.0.0.1:7890", reachable: true, latencyMs: 12 },
-          { url: "https://192.168.1.10:7890", reachable: false, error: "timeout" },
-        ]
-      }
-      return undefined as unknown as never
-    })
-
-    render(<CompanionSection />)
-    await user.click(screen.getByTestId("companion-group-trigger-advanced"))
-    await user.click(await screen.findByRole("button", { name: /Test reachability/i }))
-
-    expect(await screen.findByText("https://127.0.0.1:7890")).toBeInTheDocument()
-    expect(screen.getByText("https://192.168.1.10:7890")).toBeInTheDocument()
-    expect(screen.getByText(/timeout/i)).toBeInTheDocument()
-  })
-
-  it("handles diagnostics command failures and sparse rows", async () => {
-    const user = userEvent.setup()
-    callSpy.mockImplementation(async (name: string) => {
-      if (name === "companion_server_status") return STATUS_STOPPED
-      if (name === "companion_test_local_reachability") {
-        return [
-          { url: "https://127.0.0.1:7890", reachable: true },
-          { url: "https://192.168.1.10:7890", reachable: false },
-        ]
-      }
-      return undefined as unknown as never
-    })
-
-    render(<CompanionSection />)
-    await user.click(screen.getByTestId("companion-group-trigger-advanced"))
-    await user.click(await screen.findByRole("button", { name: /Test reachability/i }))
-    expect(await screen.findByText("https://127.0.0.1:7890")).toBeInTheDocument()
-    expect(screen.getByText(/Failed/i)).toBeInTheDocument()
-
-    callSpy.mockImplementation(async (name: string) => {
-      if (name === "companion_server_status") return STATUS_STOPPED
-      if (name === "companion_test_local_reachability") return Promise.reject("probe failed")
-      return undefined as unknown as never
-    })
-    await user.click(screen.getByRole("button", { name: /Test reachability/i }))
-    await waitFor(() =>
-      expect(callSpy).toHaveBeenLastCalledWith("companion_test_local_reachability")
-    )
-  })
+  // The reachability probe moved into the channel matrix, which attributes each
+  // result to a channel instead of printing a flat list of URLs. Its coverage
+  // lives in channel-matrix-card.test.tsx.
 
   it("configures and clears push notification credentials", async () => {
     const user = userEvent.setup()
@@ -977,19 +929,27 @@ describe("CompanionSection", () => {
     await waitFor(() => expect(callSpy).toHaveBeenCalledWith("companion_push_status"))
   })
 
-  it("collapses Advanced & diagnostics by default and expands on click", async () => {
+  it("collapses Advanced by default and expands on click", async () => {
     const user = userEvent.setup()
     render(<CompanionSection />)
     // A default-open group renders immediately…
     await screen.findByText(/Mobile companion server/i)
     // …while the collapsed Advanced group keeps its cards unmounted.
-    expect(screen.queryByText(/Connection diagnostics/i)).toBeNull()
     expect(screen.queryByText(/Sync status/i)).toBeNull()
 
     await user.click(screen.getByTestId("companion-group-trigger-advanced"))
 
-    expect(await screen.findByText(/Connection diagnostics/i)).toBeInTheDocument()
-    expect(screen.getByText(/Sync status/i)).toBeInTheDocument()
+    expect(await screen.findByText(/Sync status/i)).toBeInTheDocument()
+  })
+
+  it("leads the network group with the channel matrix", async () => {
+    // The four channel cards each know only their own switch; the matrix is
+    // the only place that answers "can anything reach this desktop, and how".
+    render(<CompanionSection />)
+    expect(await screen.findByTestId("channel-matrix-card")).toBeInTheDocument()
+    for (const id of ["lan", "mdns", "tunnel", "webrtc"]) {
+      expect(screen.getByTestId(`channel-row-${id}`)).toBeInTheDocument()
+    }
   })
 
   it("routes the APNs example placeholders through i18n", async () => {

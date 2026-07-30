@@ -171,6 +171,21 @@ fn default_tables() -> Vec<SyncTableDescriptor> {
             description: "Agent-Team task board projection (read-only mirror; controls go through team_* RPCs)".to_string(),
             has_tombstones: true,
         },
+        SyncTableDescriptor {
+            name: "templateDefinitions".to_string(),
+            description: "Portable template definitions (read-only mobile catalog projection)".to_string(),
+            has_tombstones: false,
+        },
+        SyncTableDescriptor {
+            name: "templatePackages".to_string(),
+            description: "Template package metadata and trust (no assets or device bindings)".to_string(),
+            has_tombstones: false,
+        },
+        SyncTableDescriptor {
+            name: "templateInstances".to_string(),
+            description: "Template instance provenance and update baselines".to_string(),
+            has_tombstones: false,
+        },
     ]
 }
 
@@ -190,6 +205,9 @@ mod tests {
         assert!(r.contains("terminalHistory"));
         assert!(r.contains("settings"));
         assert!(r.contains("agentTeamBoard"));
+        assert!(r.contains("templateDefinitions"));
+        assert!(r.contains("templatePackages"));
+        assert!(r.contains("templateInstances"));
         assert!(!r.contains("ohai"));
     }
 

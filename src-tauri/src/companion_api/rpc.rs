@@ -30,10 +30,10 @@
 //! # Idempotency
 //!
 //! When the `Idempotency-Key` header is present and the command is **not**
-//! in [`READ_ONLY_COMMANDS`], a successful response is stored in the
-//! per-device [`IdempotencyCache`] for 60 seconds. A second request with the
-//! same `(device_id, idempotency_key)` returns the cached body immediately
-//! without re-executing the command.
+//! read-only, `(device_id, method, idempotency_key)` and a parameter digest
+//! are reserved before dispatch. Successful results are retained for 24 hours
+//! and shared with the WebRTC path. Conflicting parameters and pending records
+//! are rejected instead of risking a duplicate write.
 //!
 //! Read-only commands skip the cache entirely: they are cheap to re-run and
 //! their idempotency is structural (same args → same result).
@@ -47,6 +47,7 @@ use axum::{
 };
 use serde::de::DeserializeOwned;
 use serde_json::{json, Value};
+use sha2::{Digest, Sha256};
 
 use crate::{
     agents::commands as agent_commands,
@@ -55,6 +56,35 @@ use crate::{
 };
 
 use super::{middleware::DeviceContext, SharedState};
+
+fn unix_time_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis()
+        .try_into()
+        .unwrap_or(u64::MAX)
+}
+
+fn opaque_host_id(state: &SharedState) -> String {
+    let digest = Sha256::digest(state.secret.read().as_slice());
+    format!("host-{}", hex::encode(&digest[..12]))
+}
+
+fn remote_context_error(code: &'static str) -> (StatusCode, Json<RpcError>) {
+    let status = match code {
+        "REMOTE_PROXY_DISCONNECTED" => StatusCode::SERVICE_UNAVAILABLE,
+        "REMOTE_RESPONSE_STALE" => StatusCode::CONFLICT,
+        _ => StatusCode::FORBIDDEN,
+    };
+    (
+        status,
+        Json(RpcError::new(
+            code,
+            "remote execution context does not match the pending request",
+        )),
+    )
+}
 
 // ---------------------------------------------------------------------------
 // Error envelope
@@ -133,6 +163,26 @@ impl RpcError {
         )
     }
 
+    fn idempotency_conflict() -> (StatusCode, Json<Self>) {
+        (
+            StatusCode::CONFLICT,
+            Json(Self::new(
+                "idempotency_conflict",
+                "the idempotency key was already used with different parameters",
+            )),
+        )
+    }
+
+    fn idempotency_indeterminate() -> (StatusCode, Json<Self>) {
+        (
+            StatusCode::CONFLICT,
+            Json(Self::new(
+                "idempotency_indeterminate",
+                "the prior execution did not record a final result and will not be replayed",
+            )),
+        )
+    }
+
     /// Remote session control gate (Remote Session Control). The device is
     /// paired and authenticated but has not been granted the elevated
     /// remote-control capability — `allowRemoteControl` is off for it. The
@@ -182,11 +232,17 @@ impl RpcError {
 /// surface as 404 rather than 503-in-test-mode. Keep in lockstep with the
 /// `match name` arms in `dispatch()` below — drift means unknown names
 /// silently bypass the 404 path.
+#[cfg(test)]
 const KNOWN_COMMANDS: &[&str] = &[
     "claude_send",
     "claude_interrupt",
     "claude_compact",
+    "claude_restore",
+    "claude_set_mode",
     "claude_approve",
+    "claude_plugin_tool_response",
+    "claude_tool_result_decision",
+    "claude_protocol_adapter_message",
     "claude_close_session",
     "claude_sidecar_status",
     "claude_set_api_key",
@@ -199,11 +255,31 @@ const KNOWN_COMMANDS: &[&str] = &[
     "skills_scan_native",
     "skills_install_native",
     "skills_uninstall_native",
+    "skills_catalog_get",
+    "skills_bundle_upload_open",
+    "skills_bundle_upload_write",
+    "skills_bundle_upload_commit",
+    "skills_bundle_upload_abort",
+    "skills_install_atomic",
+    "skills_uninstall",
+    "external_bridge_config_get",
+    "external_bridge_config_update",
+    "external_bridge_client_create",
+    "external_bridge_client_list",
+    "external_bridge_client_rotate",
+    "external_bridge_client_revoke",
+    "external_bridge_start",
+    "external_bridge_stop",
+    "external_bridge_restart",
+    "external_bridge_status",
+    "external_bridge_relay_enable",
+    "external_bridge_relay_disable",
+    "host_admin_lease_issue",
+    "host_admin_lease_revoke",
     "mcp_server_status",
     "mcp_server_start",
     "mcp_server_stop",
     "mcp_server_restart",
-    "orchestration_proxy_response",
     "test_mcp_server",
     "read_agent_config",
     "write_agent_config",
@@ -231,6 +307,11 @@ const KNOWN_COMMANDS: &[&str] = &[
     "app_settings_update",
     // Wave 2 read-only projection routed through desktop_writes_bridge.
     "twin_profile_get",
+    // ADR-0097 — what this host can do, answered by the host's own TS layer
+    // (renderer on desktop, brain on headless) so the capability vocabulary
+    // stays single-sourced in `lib/platform/capabilities.ts`.
+    "host_capabilities",
+    "host_feature_manifest",
     // ADR-0056 Wave 4 — external-agent config (Zustand/localStorage on the
     // desktop, not Dexie). `external_agent_list` is a read-only projection;
     // `external_agent_update` (enable/disable + permission mode) round-trips
@@ -557,6 +638,32 @@ const KNOWN_COMMANDS: &[&str] = &[
     "workflow_cancel_run",
     "workflow_schedule_pause",
     "workflow_schedule_resume",
+    // App scheduler CRUD/data plane. Distinct from the client-local
+    // `scheduler_*` OS alarm commands below.
+    "scheduled_task_list",
+    "scheduled_task_get",
+    "scheduled_task_runs",
+    "scheduled_task_statistics",
+    "scheduled_task_upcoming",
+    "scheduled_task_export",
+    "scheduled_task_create",
+    "scheduled_task_update",
+    "scheduled_task_delete",
+    "scheduled_task_pause",
+    "scheduled_task_resume",
+    "scheduled_task_run_now",
+    "scheduled_task_backfill",
+    "scheduled_task_import",
+    "scheduled_task_cleanup",
+    "scheduled_task_emit_event",
+    // Unified Rust background-job supervisor and durable monitors.
+    "background_job_list",
+    "background_job_read",
+    "background_job_kill",
+    "background_job_spawn_scheduled",
+    "background_monitor_list",
+    "background_monitor_cancel",
+    "background_monitor_register_scheduled",
     // ── Workflow approval gate (ADR-0061 P2) ────────────────────────────────
     // Pending `action.approval.request` entries live in the renderer's
     // in-memory registry — round-trip through desktop_writes_bridge.
@@ -669,11 +776,12 @@ const KNOWN_COMMANDS: &[&str] = &[
 /// list has a matching `/api/v1/_rpc/<name>` path in the OpenAPI spec.
 #[allow(dead_code)] // referenced from `spec_parity::tests` only.
 pub fn known_commands() -> &'static [&'static str] {
-    KNOWN_COMMANDS
+    super::command_manifest::legacy_rpc_command_names()
 }
 
 /// Commands in this list skip the idempotency cache entirely.
 /// They are cheap to re-run and structurally idempotent.
+#[cfg(test)]
 const READ_ONLY_COMMANDS: &[&str] = &[
     "browser_capability",
     "browser_session_get",
@@ -693,6 +801,10 @@ const READ_ONLY_COMMANDS: &[&str] = &[
     "claude_has_oauth_bearer",
     "skills_load_registry",
     "skills_scan_native",
+    "skills_catalog_get",
+    "external_bridge_config_get",
+    "external_bridge_client_list",
+    "external_bridge_status",
     "mcp_server_status",
     "read_agent_config",
     "keyring_secret_get",
@@ -711,6 +823,17 @@ const READ_ONLY_COMMANDS: &[&str] = &[
     "message_get_by_session",
     // Wave 2 read-only twin profile projection.
     "twin_profile_get",
+    "host_capabilities",
+    "host_feature_manifest",
+    "scheduled_task_list",
+    "scheduled_task_get",
+    "scheduled_task_runs",
+    "scheduled_task_statistics",
+    "scheduled_task_upcoming",
+    "scheduled_task_export",
+    "background_job_list",
+    "background_job_read",
+    "background_monitor_list",
     // ADR-0056 Wave 4 — read-only external-agent list projection.
     "external_agent_list",
     // ADR-0059 R11 — read-only status probe on the headless exec backend.
@@ -832,6 +955,28 @@ const READ_ONLY_COMMANDS: &[&str] = &[
 /// Command arms are added by their respective milestones; the gate fires for a
 /// name as soon as it appears here (it runs before the dispatch `match`).
 const CONTROL_COMMANDS: &[&str] = &[
+    "claude_restore",
+    "claude_set_mode",
+    "claude_plugin_tool_response",
+    "claude_tool_result_decision",
+    "claude_protocol_adapter_message",
+    "skills_bundle_upload_open",
+    "skills_bundle_upload_write",
+    "skills_bundle_upload_commit",
+    "skills_bundle_upload_abort",
+    "skills_install_atomic",
+    "skills_uninstall",
+    "external_bridge_config_update",
+    "external_bridge_client_create",
+    "external_bridge_client_rotate",
+    "external_bridge_client_revoke",
+    "external_bridge_start",
+    "external_bridge_stop",
+    "external_bridge_restart",
+    "external_bridge_relay_enable",
+    "external_bridge_relay_disable",
+    "host_admin_lease_issue",
+    "host_admin_lease_revoke",
     "browser_session_ensure",
     "browser_session_close",
     "browser_navigate",
@@ -974,12 +1119,13 @@ const CONTROL_COMMANDS: &[&str] = &[
     // loaded plugin.
     "plugin_api_invoke",
     "plugin_api_batch_invoke",
-    // Embedded MCP lifecycle and orchestration replies steer a host-owned
-    // tool surface and therefore require remote-control authorization.
+    // Embedded MCP lifecycle steers a host-owned tool surface and therefore
+    // requires remote-control authorization. Orchestration replies stay on
+    // the host-local Tauri command surface; Companion controllers cannot
+    // race to resolve them.
     "mcp_server_start",
     "mcp_server_stop",
     "mcp_server_restart",
-    "orchestration_proxy_response",
     // Remote editor LSP can install/spawn language-server processes. Keep the
     // narrow system-channel facade behind the same elevation as terminal RCE.
     "lsp_host_ensure",
@@ -987,6 +1133,20 @@ const CONTROL_COMMANDS: &[&str] = &[
     // Workflow destructive ops + the HITL approval gate (approving a
     // workflow decision steers execution — same elevation as goal_*).
     "workflow_delete",
+    "scheduled_task_create",
+    "scheduled_task_update",
+    "scheduled_task_delete",
+    "scheduled_task_pause",
+    "scheduled_task_resume",
+    "scheduled_task_run_now",
+    "scheduled_task_backfill",
+    "scheduled_task_import",
+    "scheduled_task_cleanup",
+    "scheduled_task_emit_event",
+    "background_job_kill",
+    "background_job_spawn_scheduled",
+    "background_monitor_cancel",
+    "background_monitor_register_scheduled",
     "workflow_cancel_run",
     "workflow_approval_respond",
     // Twin destructive ops.
@@ -1019,17 +1179,39 @@ const CONTROL_COMMANDS: &[&str] = &[
     "fleet_interrupt_session",
 ];
 
-/// O(1) membership mirrors of the command allowlists above. The `&[&str]`
-/// arrays stay the source of truth (the spec-parity and source-scan tests
-/// iterate them), while these hashed sets are consulted on the per-request
-/// hot path — classifying a command no longer linear-scans ~200 entries up
-/// to three times per RPC.
+/// O(1) membership mirrors used on the request hot path. Command existence
+/// and idempotency now come from the shared protocol manifest; the remaining
+/// legacy policy arrays are retained temporarily only for parity assertions.
 static KNOWN_COMMANDS_SET: once_cell::sync::Lazy<HashSet<&'static str>> =
-    once_cell::sync::Lazy::new(|| KNOWN_COMMANDS.iter().copied().collect());
+    once_cell::sync::Lazy::new(|| known_commands().iter().copied().collect());
 static READ_ONLY_COMMANDS_SET: once_cell::sync::Lazy<HashSet<&'static str>> =
-    once_cell::sync::Lazy::new(|| READ_ONLY_COMMANDS.iter().copied().collect());
+    once_cell::sync::Lazy::new(|| {
+        super::command_manifest::commands()
+            .iter()
+            .filter(|command| command.operation == super::command_manifest::CommandOperation::Read)
+            .map(|command| command.name.as_str())
+            .collect()
+    });
 static CONTROL_COMMANDS_SET: once_cell::sync::Lazy<HashSet<&'static str>> =
     once_cell::sync::Lazy::new(|| CONTROL_COMMANDS.iter().copied().collect());
+
+const STEP_UP_COMMANDS: &[&str] = &[
+    "skills_bundle_upload_open",
+    "skills_bundle_upload_write",
+    "skills_bundle_upload_commit",
+    "skills_bundle_upload_abort",
+    "skills_install_atomic",
+    "skills_uninstall",
+    "external_bridge_config_update",
+    "external_bridge_client_create",
+    "external_bridge_client_rotate",
+    "external_bridge_client_revoke",
+    "external_bridge_start",
+    "external_bridge_stop",
+    "external_bridge_restart",
+    "external_bridge_relay_enable",
+    "external_bridge_relay_disable",
+];
 
 /// True when `name` requires the remote-control capability.
 fn is_control_command(name: &str) -> bool {
@@ -1038,6 +1220,7 @@ fn is_control_command(name: &str) -> bool {
 
 fn is_control_authorized(name: &str, device_id: &str, scope: Option<&str>) -> bool {
     !is_control_command(name)
+        || scope == Some("device_v2")
         || (scope == Some("service")
             && matches!(
                 name,
@@ -1049,7 +1232,6 @@ fn is_control_authorized(name: &str, device_id: &str, scope: Option<&str>) -> bo
                     | "mcp_server_start"
                     | "mcp_server_stop"
                     | "mcp_server_restart"
-                    | "orchestration_proxy_response"
                     | "lsp_host_ensure"
                     | "lsp_host_request"
             ))
@@ -1095,11 +1277,8 @@ fn inject_caller_device_id(name: &str, mut args: Value, device_id: &str) -> Valu
 /// 403. The external-agent arms are remote code execution by construction —
 /// every decision is also written to the audit log. R12 adds the
 /// `connectors_*` management arms.
+#[cfg(test)]
 const SERVICE_ONLY_COMMANDS: &[&str] = &[
-    "spawn_external_agent",
-    "send_to_external_agent",
-    "kill_external_agent",
-    "get_external_agent_status",
     // ADR-0059 R12 — the brain manages the public webhook ingress registry.
     "connectors_register",
     "connectors_unregister",
@@ -1196,11 +1375,175 @@ const SERVICE_ONLY_COMMANDS: &[&str] = &[
 ];
 
 static SERVICE_ONLY_COMMANDS_SET: once_cell::sync::Lazy<HashSet<&'static str>> =
-    once_cell::sync::Lazy::new(|| SERVICE_ONLY_COMMANDS.iter().copied().collect());
+    once_cell::sync::Lazy::new(|| {
+        super::command_manifest::commands()
+            .iter()
+            .filter(|command| command.target == super::command_manifest::CommandTarget::Service)
+            .map(|command| command.name.as_str())
+            .collect()
+    });
 
 /// True when `name` may be invoked only with a `"service"`-scope JWT.
 fn is_service_only_command(name: &str) -> bool {
     SERVICE_ONLY_COMMANDS_SET.contains(name)
+}
+
+/// Commands that start or drive an external agent on this host — remote code
+/// execution by construction (ADR-0097 D-agent-control).
+///
+/// These were `SERVICE_ONLY`, which made them reachable only by the co-located
+/// brain and left ADR-0082's R4 ("drive a remote host's agents") with no path at
+/// all: pairing yields a *device* JWT, and no amount of granting could turn one
+/// into a service token.
+///
+/// They are not folded into `CONTROL_COMMANDS` either. Remote control means
+/// steering work this host already chose to run; this means launching a new
+/// process. A user enabling "remote control" to let their phone approve a
+/// prompt should not thereby be handing out process execution, so the grant is
+/// a separate, separately-labelled one — see
+/// [`super::control_allow_list::agent_control_global`].
+///
+/// The safety floor does not move: every spawn still has to clear the
+/// `SpawnPolicy` preset allowlist (bare binary from a fixed list, cwd under the
+/// workspaces root, default-deny env) and every allow/deny is audited. That
+/// check runs on the value, not on the caller, so it applies identically to the
+/// service token and to a granted device.
+const AGENT_CONTROL_COMMANDS: &[&str] = &[
+    "spawn_external_agent",
+    "send_to_external_agent",
+    "kill_external_agent",
+    "get_external_agent_status",
+];
+
+static AGENT_CONTROL_COMMANDS_SET: once_cell::sync::Lazy<HashSet<&'static str>> =
+    once_cell::sync::Lazy::new(|| AGENT_CONTROL_COMMANDS.iter().copied().collect());
+
+/// True when `name` needs the agent-control grant (or a service token).
+fn is_agent_control_command(name: &str) -> bool {
+    AGENT_CONTROL_COMMANDS_SET.contains(name)
+}
+
+/// Whether this caller may run agents on this host.
+///
+/// The brain keeps its existing access through the service scope; a paired
+/// device needs an explicit grant, which on a desktop host comes from the
+/// paired-devices toggle and on a headless host from
+/// `cognia-server devices grant --agent-control`.
+fn is_agent_control_authorized(name: &str, device_id: &str, scope: Option<&str>) -> bool {
+    if !is_agent_control_command(name) {
+        return true;
+    }
+    if scope == Some("device_v2") || scope == Some("service") {
+        return true;
+    }
+    // An unauthenticated or malformed context carries an empty `device_id`, and
+    // the grant store refuses to store one (`device_grants::grant`) — but only
+    // the store did. A list that somehow held `""` would match every such
+    // context here, so the caller-side check is repeated rather than assumed.
+    // `ws_terminal.rs` guards its own path the same way.
+    if device_id.trim().is_empty() {
+        return false;
+    }
+    super::control_allow_list::agent_control_global().is_allowed(device_id)
+}
+
+const AGENT_SCHEDULE_TASK_TYPES: &[&str] = &[
+    "chat",
+    "agent",
+    "agent-team",
+    "goal",
+    "skill",
+    "external-agent",
+];
+
+fn is_agent_schedule_task_type(task_type: &str) -> bool {
+    AGENT_SCHEDULE_TASK_TYPES.contains(&task_type)
+}
+
+/// Scheduler commands are payload-sensitive: script/workflow maintenance only
+/// needs the ordinary control grant, while reading or mutating an AI task also
+/// needs the separate agent-control grant. Missing type hints fail closed.
+fn scheduled_task_requires_agent_control(name: &str, args: &Value) -> bool {
+    if !name.starts_with("scheduled_task_") {
+        return false;
+    }
+    match name {
+        "scheduled_task_create" => args
+            .get("input")
+            .and_then(|input| input.get("type"))
+            .and_then(Value::as_str)
+            .map(is_agent_schedule_task_type)
+            .unwrap_or(true),
+        "scheduled_task_list" => args
+            .get("filter")
+            .and_then(|filter| filter.get("types"))
+            .and_then(Value::as_array)
+            .map(|types| {
+                types
+                    .iter()
+                    .filter_map(Value::as_str)
+                    .any(is_agent_schedule_task_type)
+            })
+            // An unfiltered list may disclose prompts from an AI task.
+            .unwrap_or(true),
+        "scheduled_task_statistics" | "scheduled_task_upcoming" | "scheduled_task_export" => true,
+        _ => args
+            .get("taskType")
+            .and_then(Value::as_str)
+            .map(is_agent_schedule_task_type)
+            .unwrap_or(true),
+    }
+}
+
+fn payload_agent_control_authorized(
+    name: &str,
+    args: &Value,
+    device_id: &str,
+    scope: Option<&str>,
+) -> bool {
+    if !scheduled_task_requires_agent_control(name, args) {
+        return true;
+    }
+    if scope == Some("device_v2") || scope == Some("service") {
+        return true;
+    }
+    !device_id.trim().is_empty()
+        && super::control_allow_list::agent_control_global().is_allowed(device_id)
+}
+
+/// Shared refusal for the agent-control gate. One string for both the HTTP
+/// handler and the WebRTC `dispatch` mirror — the two must not be able to
+/// drift into saying different things about the same grant.
+const AGENT_CONTROL_FORBIDDEN: &str = "this device is not authorized to run agents on this host; grant it from the host's paired-devices settings, or with `cognia-server devices grant --agent-control <device-id>`";
+
+/// Refuse an agent-control command *and* record the refusal.
+///
+/// The grant's contract is that every start and every refusal is written to the
+/// host's audit log with the device that asked. The `SpawnPolicy` refusals
+/// inside the `spawn_external_agent` arm were audited, but this gate — the one
+/// an ungranted device actually hits — returned 403 straight to the caller, so
+/// the single most interesting denial (an unauthorized device probing the
+/// execution plane) was the one that left no trace.
+///
+/// Both the HTTP handler and the WebRTC `dispatch` mirror route their 403
+/// through here so the two transports cannot drift into auditing differently.
+async fn refuse_agent_control(
+    name: &str,
+    device_id: &str,
+    scope: Option<&str>,
+) -> (StatusCode, Json<RpcError>) {
+    super::audit::record_async(
+        "external_agent_authorize",
+        device_id,
+        scope.unwrap_or(""),
+        "deny",
+        serde_json::json!({
+            "command": name,
+            "reason": "device lacks the agent-control grant",
+        }),
+    )
+    .await;
+    RpcError::forbidden(AGENT_CONTROL_FORBIDDEN)
 }
 
 /// Public read-only accessor for the remote-control command set. Used by
@@ -1281,138 +1624,13 @@ fn lan_base_url(bind_lan: Option<bool>) -> Option<String> {
 
 /// Allowlisted patch keys for `app_settings_update`. The mobile client may
 /// only mutate user-facing preferences; transport, sidecar, and provider
-/// configuration stay desktop-only. Mirror this with the OpenAPI spec.
-const APP_SETTINGS_MOBILE_ALLOWED_KEYS: &[&str] = &[
-    "theme",
-    "fontScale",
-    "language",
-    "reduceMotion",
-    "defaultModel",
-    "defaultCharacterId",
-    "biometricRequiredFor",
-    // Mobile `/me/computer-use` master toggle (ADR-0020 follow-up). When
-    // false, mobile-initiated turns refuse computer-use regardless of the
-    // per-character flag.
-    "mobileComputerUseEnabled",
-    // Appearance — mobile `/me/appearance` route writes these through the
-    // same allowlist. The matching field types live in
-    // `lib/claude/types.ts` (`colorTheme`, `customThemes`,
-    // `activeCustomThemeId`, `wallpapers`, `customCss`, `customCssEnabled`,
-    // `importedVscodeThemes`).
-    "colorTheme",
-    "customThemes",
-    "activeCustomThemeId",
-    "wallpapers",
-    "customCss",
-    "customCssEnabled",
-    "importedVscodeThemes",
-    // ADR-0021 — WebRTC WAN transport configuration. Mobile clients toggle
-    // the feature and configure ICE/TURN/signaling endpoints from the
-    // Mobile companion settings tab.
-    "webrtcEnabled",
-    "signalingUrl",
-    "iceServers",
-    "turnServers",
-    "turnProvider",
-    // Wave 4.1 — broader user-facing preference surface so the mobile shell can
-    // mirror the desktop settings it already renders. All are non-credential,
-    // non-transport preference fields on `AppSettings` (`lib/claude/types.ts`).
-    "telemetryEnabled",
-    "sttLanguage",
-    "selectedMicId",
-    "pinnedWorkflowIds",
-    "pinnedMeRowIds",
-    "sidebarLayout",
-    "lastInboxViewedAt",
-    "conversationTitle",
-    "conversationTimeline",
-    "searchEnabled",
-    "searchMaxResults",
-    "ttsEnabled",
-    "ttsProvider",
-    "ttsRate",
-    "ttsPitch",
-    "ttsVolume",
-    "ttsAutoPlay",
-    // ADR-0056 (mobile settings parity) — the remaining "portable" appearance
-    // keys that already sync desktop→phone (`CROSS_PLATFORM_SETTING_KEYS`) but
-    // were not yet writable back, so the embedded `<AppearanceSection/>` on
-    // `/me/appearance` silently 400'd on those tabs. All are non-credential
-    // presentation prefs.
-    "autoMode",
-    "density",
-    "radius",
-    "motion",
-    "typographyExt",
-    "a11y",
-    // Theme system enhancement — the standalone accent-color override and the
-    // directly-activated plugin theme pointer. Both are non-credential
-    // presentation prefs written by the embedded `<AppearanceSection/>` theme
-    // tab on `/me/appearance`; without these the phone 400's on those writes.
-    "accentColor",
-    "activePluginThemeId",
-    // ADR-0056 — agent-default preferences. Editable from the phone's
-    // `/me/agent` page only in PAIRED mode (the standalone engine has no agent
-    // loop). `permissionMode` escalations are additionally biometric-gated on
-    // the client (decision D4); the server still only checks allowlist
-    // membership here. None are credentials or transport config.
-    "permissionMode",
-    "defaultSystemPrompt",
-    "defaultMaxThinkingTokens",
-    "bareMode",
-    "debugMode",
-    "briefMode",
-    // ADR-0056 (Wave 2) — conversation completeness. `composerBehavior` and
-    // `streamPartialMessages` are phone-composer / render prefs; `compaction`
-    // is agent-execution config edited from `/me/agent` (paired). None are
-    // credentials or transport config.
-    "composerBehavior",
-    "streamPartialMessages",
-    "compaction",
-    // Conversation-list (sidebar) render prefs edited from `/me/conversation`
-    // — density / preview / grouping / unread badges / search scope. Pure UI
-    // presentation config, no credentials.
-    "conversationSidebar",
-    // ADR-0056 (Wave 3) — project instruction loading config (CLAUDE.md /
-    // AGENTS.md discovery on the paired desktop). Remote-edited from
-    // `/me/instructions`. The globalPath / extraPaths it carries are desktop
-    // filesystem paths, but the value is config, not a credential.
-    "instructions",
-    // ADR-0056 (Wave 3) — master toggle for built-in surface-skill auto-
-    // injection (flows into `resolveSendOptions`). Edited from `/me/agent`.
-    "surfaceSkillsEnabled",
-    // ADR-0056 — visual workflow editor performance tier. Edited from
-    // `/me/workflows-settings` (both modes). A per-device motion/computation
-    // knob, not a credential or transport field; it is intentionally NOT
-    // mirrored desktop→phone (kept device-local) but is writable up so a
-    // paired desktop's tier can be set from the phone.
-    "workflowEditorPerformanceTier",
-    // ADR-0056 (Wave 2) — per-provider TTS voice selection. The phone's
-    // `/me/speech` page writes the active provider's flat voice-id key
-    // (matching the desktop `provider-config.tsx` field names). All are
-    // non-credential preference strings; API keys are NOT here.
-    "systemVoice",
-    "openaiVoice",
-    "geminiVoice",
-    "edgeVoice",
-    "elevenlabsVoice",
-    "lmntVoice",
-    "humeVoice",
-    "cartesiaVoice",
-    "deepgramVoice",
-    "xiaomiVoice",
-    "mistralVoiceId",
-    // ADR-0056 (Wave 2) — web-search completeness. Preferred provider +
-    // cloud→system fallback edited from `/me/web-search`. Provider API keys
-    // stay device-local (`searchProviders` is deliberately NOT allowlisted).
-    "defaultSearchProvider",
-    "searchFallbackEnabled",
-    // ADR-0056 (Wave 2) — Notification Center preferences (one JSON object).
-    // The phone's `/me/notifications` page edits channels / level gates / quiet
-    // hours / behaviour / per-source mute / retention. The OS push permission
-    // itself stays a native, device-local grant (not part of this value).
-    "notificationPreferences",
-];
+/// configuration stay desktop-only.
+///
+/// The list itself is generated from
+/// `packages/agent-config-types/src/settings-sync.ts` — the one table that also
+/// drives the down-mirror and the OpenAPI enum, so the three can no longer
+/// drift apart. Edit that table, then run `pnpm settings-sync:gen`.
+use super::settings_sync_generated::APP_SETTINGS_MOBILE_ALLOWED_KEYS;
 
 /// Public read-only accessor for the mobile-side `app_settings_update`
 /// allowlist. Used by the OpenAPI `spec_parity` test (Wave 3.6) and by the
@@ -1505,6 +1723,15 @@ pub async fn rpc_handler(
         ));
     }
 
+    // Agent-control gate. Mirrored at the top of `dispatch` for the WebRTC
+    // path, exactly like the two gates above.
+    if !is_agent_control_authorized(&name, &ctx.device_id, Some(ctx.scope.as_str())) {
+        return Err(refuse_agent_control(&name, &ctx.device_id, Some(ctx.scope.as_str())).await);
+    }
+    if !payload_agent_control_authorized(&name, &args, &ctx.device_id, Some(ctx.scope.as_str())) {
+        return Err(refuse_agent_control(&name, &ctx.device_id, Some(ctx.scope.as_str())).await);
+    }
+
     // Wave 3.3 — per-device rate limiter sits after the JWT verifier
     // middleware (so we can key on device_id) and before idempotency
     // lookup (cache hits don't burn a token).
@@ -1516,11 +1743,26 @@ pub async fn rpc_handler(
 
     let is_read_only = READ_ONLY_COMMANDS_SET.contains(name.as_str());
 
-    // Cache look-up (non-read-only commands only).
+    // Atomically reserve the write before dispatch. The same ledger is used
+    // by WebRTC, so RTC timeout followed by HTTPS fallback cannot execute it
+    // twice.
     if !is_read_only {
         if let Some(ref key) = idem_key {
-            if let Some(cached) = state.idempotency.get(&ctx.device_id, key) {
-                return Ok(Json(cached));
+            match state
+                .idempotency
+                .begin(&ctx.device_id, &name, key, &args)
+                .map_err(|error| RpcError::internal(error.to_string()))?
+            {
+                super::idempotency::IdempotencyDecision::Execute => {}
+                super::idempotency::IdempotencyDecision::Cached(cached) => {
+                    return Ok(Json(cached));
+                }
+                super::idempotency::IdempotencyDecision::Conflict => {
+                    return Err(RpcError::idempotency_conflict());
+                }
+                super::idempotency::IdempotencyDecision::Indeterminate => {
+                    return Err(RpcError::idempotency_indeterminate());
+                }
             }
         }
     }
@@ -1555,12 +1797,13 @@ pub async fn rpc_handler(
     super::metrics::record_rpc_call(dispatched.is_ok());
     let result = dispatched?;
 
-    // Cache the result (non-read-only + idempotency key present).
+    // Commit the result (non-read-only + idempotency key present).
     if !is_read_only {
         if let Some(key) = idem_key {
             state
                 .idempotency
-                .put(ctx.device_id.clone(), key, result.clone());
+                .complete(&ctx.device_id, &name, &key, &result)
+                .map_err(|error| RpcError::internal(error.to_string()))?;
         }
     }
 
@@ -1619,6 +1862,19 @@ fn required_aliased<T: DeserializeOwned>(
         })?;
     serde_json::from_value(v.clone())
         .map_err(|e| RpcError::malformed(format!("field '{primary}': {e}")))
+}
+
+fn optional_aliased<T: DeserializeOwned>(
+    args: &Value,
+    primary: &str,
+    alias: &str,
+) -> Result<Option<T>, (StatusCode, Json<RpcError>)> {
+    match args.get(primary).or_else(|| args.get(alias)) {
+        None | Some(Value::Null) => Ok(None),
+        Some(value) => serde_json::from_value(value.clone())
+            .map(Some)
+            .map_err(|error| RpcError::malformed(format!("field '{primary}': {error}"))),
+    }
 }
 
 /// Extract an optional field from a JSON object.
@@ -1684,6 +1940,181 @@ fn mcp_server_rpc_error(
             StatusCode::SERVICE_UNAVAILABLE,
             Json(RpcError::new("mcp_server_unavailable", message)),
         ),
+    }
+}
+
+fn external_bridge_rpc_error(message: String) -> (StatusCode, Json<RpcError>) {
+    structured_remote_rpc_error(message, "external_bridge_invalid_request")
+}
+
+fn skill_transaction_rpc_error(message: String) -> (StatusCode, Json<RpcError>) {
+    structured_remote_rpc_error(message, "skills_transaction_invalid_request")
+}
+
+fn structured_remote_rpc_error(
+    message: String,
+    fallback_code: &'static str,
+) -> (StatusCode, Json<RpcError>) {
+    let (status, code) = if message.starts_with("REMOTE_FEATURE_UNSUPPORTED") {
+        (StatusCode::NOT_IMPLEMENTED, "REMOTE_FEATURE_UNSUPPORTED")
+    } else if message.starts_with("REMOTE_RESPONSE_STALE") {
+        (StatusCode::CONFLICT, "REMOTE_RESPONSE_STALE")
+    } else if message.starts_with("REMOTE_SCOPE_DENIED") {
+        (StatusCode::FORBIDDEN, "REMOTE_SCOPE_DENIED")
+    } else if message.starts_with("REMOTE_CONSENT_REQUIRED") {
+        (StatusCode::PRECONDITION_REQUIRED, "REMOTE_CONSENT_REQUIRED")
+    } else {
+        (StatusCode::BAD_REQUEST, fallback_code)
+    };
+    (status, Json(RpcError::new(code, message)))
+}
+
+async fn sync_external_bridge_verifiers(
+    host: &super::dispatch_host::DispatchHost,
+    data_dir: &std::path::Path,
+) -> Result<(), (StatusCode, Json<RpcError>)> {
+    use tauri::Manager;
+
+    let bridge_data_dir = data_dir.to_path_buf();
+    let clients = tokio::task::spawn_blocking(move || {
+        super::external_bridge::active_clients(&bridge_data_dir)
+    })
+    .await
+    .map_err(|error| RpcError::internal(error.to_string()))?
+    .map_err(external_bridge_rpc_error)?;
+    let result = match host {
+        super::dispatch_host::DispatchHost::Tauri(app) => app
+            .state::<crate::mcp_server::McpServerState>()
+            .replace_bridge_clients(&clients),
+        super::dispatch_host::DispatchHost::Headless(services) => {
+            services.mcp_server.replace_bridge_clients(&clients)
+        }
+    };
+    match result {
+        Ok(()) | Err(crate::mcp_server::types::McpServerError::NotRunning) => Ok(()),
+        Err(error) => Err(mcp_server_rpc_error(error)),
+    }
+}
+
+async fn external_bridge_start_for_host(
+    host: &super::dispatch_host::DispatchHost,
+    restart: bool,
+) -> Result<Value, (StatusCode, Json<RpcError>)> {
+    use tauri::Manager;
+
+    let data_dir = host.data_dir().map_err(external_bridge_rpc_error)?;
+    let bridge_data_dir = data_dir.clone();
+    let (config, clients) = tokio::task::spawn_blocking(move || {
+        Ok::<_, String>((
+            super::external_bridge::config_get(&bridge_data_dir)?,
+            super::external_bridge::active_clients(&bridge_data_dir)?,
+        ))
+    })
+    .await
+    .map_err(|error| RpcError::internal(error.to_string()))?
+    .map_err(external_bridge_rpc_error)?;
+    if clients.is_empty() {
+        return Err(external_bridge_rpc_error(
+            "REMOTE_CONSENT_REQUIRED: create an External Bridge client before starting".into(),
+        ));
+    }
+    let settings_json = serde_json::to_string(&json!({
+        "enabled": true,
+        "enabledScopes": config.enabled_scopes,
+        "httpPort": config.port,
+    }))
+    .map_err(|error| RpcError::internal(error.to_string()))?;
+    super::external_bridge::set_runtime_state(&data_dir, "starting", None);
+
+    if restart {
+        let stopped = match host {
+            super::dispatch_host::DispatchHost::Tauri(app) => {
+                crate::mcp_server::commands::mcp_server_stop_for_state(
+                    app.state::<crate::mcp_server::McpServerState>().inner(),
+                )
+            }
+            super::dispatch_host::DispatchHost::Headless(services) => {
+                crate::mcp_server::commands::mcp_server_stop_for_state(services.mcp_server.as_ref())
+            }
+        };
+        if let Err(error) = stopped {
+            super::external_bridge::set_runtime_state(
+                &data_dir,
+                "degraded",
+                Some(error.to_string()),
+            );
+            return Err(mcp_server_rpc_error(error));
+        }
+    }
+
+    let started = match host {
+        super::dispatch_host::DispatchHost::Tauri(app) => {
+            let sidecar_path =
+                crate::mcp_server::commands::resolve_sidecar_path(app).ok_or_else(|| {
+                    RpcError::service_unavailable(
+                        "External Bridge MCP sidecar is not installed".to_string(),
+                    )
+                })?;
+            let automation = app.state::<crate::automation::commands::AutomationState>();
+            app.state::<crate::mcp_server::McpServerState>()
+                .start_with_clients(
+                    config.port,
+                    clients,
+                    settings_json,
+                    sidecar_path.to_string_lossy().into_owned(),
+                    Some((
+                        automation.handle.clone(),
+                        crate::automation::dispatcher::Enforcement::from_state(&automation),
+                    )),
+                    Some(crate::mcp_server::orchestration_proxy::tauri_event_sink(
+                        app.clone(),
+                    )),
+                )
+                .await
+        }
+        super::dispatch_host::DispatchHost::Headless(services) => {
+            services
+                .mcp_server
+                .start_with_clients(
+                    config.port,
+                    clients,
+                    settings_json,
+                    crate::headless::resolve_mcp_sidecar_path()
+                        .to_string_lossy()
+                        .into_owned(),
+                    Some(
+                        services
+                            .mcp_automation()
+                            .await
+                            .map_err(RpcError::internal)?,
+                    ),
+                    None,
+                )
+                .await
+        }
+    };
+
+    match started {
+        Ok(port) => {
+            if matches!(host, super::dispatch_host::DispatchHost::Headless(_)) {
+                super::external_bridge::set_runtime_state(
+                    &data_dir,
+                    "degraded",
+                    Some("host-local orchestration executor is unavailable".into()),
+                );
+            } else {
+                super::external_bridge::set_runtime_state(&data_dir, "running", None);
+            }
+            Ok(json!(port))
+        }
+        Err(error) => {
+            super::external_bridge::set_runtime_state(
+                &data_dir,
+                "degraded",
+                Some(error.to_string()),
+            );
+            Err(mcp_server_rpc_error(error))
+        }
     }
 }
 
@@ -1797,6 +2228,14 @@ pub(super) async fn dispatch(
             "this device is not authorized for remote control; enable it from the desktop paired-devices settings",
         ));
     }
+    if STEP_UP_COMMANDS.contains(&name) && scope != Some("service") {
+        let admin_lease = args
+            .get("adminLease")
+            .or_else(|| args.get("admin_lease"))
+            .and_then(Value::as_str);
+        super::admin_lease::validate(device_id, name, admin_lease)
+            .map_err(external_bridge_rpc_error)?;
+    }
 
     // Service-scope gate, mirrored from `rpc_handler` so the WebRTC
     // `signaling::dispatch` path (which is always device-scoped — it passes
@@ -1805,6 +2244,16 @@ pub(super) async fn dispatch(
         return Err(RpcError::forbidden(
             "this command requires the headless service token",
         ));
+    }
+
+    // Agent-control gate, mirrored from `rpc_handler`. The WebRTC path passes
+    // `scope: None`, so a DataChannel caller needs the same explicit grant an
+    // HTTP one does — the transport must not be a way around it.
+    if !is_agent_control_authorized(name, device_id, scope) {
+        return Err(refuse_agent_control(name, device_id, scope).await);
+    }
+    if !payload_agent_control_authorized(name, &args, device_id, scope) {
+        return Err(refuse_agent_control(name, device_id, scope).await);
     }
 
     // Allowlist gate. The HTTP `rpc_handler` already rejects unknown names
@@ -1845,9 +2294,23 @@ pub(super) async fn dispatch(
         // state + host resolve from either the Tauri app or the headless
         // services registry, so a cloud cognia-server executes chat turns.
         "claude_send" => {
-            let session_id: String = required(&args, "session_id")?;
+            let session_id: String = required_aliased(&args, "session_id", "sessionId")?;
             let prompt: Value = required(&args, "prompt")?;
             let mut options: Option<claude_commands::SendOptions> = optional(&args, "options")?;
+            let context = super::remote_execution::global().register(
+                &opaque_host_id(state),
+                device_id,
+                &session_id,
+                unix_time_ms(),
+            );
+            options
+                .get_or_insert_with(claude_commands::SendOptions::default)
+                .extra
+                .insert(
+                    "remoteExecutionContext".to_string(),
+                    serde_json::to_value(context)
+                        .map_err(|error| RpcError::internal(error.to_string()))?,
+                );
             if let Some(send_options) = options.as_mut() {
                 if let Some(envelope) = send_options.extra.remove("taskWorkspace") {
                     let envelope: crate::task_workspace::TaskWorkspaceTurnEnvelope =
@@ -1879,7 +2342,7 @@ pub(super) async fn dispatch(
         }
 
         "claude_interrupt" => {
-            let session_id: String = required(&args, "session_id")?;
+            let session_id: String = required_aliased(&args, "session_id", "sessionId")?;
             claude_commands::claude_interrupt_impl(&host.sidecar_state(), session_id)
                 .await
                 .map(|_| Value::Null)
@@ -1887,7 +2350,7 @@ pub(super) async fn dispatch(
         }
 
         "claude_compact" => {
-            let session_id: String = required(&args, "session_id")?;
+            let session_id: String = required_aliased(&args, "session_id", "sessionId")?;
             let focus: Option<String> = args
                 .get("focus")
                 .and_then(|v| v.as_str())
@@ -1898,12 +2361,46 @@ pub(super) async fn dispatch(
                 .map_err(RpcError::internal)
         }
 
+        "claude_restore" => {
+            let session_id: String = required_aliased(&args, "session_id", "sessionId")?;
+            let messages: Value = required(&args, "messages")?;
+            claude_commands::claude_restore_impl(&host.sidecar_state(), session_id, messages)
+                .await
+                .map(|_| Value::Null)
+                .map_err(RpcError::internal)
+        }
+
+        "claude_set_mode" => {
+            let session_id: String = required_aliased(&args, "session_id", "sessionId")?;
+            let mode: String = required(&args, "mode")?;
+            claude_commands::claude_set_mode_impl(&host.sidecar_state(), session_id, mode)
+                .await
+                .map(|_| Value::Null)
+                .map_err(RpcError::internal)
+        }
+
         "claude_approve" => {
-            let session_id: String = required(&args, "session_id")?;
-            let request_id: String = required(&args, "request_id")?;
+            let session_id: String = required_aliased(&args, "session_id", "sessionId")?;
+            let request_id: String = required_aliased(&args, "request_id", "requestId")?;
             let decision: String = required(&args, "decision")?;
             let message: Option<String> = optional(&args, "message")?;
-            let updated_input: Option<Value> = optional(&args, "updated_input")?;
+            let updated_input: Option<Value> =
+                optional_aliased(&args, "updated_input", "updatedInput")?;
+            let context: super::remote_execution::RemoteExecutionContext =
+                required_aliased(
+                    &args,
+                    "remote_execution_context",
+                    "remoteExecutionContext",
+                )?;
+            super::remote_execution::global()
+                .validate_and_consume(
+                    &context,
+                    device_id,
+                    &session_id,
+                    &request_id,
+                    unix_time_ms(),
+                )
+                .map_err(remote_context_error)?;
             claude_commands::claude_approve_impl(
                 &host.sidecar_state(),
                 session_id,
@@ -1918,8 +2415,109 @@ pub(super) async fn dispatch(
         }
 
         "claude_close_session" => {
-            let session_id: String = required(&args, "session_id")?;
+            let session_id: String = required_aliased(&args, "session_id", "sessionId")?;
             claude_commands::claude_close_session_impl(&host.sidecar_state(), session_id)
+                .await
+                .map(|_| Value::Null)
+                .map_err(RpcError::internal)
+        }
+
+        "claude_plugin_tool_response" => {
+            let session_id: String = required_aliased(&args, "session_id", "sessionId")?;
+            let tool_use_id: String = required_aliased(&args, "tool_use_id", "toolUseId")?;
+            let context: super::remote_execution::RemoteExecutionContext =
+                required_aliased(&args, "remote_execution_context", "remoteExecutionContext")?;
+            super::remote_execution::global()
+                .validate_and_consume(
+                    &context,
+                    device_id,
+                    &session_id,
+                    &tool_use_id,
+                    unix_time_ms(),
+                )
+                .map_err(remote_context_error)?;
+            let result: Option<Value> = optional(&args, "result")?;
+            let error: Option<String> = optional(&args, "error")?;
+            claude_commands::claude_plugin_tool_response_impl(
+                &host.sidecar_state(),
+                session_id,
+                tool_use_id,
+                result,
+                error,
+            )
+            .await
+            .map(|_| Value::Null)
+            .map_err(RpcError::internal)
+        }
+
+        "claude_tool_result_decision" => {
+            let session_id: String = required_aliased(&args, "session_id", "sessionId")?;
+            let review_id: String = required_aliased(&args, "review_id", "reviewId")?;
+            let context: super::remote_execution::RemoteExecutionContext =
+                required_aliased(&args, "remote_execution_context", "remoteExecutionContext")?;
+            super::remote_execution::global()
+                .validate_and_consume(
+                    &context,
+                    device_id,
+                    &session_id,
+                    &review_id,
+                    unix_time_ms(),
+                )
+                .map_err(remote_context_error)?;
+            let updated_tool_output: Option<Value> =
+                args.get("updated_tool_output")
+                    .or_else(|| args.get("updatedToolOutput"))
+                    .cloned();
+            claude_commands::claude_tool_result_decision_impl(
+                &host.sidecar_state(),
+                session_id,
+                review_id,
+                updated_tool_output,
+            )
+            .await
+            .map(|_| Value::Null)
+            .map_err(RpcError::internal)
+        }
+
+        "claude_protocol_adapter_message" => {
+            let message: Value = required(&args, "message")?;
+            let context: super::remote_execution::RemoteExecutionContext =
+                required_aliased(&args, "remote_execution_context", "remoteExecutionContext")?;
+            let session_id: String = required_aliased(&args, "session_id", "sessionId")?;
+            let exec_id = message
+                .get("execId")
+                .or_else(|| message.get("exec_id"))
+                .and_then(Value::as_str)
+                .ok_or_else(|| {
+                    RpcError::malformed(
+                        "claude_protocol_adapter_message.message.execId is required".into(),
+                    )
+                })?;
+            let message_id = message
+                .get("messageId")
+                .or_else(|| message.get("message_id"))
+                .and_then(Value::as_str)
+                .ok_or_else(|| {
+                    RpcError::malformed(
+                        "claude_protocol_adapter_message.message.messageId is required".into(),
+                    )
+                })?;
+            let terminal = matches!(
+                message.get("type").and_then(Value::as_str),
+                Some("protocol_adapter_done" | "protocol_adapter_error")
+            );
+            super::remote_execution::global()
+                .validate_pending_message(
+                    &context,
+                    device_id,
+                    &session_id,
+                    exec_id,
+                    message_id,
+                    terminal,
+                    unix_time_ms(),
+                )
+                .map_err(remote_context_error)?;
+            claude_commands::claude_protocol_adapter_message_impl(&host.sidecar_state(), message)
                 .await
                 .map(|_| Value::Null)
                 .map_err(RpcError::internal)
@@ -2093,6 +2691,267 @@ pub(super) async fn dispatch(
                 })
         }
 
+        "skills_catalog_get" => {
+            let host = host.clone();
+            tokio::task::spawn_blocking(move || {
+                super::skill_transactions::catalog_get(&host)
+            })
+            .await
+            .map_err(|error| RpcError::internal(error.to_string()))?
+            .map_err(skill_transaction_rpc_error)
+            .and_then(to_json)
+        }
+
+        "skills_bundle_upload_open" => {
+            let request: crate::skills::bundle::BundleUploadOpenRequest =
+                required(&args, "request")?;
+            let host = host.clone();
+            let device_id = device_id.to_owned();
+            tokio::task::spawn_blocking(move || {
+                super::skill_transactions::upload_open(&host, &device_id, request)
+            })
+            .await
+            .map_err(|error| RpcError::internal(error.to_string()))?
+            .map_err(skill_transaction_rpc_error)
+            .and_then(to_json)
+        }
+
+        "skills_bundle_upload_write" => {
+            let handle_id: String = required_aliased(&args, "handle_id", "handleId")?;
+            let offset: u64 = required(&args, "offset")?;
+            let data_base64: String = required_aliased(&args, "data_base64", "dataBase64")?;
+            let chunk_hash: String = required_aliased(&args, "chunk_hash", "chunkHash")?;
+            let host = host.clone();
+            let device_id = device_id.to_owned();
+            tokio::task::spawn_blocking(move || {
+                super::skill_transactions::upload_write(
+                    &host,
+                    &device_id,
+                    &handle_id,
+                    offset,
+                    &data_base64,
+                    &chunk_hash,
+                )
+            })
+            .await
+            .map_err(|error| RpcError::internal(error.to_string()))?
+            .map_err(skill_transaction_rpc_error)
+            .and_then(to_json)
+        }
+
+        "skills_bundle_upload_commit" => {
+            let handle_id: String = required_aliased(&args, "handle_id", "handleId")?;
+            let host = host.clone();
+            let device_id = device_id.to_owned();
+            tokio::task::spawn_blocking(move || {
+                super::skill_transactions::upload_commit(&host, &device_id, &handle_id)
+            })
+            .await
+            .map_err(|error| RpcError::internal(error.to_string()))?
+            .map_err(skill_transaction_rpc_error)?;
+            Ok(Value::Null)
+        }
+
+        "skills_bundle_upload_abort" => {
+            let handle_id: String = required_aliased(&args, "handle_id", "handleId")?;
+            let host = host.clone();
+            let device_id = device_id.to_owned();
+            tokio::task::spawn_blocking(move || {
+                super::skill_transactions::upload_abort(&host, &device_id, &handle_id)
+            })
+            .await
+            .map_err(|error| RpcError::internal(error.to_string()))?
+            .map_err(skill_transaction_rpc_error)?;
+            Ok(Value::Null)
+        }
+
+        "skills_install_atomic" => {
+            let handle_id: String = required_aliased(&args, "handle_id", "handleId")?;
+            let host = host.clone();
+            let device_id = device_id.to_owned();
+            tokio::task::spawn_blocking(move || {
+                super::skill_transactions::install_atomic(&host, &device_id, &handle_id)
+            })
+            .await
+            .map_err(|error| RpcError::internal(error.to_string()))?
+            .map_err(skill_transaction_rpc_error)
+            .and_then(to_json)
+        }
+
+        "skills_uninstall" => {
+            let target: crate::skills::install::SkillsTarget = required(&args, "target")?;
+            let dir_name: String = required_aliased(&args, "dir_name", "dirName")?;
+            let host = host.clone();
+            tokio::task::spawn_blocking(move || {
+                super::skill_transactions::uninstall(&host, target, &dir_name)
+            })
+            .await
+            .map_err(|error| RpcError::internal(error.to_string()))?
+            .map_err(skill_transaction_rpc_error)
+                .and_then(to_json)
+        }
+
+        "external_bridge_config_get" => {
+            let data_dir = host.data_dir().map_err(external_bridge_rpc_error)?;
+            tokio::task::spawn_blocking(move || super::external_bridge::config_get(&data_dir))
+                .await
+                .map_err(|error| RpcError::internal(error.to_string()))?
+                .map_err(external_bridge_rpc_error)
+                .and_then(to_json)
+        }
+
+        "external_bridge_config_update" => {
+            let update: super::external_bridge::ExternalBridgeConfigUpdate =
+                required(&args, "update")?;
+            let data_dir = host.data_dir().map_err(external_bridge_rpc_error)?;
+            let running = host.mcp_server_status().running;
+            let bridge_data_dir = data_dir.clone();
+            let updated = tokio::task::spawn_blocking(move || {
+                super::external_bridge::config_update(&bridge_data_dir, update)
+            })
+            .await
+            .map_err(|error| RpcError::internal(error.to_string()))?
+            .map_err(external_bridge_rpc_error)?;
+            if running {
+                super::external_bridge::set_runtime_state(
+                    &data_dir,
+                    "degraded",
+                    Some("configuration changed; restart required".into()),
+                );
+            }
+            to_json(updated)
+        }
+
+        "external_bridge_client_create" => {
+            let name: String = required(&args, "name")?;
+            let scopes: Vec<String> = required(&args, "scopes")?;
+            let expires_at: Option<u64> = optional_aliased(&args, "expires_at", "expiresAt")?;
+            let data_dir = host.data_dir().map_err(external_bridge_rpc_error)?;
+            let bridge_data_dir = data_dir.clone();
+            let created = tokio::task::spawn_blocking(move || {
+                super::external_bridge::client_create(
+                    &bridge_data_dir,
+                    name,
+                    scopes,
+                    expires_at,
+                )
+            })
+            .await
+            .map_err(|error| RpcError::internal(error.to_string()))?
+            .map_err(external_bridge_rpc_error)?;
+            sync_external_bridge_verifiers(host, &data_dir).await?;
+            to_json(created)
+        }
+
+        "external_bridge_client_list" => {
+            let data_dir = host.data_dir().map_err(external_bridge_rpc_error)?;
+            tokio::task::spawn_blocking(move || super::external_bridge::client_list(&data_dir))
+                .await
+                .map_err(|error| RpcError::internal(error.to_string()))?
+                .map_err(external_bridge_rpc_error)
+                .and_then(to_json)
+        }
+
+        "external_bridge_client_rotate" => {
+            let client_id: String = required_aliased(&args, "client_id", "clientId")?;
+            let data_dir = host.data_dir().map_err(external_bridge_rpc_error)?;
+            let bridge_data_dir = data_dir.clone();
+            let rotated = tokio::task::spawn_blocking(move || {
+                super::external_bridge::client_rotate(&bridge_data_dir, &client_id)
+            })
+            .await
+            .map_err(|error| RpcError::internal(error.to_string()))?
+            .map_err(external_bridge_rpc_error)?;
+            sync_external_bridge_verifiers(host, &data_dir).await?;
+            to_json(rotated)
+        }
+
+        "external_bridge_client_revoke" => {
+            let client_id: String = required_aliased(&args, "client_id", "clientId")?;
+            let data_dir = host.data_dir().map_err(external_bridge_rpc_error)?;
+            let bridge_data_dir = data_dir.clone();
+            let revoked = tokio::task::spawn_blocking(move || {
+                super::external_bridge::client_revoke(&bridge_data_dir, &client_id)
+            })
+            .await
+            .map_err(|error| RpcError::internal(error.to_string()))?
+            .map_err(external_bridge_rpc_error)?;
+            sync_external_bridge_verifiers(host, &data_dir).await?;
+            to_json(revoked)
+        }
+
+        "external_bridge_start" => external_bridge_start_for_host(host, false).await,
+        "external_bridge_restart" => external_bridge_start_for_host(host, true).await,
+        "external_bridge_stop" => {
+            use tauri::Manager;
+            let data_dir = host.data_dir().map_err(external_bridge_rpc_error)?;
+            let result = match host {
+                super::dispatch_host::DispatchHost::Tauri(app) => {
+                    crate::mcp_server::commands::mcp_server_stop_for_state(
+                        app.state::<crate::mcp_server::McpServerState>().inner(),
+                    )
+                }
+                super::dispatch_host::DispatchHost::Headless(services) => {
+                    crate::mcp_server::commands::mcp_server_stop_for_state(
+                        services.mcp_server.as_ref(),
+                    )
+                }
+            };
+            result.map_err(mcp_server_rpc_error)?;
+            super::external_bridge::set_runtime_state(&data_dir, "stopped", None);
+            Ok(Value::Null)
+        }
+
+        "external_bridge_status" => {
+            let data_dir = host.data_dir().map_err(external_bridge_rpc_error)?;
+            let server_status = host.mcp_server_status();
+            tokio::task::spawn_blocking(move || {
+                super::external_bridge::status(&data_dir, &server_status)
+            })
+                .await
+                .map_err(|error| RpcError::internal(error.to_string()))?
+                .map_err(external_bridge_rpc_error)
+                .and_then(to_json)
+        }
+
+        "external_bridge_relay_enable" | "external_bridge_relay_disable" => {
+            Err(external_bridge_rpc_error(
+                "REMOTE_FEATURE_UNSUPPORTED: managed relay is not advertised by this host".into(),
+            ))
+        }
+
+        "host_admin_lease_issue" => {
+            let operations: Vec<String> = required(&args, "operations")?;
+            let ttl_seconds: Option<u64> =
+                optional_aliased(&args, "ttl_seconds", "ttlSeconds")?;
+            let confirmed: bool = required(&args, "confirmed")?;
+            let owner_authorized = if scope == Some("owner_v2") || scope == Some("service") {
+                true
+            } else {
+                account_id
+                    .zip(super::security_store::security_store())
+                    .is_some_and(|(tenant_id, security)| {
+                        security
+                            .has_capability(tenant_id, device_id, "host.admin")
+                            .unwrap_or(false)
+                    })
+            };
+            super::admin_lease::issue(
+                device_id,
+                operations,
+                ttl_seconds,
+                confirmed,
+                owner_authorized,
+            )
+                .map_err(external_bridge_rpc_error)
+                .and_then(to_json)
+        }
+
+        "host_admin_lease_revoke" => {
+            super::admin_lease::revoke_device(device_id);
+            Ok(Value::Null)
+        }
+
         // ── MCP server ────────────────────────────────────────────────────────
 
         "mcp_server_start" | "mcp_server_restart" => {
@@ -2156,17 +3015,6 @@ pub(super) async fn dispatch(
                         .map_err(mcp_server_rpc_error)
                 }
                 crate::companion_api::dispatch_host::DispatchHost::Headless(services) => {
-                    let event_bus = std::sync::Arc::clone(&services.event_bus);
-                    let sink: crate::mcp_server::orchestration_proxy::OrchestrationEventSink =
-                        std::sync::Arc::new(move |event| {
-                            let payload = serde_json::to_value(event)
-                                .map_err(|error| error.to_string())?;
-                            event_bus.publish(
-                                crate::mcp_server::orchestration_proxy::EXEC_EVENT.to_string(),
-                                payload,
-                            );
-                            Ok(())
-                        });
                     crate::mcp_server::commands::mcp_server_start_for_state(
                         services.mcp_server.as_ref(),
                         port,
@@ -2181,7 +3029,7 @@ pub(super) async fn dispatch(
                                 .await
                                 .map_err(RpcError::internal)?,
                         ),
-                        Some(sink),
+                        None,
                     )
                     .await
                     .map(|bound| json!(bound))
@@ -2206,29 +3054,6 @@ pub(super) async fn dispatch(
                 .map_err(mcp_server_rpc_error)
             }
         },
-        "orchestration_proxy_response" => {
-            let id: String = required(&args, "id")?;
-            let ok: bool = required(&args, "ok")?;
-            let result: Option<Value> = optional(&args, "result")?;
-            let error: Option<String> = optional(&args, "error")?;
-            let reply = crate::mcp_server::orchestration_proxy::OrchestrationReply {
-                ok,
-                result,
-                error,
-            };
-            match &host {
-                crate::companion_api::dispatch_host::DispatchHost::Tauri(app) => {
-                    use tauri::Manager;
-                    app.state::<crate::mcp_server::McpServerState>()
-                        .resolve_orchestration_reply(&id, reply);
-                }
-                crate::companion_api::dispatch_host::DispatchHost::Headless(services) => {
-                    services.mcp_server.resolve_orchestration_reply(&id, reply);
-                }
-            }
-            Ok(Value::Null)
-        }
-
         "mcp_server_status" => {
             let status = host.mcp_server_status();
             serde_json::to_value(status).map_err(|e| RpcError::internal(e.to_string()))
@@ -2381,6 +3206,48 @@ pub(super) async fn dispatch(
                 .map_err(RpcError::internal)
         }
 
+        // ── Rust-owned background jobs and durable monitors ─────────────────
+        // These calls never depend on a renderer bridge, so they keep working
+        // on a headless host and when the desktop WebView is suspended.
+        "background_job_list" => crate::jobs::dispatch_host_rpc("jobs.list", &args)
+            .await
+            .map_err(RpcError::internal),
+        "background_job_read" => crate::jobs::dispatch_host_rpc("jobs.read", &args)
+            .await
+            .map_err(RpcError::internal),
+        "background_job_kill" => crate::jobs::dispatch_host_rpc("jobs.kill", &args)
+            .await
+            .map_err(RpcError::internal),
+        "background_job_spawn_scheduled" => {
+            let task_id: String = required(&args, "taskId")?;
+            let command: String = required(&args, "command")?;
+            let cwd: std::path::PathBuf = required(&args, "cwd")?;
+            let label: Option<String> = optional(&args, "label")?;
+            crate::jobs::background_job_spawn_scheduled(task_id, command, cwd, label)
+                .await
+                .map_err(RpcError::internal)
+        }
+        "background_monitor_list" => crate::jobs::dispatch_host_rpc("monitors.list", &args)
+            .await
+            .map_err(RpcError::internal),
+        "background_monitor_cancel" => crate::jobs::dispatch_host_rpc("monitors.cancel", &args)
+            .await
+            .map_err(RpcError::internal),
+        "background_monitor_register_scheduled" => {
+            let task_id: String = required(&args, "taskId")?;
+            let condition: cognia_jobs::MonitorCondition = required(&args, "condition")?;
+            let expires_at_ms: Option<i64> = optional(&args, "expiresAtMs")?;
+            let label: Option<String> = optional(&args, "label")?;
+            crate::jobs::background_monitor_register_scheduled(
+                task_id,
+                condition,
+                expires_at_ms,
+                label,
+            )
+            .await
+            .map_err(RpcError::internal)
+        }
+
         // ── Desktop-write bridge (Wave 2 mutating RPCs) ──────────────────────
         // All commands route through one generic bridge that emits
         // `companion://desktop-write-request` with `{ command, payload }`.
@@ -2393,6 +3260,8 @@ pub(super) async fn dispatch(
         | "plugin_set_enabled"
         | "adapter_update_policy"
         | "twin_profile_get"
+        | "host_capabilities"
+        | "host_feature_manifest"
         // Mobile outbound-queue RPCs — same generic bridge, different
         // TS-side dispatch arms in `lib/companion/desktop-write-source.ts`.
         | "connector_send"
@@ -2431,6 +3300,25 @@ pub(super) async fn dispatch(
         | "workflow_cancel_run"
         | "workflow_schedule_pause"
         | "workflow_schedule_resume"
+        // App scheduler CRUD/data plane. The bridge resolves to the connected
+        // brain first, so a remote desktop operates the host's durable Dexie
+        // scheduler rather than its own local database.
+        | "scheduled_task_list"
+        | "scheduled_task_get"
+        | "scheduled_task_runs"
+        | "scheduled_task_statistics"
+        | "scheduled_task_upcoming"
+        | "scheduled_task_export"
+        | "scheduled_task_create"
+        | "scheduled_task_update"
+        | "scheduled_task_delete"
+        | "scheduled_task_pause"
+        | "scheduled_task_resume"
+        | "scheduled_task_run_now"
+        | "scheduled_task_backfill"
+        | "scheduled_task_import"
+        | "scheduled_task_cleanup"
+        | "scheduled_task_emit_event"
         // ADR-0061 P2 — HITL approval gate; respond gets callerDeviceId
         // injected below so the responder identity is spoof-proof.
         | "workflow_approval_list"
@@ -6060,19 +6948,6 @@ mod tests {
             .expect("stop is idempotent when MCP server is not running");
             assert_eq!(stopped, Value::Null);
         }
-
-        let reply = dispatch(
-            "orchestration_proxy_response",
-            json!({ "id": "already-gone", "ok": false, "error": "cancelled" }),
-            &state,
-            &host,
-            "brain-local",
-            Some(ACCOUNT_ID),
-            Some("service"),
-        )
-        .await
-        .expect("unknown orchestration reply remains a no-op");
-        assert_eq!(reply, Value::Null);
     }
 
     /// The live terminal inventory belongs to the companion WS process, not
@@ -6158,27 +7033,152 @@ mod tests {
 
     // ── External-agent arms: scope + policy + audit (ADR-0059 R11) ──────────
 
-    /// A device JWT must never reach the RCE-grade arms — the HTTP handler
-    /// rejects with 403 before dispatch.
+    /// An UNGRANTED device JWT must never reach the RCE-grade arms — the HTTP
+    /// handler rejects with 403 before dispatch. Denial is the default: these
+    /// commands used to be service-token-only, and relaxing them to "grantable"
+    /// must not relax them to "reachable".
     #[tokio::test]
-    async fn device_scope_cannot_reach_the_external_agent_arms() {
+    async fn ungranted_device_cannot_reach_the_external_agent_arms() {
+        // The allow lists are process-global and `seed_allow_lists` REPLACES
+        // them, so without this guard a concurrent `device_grants` test can
+        // reseed underneath and this gate passes for the wrong reason.
+        let _guard = super::super::control_allow_list::test_guard();
+        super::super::control_allow_list::agent_control_global().clear();
         let state = test_state();
         let router = build_router(state);
         let jwt = device_jwt("phone-1");
-        for name in [
-            "spawn_external_agent",
-            "send_to_external_agent",
-            "kill_external_agent",
-            "get_external_agent_status",
-        ] {
+        for name in AGENT_CONTROL_COMMANDS {
             let resp = rpc_post(router.clone(), name, json!({}), &jwt, None).await;
-            assert_eq!(resp.status().as_u16(), 403, "{name} must be scope-gated");
+            assert_eq!(resp.status().as_u16(), 403, "{name} must be grant-gated");
         }
     }
 
-    /// The mirrored in-dispatch gate covers the WebRTC path (`scope: None`).
+    /// The grant is what R4 was blocked on: a paired desktop only ever gets a
+    /// *device* JWT, so while these arms were service-token-only there was no
+    /// credential anywhere that could reach them.
     #[tokio::test]
-    async fn dispatch_without_service_scope_rejects_service_only_commands() {
+    async fn a_granted_device_gets_past_the_agent_control_gate() {
+        let _guard = super::super::control_allow_list::test_guard();
+        let acl = super::super::control_allow_list::agent_control_global();
+        acl.clear();
+        acl.allow("phone-granted".to_string());
+        let state = test_state();
+        let router = build_router(state);
+        let jwt = device_jwt("phone-granted");
+
+        let resp = rpc_post(router, "get_external_agent_status", json!({}), &jwt, None).await;
+        // Past the gate. What it hits next is the headless-services check —
+        // any status but 403 proves authorization no longer rejects it.
+        assert_ne!(resp.status().as_u16(), 403);
+        acl.clear();
+    }
+
+    /// Remote control and agent control are separate grants on purpose: letting
+    /// a phone approve prompts must not also let it start processes.
+    #[tokio::test]
+    async fn the_remote_control_grant_does_not_confer_agent_control() {
+        let _guard = super::super::control_allow_list::test_guard();
+        super::super::control_allow_list::agent_control_global().clear();
+        let control = super::super::control_allow_list::global();
+        control.allow("phone-control-only".to_string());
+        let state = test_state();
+        let router = build_router(state);
+        let jwt = device_jwt("phone-control-only");
+
+        let resp = rpc_post(router, "spawn_external_agent", json!({}), &jwt, None).await;
+        assert_eq!(resp.status().as_u16(), 403);
+        control.disallow("phone-control-only");
+    }
+
+    /// The grant's contract is that every start AND every refusal is audited
+    /// with the device that asked. The `SpawnPolicy` denials inside the spawn
+    /// arm were, but this gate returned 403 before reaching any of them — so an
+    /// ungranted device probing the execution plane was the one denial that left
+    /// no trace at all.
+    #[tokio::test]
+    async fn an_ungranted_device_has_its_refusal_audited() {
+        let _acl_guard = super::super::control_allow_list::test_guard();
+        let _audit_guard = super::super::audit::test_guard();
+        super::super::control_allow_list::agent_control_global().clear();
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let path = tmp.path().join("audit.log");
+        super::super::audit::install_at_for_testing(Some(path.clone()));
+
+        let state = test_state();
+        let router = build_router(state);
+        let jwt = device_jwt("phone-ungranted");
+        let resp = rpc_post(router, "spawn_external_agent", json!({}), &jwt, None).await;
+        assert_eq!(resp.status().as_u16(), 403);
+
+        let log = std::fs::read_to_string(&path).expect("audit log written on refusal");
+        let entry: serde_json::Value =
+            serde_json::from_str(log.lines().next().expect("one line")).expect("json line");
+        assert_eq!(entry["kind"], "external_agent_authorize");
+        assert_eq!(entry["decision"], "deny");
+        // The device that asked is the whole point of the record.
+        assert_eq!(entry["device_id"], "phone-ungranted");
+        assert_eq!(entry["command"], "spawn_external_agent");
+
+        super::super::audit::install_at_for_testing(None);
+    }
+
+    /// The agent arms must not have leaked into the remote-control tier while
+    /// moving out of the service-only one.
+    #[test]
+    fn agent_control_commands_are_their_own_tier() {
+        for name in AGENT_CONTROL_COMMANDS {
+            assert!(
+                is_agent_control_command(name),
+                "{name} must be in the agent-control tier"
+            );
+            assert!(
+                !is_service_only_command(name),
+                "{name} must no longer be service-token-only"
+            );
+            assert!(
+                !is_control_command(name),
+                "{name} must not ride the remote-control grant"
+            );
+            assert!(
+                KNOWN_COMMANDS_SET.contains(name),
+                "{name} must stay allowlisted"
+            );
+        }
+    }
+
+    #[test]
+    fn scheduled_task_agent_control_is_payload_sensitive_and_fail_closed() {
+        assert!(!scheduled_task_requires_agent_control(
+            "scheduled_task_create",
+            &json!({ "input": { "type": "workflow" } })
+        ));
+        assert!(scheduled_task_requires_agent_control(
+            "scheduled_task_create",
+            &json!({ "input": { "type": "agent" } })
+        ));
+        assert!(!scheduled_task_requires_agent_control(
+            "scheduled_task_delete",
+            &json!({ "taskType": "backup" })
+        ));
+        assert!(scheduled_task_requires_agent_control(
+            "scheduled_task_delete",
+            &json!({})
+        ));
+        assert!(scheduled_task_requires_agent_control(
+            "scheduled_task_list",
+            &json!({})
+        ));
+        assert!(!scheduled_task_requires_agent_control(
+            "scheduled_task_list",
+            &json!({ "filter": { "types": ["workflow", "backup"] } })
+        ));
+    }
+
+    /// The mirrored in-dispatch gate covers the WebRTC path (`scope: None`), so
+    /// the DataChannel cannot be used to skip the grant the HTTP path enforces.
+    #[tokio::test]
+    async fn dispatch_without_a_grant_rejects_the_agent_arms() {
+        super::super::control_allow_list::agent_control_global().clear();
         let state = test_state();
         let err = dispatch(
             "spawn_external_agent",
@@ -6190,7 +7190,7 @@ mod tests {
             None, // the DataChannel path
         )
         .await
-        .expect_err("device-scoped channel must be rejected");
+        .expect_err("ungranted device-scoped channel must be rejected");
         assert_eq!(err.0, StatusCode::FORBIDDEN);
     }
 
@@ -6205,7 +7205,6 @@ mod tests {
             "mcp_server_start",
             "mcp_server_stop",
             "mcp_server_restart",
-            "orchestration_proxy_response",
             "lsp_host_ensure",
             "lsp_host_request",
         ] {
@@ -6285,13 +7284,8 @@ mod tests {
     }
 
     #[test]
-    fn mcp_lifecycle_and_reply_are_control_gated_but_not_service_only() {
-        for command in [
-            "mcp_server_start",
-            "mcp_server_stop",
-            "mcp_server_restart",
-            "orchestration_proxy_response",
-        ] {
+    fn mcp_lifecycle_is_control_gated_but_not_service_only() {
+        for command in ["mcp_server_start", "mcp_server_stop", "mcp_server_restart"] {
             assert!(CONTROL_COMMANDS.contains(&command));
             assert!(!READ_ONLY_COMMANDS.contains(&command));
             assert!(!SERVICE_ONLY_COMMANDS.contains(&command));
@@ -6447,11 +7441,11 @@ mod tests {
 
     #[test]
     fn service_only_commands_are_known_and_not_control_gated() {
+        // The four external-agent arms used to head this list. They moved to
+        // the agent-control tier so a paired device can be granted them; see
+        // `agent_control_commands_are_their_own_tier`, which pins that they
+        // left this one rather than joining the remote-control grant.
         for name in [
-            "spawn_external_agent",
-            "send_to_external_agent",
-            "kill_external_agent",
-            "get_external_agent_status",
             "connectors_register",
             "connectors_unregister",
             "connectors_list_adapters",
@@ -7438,12 +8432,19 @@ rl.on("line", (line) => {
             100,
             Duration::from_secs(60),
         ));
-        // Pre-seed the cache with a known response for device "dev-idem".
-        cache.put(
-            "dev-idem".into(),
-            "idem-key-1".into(),
-            json!({ "cached": true }),
-        );
+        // Pre-seed the ledger with a completed response for the exact request.
+        let params = json!({ "session_id": "s1", "prompt": "hi" });
+        cache
+            .begin("dev-idem", "claude_send", "idem-key-1", &params)
+            .unwrap();
+        cache
+            .complete(
+                "dev-idem",
+                "claude_send",
+                "idem-key-1",
+                &json!({ "cached": true }),
+            )
+            .unwrap();
 
         let state = Arc::new(CompanionState {
             secret: RwLock::new(SECRET.to_vec()),
@@ -7469,14 +8470,7 @@ rl.on("line", (line) => {
         // Send a NON-read-only command (e.g., claude_send) with the
         // pre-seeded idempotency key. The cache hit is returned before
         // the dispatch even runs (so app_handle=None doesn't matter).
-        let resp = rpc_post(
-            router,
-            "claude_send",
-            json!({ "session_id": "s1", "prompt": "hi" }),
-            &jwt,
-            Some("idem-key-1"),
-        )
-        .await;
+        let resp = rpc_post(router, "claude_send", params, &jwt, Some("idem-key-1")).await;
         assert_eq!(resp.status(), StatusCode::OK);
         let body = body_json(resp).await;
         assert_eq!(body["cached"], true);
@@ -7491,8 +8485,14 @@ rl.on("line", (line) => {
             100,
             Duration::from_secs(60),
         ));
-        cache.put("dev2".into(), "k1".into(), json!({ "hit": 1 }));
-        cache.put("dev2".into(), "k2".into(), json!({ "hit": 2 }));
+        for (key, hit) in [("k1", 1), ("k2", 2)] {
+            cache
+                .begin("dev2", "claude_close_session", key, &json!({}))
+                .unwrap();
+            cache
+                .complete("dev2", "claude_close_session", key, &json!({ "hit": hit }))
+                .unwrap();
+        }
 
         let state = Arc::new(CompanionState {
             secret: RwLock::new(SECRET.to_vec()),
@@ -7584,7 +8584,18 @@ rl.on("line", (line) => {
             100,
             Duration::from_millis(0),
         ));
-        cache.put("dev4".into(), "stale".into(), json!({ "stale": true }));
+        let params = json!({ "session_id": "s" });
+        cache
+            .begin("dev4", "claude_interrupt", "stale", &params)
+            .unwrap();
+        cache
+            .complete(
+                "dev4",
+                "claude_interrupt",
+                "stale",
+                &json!({ "stale": true }),
+            )
+            .unwrap();
         // Let the entry expire.
         std::thread::sleep(Duration::from_millis(5));
 
@@ -7610,14 +8621,7 @@ rl.on("line", (line) => {
         let jwt = device_jwt("dev4");
 
         // The cache entry is expired → dispatch runs → 503 (app_handle=None).
-        let resp = rpc_post(
-            router,
-            "claude_interrupt",
-            json!({ "session_id": "s" }),
-            &jwt,
-            Some("stale"),
-        )
-        .await;
+        let resp = rpc_post(router, "claude_interrupt", params, &jwt, Some("stale")).await;
         // 503 means dispatch was attempted (cache miss), not a cached 200.
         assert_eq!(resp.status().as_u16(), 503);
     }
@@ -7827,6 +8831,17 @@ rl.on("line", (line) => {
         assert_not_404!(
             "test_mcp_server",
             json!({ "transport": "stdio", "command": "echo" })
+        );
+    }
+
+    #[test]
+    fn arbitrary_mcp_probe_is_service_only_until_signed_policy_execution_lands() {
+        assert!(is_service_only_command("test_mcp_server"));
+        assert_eq!(
+            super::super::command_manifest::descriptor("test_mcp_server")
+                .expect("descriptor")
+                .capability,
+            "process.spawn"
         );
     }
 
@@ -8333,11 +9348,15 @@ rl.on("line", (line) => {
                 "Wave-3 key '{key}' missing from APP_SETTINGS_MOBILE_ALLOWED_KEYS"
             );
         }
-        // ADR-0056 — workflow editor performance tier, written from
-        // `/me/workflows-settings`. Missing → 400 on save.
+        // `workflowEditorPerformanceTier` is deliberately NOT here. It is a
+        // motion/computation budget picked for one device's GPU and CPU; the
+        // old comment on the allowlist already called it "kept device-local"
+        // while still letting the phone write the desktop's copy, which is a
+        // contradiction. It is now `device-local` in the classification table:
+        // `/me/workflows-settings` sets this handset's tier and nothing else.
         assert!(
-            APP_SETTINGS_MOBILE_ALLOWED_KEYS.contains(&"workflowEditorPerformanceTier"),
-            "workflowEditorPerformanceTier missing from APP_SETTINGS_MOBILE_ALLOWED_KEYS"
+            !APP_SETTINGS_MOBILE_ALLOWED_KEYS.contains(&"workflowEditorPerformanceTier"),
+            "workflowEditorPerformanceTier must stay device-local"
         );
     }
 
@@ -8390,10 +9409,20 @@ rl.on("line", (line) => {
     }
 
     #[test]
-    fn mobile_allowlist_includes_webrtc_keys() {
-        // ADR-0021 — the WebRTC settings card writes these from the mobile
-        // companion tab; `turnProvider` (ephemeral-TURN provisioning) joined
-        // the original four. Missing any → 400 on save.
+    fn mobile_allowlist_excludes_transport_config_keys() {
+        // These were allowlisted for a "mobile companion settings tab" that was
+        // never built — no mobile surface ever wrote one of them, so the
+        // entries were dead. Worse, the direction was backwards: the phone
+        // reads `signalingUrl` / `iceServers` / `turnServers` from its OWN
+        // settings row to dial the rendezvous, and they were never mirrored
+        // down, so a self-hosted signaling server or TURN relay configured on
+        // the desktop could not reach the phone at all — it silently fell back
+        // to the public default and WebRTC failed behind symmetric NAT.
+        //
+        // They are now `server-authoritative` in
+        // `packages/agent-config-types/src/settings-sync.ts`: mirrored down,
+        // never accepted up. `webrtcEnabled` is `device-local` — whether to
+        // attempt the tier is each device's own call.
         for key in [
             "webrtcEnabled",
             "signalingUrl",
@@ -8402,8 +9431,8 @@ rl.on("line", (line) => {
             "turnProvider",
         ] {
             assert!(
-                APP_SETTINGS_MOBILE_ALLOWED_KEYS.contains(&key),
-                "WebRTC key '{key}' missing from APP_SETTINGS_MOBILE_ALLOWED_KEYS"
+                !APP_SETTINGS_MOBILE_ALLOWED_KEYS.contains(&key),
+                "transport key '{key}' must NOT be writable from a paired client"
             );
         }
     }
@@ -8417,12 +9446,29 @@ rl.on("line", (line) => {
             "language",
             "reduceMotion",
             "defaultModel",
-            "defaultCharacterId",
-            "biometricRequiredFor",
         ] {
             assert!(
                 APP_SETTINGS_MOBILE_ALLOWED_KEYS.contains(&key),
                 "baseline key '{key}' must stay in the mobile allowlist"
+            );
+        }
+
+        // Two former "baseline" entries are gone on purpose.
+        //
+        // `defaultCharacterId` never existed on `AppSettings` — it lives on
+        // `AdapterInstanceRow`. A phone could pass the allowlist with it and
+        // then write a field the desktop's settings row does not have. It was
+        // pure drift, invisible because nothing checked the constant against
+        // the type.
+        //
+        // `biometricRequiredFor` is now `device-local`: gating is a property of
+        // the device's own authenticator, and letting one device push its
+        // policy onto another either weakens it or locks out a device with no
+        // biometric hardware.
+        for key in ["defaultCharacterId", "biometricRequiredFor"] {
+            assert!(
+                !APP_SETTINGS_MOBILE_ALLOWED_KEYS.contains(&key),
+                "'{key}' must NOT be in the mobile allowlist"
             );
         }
     }
@@ -8546,5 +9592,36 @@ rl.on("line", (line) => {
             400,
             "allowlisted colorTheme patch must not be rejected as 400"
         );
+    }
+
+    #[test]
+    fn host_feature_manifest_is_a_read_only_rpc_contract() {
+        assert!(KNOWN_COMMANDS.contains(&"host_feature_manifest"));
+        assert!(READ_ONLY_COMMANDS.contains(&"host_feature_manifest"));
+        assert!(!CONTROL_COMMANDS.contains(&"host_feature_manifest"));
+    }
+
+    #[test]
+    fn remote_claude_response_commands_are_control_gated() {
+        for command in [
+            "claude_restore",
+            "claude_set_mode",
+            "claude_plugin_tool_response",
+            "claude_tool_result_decision",
+            "claude_protocol_adapter_message",
+        ] {
+            assert!(
+                KNOWN_COMMANDS.contains(&command),
+                "{command} must be remotely reachable"
+            );
+            assert!(
+                CONTROL_COMMANDS.contains(&command),
+                "{command} must require remote control"
+            );
+            assert!(
+                !READ_ONLY_COMMANDS.contains(&command),
+                "{command} mutates a live session"
+            );
+        }
     }
 }

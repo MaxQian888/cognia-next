@@ -10,6 +10,11 @@ import {
   companionStorage,
   pickCompanionStorage,
 } from "./companion-storage"
+import {
+  buildRoomDescriptorV2,
+  generatePersistableV2SigningIdentity,
+  generateV2SigningKeyPair,
+} from "@/lib/signaling/v2-crypto"
 
 const MOCK: CompanionConfig = {
   baseUrl: "https://192.168.1.42:7890",
@@ -34,6 +39,51 @@ describe("LocalStorageCompanionStorage", () => {
   it("save + load round-trips the config", async () => {
     await storage.save(MOCK)
     expect(await storage.load()).toEqual(MOCK)
+  })
+
+  it("keeps the v2 private key out of localStorage and reloads a non-extractable key", async () => {
+    const mobile = await generatePersistableV2SigningIdentity()
+    const desktop = await generateV2SigningKeyPair()
+    const descriptor = await buildRoomDescriptorV2({
+      roomNonce: "AAECAwQFBgcICQoLDA0ODw",
+      desktopSigningKey: desktop.encodedPublicKey,
+      mobileSigningKey: mobile.encodedPublicKey,
+      notAfter: Date.now() + 60_000,
+    })
+    const keys = new Map<string, CryptoKey>()
+    const keyStore = {
+      async save(deviceId: string, jwk: JsonWebKey) {
+        const key = await crypto.subtle.importKey(
+          "jwk",
+          jwk,
+          { name: "ECDSA", namedCurve: "P-256" },
+          false,
+          ["sign"]
+        )
+        keys.set(deviceId, key)
+        return key
+      },
+      async load(deviceId: string) {
+        return keys.get(deviceId) ?? null
+      },
+      async clear(deviceId: string) {
+        keys.delete(deviceId)
+      },
+    }
+    const isolated = new LocalStorageCompanionStorage(keyStore)
+    await isolated.save({
+      ...MOCK,
+      rendezvousId: descriptor.roomId,
+      signalingRoomDescriptor: descriptor,
+      signalingPrivateKeyJwk: mobile.privateKeyJwk,
+    })
+
+    const raw = window.localStorage.getItem("cognia.companion.config.v1")!
+    expect(raw).not.toContain(mobile.privateKeyJwk.d!)
+    expect(raw).not.toContain("signalingPrivateKeyJwk")
+    const loaded = await isolated.load()
+    expect(loaded?.signalingPrivateKey?.extractable).toBe(false)
+    expect(loaded?.signalingPrivateKeyJwk).toBeUndefined()
   })
 
   it("clear removes the stored value", async () => {

@@ -179,9 +179,14 @@ export function LogtoLoginCard() {
         <CardDescription>{t("description")}</CardDescription>
       </CardHeader>
       <CardContent className="space-y-3">
+        {/* Not a desktop-only gate any more: `openUrl` already routes through
+            the Tauri opener, the Capacitor in-app browser or `window.open`, and
+            the session store falls back to an encrypted IndexedDB vault. What
+            differs is where the token ends up, which is worth saying out loud
+            rather than implying the feature is missing. */}
         {!isTauri() && (
-          <p className="text-xs text-muted-foreground" data-testid="logto-desktop-only">
-            {t("desktopOnly")}
+          <p className="text-xs text-muted-foreground" data-testid="logto-storage-note">
+            {t("storageFallback")}
           </p>
         )}
 
@@ -253,6 +258,7 @@ export function LogtoLoginCard() {
               label={t("field.scope")}
               value={form.scope}
               onChange={onField("scope")}
+              // i18n-exempt: OAuth scope identifiers, not translatable UI copy
               placeholder="brain:rpc brain:read"
             />
             <Field

@@ -705,7 +705,11 @@ mod tests {
     use futures_util::{SinkExt, StreamExt};
     use serde_json::json;
     use std::net::SocketAddr;
-    use tokio_tungstenite::tungstenite::Message as WsMessage;
+    use tokio_tungstenite::tungstenite::{
+        client::IntoClientRequest,
+        http::{header::AUTHORIZATION, Request},
+        Message as WsMessage,
+    };
 
     const SECRET: &[u8] = b"test-secret-32-bytes-exactly____";
     const ACCOUNT_ID: &str = "local_acct_a";
@@ -767,9 +771,21 @@ mod tests {
         tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
     >;
 
+    fn authorized_request(addr: SocketAddr, token: &str) -> Request<()> {
+        let mut request = format!("ws://{addr}/ws/v1/bridge")
+            .into_client_request()
+            .expect("valid bridge URL");
+        request.headers_mut().insert(
+            AUTHORIZATION,
+            format!("Bearer {token}")
+                .parse()
+                .expect("valid authorization header"),
+        );
+        request
+    }
+
     async fn connect(addr: SocketAddr, token: &str) -> WsClient {
-        let url = format!("ws://{addr}/ws/v1/bridge?token={token}");
-        let (ws, _resp) = tokio_tungstenite::connect_async(&url)
+        let (ws, _resp) = tokio_tungstenite::connect_async(authorized_request(addr, token))
             .await
             .expect("ws connect");
         ws
@@ -883,8 +899,7 @@ mod tests {
         let state = test_state();
         let addr = serve_bridge(state).await;
         let device = issue_device_jwt(SECRET, "phone-1", ACCOUNT_ID).expect("device jwt");
-        let url = format!("ws://{addr}/ws/v1/bridge?token={device}");
-        let result = tokio_tungstenite::connect_async(&url).await;
+        let result = tokio_tungstenite::connect_async(authorized_request(addr, &device)).await;
         assert!(
             result.is_err(),
             "device-scope token must not open the bridge"

@@ -37,7 +37,7 @@ use std::time::Duration;
 use super::{a2a, acp, healthz, rpc, tls::TlsMaterial, ws, ws_bridge, ws_terminal};
 use axum::{
     middleware::{from_fn, from_fn_with_state},
-    routing::{any, get, post},
+    routing::{any, delete, get, post},
     Router,
 };
 use axum_server::tls_rustls::RustlsConfig;
@@ -89,6 +89,8 @@ pub enum CompanionServerError {
     },
     #[error("companion TLS config load failed: {0}")]
     Tls(String),
+    #[error("companion security database initialization failed: {0}")]
+    Security(String),
 }
 
 impl serde::Serialize for CompanionServerError {
@@ -210,23 +212,30 @@ pub async fn spawn_server(
 ///   GET  /api/v1/whoami   — identity check for the mobile app post-pair
 /// ```
 pub fn build_router(state: SharedState) -> Router {
+    build_router_for_mode(state, super::deployment::deployment_mode())
+}
+
+fn build_router_for_mode(state: SharedState, mode: super::deployment::DeploymentMode) -> Router {
     // Pre-auth POST routes that can be brute-forced from the LAN — gated
     // by a per-source-IP token bucket. See `middleware::pre_auth_rate_limit`
     // for the bucket parameters and rationale.
-    let metered_pre_auth_routes = Router::new()
-        .route("/api/v1/auth/pair/issue", post(auth::issue_handler))
-        .route("/api/v1/auth/pair", post(auth::pair_handler))
-        // 6-digit numeric code redemption path. Same trust model as
-        // `/api/v1/auth/pair` (callable from the phone over LAN); we
-        // resolve `code -> pair_jwt` server-side then run the same
-        // redeem logic. The 6-digit keyspace (~900K codes) makes this the
-        // primary brute-force target — see the docstring on
-        // `middleware::pre_auth_rate_limit`.
-        .route(
-            "/api/v1/auth/pair/redeem-code",
-            post(auth::redeem_code_handler),
-        )
-        .layer(from_fn(middleware::pre_auth_rate_limit));
+    let metered_pre_auth_routes = match mode {
+        super::deployment::DeploymentMode::SingleUser => Router::new()
+            .route("/api/v1/auth/pair/issue", post(auth::issue_handler))
+            .route("/api/v1/auth/pair", post(auth::pair_handler))
+            // 6-digit numeric code redemption path. Same trust model as
+            // `/api/v1/auth/pair` (callable from the phone over LAN); we
+            // resolve `code -> pair_jwt` server-side then run the same
+            // redeem logic. The 6-digit keyspace (~900K codes) makes this the
+            // primary brute-force target — see the docstring on
+            // `middleware::pre_auth_rate_limit`.
+            .route(
+                "/api/v1/auth/pair/redeem-code",
+                post(auth::redeem_code_handler),
+            )
+            .layer(from_fn(middleware::pre_auth_rate_limit)),
+        super::deployment::DeploymentMode::MultiTenant => Router::new(),
+    };
 
     // Unmetered public routes — no rate limit, no JWT. Used for service
     // discovery only; do not add anything sensitive here.
@@ -237,9 +246,6 @@ pub fn build_router(state: SharedState) -> Router {
         // cert rotation and confirm they're talking to the right
         // desktop. See `healthz` module docs.
         .route("/api/v1/healthz", get(healthz::healthz_handler))
-        // Prometheus exposition (ADR-0059 D9) — aggregate counters only,
-        // same public trust model as the services' /metrics.
-        .route("/metrics", get(super::metrics::metrics_handler))
         // A2A Agent Card (a2a-protocol.org) — public discovery document. Read
         // only, discovery-safe fields only; the A2A endpoint itself (`/a2a`)
         // is device-JWT gated below.
@@ -247,6 +253,10 @@ pub fn build_router(state: SharedState) -> Router {
             "/.well-known/agent-card.json",
             get(a2a::a2a_agent_card_handler),
         );
+
+    let operator_routes = Router::new()
+        .route("/metrics", get(super::metrics::metrics_handler))
+        .layer(from_fn(middleware::require_loopback_operator));
 
     // Authenticated routes — JWT verifier middleware applied.
     //
@@ -304,6 +314,32 @@ pub fn build_router(state: SharedState) -> Router {
             middleware::require_device_jwt,
         ));
 
+    // v2 keeps the v1 RPC payload shape for one compatibility release, but
+    // replaces its authentication and authorization completely: short-lived
+    // key-bound access token, per-request DPoP proof, manifest capability,
+    // transport target, and UUID idempotency enforcement.
+    let v2_protected_routes = Router::new()
+        .route("/api/v2/_rpc/{name}", post(super::v2::rpc_handler))
+        .layer(from_fn_with_state(
+            state.clone(),
+            super::v2::require_device_access,
+        ));
+    let v2_owner_routes = Router::new()
+        .route("/api/v2/devices", get(super::v2::devices_handler))
+        .route(
+            "/api/v2/devices/{device_id}",
+            delete(super::v2::revoke_device_handler),
+        )
+        .route("/api/v2/invitations", post(super::v2::invitation_handler))
+        .route(
+            "/api/v2/policies",
+            get(super::v2::policies_handler).post(super::v2::create_policy_handler),
+        )
+        .layer(from_fn_with_state(
+            state.clone(),
+            super::v2::require_owner_access,
+        ));
+
     // Lark dual-entry public surface (plan 2026-07-24) — cloned handle so the
     // headless-only nest below can outlive the `with_state` move.
     let lark_entry_state = state.clone();
@@ -311,6 +347,11 @@ pub fn build_router(state: SharedState) -> Router {
     let mut router = Router::new()
         .merge(metered_pre_auth_routes)
         .merge(unmetered_public_routes)
+        .merge(operator_routes)
+        .merge(super::v2::router())
+        .route("/ws/v2/events", any(ws::ws_v2_handler))
+        .merge(v2_protected_routes)
+        .merge(v2_owner_routes)
         // Browser stream upgrades authenticate with a 60-second, single-use
         // ticket obtained through the protected route above. Long-lived JWTs
         // are deliberately never placed in the WebSocket URL.
@@ -536,6 +577,30 @@ mod tests {
         );
 
         let _ = handle.shutdown.send(());
+    }
+
+    #[tokio::test]
+    async fn multi_tenant_mode_does_not_mount_legacy_pairing_routes() {
+        use tower::ServiceExt as _;
+
+        let router = build_router_for_mode(
+            test_state(),
+            crate::companion_api::deployment::DeploymentMode::MultiTenant,
+        );
+        let mut request = axum::http::Request::builder()
+            .method("POST")
+            .uri("/api/v1/auth/pair/issue")
+            .body(axum::body::Body::from("{}"))
+            .unwrap();
+        request
+            .extensions_mut()
+            .insert(axum::extract::ConnectInfo(std::net::SocketAddr::from((
+                [127, 0, 0, 1],
+                34567,
+            ))));
+
+        let response = router.oneshot(request).await.unwrap();
+        assert_eq!(response.status(), axum::http::StatusCode::NOT_FOUND);
     }
 
     /// ADR-0059 F4/R12: the public `/connectors` ingress mounts only on

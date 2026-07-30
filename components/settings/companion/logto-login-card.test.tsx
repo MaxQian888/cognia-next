@@ -125,9 +125,17 @@ describe("<LogtoLoginCard />", () => {
     expect(signIn).toHaveBeenCalledTimes(1)
   })
 
-  it("hints when not running in the desktop app", async () => {
+  it("says where the token is stored off the desktop, without gating sign-in", async () => {
+    // This used to claim cloud sign-in was desktop-only. It never was: the
+    // authorize step routes through the Capacitor in-app browser or
+    // `window.open`, and the session falls back to an encrypted vault. Saying
+    // "desktop only" hid a working feature and left a phone connecting to a
+    // multi-user cloud deployment with no way to authenticate.
     setTauri(false)
     render(<LogtoLoginCard />)
-    expect(await screen.findByTestId("logto-desktop-only")).toBeInTheDocument()
+    expect(await screen.findByTestId("logto-storage-note")).toBeInTheDocument()
+    // The form is still there — the note is informational, not a gate. Awaited
+    // separately because it only mounts once the session load settles.
+    expect(await screen.findByTestId("logto-sign-in")).toBeEnabled()
   })
 })

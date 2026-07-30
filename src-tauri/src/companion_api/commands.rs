@@ -19,7 +19,7 @@ use super::{
     jwt::issue_pair_jwt,
     mdns::AutoStartConfig,
     pair_code_lru::PairCodeEntry,
-    secret,
+    secret, security_store,
     server::{CompanionServerError, DEFAULT_PORT},
     tls,
     tunnel::{self, TunnelInfo},
@@ -68,6 +68,10 @@ pub async fn companion_server_start(
     // starting the server so no events are missed.
     let event_bus = EventBus::new();
     register_default_event_channels(&app_handle, Arc::clone(&event_bus));
+    let dir = data_dir(&app_handle).map_err(CompanionServerError::Tls)?;
+    let idempotency =
+        super::idempotency::IdempotencyCache::open(dir.join("companion-idempotency.sqlite"))
+            .map_err(|error| CompanionServerError::Security(error.to_string()))?;
 
     // Clone the deny_list Arc so both the Tauri command layer and the axum
     // server share the same live deny list.
@@ -76,7 +80,7 @@ pub async fn companion_server_start(
         redemption_lru: super::redemption_lru::RedemptionLru::new(),
         deny_list: Arc::clone(&state.deny_list),
         app_handle: Some(app_handle),
-        idempotency: Arc::new(super::idempotency::IdempotencyCache::new()),
+        idempotency: Arc::new(idempotency),
         event_bus,
         // Same Arc as the long-lived CompanionServerState — keeps the
         // `companion_sync_pull_response` Tauri command and the in-flight
@@ -109,10 +113,16 @@ pub async fn companion_server_start(
     });
 
     // Load TLS material (M2.9 — every companion-server bind terminates HTTPS).
-    let dir = data_dir(shared.app_handle.as_ref().expect("app_handle present"))
-        .map_err(CompanionServerError::Tls)?;
     let tls_material =
         tls::ensure_certificate(&dir).map_err(|e| CompanionServerError::Tls(e.to_string()))?;
+    let security = security_store::SecurityStore::open(dir.join("companion-security.sqlite"))
+        .map_err(|error| CompanionServerError::Security(error.to_string()))?;
+    security_store::install_security_store(Some(security));
+    let signaling_store = super::signaling::registration_store::SignalingRegistrationStore::open(
+        dir.join("companion-signaling.sqlite"),
+    )
+    .map_err(|error| CompanionServerError::Security(error.to_string()))?;
+    super::signaling::registration_store::install(Some(Arc::clone(&signaling_store)));
 
     // Publish the fingerprint so `whoami` (P0.3) can include it in responses
     // for app-layer attestation against the QR-pinned value.
@@ -126,7 +136,20 @@ pub async fn companion_server_start(
         use tauri::Manager as _;
         let app = shared.app_handle.as_ref().expect("app_handle present");
         if let Some(hub) = app.try_state::<std::sync::Arc<super::signaling::SignalingHub>>() {
+            let hub_arc = Arc::clone(hub.inner());
+            super::signaling::install_hub(Some(&hub_arc));
+            let pending = hub.registrations_snapshot();
             hub.bind(Arc::clone(&shared));
+            if pending.is_empty() {
+                let persisted = signaling_store
+                    .load_all()
+                    .map_err(|error| CompanionServerError::Security(error.to_string()))?;
+                hub.sync_devices(persisted);
+            } else {
+                signaling_store
+                    .replace_all(&pending, super::auth::now_ms())
+                    .map_err(|error| CompanionServerError::Security(error.to_string()))?;
+            }
         }
     }
 
@@ -276,7 +299,19 @@ pub async fn companion_revoke_device(
     device_id: String,
     state: State<'_, CompanionServerState>,
 ) -> Result<(), String> {
-    state.revoke_device(device_id);
+    state.revoke_device(device_id.clone());
+    if let Some(store) = super::signaling::registration_store::installed() {
+        if let Some(key_ref) = store
+            .remove_device(&device_id)
+            .map_err(|error| error.to_string())?
+        {
+            cognia_secrets::keyring_secrets::clear(
+                super::signaling::envelope_v2::SIGNALING_KEY_NAMESPACE,
+                &key_ref,
+            )?;
+        }
+        super::signaling::refresh_installed_hub()?;
+    }
     Ok(())
 }
 
@@ -315,6 +350,40 @@ pub async fn companion_set_remote_control(device_id: String, allowed: bool) -> R
 #[tauri::command]
 pub async fn companion_seed_remote_control(device_ids: Vec<String>) -> Result<(), String> {
     super::control_allow_list::global().reseed(device_ids);
+    Ok(())
+}
+
+/// Grant or revoke a device's **agent-control** capability: starting and
+/// driving external agents on this desktop.
+///
+/// A separate grant from remote control on purpose. Remote control steers work
+/// this host already chose to run; this launches new processes. Folding them
+/// into one switch would mean a user enabling remote control so their phone can
+/// approve a prompt had also handed out process execution.
+#[tauri::command]
+pub async fn companion_set_agent_control(device_id: String, allowed: bool) -> Result<(), String> {
+    // An empty id is what an unauthenticated or malformed RPC context carries,
+    // so storing one would hand agent control to every such caller. The CLI
+    // path (`device_grants::grant`) already refuses it; this is the same
+    // refusal on the desktop path.
+    if device_id.trim().is_empty() {
+        return Err("device_id is required".into());
+    }
+    let acl = super::control_allow_list::agent_control_global();
+    if allowed {
+        acl.allow(device_id);
+    } else {
+        acl.disallow(&device_id);
+    }
+    Ok(())
+}
+
+/// Re-seed the agent-control allow list at desktop boot from the persisted
+/// Dexie rows where `allowAgentControl === true`. Replace semantics, matching
+/// [`companion_seed_remote_control`].
+#[tauri::command]
+pub async fn companion_seed_agent_control(device_ids: Vec<String>) -> Result<(), String> {
+    super::control_allow_list::agent_control_global().reseed(device_ids);
     Ok(())
 }
 

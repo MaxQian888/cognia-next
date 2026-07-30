@@ -40,6 +40,46 @@ pub fn global() -> &'static Arc<ControlAllowList> {
     &CONTROL_ALLOW_LIST
 }
 
+/// Devices permitted to start and drive *external agents* on this host.
+///
+/// Deliberately a second list rather than a flag on the first. Remote control
+/// means steering sessions this host already decided to run; starting an agent
+/// means launching a new process. Both are elevated, but granting someone the
+/// ability to write files should not silently also grant process execution, and
+/// a single toggle labelled "remote control" would do exactly that.
+///
+/// Same shape as the control list, so it inherits its behaviour and tests.
+static AGENT_CONTROL_ALLOW_LIST: Lazy<Arc<ControlAllowList>> =
+    Lazy::new(|| Arc::new(ControlAllowList::new()));
+
+/// Accessor for the process-global agent-control allow list.
+pub fn agent_control_global() -> &'static Arc<ControlAllowList> {
+    &AGENT_CONTROL_ALLOW_LIST
+}
+
+/// Serializes every test that touches the two allow lists above.
+///
+/// Both are process-global and `reseed` REPLACES, so `cargo test` — one binary,
+/// threads in parallel — will happily run a seeding test that wipes the list
+/// alongside an RPC gate test that just granted itself a device. Whichever
+/// loses the race sees an empty list and passes for the wrong reason: a
+/// permission gate that reports "allowed" because the grant vanished is exactly
+/// the false green this lock exists to prevent.
+///
+/// Hold it for the whole test body, and clear the lists before releasing it.
+#[cfg(test)]
+pub(crate) fn test_guard() -> std::sync::MutexGuard<'static, ()> {
+    static ALLOW_LIST_TEST_LOCK: std::sync::OnceLock<std::sync::Mutex<()>> =
+        std::sync::OnceLock::new();
+    // Poisoning only means an earlier test panicked while holding the guard;
+    // the lists are cleared on entry below, so the state is still usable and
+    // failing every subsequent test on it would bury the original failure.
+    ALLOW_LIST_TEST_LOCK
+        .get_or_init(|| std::sync::Mutex::new(()))
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
 /// Thread-safe set of device IDs permitted to issue remote-control RPCs.
 pub struct ControlAllowList {
     inner: RwLock<HashSet<String>>,
@@ -167,6 +207,7 @@ mod tests {
 
     #[test]
     fn global_is_a_shared_singleton() {
+        let _guard = test_guard();
         // Two `global()` calls observe the same underlying set.
         global().clear();
         global().allow("shared-dev".to_string());

@@ -72,6 +72,28 @@ pub(crate) fn install_at_for_testing(path: Option<PathBuf>) {
     *AUDIT.lock() = path.map(|path| AuditLog { path });
 }
 
+/// Serializes every test that installs the process-global audit log.
+///
+/// `install_at_for_testing` REPLACES the slot, so `cargo test` — one binary,
+/// threads in parallel — will happily point the log at another test's temp file,
+/// or clear it entirely, midway through a test that is about to assert a record
+/// was written. Whichever loses the race reads an empty log and fails, or worse
+/// passes because it asserted absence. Mirrors
+/// [`super::control_allow_list::test_guard`], which exists for the same reason.
+///
+/// Hold it for the whole test body.
+#[cfg(test)]
+pub(crate) fn test_guard() -> std::sync::MutexGuard<'static, ()> {
+    static AUDIT_TEST_LOCK: std::sync::OnceLock<std::sync::Mutex<()>> = std::sync::OnceLock::new();
+    // Poisoning only means an earlier test panicked while holding the guard;
+    // every test installs its own path on entry, so the state is still usable
+    // and failing all subsequent tests would bury the original failure.
+    AUDIT_TEST_LOCK
+        .get_or_init(|| std::sync::Mutex::new(()))
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
 /// Append one audit record. `fields` is merged into the envelope
 /// (`ts_ms`, `kind`, `device_id`, `scope`, `decision`). No-op when no log is
 /// installed; a failed write logs an error but never fails the request.
@@ -125,6 +147,7 @@ mod tests {
     /// append, shape, and rotation sequentially to avoid parallel races.
     #[test]
     fn records_allow_and_deny_lines_and_rotates() {
+        let _guard = test_guard();
         let tmp = tempfile::tempdir().expect("tempdir");
         let path = tmp.path().join("audit.log");
         install_at_for_testing(Some(path.clone()));

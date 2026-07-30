@@ -7,8 +7,9 @@
 //! # Token extraction order
 //!
 //! 1. `Authorization: Bearer <jwt>` header — standard REST path.
-//! 2. `?token=<jwt>` query parameter — needed for WebSocket upgrade requests
-//!    (M2.6), where custom headers are not reliably supported by browsers.
+//! 2. Legacy `?token=<jwt>` query parameters are disabled by default. They are
+//!    available only behind `COGNIA_ALLOW_LEGACY_QUERY_TOKEN=1` during the
+//!    one-release v1 migration window; v2 uses single-use socket tickets.
 //!
 //! If both are present, the header takes precedence.
 //!
@@ -91,16 +92,54 @@ pub async fn require_device_jwt(
     request: Request,
     next: Next,
 ) -> Response {
-    authenticate_request(state, super::oidc_authenticator(), request, next).await
+    let oidc = match super::deployment::deployment_mode() {
+        super::deployment::DeploymentMode::SingleUser => None,
+        super::deployment::DeploymentMode::MultiTenant => match super::oidc_authenticator() {
+            Some(authenticator) => Some(authenticator),
+            None => {
+                return (
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    Json(json!({
+                        "code": "oidc_unavailable",
+                        "message": "tenant authentication is not configured",
+                    })),
+                )
+                    .into_response();
+            }
+        },
+    };
+    authenticate_request(state, oidc, request, next).await
+}
+
+/// Operator-only surface for metrics and local diagnostics. The real socket
+/// peer is authoritative; forwarding headers are deliberately ignored.
+pub async fn require_loopback_operator(request: Request, next: Next) -> Response {
+    let is_loopback = request
+        .extensions()
+        .get::<ConnectInfo<SocketAddr>>()
+        .is_some_and(|peer| peer.0.ip().is_loopback());
+    if !is_loopback {
+        return (
+            StatusCode::FORBIDDEN,
+            Json(json!({
+                "error": {
+                    "code": "operator_loopback_required",
+                    "message": "this operator endpoint is only available from loopback"
+                }
+            })),
+        )
+            .into_response();
+    }
+    next.run(request).await
 }
 
 /// Core companion-gateway auth, split out from [`require_device_jwt`] so the
 /// OIDC authenticator can be injected in tests.
 ///
 /// `oidc` is `Some` only in cloud/headless mode ([`super::oidc_authenticator`]).
-/// When present, a Logto access token is tried first; any failure falls through
-/// to the HS256 device / service path, so enabling OIDC never breaks existing
-/// paired devices.
+/// When present, OIDC is the exclusive device authentication authority. A
+/// rejected token or unavailable issuer fails closed and never falls through
+/// to the single-user HS256 device path.
 async fn authenticate_request(
     state: SharedState,
     oidc: Option<Arc<OidcAuthenticator>>,
@@ -126,11 +165,18 @@ async fn authenticate_request(
         .and_then(|v| v.strip_prefix("Bearer "))
         .map(str::to_owned);
 
-    let query_token: Option<String> = request
-        .uri()
-        .query()
-        .and_then(|q| serde_urlencoded::from_str::<TokenQuery>(q).ok())
-        .and_then(|tq| tq.token);
+    let legacy_query_tokens_enabled = std::env::var("COGNIA_ALLOW_LEGACY_QUERY_TOKEN")
+        .ok()
+        .is_some_and(|value| matches!(value.as_str(), "1" | "true" | "yes"));
+    let query_token: Option<String> = legacy_query_tokens_enabled
+        .then(|| {
+            request
+                .uri()
+                .query()
+                .and_then(|q| serde_urlencoded::from_str::<TokenQuery>(q).ok())
+                .and_then(|tq| tq.token)
+        })
+        .flatten();
 
     // Header takes precedence over query string.
     let token = match header_token.or(query_token) {
@@ -138,15 +184,15 @@ async fn authenticate_request(
         None => {
             return error_response(
                 "missing_authorization",
-                "Authorization header or ?token= query parameter is required",
+                "Authorization bearer token is required",
             );
         }
     };
 
-    // ── 1b. OIDC mode (ADR-0059 cloud/headless): try a Logto token first ─────
-    // Present only when the gateway is configured for Logto. On ANY failure we
-    // fall through to the HS256 device/service path below, so enabling OIDC is
-    // additive and never breaks existing paired devices.
+    // ── 1b. OIDC mode (ADR-0059 cloud/headless) ──────────────────────────────
+    // Once configured, OIDC is authoritative. Falling through to a self-issued
+    // HS256 token would let a legacy paired device bypass tenant authentication
+    // and would turn a JWKS outage into an authentication downgrade.
     if let Some(authn) = oidc.as_ref() {
         match authn.authenticate(&token).await {
             Ok(claims) => {
@@ -157,16 +203,12 @@ async fn authenticate_request(
                 request.extensions_mut().insert(ctx);
                 return next.run(request).await;
             }
-            // Not a Logto token (no `kid`) — the common case for a paired HS256
-            // device. Expected: fall through to the HS256 path silently.
-            Err(super::oidc::OidcError::MissingKid) => {}
-            // A token that DID look like a Logto JWT failed to verify (bad
-            // signature / wrong issuer or audience / expired / missing scope) or
-            // the JWKS fetch failed. Log it (error only, never the token) so
-            // cloud-mode misconfig or a hung issuer is diagnosable, then still
-            // fall through — enabling OIDC never breaks existing paired devices.
             Err(e) => {
-                log::warn!("companion-api oidc: token rejected, falling back to HS256: {e}");
+                log::warn!("companion-api oidc: token rejected: {e}");
+                return error_response(
+                    "oidc_authentication_failed",
+                    "the identity provider could not authenticate this request",
+                );
             }
         }
     }
@@ -567,7 +609,7 @@ mod tests {
     // ── Query-string auth (WS upgrade path) ─────────────────────────────────
 
     #[tokio::test]
-    async fn query_string_token_works() {
+    async fn query_string_token_is_disabled_by_default() {
         let state = test_state();
         let router = build_router(state);
         let jwt = device_jwt("qs-device");
@@ -576,9 +618,9 @@ mod tests {
             .body(Body::empty())
             .unwrap();
         let resp = router.oneshot(req).await.unwrap();
-        assert_eq!(resp.status().as_u16(), 200);
+        assert_eq!(resp.status().as_u16(), 401);
         let body = body_json(resp).await;
-        assert_eq!(body["device_id"], "qs-device");
+        assert_eq!(body["code"], "missing_authorization");
     }
 
     // ── Pre-auth rate limit ──────────────────────────────────────────────────
@@ -808,9 +850,9 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn oidc_configured_still_accepts_device_hs256() {
-        // With OIDC enabled, a plain HS256 device token (no `kid`) fails OIDC
-        // verification and must fall through to the existing HS256 path.
+    async fn oidc_configured_rejects_device_hs256_without_fallback() {
+        // Cloud mode is fail-closed: once OIDC is configured, a self-issued
+        // HS256 device token must never bypass tenant authentication.
         let server = wiremock::MockServer::start().await;
         test_support::mount_lenient(&server).await;
         let router = build_oidc_router(test_state(), oidc_authn(server.uri()));
@@ -821,9 +863,9 @@ mod tests {
             .body(Body::empty())
             .unwrap();
         let resp = router.oneshot(req).await.unwrap();
-        assert_eq!(resp.status().as_u16(), 200);
+        assert_eq!(resp.status().as_u16(), 401);
         let body = body_json(resp).await;
-        assert_eq!(body["device_id"], "hs256-device");
+        assert_eq!(body["code"], "oidc_authentication_failed");
     }
 
     #[tokio::test]

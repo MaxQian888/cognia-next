@@ -11,6 +11,7 @@ import {
   runSyncDown,
 } from "@/lib/sync/companion-sync"
 import { hydrateCompanionConfig } from "@/lib/tauri/transport-companion"
+import { remoteEventResyncCoordinator } from "@/lib/tauri/resync-coordinator"
 import { loggers } from "@cognia/logging"
 
 const log = loggers.shell
@@ -61,6 +62,11 @@ export function WebCompanionBootProvider({ children }: { children: React.ReactNo
       }
 
       try {
+        cleanup.push(
+          remoteEventResyncCoordinator.register("*", async () => {
+            await runSyncDown()
+          })
+        )
         await runSyncDown()
       } catch (err) {
         log.warn("web companion: initial sync-down failed", {

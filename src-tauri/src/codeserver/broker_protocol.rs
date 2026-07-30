@@ -21,54 +21,6 @@ pub(crate) enum ProtocolMode {
     JsonRpc,
 }
 
-#[derive(Default)]
-pub(crate) struct ContentLengthDecoder {
-    buffer: Vec<u8>,
-    expected_body_bytes: Option<usize>,
-}
-
-impl ContentLengthDecoder {
-    pub(crate) fn push(&mut self, bytes: &[u8]) -> Result<Vec<Value>, String> {
-        self.buffer.extend_from_slice(bytes);
-        let mut values = Vec::new();
-        loop {
-            if self.expected_body_bytes.is_none() {
-                let Some(header_end) = find_bytes(&self.buffer, b"\r\n\r\n") else {
-                    if self.buffer.len() > MAX_HEADER_BYTES {
-                        return Err(format!("JSON-RPC header exceeds {MAX_HEADER_BYTES} bytes"));
-                    }
-                    break;
-                };
-                if header_end > MAX_HEADER_BYTES {
-                    return Err(format!("JSON-RPC header exceeds {MAX_HEADER_BYTES} bytes"));
-                }
-                let header = std::str::from_utf8(&self.buffer[..header_end])
-                    .map_err(|_| "JSON-RPC header is not ASCII/UTF-8".to_string())?;
-                let content_length = parse_content_length(header)?;
-                if content_length > MAX_FRAME_BYTES {
-                    return Err(format!(
-                        "JSON-RPC frame exceeds {MAX_FRAME_BYTES} bytes: {content_length}"
-                    ));
-                }
-                self.buffer.drain(..header_end + 4);
-                self.expected_body_bytes = Some(content_length);
-            }
-
-            let expected = self.expected_body_bytes.expect("set above");
-            if self.buffer.len() < expected {
-                break;
-            }
-            let body: Vec<u8> = self.buffer.drain(..expected).collect();
-            self.expected_body_bytes = None;
-            values.push(
-                serde_json::from_slice(&body)
-                    .map_err(|error| format!("invalid JSON-RPC body: {error}"))?,
-            );
-        }
-        Ok(values)
-    }
-}
-
 pub(crate) fn encode_content_length(value: &Value) -> Result<Vec<u8>, String> {
     let body =
         serde_json::to_vec(value).map_err(|error| format!("encode JSON-RPC body: {error}"))?;
@@ -156,12 +108,6 @@ fn parse_content_length(header: &str) -> Result<usize, String> {
     content_length.ok_or_else(|| "missing Content-Length header".to_string())
 }
 
-fn find_bytes(haystack: &[u8], needle: &[u8]) -> Option<usize> {
-    haystack
-        .windows(needle.len())
-        .position(|window| window == needle)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -182,7 +128,10 @@ mod tests {
     #[test]
     fn encoder_uses_utf8_byte_length() {
         let frame = encode_content_length(&json!({ "value": "你好" })).unwrap();
-        let separator = find_bytes(&frame, b"\r\n\r\n").unwrap();
+        let separator = frame
+            .windows(4)
+            .position(|window| window == b"\r\n\r\n")
+            .unwrap();
         let header = std::str::from_utf8(&frame[..separator]).unwrap();
         let declared = parse_content_length(header).unwrap();
         assert_eq!(declared, frame.len() - separator - 4);

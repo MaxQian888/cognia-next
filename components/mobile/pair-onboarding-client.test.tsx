@@ -39,11 +39,40 @@ jest.mock("@/lib/tauri", () => ({
 // Stub the QR scanner; keep the legacy mock path so any transitive callers keep working.
 jest.mock("@/lib/capacitor/barcode", () => ({ scan: jest.fn() }))
 jest.mock("@/lib/qr/barcode-scanner", () => ({ scanQrCode: jest.fn() }))
+jest.mock("@/lib/signaling/v2-crypto", () => ({
+  generatePersistableV2SigningIdentity: async () => ({
+    privateKey: {},
+    publicKey: {},
+    privateKeyJwk: { kty: "EC", crv: "P-256", d: "private" },
+    encodedPublicKey: "mobile-signing-key",
+  }),
+  buildRoomDescriptorV2: async (input: Record<string, unknown>) => ({
+    v: 2,
+    roomId: "room-1",
+    ...input,
+  }),
+  importV2SigningPrivateKey: async () => ({}),
+}))
 
 // Control hydration timing so the loading-screen escape paths are testable.
 // Defaults mirror the real LocalStorage backend (read/clear the config key)
 // so the existing hydrate/sign-out cases behave exactly as before.
 const COMPANION_KEY = "cognia.companion.config.v1"
+
+function withSignalingV2(body: Record<string, unknown>): Record<string, unknown> {
+  return {
+    ...body,
+    rendezvous_id: "room-1",
+    room_descriptor: {
+      v: 2,
+      roomId: "room-1",
+      roomNonce: "room-nonce",
+      desktopSigningKey: "desktop-signing-key",
+      mobileSigningKey: "mobile-signing-key",
+      notAfter: Date.now() + 60_000,
+    },
+  }
+}
 let hydrateImpl: () => Promise<unknown> = async () => {
   const raw = window.localStorage.getItem(COMPANION_KEY)
   return raw ? JSON.parse(raw) : null
@@ -320,11 +349,11 @@ describe("<PairOnboardingClient /> — coordinator", () => {
       ok: true,
       status: 200,
       json: () =>
-        Promise.resolve({
+        Promise.resolve(withSignalingV2({
           device_id: "dev-001",
           device_jwt: "jwt.value",
           server_version: "0.1.0",
-        }),
+        })),
       text: () => Promise.resolve(""),
     })
     const user = userEvent.setup()

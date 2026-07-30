@@ -800,6 +800,25 @@ describe("dispatchCommand: memory_* (ADR-0069)", () => {
 })
 
 describe("dispatchCommand: unknown command", () => {
+  it("returns the versioned host feature contract", async () => {
+    await expect(dispatchCommand("host_feature_manifest", {})).resolves.toMatchObject({
+      schemaVersion: 1,
+      hostBuildId: expect.any(String),
+      platform: expect.any(String),
+      generatedAt: expect.any(Number),
+      features: {
+        "claude.host-tools": {
+          version: 1,
+          operations: expect.arrayContaining(["claude_send", "claude_interrupt"]),
+        },
+      },
+      limits: {
+        rpcJsonBodyBytes: 64 * 1024,
+        skillUploadChunkBytes: 32 * 1024,
+      },
+    })
+  })
+
   it("throws an explicit error", async () => {
     await expect(dispatchCommand("not_a_real_command", {})).rejects.toThrow(
       /unknown desktop-write command: not_a_real_command/

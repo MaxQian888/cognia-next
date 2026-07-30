@@ -5,10 +5,12 @@ import { render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 
 jest.mock("next-intl", () => ({
-  useTranslations: (ns: string) => (key: string) => `${ns}.${key}`,
+  useTranslations: (ns: string) => (key: string, values?: Record<string, string | number>) =>
+    key === "list.featureVersion" ? `${values?.feature} v${values?.version}` : `${ns}.${key}`,
 }))
 
 import type { CompanionConfig } from "@/lib/tauri/companion-storage"
+import { buildLocalHostFeatureManifest } from "@/lib/platform/host-feature-manifest"
 import { __resetRoutingForTests, getActiveRemoteTransport } from "@/lib/tauri/transport-routing"
 import type { Transport } from "@/lib/tauri/transport-types"
 import {
@@ -57,7 +59,7 @@ it("lists a host and connects to it", async () => {
 
   await waitFor(() => expect(useRemoteHostStore.getState().activeHostId).toBe(host.id))
   expect(getActiveRemoteTransport()).not.toBeNull()
-  expect(screen.getByText("settings.remoteHosts.list.activeBadge")).toBeInTheDocument()
+  expect(screen.getByText(/settings\.remoteHosts\.list\.state\./)).toBeInTheDocument()
 })
 
 it("disconnects the active host", async () => {
@@ -107,4 +109,53 @@ it("removes a host", async () => {
 
   await user.click(screen.getByRole("button", { name: /settings.remoteHosts.list.removeA11y/ }))
   expect(useRemoteHostStore.getState().hosts).toHaveLength(0)
+})
+
+it("lists the capabilities a host reported", () => {
+  // Visibility is the point: before this a client had no way to know what the
+  // host it drives can do, so workflow preflight judged a cloud server by the
+  // desktop's own baseline.
+  const host = seedHost("Cloud", "https://cloud.example")
+  useRemoteHostStore.setState({
+    hosts: useRemoteHostStore
+      .getState()
+      .hosts.map((h) => (h.id === host.id ? { ...h, capabilities: ["always-on", "headless"] } : h)),
+  })
+
+  render(<HostsTab />)
+  const row = screen.getByTestId(`remote-host-capabilities-${host.id}`)
+  expect(row).toHaveTextContent("always-on")
+  expect(row).toHaveTextContent("headless")
+})
+
+it("says so plainly when a host has not been asked yet", () => {
+  const host = seedHost("Cloud", "https://cloud.example")
+  render(<HostsTab />)
+  expect(screen.queryByTestId(`remote-host-capabilities-${host.id}`)).toBeNull()
+  expect(screen.getByText("settings.remoteHosts.list.capabilitiesUnknown")).toBeInTheDocument()
+})
+
+it("separates advertised host execution from unadvertised incomplete features", () => {
+  const host = seedHost("Cloud", "https://cloud.example")
+  const manifest = buildLocalHostFeatureManifest({
+    hostBuildId: "build-42",
+    platform: "headless",
+  })
+  useRemoteHostStore.setState({
+    hosts: useRemoteHostStore
+      .getState()
+      .hosts.map((candidate) =>
+        candidate.id === host.id ? { ...candidate, featureManifest: manifest } : candidate
+      ),
+  })
+
+  render(<HostsTab />)
+  const featurePanel = screen.getByTestId(`remote-host-features-${host.id}`)
+  expect(featurePanel).toHaveTextContent("claude.host-tools v1")
+  expect(featurePanel).toHaveTextContent("claude.controller-tool-proxy")
+  expect(featurePanel).not.toHaveTextContent("claude.controller-tool-proxy v1")
+  expect(featurePanel).toHaveTextContent("skills.atomic-install")
+  expect(featurePanel).toHaveTextContent("external-bridge.lifecycle")
+  expect(featurePanel).toHaveTextContent("external-bridge.managed-relay")
+  expect(featurePanel).toHaveTextContent("settings.remoteHosts.list.featurePermissionNote")
 })

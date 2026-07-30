@@ -371,15 +371,19 @@ export async function isIslandWindowOpen(): Promise<boolean> {
 /**
  * Resize the island to its measured content size (logical px). Returns the
  * display's {@link IslandGeometry}: the top safe-area inset (logical px — the
- * notch height) that Rust grew the window by, and whether a full-screen app
- * currently owns that display.
+ * notch height) that Rust grew the window by, and whether the island should
+ * withdraw for a full-screen app on that display.
  *
  * The shell pads its card below the inset so the content clears the camera
  * housing while the window still spans the notch strip (keeping slam-to-top
- * hover on target), and suppresses the idle pill entirely while full-screen.
+ * hover on target), and suppresses the idle pill entirely while `fullscreen`.
+ * That flag is already gated by {@link islandSetHideOnFullscreen} — it is false
+ * on a full-screen Space unless the user opted into hiding there, so the shell
+ * never has to know about the preference.
+ *
  * Returning both from the resize round-trip the shell already makes after every
- * layout means the full-screen regime is known synchronously at mount instead
- * of racing the first `fleet://island-geometry` push.
+ * layout means the regime is known synchronously at mount instead of racing the
+ * first `fleet://island-geometry` push.
  */
 export async function islandResize(width: number, height: number): Promise<IslandGeometry> {
   if (!isTauri()) return EMPTY_ISLAND_GEOMETRY
@@ -445,6 +449,41 @@ export async function islandSetMonitor(name: string | null): Promise<boolean> {
     return true
   } catch (err) {
     console.warn("islandSetMonitor failed", err)
+    return false
+  }
+}
+
+/**
+ * Whether the island withdraws while a full-screen app owns its display.
+ *
+ * Persisted in `island-window.json` beside the monitor choice, not in app
+ * settings: the placement path that consumes it runs in Rust, and the tray
+ * toggle reaches it without a renderer. `false` off Tauri or on failure — the
+ * safe answer, because false is "show the island everywhere".
+ */
+export async function islandGetHideOnFullscreen(): Promise<boolean> {
+  if (!isTauri()) return false
+  try {
+    return await invoke<boolean>("island_get_hide_on_fullscreen")
+  } catch (err) {
+    console.warn("islandGetHideOnFullscreen failed", err)
+    return false
+  }
+}
+
+/**
+ * Opt into (or out of) the island withdrawing while a full-screen app owns its
+ * display. Off by default: the overlay's NSPanel is configured to float over
+ * every Space, and hiding there unconditionally read as the island being broken
+ * outside Cognia's own desktop. A live island picks the change up immediately.
+ */
+export async function islandSetHideOnFullscreen(hide: boolean): Promise<boolean> {
+  if (!isTauri()) return false
+  try {
+    await invoke("island_set_hide_on_fullscreen", { hide })
+    return true
+  } catch (err) {
+    console.warn("islandSetHideOnFullscreen failed", err)
     return false
   }
 }

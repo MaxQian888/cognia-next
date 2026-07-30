@@ -15,7 +15,8 @@ function fakeTransport(tag: string) {
   const calls: Array<{ name: string; args?: Record<string, unknown> }> = []
   const subscriptions: string[] = []
   const unsubscribe = jest.fn()
-  const transport: Transport = {
+  const destroy = jest.fn()
+  const transport = {
     call: jest.fn(async (name: string, args?: Record<string, unknown>) => {
       calls.push({ name, args })
       return `${tag}:${name}` as unknown
@@ -24,8 +25,9 @@ function fakeTransport(tag: string) {
       subscriptions.push(event)
       return unsubscribe
     }) as Transport["subscribe"],
-  }
-  return { transport, calls, subscriptions, unsubscribe, tag }
+    destroy,
+  } as Transport & { destroy: () => void }
+  return { transport, calls, subscriptions, unsubscribe, destroy, tag }
 }
 
 describe("RoutingTransport", () => {
@@ -61,6 +63,44 @@ describe("RoutingTransport", () => {
     expect(getActiveRemoteTransport()).toBe(remote.transport)
   })
 
+  it("keeps unclassified commands local instead of transparently redirecting them", async () => {
+    const local = fakeTransport("local")
+    const remote = fakeTransport("remote")
+    const routing = new RoutingTransport(local.transport)
+    setActiveRemoteTransport(remote.transport)
+
+    const result = await routing.call("future_renderer_only_command")
+
+    expect(result).toBe("local:future_renderer_only_command")
+    expect(local.calls).toHaveLength(1)
+    expect(remote.calls).toHaveLength(0)
+  })
+
+  it("keeps manifest client commands local while a remote host is active", async () => {
+    const local = fakeTransport("local")
+    const remote = fakeTransport("remote")
+    const routing = new RoutingTransport(local.transport)
+    setActiveRemoteTransport(remote.transport)
+
+    await routing.call("app_settings_update", { theme: "dark" })
+
+    expect(local.calls.map((call) => call.name)).toEqual(["app_settings_update"])
+    expect(remote.calls).toHaveLength(0)
+  })
+
+  it("rejects service-only commands from the device routing plane", async () => {
+    const local = fakeTransport("local")
+    const remote = fakeTransport("remote")
+    const routing = new RoutingTransport(local.transport)
+    setActiveRemoteTransport(remote.transport)
+
+    await expect(routing.call("keyring_secret_get", { key: "secret" })).rejects.toThrow(
+      "service-only"
+    )
+    expect(local.calls).toHaveLength(0)
+    expect(remote.calls).toHaveLength(0)
+  })
+
   it("keeps desktop webview and relay commands local while a remote host is active", async () => {
     const local = fakeTransport("local")
     const remote = fakeTransport("remote")
@@ -83,12 +123,28 @@ describe("RoutingTransport", () => {
     const routing = new RoutingTransport(local.transport)
 
     setActiveRemoteTransport(remote.transport)
-    await routing.call("first")
+    await routing.call("git_status")
     setActiveRemoteTransport(null)
-    await routing.call("second")
+    await routing.call("git_log")
 
-    expect(remote.calls.map((c) => c.name)).toEqual(["first"])
-    expect(local.calls.map((c) => c.name)).toEqual(["second"])
+    expect(remote.calls.map((c) => c.name)).toEqual(["git_status"])
+    expect(local.calls.map((c) => c.name)).toEqual(["git_log"])
+  })
+
+  it("disposes the previous remote transport on switch and deactivate", () => {
+    const local = fakeTransport("local")
+    const first = fakeTransport("first")
+    const second = fakeTransport("second")
+    const routing = new RoutingTransport(local.transport)
+    expect(routing).toBeDefined()
+
+    setActiveRemoteTransport(first.transport)
+    setActiveRemoteTransport(second.transport)
+    expect(first.destroy).toHaveBeenCalledTimes(1)
+
+    setActiveRemoteTransport(null)
+    expect(second.destroy).toHaveBeenCalledTimes(1)
+    expect(local.destroy).not.toHaveBeenCalled()
   })
 
   it("moves an existing subscription across active-host changes without leaking listeners", () => {

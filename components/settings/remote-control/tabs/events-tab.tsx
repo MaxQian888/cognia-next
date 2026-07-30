@@ -30,6 +30,8 @@ const EVENT_TYPES: SchedulerEventType[] = [
   "plan:completed",
   "connection:outbound:send",
   "connection:scheduled:digest",
+  "job:exited",
+  "monitor:fired",
   "custom",
 ]
 
@@ -51,6 +53,8 @@ const EVENT_KEY_MAP: Record<SchedulerEventType, string> = {
   "connection:outbound:send": "connectionOutboundSend",
   "connection:scheduled:digest": "connectionScheduledDigest",
   "connection:housekeeping:daily": "connectionHousekeepingDaily",
+  "job:exited": "jobExited",
+  "monitor:fired": "monitorFired",
   custom: "custom",
 }
 

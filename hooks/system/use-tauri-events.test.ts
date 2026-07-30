@@ -4,6 +4,8 @@
 import { renderHook } from "@testing-library/react"
 
 const isTauriMock = jest.fn().mockReturnValue(true)
+const transportInvoke = jest.fn()
+const isRemoteHostActive = jest.fn().mockReturnValue(false)
 const tauriHandlers: Record<string, (p: unknown) => void> = {}
 const tauriUnsub: jest.Mock[] = []
 
@@ -24,9 +26,15 @@ jest.mock("@/lib/tauri", () => ({
     cliMatches: "cli://matches",
     cliSecondInstance: "cli://second-instance",
     deepLink: "deep-link://received",
+    backgroundJobExited: "jobs://exited",
+    backgroundMonitorFired: "jobs://monitor-fired",
   },
   onTauriEvent: (event: string, fn: (p: unknown) => void) => onTauriEventMock(event, fn),
   isTauri: () => isTauriMock(),
+  transport: { call: (...args: unknown[]) => transportInvoke(...args) },
+}))
+jest.mock("@/lib/tauri/transport-routing", () => ({
+  isRemoteHostActive: () => isRemoteHostActive(),
 }))
 
 const TAURI_EVENTS = {
@@ -38,7 +46,14 @@ const TAURI_EVENTS = {
   cliMatches: "cli://matches",
   cliSecondInstance: "cli://second-instance",
   deepLink: "deep-link://received",
+  backgroundJobExited: "jobs://exited",
+  backgroundMonitorFired: "jobs://monitor-fired",
 }
+
+const emitSchedulerEvent = jest.fn().mockResolvedValue(undefined)
+jest.mock("@/lib/scheduler/event-integration", () => ({
+  emitSchedulerEvent: (...args: unknown[]) => emitSchedulerEvent(...args),
+}))
 
 const listenHandlers: Record<string, (e: { payload: unknown }) => void> = {}
 const listenUnsub: jest.Mock[] = []
@@ -105,6 +120,15 @@ const uiStoreState = {
 jest.mock("@/stores/ui", () => ({
   useUIStore: { getState: () => uiStoreState },
 }))
+const findActiveSessionForConversation = jest.fn()
+jest.mock("@/lib/connectors/session-bindings", () => ({
+  findActiveSessionForConversation: (...args: unknown[]) =>
+    findActiveSessionForConversation(...args),
+}))
+const selectScheduledTask = jest.fn()
+jest.mock("@/stores/scheduler/scheduler-store", () => ({
+  useSchedulerStore: { getState: () => ({ selectTask: selectScheduledTask }) },
+}))
 const settingsStoreState = {
   save: (...a: unknown[]) => saveSettings(...a),
 }
@@ -162,6 +186,8 @@ beforeEach(() => {
   clearChatStore.mockClear()
   requestOpenSettings.mockClear()
   setSelectedGuild.mockClear()
+  findActiveSessionForConversation.mockReset()
+  selectScheduledTask.mockClear()
   saveSettings.mockClear()
   openDialogMock.mockReset()
   openPathAsWorkspaceMock.mockReset()
@@ -169,6 +195,10 @@ beforeEach(() => {
   dispatchTrayClickMock.mockClear()
   dispatchShortcutMock.mockClear()
   checkUpdatesMock.mockReset()
+  emitSchedulerEvent.mockClear()
+  transportInvoke.mockReset()
+  transportInvoke.mockResolvedValue(undefined)
+  isRemoteHostActive.mockReturnValue(false)
 })
 
 async function flushPromises() {
@@ -327,6 +357,25 @@ describe("useTauriEvents", () => {
       expect(setActiveSession).not.toHaveBeenCalled()
     })
 
+    it("IM conversation deep link activates its bound session", async () => {
+      findActiveSessionForConversation.mockResolvedValue({ id: "session-im" })
+
+      await fireDeepLinks(["cognia://im?conversationKey=discord%3Aa1%3Ac1"])
+      await flushPromises()
+
+      expect(findActiveSessionForConversation).toHaveBeenCalledWith("discord:a1:c1")
+      expect(setActiveSession).toHaveBeenCalledWith("session-im")
+      expect(setSelectedGuild).toHaveBeenCalledWith({ kind: "dm" })
+    })
+
+    it("scheduler deep link selects the task and opens the scheduler", async () => {
+      await fireDeepLinks(["cognia://scheduler/task/task-42"])
+      await flushPromises()
+
+      expect(selectScheduledTask).toHaveBeenCalledWith("task-42")
+      expect(routerPush).toHaveBeenCalledWith("/scheduler")
+    })
+
     it("settings deep link forwards the tab parameter", async () => {
       await fireDeepLinks(["cognia://settings?tab=advanced"])
       expect(requestOpenSettings).toHaveBeenCalledWith("advanced")
@@ -408,5 +457,23 @@ describe("useTauriEvents", () => {
     for (const u of listenUnsub) {
       expect(u).toHaveBeenCalled()
     }
+  })
+})
+
+it("forwards native job and monitor terminal events into scheduler event tasks", async () => {
+  renderHook(() => useTauriEvents())
+  await flushPromises()
+
+  tauriHandlers[TAURI_EVENTS.backgroundJobExited]?.({ jobId: "job-1" })
+  tauriHandlers[TAURI_EVENTS.backgroundMonitorFired]?.({ id: "monitor-1" })
+
+  expect(emitSchedulerEvent).toHaveBeenCalledWith("job:exited", { jobId: "job-1" })
+  expect(emitSchedulerEvent).toHaveBeenCalledWith("monitor:fired", { id: "monitor-1" })
+
+  isRemoteHostActive.mockReturnValue(true)
+  tauriHandlers[TAURI_EVENTS.backgroundJobExited]?.({ jobId: "job-remote" })
+  expect(transportInvoke).toHaveBeenCalledWith("scheduled_task_emit_event", {
+    eventType: "job:exited",
+    data: { jobId: "job-remote" },
   })
 })

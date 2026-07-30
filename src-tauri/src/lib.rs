@@ -553,6 +553,13 @@ pub fn run() {
             // Processes tab): list + control cognia-spawned child processes.
             process_registry::list_managed_processes,
             process_registry::control_managed_process,
+            jobs::background_job_list,
+            jobs::background_job_read,
+            jobs::background_job_kill,
+            jobs::background_job_spawn_scheduled,
+            jobs::background_monitor_list,
+            jobs::background_monitor_cancel,
+            jobs::background_monitor_register_scheduled,
             account_auth::account_password_create_verifier,
             account_auth::account_password_verify,
             claude::commands::claude_send,
@@ -1754,8 +1761,20 @@ pub fn run() {
             // lifetime must become `interrupted` before any spawn, or the
             // concurrency caps count ghosts and reject real work.
             if let Ok(dir) = app.path().app_data_dir() {
-                if let Err(e) = jobs::install(dir.join("cognia")) {
-                    log::warn!("background-job supervisor unavailable: {e}");
+                match jobs::install(dir.join("cognia")) {
+                    Ok(supervisor) => {
+                        let handle = app.handle().clone();
+                        supervisor.on_exit(std::sync::Arc::new(move |exit| {
+                            let _ = handle.emit("jobs://exited", exit);
+                        }));
+                        if let Some(monitors) = jobs::monitors() {
+                            let handle = app.handle().clone();
+                            monitors.on_fired(std::sync::Arc::new(move |monitor| {
+                                let _ = handle.emit("jobs://monitor-fired", monitor);
+                            }));
+                        }
+                    }
+                    Err(e) => log::warn!("background-job supervisor unavailable: {e}"),
                 }
             }
 

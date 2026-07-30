@@ -38,10 +38,6 @@ pub struct DownloadCancel {
 }
 
 impl DownloadCancel {
-    pub fn new() -> Arc<Self> {
-        Arc::new(Self::default())
-    }
-
     /// Ask any in-flight download to stop. No-op when none is running.
     pub fn cancel(&self) {
         self.notify.notify_waiters();
@@ -481,7 +477,7 @@ mod tests {
     /// relies on.
     #[tokio::test]
     async fn cancel_wakes_a_parked_waiter() {
-        let token = DownloadCancel::new();
+        let token = Arc::<DownloadCancel>::default();
         let waiter = token.clone();
 
         let parked = tokio::spawn(async move {
@@ -505,7 +501,7 @@ mod tests {
     /// the next download. The UI fires this button without checking first.
     #[tokio::test]
     async fn cancel_with_no_download_in_flight_is_inert() {
-        let token = DownloadCancel::new();
+        let token = Arc::<DownloadCancel>::default();
         token.cancel();
 
         let waiter = token.clone();
