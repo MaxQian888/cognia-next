@@ -1,4 +1,5 @@
 import { sha256Hex } from "@/lib/share/hash"
+import { tokenize } from "@/lib/workflow/runtime/expression"
 
 export const TEMPLATE_API_VERSION = "cognia.ai/templates/v1" as const
 
@@ -272,6 +273,7 @@ function pushInterpolationIssues(
   value: TemplateJson,
   path: string,
   inputIds: ReadonlySet<string>,
+  allowWorkflowExpressions: boolean,
   issues: TemplateValidationIssue[]
 ): void {
   if (typeof value === "string") {
@@ -285,7 +287,9 @@ function pushInterpolationIssues(
     }
     for (const match of value.matchAll(/\{\{([^{}]+)\}\}/g)) {
       const expression = match[1].trim()
-      if (!IDENTIFIER.test(expression) || !inputIds.has(expression)) {
+      const declaredInput = IDENTIFIER.test(expression) && inputIds.has(expression)
+      const workflowExpression = allowWorkflowExpressions && tokenize(expression).length > 0
+      if (!declaredInput && !workflowExpression) {
         issues.push({
           code: "interpolation.unknown",
           path,
@@ -307,13 +311,19 @@ function pushInterpolationIssues(
   }
   if (Array.isArray(value)) {
     value.forEach((nested, index) =>
-      pushInterpolationIssues(nested, `${path}[${index}]`, inputIds, issues)
+      pushInterpolationIssues(
+        nested,
+        `${path}[${index}]`,
+        inputIds,
+        allowWorkflowExpressions,
+        issues
+      )
     )
     return
   }
   if (!value || typeof value !== "object") return
   for (const [key, nested] of Object.entries(value)) {
-    pushInterpolationIssues(nested, `${path}.${key}`, inputIds, issues)
+    pushInterpolationIssues(nested, `${path}.${key}`, inputIds, allowWorkflowExpressions, issues)
   }
 }
 
@@ -417,6 +427,7 @@ export function validateTemplateDefinition(
     definition.payload,
     "payload",
     new Set(definition.inputs.map((input) => input.id)),
+    definition.domain === "workflow",
     issues
   )
 

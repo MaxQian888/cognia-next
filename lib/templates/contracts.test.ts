@@ -125,6 +125,48 @@ describe("template contracts", () => {
     }
   })
 
+  it("allows safe workflow runtime expressions without treating them as template inputs", async () => {
+    const definition = await createTemplateDefinition({
+      id: "workflow.runtime-expressions",
+      domain: "workflow",
+      status: "draft",
+      revision: 1,
+      metadata: { name: "Runtime expressions" },
+      payload: {
+        variables: { repoPath: "/workspace" },
+        nodes: [
+          {
+            id: "plan",
+            data: {
+              params: {
+                cwd: "{{ $vars.repoPath }}",
+                prompt: "{{ $node['analyze'].text }}",
+              },
+            },
+          },
+        ],
+      },
+      inputs: [],
+      dependencies: [],
+      capabilities: [],
+      compatibility: { platforms: ["desktop"] },
+      provenance: { source: "user" },
+    })
+
+    expect(validateTemplateDefinition(definition)).toMatchObject({ ok: true, issues: [] })
+    expect(
+      validateTemplateDefinition({
+        ...definition,
+        payload: { nodes: [{ data: { params: { prompt: "{{ $node['analyze'].text() }}" } } }] },
+      }).issues
+    ).toEqual([
+      expect.objectContaining({
+        code: "interpolation.unknown",
+        message: "Interpolation must reference a declared input: $node['analyze'].text()",
+      }),
+    ])
+  })
+
   it("classifies structural compatibility conservatively", async () => {
     const base = await createTemplateDefinition({
       id: "skill.summary",

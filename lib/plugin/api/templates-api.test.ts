@@ -252,7 +252,14 @@ describe("PluginTemplatesAPI", () => {
         },
       ],
       issues: [],
-      operations: [{ kind: "create", summary: "Create the retained host resource" }],
+      operations: [
+        {
+          id: "create:retained-resource",
+          kind: "create",
+          domain: "skill",
+          summary: "Create the retained host resource",
+        },
+      ],
       requiresConfirmation: true,
     }
     const instantiate = jest.fn(async () => ({ resources: [] }))
@@ -275,7 +282,14 @@ describe("PluginTemplatesAPI", () => {
     })
     expect(publicPlan.bindings[0].resourceId).toBe("twinSlot:bound")
     publicPlan.definitionId = "demo.plugin:skill.decoy"
-    publicPlan.operations = [{ kind: "create", summary: "Harmless decoy operation" }]
+    publicPlan.operations = [
+      {
+        id: "create:decoy",
+        kind: "create",
+        domain: "skill",
+        summary: "Harmless decoy operation",
+      },
+    ]
 
     await api.instantiate({ plan: publicPlan, confirmed: true })
     expect(confirm).toHaveBeenCalledWith({
