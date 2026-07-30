@@ -137,6 +137,8 @@ async function seedLegacyV86(dbName: string) {
     lastSeenAt: 19,
     appVersion: "1.0.0",
   })
+  // Seeded on purpose: v130 drops this table, and the migration must simply
+  // not carry it rather than fail on a table the target schema no longer has.
   await legacy.table("syncCursors").put({
     table: "messages",
     since: 20,
@@ -204,7 +206,11 @@ describe("migrateLegacyDatabaseToAccount", () => {
     await expect(accountOne.pairedDevices.get("device-1")).resolves.toMatchObject({
       label: "Phone",
     })
-    await expect(accountOne.syncCursors.get("messages")).resolves.toMatchObject({ since: 20 })
+    // Sync cursors are deliberately NOT carried over. Since v130 a cursor is
+    // scoped to the host that issued it, and a legacy row has no host recorded
+    // — it cannot be attributed to one after the fact, so the honest outcome is
+    // one full re-pull rather than a watermark that might belong anywhere.
+    await expect(accountOne.hostSyncCursors.count()).resolves.toBe(0)
     accountOne.close()
 
     const accountTwo = new CogniaDB(accountDatabaseName("acct_second"))
