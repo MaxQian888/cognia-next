@@ -36,10 +36,8 @@ export function validateMacosReleaseSigning(environment) {
 }
 
 function main() {
-  const { identity, teamId } = validateMacosReleaseSigning(process.env)
-  process.stdout.write(
-    `macOS release signing preflight passed for ${identity} (Team ID ${teamId}).\n`
-  )
+  validateMacosReleaseSigning(process.env)
+  process.stdout.write("macOS release signing preflight passed.\n")
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {

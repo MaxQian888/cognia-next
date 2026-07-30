@@ -52,7 +52,7 @@
     "scripts:test:sync": "node --test scripts/sync/*.test.mjs",
     "scripts:test:i18n": "node --test scripts/i18n/*.test.mjs",
     "scripts:test:plugin": "node --test scripts/plugin/*.test.mjs scripts/scaffold/*.test.mjs",
-    "scripts:test:ci": "node --test scripts/test/*.test.mjs scripts/e2e/*.test.mjs scripts/dev/*.test.mjs scripts/ci/report/*.test.mjs",
+    "scripts:test:ci": "node --test scripts/test/*.test.mjs scripts/e2e/*.test.mjs scripts/dev/*.test.mjs scripts/ci/require-macos-release-signing.test.mjs scripts/ci/report/*.test.mjs",
     "lint:claude-md": "node scripts/gates/check-claude-md.mjs",
     "plugin:contract:check": "node scripts/plugin/generate-contract.mjs --check",
     "plugin:author-imports": "node scripts/plugin/check-author-imports.mjs",

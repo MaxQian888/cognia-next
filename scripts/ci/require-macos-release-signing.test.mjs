@@ -73,16 +73,43 @@ test("rejects malformed or identity-mismatched Team IDs", () => {
   )
 })
 
-test("tagged macOS builds run the preflight and pass signing inputs only to macOS", () => {
+test("one release preflight gates the matrix and signing inputs stay on tagged macOS", () => {
   const workflow = readFileSync(`${repositoryRoot}/.github/workflows/build-tauri.yml`, "utf8")
 
   assert.match(
     workflow,
-    /if: inputs\.tagName != '' && runner\.os == 'macOS'[\s\S]*node scripts\/ci\/require-macos-release-signing\.mjs/
+    /release-preflight:[\s\S]*if: inputs\.tagName != ''[\s\S]*node scripts\/ci\/require-macos-release-signing\.mjs/
+  )
+  assert.match(
+    workflow,
+    /build-tauri:[\s\S]*needs: release-preflight[\s\S]*needs\.release-preflight\.result == 'success'/
   )
   for (const name of Object.keys(validEnvironment)) {
-    assert.match(workflow, new RegExp(`${name}: .*runner\\.os == 'macOS'`))
+    assert.match(
+      workflow,
+      new RegExp(`${name}: .*inputs\\.tagName != '' && runner\\.os == 'macOS'`)
+    )
   }
+})
+
+test("publishes only after every platform has uploaded to the draft", () => {
+  const workflow = readFileSync(`${repositoryRoot}/.github/workflows/build-tauri.yml`, "utf8")
+
+  assert.match(workflow, /releaseDraft: true/)
+  assert.doesNotMatch(workflow, /releaseDraft: false/)
+  assert.match(
+    workflow,
+    /publish-release:[\s\S]*if: inputs\.tagName != ''[\s\S]*needs: build-tauri[\s\S]*gh release edit "\$RELEASE_TAG" --draft=false --latest/
+  )
+})
+
+test("the release preflight regression test is part of the CI script suite", () => {
+  const packageJson = JSON.parse(readFileSync(`${repositoryRoot}/package.json`, "utf8"))
+
+  assert.match(
+    packageJson.scripts["scripts:test:ci"],
+    /scripts\/ci\/require-macos-release-signing\.test\.mjs/
+  )
 })
 
 test("the macOS bundle contract is hardened, latest-only, and never ad-hoc", () => {
