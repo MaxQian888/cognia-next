@@ -1420,6 +1420,20 @@ export interface ChatSession {
   visibility?: SessionVisibility
   /** Typed resource identity for an embedded session; never contains resource content. */
   surfaceBinding?: SessionSurfaceBinding
+  /**
+   * Denormalised, indexed rendering of {@link surfaceBinding} (Dexie v131).
+   *
+   * Dexie cannot index a nested object, so looking an embedded session up by
+   * its binding used to mean `db.sessions.toArray()` — a full scan of every
+   * session on every workbench open. This column carries the same identity as
+   * a flat string so the lookup is an index hit.
+   *
+   * Deliberately excludes the workbench instance suffix that
+   * `resourceWorkbenchSessionId` appends: several asides share one binding, and
+   * enumerating "every sidechat of this conversation" is a `.equals()` on this
+   * column. Absent on non-embedded sessions.
+   */
+  surfaceBindingKey?: string
   /** Direct sessions: the persona driving replies. */
   characterId?: string
   /** Team sessions: the team whose members reply. */
@@ -2887,6 +2901,20 @@ export interface AppSettings {
    * no Dexie migration. See `@/types/shell/workbench-rail`.
    */
   workbenchRail?: import("@/types/shell/workbench-rail").WorkbenchRailLayout
+  /**
+   * Whether the Context Workbench's activity rail stays on screen when the
+   * panel body is closed — the persistent minibar. Default `true`.
+   *
+   * Separate from `workbenchRail` for the same reason `sidebarSide` is separate
+   * from `sidebarLayout`: that type's mutators rebuild their object (so a new
+   * field would be wiped by the next hide/show), and its "restore defaults"
+   * means "put my activity order back", which must not also switch the rail off.
+   *
+   * Turning it off restores the pre-minibar behaviour — the whole right column
+   * collapses to zero width. Desktop-only; narrow screens use a Sheet and never
+   * show a rail beside the conversation.
+   */
+  workbenchRailPersistent?: boolean
   /**
    * Customization of the desktop title bar (the top window bar): the order of
    * its segments plus the ones the user removed. Lives in settings JSON (same
