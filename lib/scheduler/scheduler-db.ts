@@ -521,7 +521,7 @@ function serializeTask(task: ScheduledTask): DBScheduledTask {
       ...task.trigger,
       runAt: task.trigger.runAt?.toISOString(),
     }),
-    eventType: task.trigger.type === "event" ? task.trigger.eventType : "",
+    eventType: task.trigger.type === "event" ? (task.trigger.eventType ?? "") : "",
     payload: task.payload !== undefined ? JSON.stringify(task.payload) : undefined,
     config: JSON.stringify(task.config),
     notification: JSON.stringify(task.notification),
