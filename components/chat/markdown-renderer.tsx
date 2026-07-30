@@ -291,6 +291,17 @@ export interface MarkdownRendererProps {
    * the branch from `<StreamingTextPart>` to `<MarkdownRenderer>`.
    */
   isStreaming?: boolean
+  /**
+   * Which typeset preset this surface reads.
+   *
+   * `"chat"` (the default, and what every assistant turn uses) tightens leading
+   * and block flow — `app/typeset.css` justifies it as "a turn is a
+   * conversation, not an article". `"document"` keeps typeset's own article
+   * rhythm and is what the long-form surfaces want: plugin READMEs, skill docs
+   * and the skill preview, which is where the Tailwind `prose` classes used to
+   * do this job.
+   */
+  rhythm?: "chat" | "document"
   /** Root used to resolve workspace-relative Markdown file links. */
   projectRoot?: string | null
   /** Optional owner override, used when opening a file must first mount an editor tab. */
@@ -313,6 +324,7 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
   mathShowCopyButton = true,
   messageId,
   isStreaming = false,
+  rhythm = "chat",
   projectRoot,
   onOpenProjectFile,
 }: MarkdownRendererProps) {
@@ -361,7 +373,9 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
   )
 
   return (
-    <div className={cn("markdown-renderer prose prose-sm dark:prose-invert max-w-none", className)}>
+    <div
+      className={cn("markdown-renderer typeset", rhythm === "chat" && "typeset-chat", className)}
+    >
       <ReactMarkdown
         remarkPlugins={remarkPlugins}
         rehypePlugins={rehypePlugins}
@@ -423,6 +437,12 @@ function buildComponents(
       enableVideoEmbed,
       enableAudioEmbed,
     }),
+    // Every block renderer reached from here paints its own `<pre>` or
+    // `<table>` — Shiki's fence, KaTeX's display math, Mermaid's source
+    // fallback, the diff table. typeset's element rules are an unbounded
+    // descendant match, so each one is wrapped in `not-typeset` at its mount
+    // rather than at its root: these components have two to four return
+    // branches each, and the mount is the one place that covers all of them.
     code({ className: codeClassName, children, ...props }) {
       const match = /(?:^|\s)language-([^\s]+)/.exec(codeClassName || "")
       const language = match ? match[1] : undefined
@@ -438,11 +458,13 @@ function buildComponents(
         const isDisplayMath = codeClassName?.includes("math-display")
         if (isDisplayMath) {
           return (
-            <MathBlock
-              content={codeContent}
-              scale={mathFontScale}
-              alignment={mathDisplayAlignment}
-            />
+            <div className="not-typeset">
+              <MathBlock
+                content={codeContent}
+                scale={mathFontScale}
+                alignment={mathDisplayAlignment}
+              />
+            </div>
           )
         }
         return (
@@ -459,34 +481,49 @@ function buildComponents(
         if (target) {
           return (
             <ProjectFileLink target={target} onOpenFile={onOpenProjectFile}>
-              <code className="rounded bg-muted px-1.5 py-0.5 text-sm font-mono" {...props}>
+              <code className="rounded bg-muted px-1.5 py-0.5 font-mono" {...props}>
                 {children}
               </code>
             </ProjectFileLink>
           )
         }
+        // No `text-sm`: typeset sizes inline code at 0.85em, so it tracks
+        // whichever preset the surrounding container carries instead of
+        // pinning 14px into a compact tool card and a full-width README alike.
         return (
-          <code className="rounded bg-muted px-1.5 py-0.5 text-sm font-mono" {...props}>
+          <code className="rounded bg-muted px-1.5 py-0.5 font-mono" {...props}>
             {children}
           </code>
         )
       }
 
       if (enableMermaid && language === "mermaid") {
-        return <SafeMermaidBlock content={codeContent} />
+        return (
+          <div className="not-typeset">
+            <SafeMermaidBlock content={codeContent} />
+          </div>
+        )
       }
 
       if (enableDiff && language === "diff") {
-        return <SafeDiffBlock content={codeContent} />
+        return (
+          <div className="not-typeset">
+            <SafeDiffBlock content={codeContent} />
+          </div>
+        )
       }
 
       if (language === "a2ui") {
-        return <SafeA2UIBlock content={codeContent} messageId={messageId} />
+        return (
+          <div className="not-typeset">
+            <SafeA2UIBlock content={codeContent} messageId={messageId} />
+          </div>
+        )
       }
 
       const showArtifactButton = codeContent.includes("\n")
       return (
-        <div className="relative group/code">
+        <div className="not-typeset relative group/code">
           <CodeBlock
             code={codeContent}
             language={language}
@@ -526,48 +563,6 @@ function buildComponents(
         <ExternalLink href={href ?? ""} className="text-primary hover:underline">
           {children}
         </ExternalLink>
-      )
-    },
-    h1({ children, id }) {
-      return (
-        <h1 id={id} className="scroll-mt-20 text-2xl font-bold mt-6 mb-4">
-          {children}
-        </h1>
-      )
-    },
-    h2({ children, id }) {
-      return (
-        <h2 id={id} className="scroll-mt-20 text-xl font-bold mt-5 mb-3">
-          {children}
-        </h2>
-      )
-    },
-    h3({ children, id }) {
-      return (
-        <h3 id={id} className="scroll-mt-20 text-lg font-semibold mt-4 mb-2">
-          {children}
-        </h3>
-      )
-    },
-    h4({ children, id }) {
-      return (
-        <h4 id={id} className="scroll-mt-20 text-base font-semibold mt-3 mb-2">
-          {children}
-        </h4>
-      )
-    },
-    h5({ children, id }) {
-      return (
-        <h5 id={id} className="scroll-mt-20 text-sm font-semibold mt-3 mb-2">
-          {children}
-        </h5>
-      )
-    },
-    h6({ children, id }) {
-      return (
-        <h6 id={id} className="scroll-mt-20 text-sm font-medium text-muted-foreground mt-3 mb-2">
-          {children}
-        </h6>
       )
     },
   }

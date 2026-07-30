@@ -125,9 +125,49 @@ describe("MarkdownRenderer", () => {
     expect(screen.getByText("Hello world")).toBeInTheDocument()
   })
 
-  it("wraps output in prose container", () => {
+  it("wraps output in a typeset chat container", () => {
     const { container } = render(<MarkdownRenderer content="test" />)
-    expect(container.querySelector(".markdown-renderer")).toBeTruthy()
+    const root = container.querySelector(".markdown-renderer")
+    expect(root).toBeTruthy()
+    // Without both classes every block element inside renders unstyled: the
+    // per-element utilities were removed when typeset took over the rhythm.
+    expect(root).toHaveClass("typeset", "typeset-chat")
+  })
+
+  it("drops the chat preset for a document surface", () => {
+    // `typeset-chat` tightens leading and flow because "a turn is a
+    // conversation, not an article" (app/typeset.css). Plugin READMEs and
+    // skill docs are articles — they used to carry Tailwind `prose` for this —
+    // so they read typeset's own document rhythm instead.
+    const { container } = render(<MarkdownRenderer content="test" rhythm="document" />)
+    const root = container.querySelector(".markdown-renderer")
+    expect(root).toHaveClass("typeset")
+    expect(root).not.toHaveClass("typeset-chat")
+  })
+
+  // typeset's element rules are an unbounded descendant match, so any block
+  // painting its own `pre`/`table` has to opt out at its mount — see the
+  // comment on the `code` override.
+  it.each([
+    ["```js\nconst a = 1\n```", "code-block"],
+    ["```mermaid\ngraph TD;\n```", "mermaid-block"],
+    ["```diff\n- a\n+ b\n```", "diff-block"],
+    ["$$x^2$$", "math-block"],
+  ])("isolates %# from typeset so it keeps painting itself", (content, testMarker) => {
+    render(<MarkdownRenderer content={content} />)
+    const block = document.querySelector(`[data-test="${testMarker}"]`)
+    expect(block).toBeTruthy()
+    expect(block?.closest(".not-typeset")).toBeTruthy()
+  })
+
+  it("lets inline code take its size from the surrounding typeset preset", () => {
+    render(<MarkdownRenderer content="use `npm run dev` here" />)
+    const code = screen.getByText("npm run dev")
+    expect(code.tagName).toBe("CODE")
+    expect(code).toHaveClass("bg-muted", "font-mono")
+    // A pinned `text-sm` would render 14px inline code in a compact tool card
+    // and a full-width README alike.
+    expect(code.className).not.toMatch(/\btext-(xs|sm|base|lg)\b/)
   })
 
   it("orders CJK parsing around GFM and adds math only when enabled", () => {
@@ -391,7 +431,7 @@ describe("MarkdownRenderer", () => {
     const table = document.querySelector("table")
     expect(table).toBeTruthy()
     const scrollWrapper = table?.parentElement
-    expect(scrollWrapper?.className).toContain("overflow-x-auto")
+    expect(scrollWrapper?.className).toContain("typeset-scroll")
   })
 
   it("renders table headers and cells", () => {
@@ -419,30 +459,19 @@ describe("MarkdownRenderer", () => {
 
   // ── headings ────────────────────────────────────────────────────────────────
 
-  it("renders h1 with correct class", () => {
-    render(<MarkdownRenderer content="# Heading 1" />)
-    const h1 = document.querySelector("h1")
-    expect(h1).toBeTruthy()
-    expect(h1?.className).toContain("text-2xl")
-  })
-
-  it("renders h2 with correct class", () => {
-    render(<MarkdownRenderer content="## Heading 2" />)
-    const h2 = document.querySelector("h2")
-    expect(h2).toBeTruthy()
-    expect(h2?.className).toContain("text-xl")
-  })
-
-  it("renders h3 and h4 with their semantic heading styles", () => {
-    render(<MarkdownRenderer content={"### Heading 3\n#### Heading 4"} />)
-    expect(screen.getByRole("heading", { level: 3 })).toHaveClass("text-lg")
-    expect(screen.getByRole("heading", { level: 4 })).toHaveClass("text-base")
-  })
-
-  it("renders h5 and h6 with restrained semantic heading styles", () => {
-    render(<MarkdownRenderer content={"##### Heading 5\n###### Heading 6"} />)
-    expect(screen.getByRole("heading", { level: 5 })).toHaveClass("text-sm")
-    expect(screen.getByRole("heading", { level: 6 })).toHaveClass("text-muted-foreground")
+  it("renders every heading level with an anchor offset and no size of its own", () => {
+    render(
+      <MarkdownRenderer
+        content={"# H1\n## H2\n### H3\n#### H4\n##### H5\n###### H6"}
+        enableMath={false}
+      />
+    )
+    for (const level of [1, 2, 3, 4, 5, 6] as const) {
+      const heading = screen.getByRole("heading", { level })
+      expect(heading).toHaveClass("scroll-mt-20")
+      expect(heading.className).not.toMatch(/\btext-(xs|sm|base|lg|xl|\dxl)\b/)
+    }
+    expect(screen.getByRole("heading", { level: 6 })).toHaveClass("normal-case")
   })
 
   // ── safe raw HTML ─────────────────────────────────────────────────────────

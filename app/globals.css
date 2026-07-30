@@ -1,6 +1,9 @@
 @import "tailwindcss";
+@import "shadcn/tailwind.css";
 @import "tw-animate-css";
 @import "katex/dist/katex.min.css";
+/* After Tailwind so its `@layer components` slot exists — see app/typeset.css. */
+@import "./typeset.css";
 
 /*
  * Bundled Powerline / Nerd Font for the integrated terminal (see
@@ -236,6 +239,70 @@
    `<html>` — these blocks turn those attributes into concrete CSS variable
    values that shadcn components and surface-aware layouts consume.
 --------------------------------------------------------------------------- */
+
+/* ---------------------------------------------------------------------------
+   Where the typography knobs are actually consumed.
+
+   `--line-height-scale` and `--letter-spacing-em` (written onto `<html>` by
+   `lib/appearance/typography-applier.tsx`) and `--density-line-height` (set by
+   the density blocks below) had no `var()` reader anywhere in the repo, so
+   Settings → Appearance → Fine-tuning and the whole density line-height axis
+   moved their sliders and changed nothing on screen.
+
+   Tailwind v4 compiles EVERY line-height utility down to one of fifteen theme
+   variables — `line-height: var(--tw-leading, var(--text-sm--line-height))`
+   for a size utility, `var(--leading-relaxed)` for an explicit one — so
+   restating those variables here is the single seam that reaches the whole
+   app without touching a component.
+
+   `--leading-multiplier` is 1 in the default state (comfortable density,
+   1x scale), which is what keeps this change invisible until someone actually
+   moves a slider. Density contributes `level / 1.5` because "comfortable" is
+   the neutral rung.
+
+   `--text-5xl--line-height` and up are deliberately left alone: they ship at
+   exactly 1 because display type is set solid, and scaling them down would
+   overlap the lines.
+--------------------------------------------------------------------------- */
+
+/* Declared on the root AND on every per-surface density container, because a
+   custom property is substituted where it is DECLARED, not where it is read.
+   `--leading-multiplier` computed on `:root` bakes in the root's
+   `--density-line-height`, and descendants inherit that already-substituted
+   number — so a surface that sets its own `--density-line-height` (the
+   `[data-density-surface]` blocks below) would have no reader left, and its
+   line-height would silently stay at the global value. Restating the tokens on
+   the surface selector re-resolves the whole chain there. */
+:root,
+[data-surface][data-density-surface] {
+  /* Both fallbacks are the neutral rung. A plugin density preset clears its
+     `--density-*` overrides by removing the inline property, and an undefined
+     var inside `calc()` would poison every line-height in the app down to
+     `normal`, so neither input is left unguarded. */
+  --leading-multiplier: calc(var(--density-line-height, 1.5) / 1.5 * var(--line-height-scale, 1));
+
+  --text-xs--line-height: calc(1 / 0.75 * var(--leading-multiplier));
+  --text-sm--line-height: calc(1.25 / 0.875 * var(--leading-multiplier));
+  --text-base--line-height: calc(1.5 / 1 * var(--leading-multiplier));
+  --text-lg--line-height: calc(1.75 / 1.125 * var(--leading-multiplier));
+  --text-xl--line-height: calc(1.75 / 1.25 * var(--leading-multiplier));
+  --text-2xl--line-height: calc(2 / 1.5 * var(--leading-multiplier));
+  --text-3xl--line-height: calc(2.25 / 1.875 * var(--leading-multiplier));
+  --text-4xl--line-height: calc(2.5 / 2.25 * var(--leading-multiplier));
+
+  --leading-tight: calc(1.25 * var(--leading-multiplier));
+  --leading-snug: calc(1.375 * var(--leading-multiplier));
+  --leading-normal: calc(1.5 * var(--leading-multiplier));
+  --leading-relaxed: calc(1.625 * var(--leading-multiplier));
+  --leading-loose: calc(2 * var(--leading-multiplier));
+}
+
+:root {
+  /* `letter-spacing` inherits, so one declaration on the root reaches every
+     text node. Elements carrying an explicit `tracking-*` utility keep their
+     own value, which is the right precedence — those are deliberate. */
+  letter-spacing: var(--letter-spacing-em);
+}
 
 :root[data-density="compact"] {
   --density-spacing: 0.75;

@@ -36,9 +36,49 @@ interface Props {
   projectRoot?: string | null
 }
 
+/** A fence opening at the start of any line, allowing CommonMark's ≤3 spaces of
+ *  indentation and the extra indentation a list item or blockquote adds. */
+const FENCE_LINE = /^[ \t>]*(?:```|~~~)/m
+
+/**
+ * Will this markdown block render a `<pre>` that typeset must not restyle?
+ *
+ * The streaming branch deliberately leaves `code`/`pre` to `@streamdown/code`
+ * (see `createStreamingComponents` below), so there is no component override to
+ * hang typeset's opt-out marker on — and typeset's element rules are an
+ * unbounded descendant match that would otherwise repaint Streamdown's `<pre>`
+ * with its own background, padding and font size. The block wrapper is the one
+ * seam we own on that path.
+ *
+ * Matching only blocks that *open* with a fence was not enough: a fence inside
+ * a list item or a blockquote, and an indented code block, all render a `<pre>`
+ * the finalised `MarkdownRenderer` styles through its own `code`/`pre`
+ * overrides. Missing them is exactly the finalise-time jump the streaming
+ * parity work set out to remove — the block was typeset-styled while streaming
+ * and swapped the instant the turn ended.
+ *
+ * Indented code is only claimed when the *whole* block is indented. A list
+ * whose continuation lines sit at four spaces would otherwise be marked, and
+ * losing typeset's rhythm on ordinary prose is the worse error of the two.
+ *
+ * Exported for tests: the streamdown module is stubbed there, so the predicate
+ * cannot be reached through a real block parse.
+ */
+export function blockRendersCode(content: unknown): boolean {
+  if (typeof content !== "string") return false
+  if (FENCE_LINE.test(content)) return true
+  const lines = content.split("\n").filter((line) => line.trim() !== "")
+  return lines.length > 0 && lines.every((line) => /^(?: {4}|\t)/.test(line))
+}
+
 const ContainedStreamdownBlock = memo(function ContainedStreamdownBlock(props: BlockProps) {
   return (
-    <div className="[content-visibility:auto] [contain-intrinsic-size:auto_160px]">
+    <div
+      className={cn(
+        "[content-visibility:auto] [contain-intrinsic-size:auto_160px]",
+        blockRendersCode((props as { content?: unknown }).content) && "not-typeset"
+      )}
+    >
       <Block {...props} />
     </div>
   )
@@ -88,6 +128,7 @@ function StreamingTextPartInner({ text, projectRoot }: Props) {
     <>
       <MessageResponse
         BlockComponent={ContainedStreamdownBlock}
+        className="typeset typeset-chat"
         components={components}
         mode="streaming"
         parseMarkdownIntoBlocksFn={parser}

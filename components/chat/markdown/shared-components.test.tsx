@@ -206,7 +206,11 @@ describe("createSharedMarkdownComponents — lists and inline", () => {
     expect(screen.getByTestId("kbd-inline")).toHaveTextContent("Ctrl")
   })
 
-  it("renders the structural elements", () => {
+  // jsdom applies no stylesheet, so these assert the CONTRACT that lets typeset
+  // own the rhythm: the block elements carry no competing utility. A stray
+  // `my-2` here would silently outrank typeset (utilities layer beats
+  // components) and the preset knobs would stop moving these elements.
+  it("leaves the block elements bare so the typeset preset owns their rhythm", () => {
     const c = createSharedMarkdownComponents()
     const { container } = renderNode(
       <div>
@@ -220,13 +224,24 @@ describe("createSharedMarkdownComponents — lists and inline", () => {
         <c.hr />
       </div>
     )
-    expect(container.querySelector("ul")).toHaveClass("list-disc")
-    expect(container.querySelector("ol")).toHaveClass("list-decimal")
+    expect(container.querySelector("ul")).not.toHaveAttribute("class")
+    expect(container.querySelector("ol")).not.toHaveAttribute("class")
     expect(container.querySelector("p")).toHaveTextContent("para")
+    expect(container.querySelector("p")).not.toHaveAttribute("class")
     expect(container.querySelector("hr")).toBeInTheDocument()
+    expect(container.querySelector("hr")).not.toHaveAttribute("class")
   })
 
-  it("wraps tables in a horizontally scrollable container", () => {
+  it("keeps the Cognia accent on blockquotes but not their spacing", () => {
+    const { blockquote: Blockquote } = createSharedMarkdownComponents({ enableAlerts: false })
+    const { container } = renderNode(<Blockquote>quoted</Blockquote>)
+    const quote = container.querySelector("blockquote")
+    expect(quote).toHaveClass("border-l-4", "border-primary/30", "italic", "text-muted-foreground")
+    // Indent and vertical rhythm belong to typeset.
+    expect(quote?.className).not.toMatch(/\bpl-\d|\bmy-\d/)
+  })
+
+  it("wraps tables in typeset's own wide-block scroller", () => {
     const c = createSharedMarkdownComponents()
     const { container } = renderNode(
       <c.table>
@@ -242,9 +257,62 @@ describe("createSharedMarkdownComponents — lists and inline", () => {
         </tbody>
       </c.table>
     )
-    expect(container.querySelector(".overflow-x-auto")).toBeInTheDocument()
+    expect(container.querySelector(".typeset-scroll")).toBeInTheDocument()
     expect(screen.getByText("head").tagName).toBe("TH")
     expect(screen.getByText("cell").tagName).toBe("TD")
+    // The grid and the header fill stay ours, and the cell padding has to as
+    // well — typeset zeroes `padding-inline-start` on first-column cells.
+    expect(screen.getByText("head")).toHaveClass("border", "bg-muted", "px-4", "py-2")
+    expect(screen.getByText("cell")).toHaveClass("border", "px-4", "py-2")
+  })
+})
+
+// Headings live here rather than on the finalised branch alone: styled only by
+// `MarkdownRenderer`, they rendered at body size for the whole stream and then
+// snapped when the turn finalised. Sharing one definition is what keeps the two
+// branches identical.
+describe("createSharedMarkdownComponents — headings", () => {
+  const LEVELS = [1, 2, 3, 4, 5, 6] as const
+
+  it.each(LEVELS)("renders h%i with no size of its own so typeset scales it", (level) => {
+    const c = createSharedMarkdownComponents()
+    const Heading = c[`h${level}` as const]
+    renderNode(<Heading>title</Heading>)
+    const heading = screen.getByRole("heading", { level })
+    // `scroll-mt-20` clears the sticky chat header on a permalink jump —
+    // typeset's own `scroll-margin-block-start` is one flow step, far too
+    // small — so it is the one utility a heading is allowed to carry.
+    expect(heading).toHaveClass("scroll-mt-20")
+    // An absolute `text-2xl` would not track the container, which is the whole
+    // reason the heading scale moved to typeset's `em`-relative one.
+    expect(heading.className).not.toMatch(/\btext-(xs|sm|base|lg|xl|\dxl)\b/)
+    expect(heading.className).not.toMatch(/\bfont-(bold|semibold|medium)\b/)
+    // Anchored on a class boundary: `\b` alone also matches inside
+    // `scroll-mt-20`, which is the one margin utility a heading keeps.
+    expect(heading.className).not.toMatch(/(^|\s)m[tb]-\d/)
+  })
+
+  it("neutralises typeset's uppercase label treatment on h6", () => {
+    const { h6: H6 } = createSharedMarkdownComponents()
+    renderNode(<H6>small heading</H6>)
+    // Upstream renders h6 as an uppercase, letter-spaced label. This product
+    // does not use that treatment, but the 0.8125em size stays — pinning h6
+    // back to `text-sm` would make it larger than h5.
+    expect(screen.getByRole("heading", { level: 6 })).toHaveClass("normal-case", "tracking-normal")
+  })
+
+  it("passes a rehype-assigned id through and omits it mid-stream", () => {
+    const { h2: H2 } = createSharedMarkdownComponents()
+    const { rerender } = renderNode(<H2 id="why-it-broke">Why it broke</H2>)
+    expect(screen.getByRole("heading", { level: 2 })).toHaveAttribute("id", "why-it-broke")
+
+    // The streaming branch runs no `rehypeMarkdownHeadingIds`, so `id` is absent.
+    rerender(
+      <NextIntlClientProvider locale="en" messages={messages}>
+        <H2>Why it broke</H2>
+      </NextIntlClientProvider>
+    )
+    expect(screen.getByRole("heading", { level: 2 })).not.toHaveAttribute("id")
   })
 })
 

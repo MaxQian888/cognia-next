@@ -11,7 +11,8 @@
  * block, a `<kbd>` or a task list rendered with the library defaults while
  * streaming and then visibly re-laid-out the instant the turn finalised and
  * `MessageRenderer` swapped in `MarkdownRenderer`. Sharing the overrides makes
- * the two branches converge.
+ * the two branches converge. Headings joined the shared set for the same
+ * reason — they were the last surface left with a stream-to-final size jump.
  *
  * Deliberately NOT shared:
  *   - `code` / `pre` — the streaming branch highlights through
@@ -168,13 +169,7 @@ export function createSharedMarkdownComponents(options: SharedMarkdownComponentO
 
       return (
         // eslint-disable-next-line @next/next/no-img-element -- markdown sources lack the fixed dimensions that next/image requires; ImageBlock above is the optimised path
-        <img
-          src={src}
-          alt={alt || ""}
-          title={title}
-          className="max-w-full h-auto rounded-lg my-4"
-          loading="lazy"
-        />
+        <img src={src} alt={alt || ""} title={title} loading="lazy" />
       )
     },
     blockquote({ children }: MarkdownElementProps<"blockquote">) {
@@ -185,8 +180,11 @@ export function createSharedMarkdownComponents(options: SharedMarkdownComponentO
           return <SafeAlertBlock type={alertInfo.type}>{alertInfo.content}</SafeAlertBlock>
         }
       }
+      // The accent rule and the muted italic are Cognia's, so they stay as
+      // utilities (which outrank typeset's `:where()` rules); the indent and
+      // the vertical rhythm are generic, so typeset owns them.
       return (
-        <blockquote className="border-l-4 border-primary/30 pl-4 italic text-muted-foreground my-4">
+        <blockquote className="border-l-4 border-primary/30 italic text-muted-foreground">
           {children}
         </blockquote>
       )
@@ -197,11 +195,14 @@ export function createSharedMarkdownComponents(options: SharedMarkdownComponentO
     kbd({ children }: MarkdownElementProps<"kbd">) {
       return <KbdInline>{children}</KbdInline>
     },
+    // Marker glyphs, indent and item spacing all come from typeset, which also
+    // varies the marker by nesting depth (disc → circle → square) — something
+    // the flat `list-disc` never did.
     ul({ children }: MarkdownElementProps<"ul">) {
-      return <ul className="list-disc pl-6 my-2 space-y-1">{children}</ul>
+      return <ul>{children}</ul>
     },
     ol({ children }: MarkdownElementProps<"ol">) {
-      return <ol className="list-decimal pl-6 my-2 space-y-1">{children}</ol>
+      return <ol>{children}</ol>
     },
     li({ children }: MarkdownElementProps<"li">) {
       // GFM task-list items (`- [ ]` / `- [x]`) arrive with a disabled
@@ -211,11 +212,17 @@ export function createSharedMarkdownComponents(options: SharedMarkdownComponentO
       if (task) {
         return <TaskListItem checked={task.checked}>{task.label}</TaskListItem>
       }
-      return <li className="leading-relaxed">{children}</li>
+      return <li>{children}</li>
     },
+    // `typeset-scroll` is typeset's own wide-block wrapper: it owns the flow
+    // margin, zeroes the child's, and widens the table to `max-content` so a
+    // wide table scrolls instead of compressing. The grid rules and the header
+    // fill stay Cognia's — including the cell padding, which has to outrank
+    // typeset's `th:first-child { padding-inline-start: 0 }` or the first
+    // column's text would sit flush against the border.
     table({ children }: MarkdownElementProps<"table">) {
       return (
-        <div className="overflow-x-auto my-4">
+        <div className="typeset-scroll">
           <table className="min-w-full border-collapse border border-border">{children}</table>
         </div>
       )
@@ -234,10 +241,66 @@ export function createSharedMarkdownComponents(options: SharedMarkdownComponentO
       return <td className="border border-border px-4 py-2">{children}</td>
     },
     p({ children }: MarkdownElementProps<"p">) {
-      return <p className="my-2 leading-relaxed">{children}</p>
+      return <p>{children}</p>
     },
     hr() {
-      return <hr className="my-6 border-border" />
+      return <hr />
+    },
+    // Size, weight and rhythm come from typeset, whose scale is `em`-relative
+    // and so tracks the container — the old absolute `text-2xl`/`text-xl` set
+    // did not, and rendered the same 24px heading in a 14px chat turn and a
+    // 16px README. Two things typeset cannot supply stay as utilities:
+    //
+    //   - `scroll-mt-20` clears the sticky chat header when a permalink jumps
+    //     to a heading. typeset sets `scroll-margin-block-start` to one flow
+    //     step (~14px), which lands the target under the header.
+    //   - h6's uppercase + letter-spacing is a label treatment this product
+    //     does not use, so it is neutralised. The 0.8125em size stays, or h6
+    //     would end up larger than h5.
+    //
+    // `id` is populated by `rehypeMarkdownHeadingIds` on the finalised branch
+    // only; mid-stream it is simply absent, which costs nothing.
+    h1({ children, id }: MarkdownElementProps<"h1">) {
+      return (
+        <h1 id={id} className="scroll-mt-20">
+          {children}
+        </h1>
+      )
+    },
+    h2({ children, id }: MarkdownElementProps<"h2">) {
+      return (
+        <h2 id={id} className="scroll-mt-20">
+          {children}
+        </h2>
+      )
+    },
+    h3({ children, id }: MarkdownElementProps<"h3">) {
+      return (
+        <h3 id={id} className="scroll-mt-20">
+          {children}
+        </h3>
+      )
+    },
+    h4({ children, id }: MarkdownElementProps<"h4">) {
+      return (
+        <h4 id={id} className="scroll-mt-20">
+          {children}
+        </h4>
+      )
+    },
+    h5({ children, id }: MarkdownElementProps<"h5">) {
+      return (
+        <h5 id={id} className="scroll-mt-20">
+          {children}
+        </h5>
+      )
+    },
+    h6({ children, id }: MarkdownElementProps<"h6">) {
+      return (
+        <h6 id={id} className="scroll-mt-20 normal-case tracking-normal">
+          {children}
+        </h6>
+      )
     },
   }
 }
