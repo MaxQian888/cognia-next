@@ -106,9 +106,11 @@ file via Tauri (`startBroadcast` → `companion_mdns_start`, `:172`).
 </Step>
 <Step>
 **Pair** — `pair-step.tsx`. Either scan the QR (`barcode.ts` → parse the payload) or type the 6-digit
-code. The submit calls `pair-api.ts`, which redeems against `POST /api/v1/auth/pair` (QR) or
-`/api/v1/auth/pair/redeem-code` (code), receiving `{ deviceJwt, deviceId, serverVersion,
-rendezvousId, rendezvousSecret, fingerprint }`. Validation lives in `pair-helpers.ts`.
+code. The submit calls `pair-api.ts`, which generates the mobile P-256 role key and redeems against
+`POST /api/v1/auth/pair` (QR) or `/api/v1/auth/pair/redeem-code` (code), receiving
+`{ deviceJwt, deviceId, serverVersion, rendezvousId, roomDescriptor, fingerprint }`.
+Validation lives in `pair-helpers.ts`; the private key is stored separately and never enters
+the public pairing row.
 </Step>
 <Step>
 **Paired** — `paired-step.tsx` runs a read-only smoke test (`claude_sidecar_status`), verifies the WS

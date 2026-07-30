@@ -168,7 +168,7 @@ sequenceDiagram
   else first use
     R->>R: issue_device_jwt (jwt.rs:89) + rendezvous tuple (auth.rs:337)
     R-->>D: emit companion://device-paired (auth.rs:358)
-    R-->>P: { deviceId, deviceJwt, rendezvousId, rendezvousSecret }
+    R-->>P: { deviceId, deviceJwt, rendezvousId, roomDescriptor, signalingKeyRef }
     P->>R: GET /api/v1/whoami (auth.rs:389) — confirm JWT + re-pin TLS
   end
 ```
@@ -182,10 +182,11 @@ sequenceDiagram
 | `redeem_code_handler` | `auth.rs:211` | `RedeemCodeRequest { code, deviceLabel, … }` (`auth.rs:70`) | `PairResponse` |
 | `whoami_handler` | `auth.rs:389` | (device JWT) | `{ device_id, server_version, tls_fingerprint }` |
 
-`PairResponse` (`auth.rs:99`) is `{ deviceId, deviceJwt, serverVersion, rendezvousId, rendezvousSecret }`.
-The `rendezvousId` (UUIDv4) and 32-byte URL-safe `rendezvousSecret` (`auth.rs:337-342`) are the seed
-for the [WebRTC plane](./signaling-webrtc) — they let the phone and desktop find each other in a room
-and HMAC every signaling envelope.
+`PairResponse` includes `{ deviceId, deviceJwt, serverVersion, rendezvousId,
+roomDescriptor, signalingKeyRef }`. `rendezvousId` is the canonical descriptor hash. The descriptor
+contains both role public keys and no secret; the host role private key is stored behind
+`signalingKeyRef`. The phone-generated private key never crosses the pairing boundary. See the
+[v2 WebRTC plane](./signaling-webrtc).
 
 ### Single-use enforcement
 

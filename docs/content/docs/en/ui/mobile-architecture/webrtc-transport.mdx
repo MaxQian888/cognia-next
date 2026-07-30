@@ -1,159 +1,84 @@
 ---
-title: WebRTC Transport
-description: The client offerer for ADR-0021 WAN transport — the TS envelope twin (HMAC + canonical JSON + replay), the SignalingClient, the offerer's createOffer/DataChannel/ICE, the mobile/desktop controllers, and the Cloudflare-Worker rendezvous server with its Durable-Object rooms.
+title: WebRTC transport
+description: The v2-only mobile/browser offerer, encrypted signaling client, bounded DataChannel protocol, recovery ladder, and LAN-first controller.
 ---
 
-# WebRTC Transport
+# WebRTC transport
 
-<Status variant="beta">beta · M-RTC</Status>
+`TransportRtc` is the mobile/browser offerer. `CompanionTransport` selects the
+route in this order:
 
-<TLDR>
-  When the phone is on cellular — no LAN, no tunnel — `CompanionTransport` upgrades to a **WebRTC
-  DataChannel**. The phone is the **offerer**: `TransportRtc` (`transport-rtc.ts`) creates the
-  `cognia.v1` DataChannel and an SDP offer, exchanges it through a `SignalingClient`
-  (`lib/signaling/client.ts:89`) connected to a public rendezvous, and on open routes `transport.call`
-  over the channel. Every signaling frame is wrapped in an HMAC-SHA256-signed canonical-JSON envelope
-  (`lib/signaling/envelope.ts`) keyed by the `rendezvousSecret` from pairing — the byte-exact TS twin
-  of the Rust envelope, so neither end trusts the relay. The rendezvous is a tiny Cloudflare Worker
-  that shards one **Durable Object per room** and forwards opaque envelopes between peers.
-</TLDR>
+1. healthy LAN HTTPS/WebSocket;
+2. open WebRTC `cognia.v2` DataChannel;
+3. authenticated HTTPS/WebSocket fallback when command metadata permits it.
 
-<StatGrid>
-  <Stat label="DataChannel" value="cognia.v1" hint="types.ts:97 — ordered" />
-  <Stat label="Phone role" value="offerer" hint="desktop is answerer" />
-  <Stat label="Replay LRU" value="256" hint="types.ts:88" />
-  <Stat label="Rendezvous" value="wss://signaling.cognia.cn" hint="types.ts:108" />
-  <Stat label="Room cap" value="4 peers / 1 desktop" hint="wrangler.toml" />
-</StatGrid>
+The client never downgrades to a legacy signaling protocol.
 
-## Where it sits
+## Pairing and signaling
 
-This is the client half of the [WebRTC signaling plane](../../subsystems/companion-api/signaling-webrtc).
-`TransportRtc` is *enabled* (not selected) by `enableWebRtcTier()` (`transport-rtc.ts:395`), invoked by
-the mobile controller; `CompanionTransport` then prefers it per-call and falls back to HTTP if it
-closes. The split-by-role is deliberate: the **phone offers** (it knows when it needs the channel), the
-**desktop answers** (it keeps a standing rendezvous client per paired device).
+The pairing response contains a public `RoomDescriptorV2` and a mobile role
+private key. Capacitor stores the key in SecureStorage. A normal browser uses
+a non-extractable WebCrypto key and an encrypted IndexedDB pairing blob.
 
-## The offerer
+`SignalingClient` connects to `/v2/signaling`, signs the server challenge with
+ECDSA P-256, generates an ephemeral P-256 ECDH key, and subscribes for the
+mobile role. SDP/ICE are encrypted with directional HKDF-SHA-256/AES-256-GCM
+keys and signed over canonical length-prefixed fields. The relay cannot read
+the encrypted body.
 
-`TransportRtc.connect()` (`:258`) builds a `SignalingClient` and, when it reports `subscribed`, runs
-`startNegotiation()` (`:563`):
+One serialized bounded send queue assigns increasing sequence numbers. The
+receiver verifies the role/session/epoch, timestamp and signature before
+advancing its replay state, then applies a bounded reorder window.
 
-```mermaid
-sequenceDiagram
-  participant TX as CompanionTransport
-  participant RT as TransportRtc (offerer)
-  participant SC as SignalingClient
-  participant RZ as Rendezvous (Worker)
-  participant DT as Desktop (answerer)
+## Negotiation
 
-  TX->>RT: enableWebRtcTier() (transport-rtc.ts:395)
-  RT->>SC: connect → subscribe ?rid= (client.ts:200)
-  SC-->>RT: state = subscribed
-  RT->>RT: createDataChannel("cognia.v1") (transport-rtc.ts:626)
-  RT->>RT: createOffer → setLocalDescription (:629)
-  RT->>SC: send "rtc:offer" (signed) (:633)
-  SC->>RZ: relay envelope
-  RZ->>DT: relay → RtcOffer
-  DT-->>RZ: RtcAnswer (signed)
-  RZ-->>SC: relay → rtc:answer
-  SC-->>RT: envelope
-  RT->>RT: setRemoteDescription(answer) (:644)
-  RT->>SC: rtc:ice candidates (signed) (:578)
-  Note over RT,DT: ICE connects, DataChannel opens (:333)
-  TX->>RT: call(method, params) over channel (:432)
-  DT-->>RT: { id, ok, result } / { kind:"event", … } (:835,:852)
+The mobile creates one ordered reliable DataChannel named `cognia.v2`. ICE
+received before the remote description is retained in order (256 entries, 30
+seconds). Every async negotiation callback checks its epoch before mutating
+the peer.
+
+`awaiting-peer` is a normal state when the host is offline. Mid-session
+recovery waits through a disconnected grace period, attempts ICE restart,
+then rebuilds the peer and uses full-jitter bounded reconnect backoff.
+
+## RPC and events
+
+RPC uses:
+
+```ts
+{ id, method, params, idempotencyKey, protocolVersion: 2 }
 ```
 
-`call()` (`:416`) sends `{ id: "rpc-N", method, params }` (`:420`) over `dc.send` (`:432`), resolved by
-matching `{ id, ok, result|error }` in `handleDataChannelMessage` (`:852`); `subscribe()` (`:437`)
-dispatches `{ kind: "event", event, seq, payload }` frames (`:835`) with a per-channel seq cursor.
-Resilience: reconnect backoff `[1…60] s` (`:66`), throttled `reconnectNow` (`:379`), and an ICE-restart
-ladder (`attemptIceRestart`, `:760`; `createOffer({ iceRestart: true })`, `:772`).
+The command manifest determines read/retry behavior. A write reuses one
+idempotency key across RTC and HTTPS fallback. The host's persistent ledger
+returns the prior result, `idempotency_conflict`, or
+`idempotency_indeterminate`; it never blindly repeats an uncertain write.
 
-## The signed envelope (TS twin)
+Events carry a global `seq`. The client persists its cursor, sends
+`event-resume`, filters duplicates/out-of-order delivery, and acknowledges
+each delivered high-water mark. `resync_required` is explicit when replay
+retention cannot cover the gap.
 
-`lib/signaling/envelope.ts` is byte-compatible with the [Rust
-envelope](../../subsystems/companion-api/signaling-webrtc#the-signed-envelope) — a cross-implementation
-MAC test pins them together. The relay is untrusted, so authenticity is end-to-end:
+## Capacity and TURN
 
-- **Canonical JSON** — `canonicalJson` (`:71`) sorts keys (`:94`) and rejects non-finite and
-  **non-integer** numbers (`:86-88`) to stay byte-identical with Rust's serde output.
-- **Sign** — `buildSignedEnvelope` (`:159`) drafts with `mac: ""`, then `macFor` (`:236`) HMAC-SHA256s
-  the canonical bytes with the 32-byte imported `rendezvousSecret` (`importSecret`, `:122`).
-- **Verify** — `verifySignedEnvelope` (`:203`) checks shape, `ver === 1`, the clock-skew window
-  (`REPLAY_CLOCK_SKEW_MS`, `types.ts:85`), and a constant-time MAC compare (`:216`).
-- **Replay** — `ReplayWindow` (`:267`); `observe(role, seq, nonce)` (`:282`) keeps a per-role
-  256-entry LRU (`REPLAY_LRU_CAPACITY`, `types.ts:88`) on both `(role,seq)` and `(role,nonce)`.
+Physical frames are limited to 32 KiB and logical messages to 1 MiB.
+Chunking allows eight concurrent reassemblies, 4 MiB memory, and a 15-second
+deadline. Browser sending pauses above 1 MiB `bufferedAmount` and resumes at
+256 KiB. Each peer permits 32 concurrent RPCs.
 
-`freshNonce` (`:250`) supplies 16 random bytes per envelope.
+Static/BYO ICE servers are combined with short-lived provider TURN servers.
+Credentials are refreshed before expiry. Configuration updates carry a
+generation guard, so a late response from an obsolete provider cannot
+overwrite newer settings. The selected candidate kind (`host`, `srflx`,
+`prflx`, or `relay`) is exposed for connection status.
 
-## The signaling client
+## Verification
 
-`SignalingClient` (`client.ts:89`) is a thin WSS client to the rendezvous. `connectUrl()` appends
-`?rid=<rendezvousId>` (`:200`) so the Worker can route the connection to the right room. On open it
-sends a `subscribe` frame and starts a 25-second ping (`:214-221`). `send(kind, body)` (`:156`) builds
-a signed envelope, base64url-encodes it, and wraps it in a `relay` `ClientFrame` (`:168`). Inbound
-server frames are handled in `handleRaw` (`:238`): `subscribed` / `peerJoined` / `peerLeft` / `relay`
-/ `pong` / `error`; terminal errors `room_full` / `role_taken` (`:49`) reject the connection.
-`handleRelay` (`:289`) parses, **verifies** (`:297`), **replay-checks** (`:304`), then emits the
-envelope. The wire types (`ClientFrame` / `ServerFrame` / `Envelope` / `EnvelopeKind`, `types.ts:16-49`)
-mirror the Rust `proto` crate exactly.
+Run the focused suites and real pair harness:
 
-## The controllers
-
-The controllers only wire configuration — they do *not* contain the RTC logic:
-
-- **`mobile-controller.ts`** (Capacitor) — `installMobileSignalingController` (`:63`) projects
-  `AppSettings` into a call to `tx.enableWebRtcTier({ signalingUrl, rtcConfiguration })` (`:169`),
-  deciding *when* the phone should attempt the RTC tier.
-- **`desktop-controller.ts`** (Tauri) — `installDesktopSignalingController` (`:90`) pushes the paired
-  device list + config into the Rust hub via `companion_signaling_sync_devices` /
-  `companion_signaling_configure` (`:113-140`).
-
-## The rendezvous server
-
-`services/signaling-server/` is a Rust signaling relay with two interchangeable backends sharing the
-`cognia_signaling_core` crate (`proto` / `policy` / `limits`). The client sends `?rid=` either way; the
-HMAC envelope is **opaque** to both — the server forwards it verbatim and never sees plaintext.
-
-### Cloudflare Worker (production)
-
-The deployed backend is a Worker that shards **one Durable Object per room**:
-
-- `lib.rs:fetch` (`:23`) routes `/healthz` (`:32`) and `/v1/signaling` → `route_signaling` (`:37`).
-- `route_signaling` (`:59`) requires the WebSocket upgrade, checks origin, reads `?rid=` (`:74`), and
-  resolves the DO with `env.durable_object("ROOM").id_from_name(&rid).get_stub()` (`:84`) — so each
-  room is an isolated, single-instance actor.
-- `RoomDurableObject` (`room.rs:68`) uses hibernatable WebSockets; `websocket_message` (`:123`) mirrors
-  the axum backend frame-for-frame — `Subscribe` (policy-gated `evaluate_subscribe`, `:179`),
-  `Unsubscribe`, `Relay` → fan-out to `subscribed_others` (`:233`), `Ping`. Room caps come from
-  `wrangler.toml` `[vars]`: `SIGNALING_MAX_PEERS_PER_ROOM = 4`, `SIGNALING_MAX_DESKTOPS = 1`,
-  `SIGNALING_MAX_CONN_PER_IP_PER_ROOM = 4`. The Worker is `cognia-signaling`, bound to the custom
-  domain `signaling.cognia.cn` (a `*.workers.dev` host is GFW-blocked in CN).
-
-### axum (self-host)
-
-`services/signaling-server/src/` is the equivalent single-process server for self-hosting: `router()`
-(`server.rs:76`) serves `/healthz`, `/metrics`, and `any /v1/signaling` → `ws_upgrade` (`ws.rs:62`); a
-`Mutex<HashMap<rid, Vec<PeerHandle>>>` `RoomRegistry` (`room.rs:45`) holds rooms in memory; `handle_frame`
-(`ws.rs:256`) implements the same `Subscribe` / `Relay` / `Ping` semantics. Default `$PORT` 7892,
-deployable to Fly.io.
-
-## Why this design
-
-- **Zero-trust relay.** The rendezvous can be a commodity Worker because it only moves signed,
-  replay-protected envelopes. Compromising it leaks nothing and forges nothing.
-- **One room, one actor.** A Durable Object per `rid` gives strict per-room isolation and trivial
-  fan-out without a shared datastore.
-- **Same protocol, two backends.** Sharing `cognia_signaling_core` means the TS client, the Rust
-  desktop answerer, the axum self-host, and the Worker all speak one wire format — verified by the
-  cross-impl MAC test.
-
-## Related pages
-
-<Cards>
-  <Card title="External API: WebRTC signaling plane" href="../../subsystems/companion-api/signaling-webrtc" description="The desktop answerer, the webrtc-rs peer, and the DataChannel→dispatch pump." />
-  <Card title="Transport layer" href="./transport-layer" description="How CompanionTransport enables, prefers, and falls back from the RTC tier." />
-  <Card title="Discovery & pairing" href="./discovery-pairing" description="Where the rendezvousId + rendezvousSecret are minted." />
-</Cards>
+```bash
+pnpm exec jest lib/signaling lib/tauri/transport-rtc.test.ts --runInBand
+pnpm webrtc:crypto-vector
+pnpm webrtc:smoke
+pnpm webrtc:pair
+```

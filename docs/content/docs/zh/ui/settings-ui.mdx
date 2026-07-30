@@ -247,11 +247,13 @@ export const SETTINGS_SEARCH_KEYWORDS: Record<SettingsSectionId, string[]> = {
 
 桌面壳是 `<SidebarProvider>` 包 `<SettingsSidebar>` 与 `<SidebarInset>`，宽度固定 `15rem`；窄屏自动折叠为汉堡菜单按钮。
 
-移动壳（`components/mobile/settings/mobile-settings-panel.tsx`）把同一份 `SettingsShell` 装进 Sheet 抽屉：
+手机端**根本不渲染** `/settings`。它的设置面是 `/me` —— 一套独立的、数据驱动的 iOS 风格列表：
 
-- 进入 `/settings` 时检测 `usePlatform()`。
-- mobile = 顶栏汉堡按钮触发 Sheet，section 列表在 Sheet 内；选中后 Sheet 自动关。
-- 移动 chrome（statusbar/safe-area）由 mobile-shell-wrapper 顶层处理；设置 panel 不重复关心。
+- `components/mobile/me/me-entries.ts` 是注册表：每行一条带类型的条目（图标、i18n label key、href、分组、搜索关键词），驱动约 48 个 `/me/*` 子页，外加搜索与收藏。
+- 按 ADR-0056 D3，纯 settings-store 驱动的桌面分区**直接内嵌**进 `/me/*` 的 `SubPageShell`，而不是重写一份 —— `/me/appearance`、`/me/canvas`、`/me/eval` 都是这么做的。需要 Tauri 的分区在 `SETTINGS_NAV` 里标 `desktopOnly`，由 `settings-sidebar.tsx` 在非桌面环境过滤掉。
+- 移动 chrome（statusbar/safe-area/tab bar）由 `mobile-shell-wrapper` 顶层处理；`/me` 各页不重复关心。
+
+> `components/mobile/settings/mobile-settings-panel.tsx` 是 Wave 2.7 的遗留物，**不是**移动端设置外壳。它的内容早已拆进 `components/mobile/me/`，本体零消费者，已登记在 `scripts/gates/unreachable-component-baseline.json`。不要在它上面继续搭东西。
 
 ## SettingsSyncProvider
 

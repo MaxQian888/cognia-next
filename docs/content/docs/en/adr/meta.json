@@ -96,6 +96,10 @@
     "0092-official-website-workspace",
     "0093-selection-toolbar-content-hugging-window",
     "0094-conversation-anchors-and-jump",
-    "0095-desktop-selection-perception"
+    "0095-desktop-selection-perception",
+    "0096-loading-state-motion-and-accessibility",
+    "0097-cross-device-settings-contract-and-companion-reach",
+    "0098-persistent-workbench-rail",
+    "0100-unified-template-platform"
   ]
 }

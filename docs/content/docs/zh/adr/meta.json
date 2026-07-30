@@ -65,6 +65,7 @@
     "0090-unified-agent-execution-and-gateway-compatibility",
     "0092-official-website-workspace",
     "0094-conversation-anchors-and-jump",
+    "0098-persistent-workbench-rail",
     "---仅提供英文版---",
     "[ADR 0021 — WebRTC DataChannel WAN transport](/en/docs/adr/0021-webrtc-datachannel-wan-transport)",
     "[ADR 0022 — Agent Team runtime hardening](/en/docs/adr/0022-agent-team-runtime-hardening)",
@@ -97,6 +98,9 @@
     "[0071 — Blocking Lead Task Review](/en/docs/adr/0071-blocking-lead-task-review)",
     "[0091 — Lark Unified Identity and Dual-Entry Surfaces](/en/docs/adr/0091-lark-unified-identity-dual-entry)",
     "[ADR 0093 — Selection Toolbar: Content-Hugging Overlay and Six-Action Contract](/en/docs/adr/0093-selection-toolbar-content-hugging-window)",
-    "[ADR 0095 — Desktop Selection Perception](/en/docs/adr/0095-desktop-selection-perception)"
+    "[ADR 0095 — Desktop Selection Perception](/en/docs/adr/0095-desktop-selection-perception)",
+    "[ADR-0096 — Loading-state motion and accessibility](/en/docs/adr/0096-loading-state-motion-and-accessibility)",
+    "[ADR-0097 — Cross-device settings contract and companion reach](/en/docs/adr/0097-cross-device-settings-contract-and-companion-reach)",
+    "[ADR 0100 — Unified Template Platform](/en/docs/adr/0100-unified-template-platform)"
   ]
 }

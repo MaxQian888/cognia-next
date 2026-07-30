@@ -92,3 +92,21 @@ WAN 机制的前提下,获得外向"连接远程 Cognia 主机"模式。
   错误失败——这是服务端 allow-list 决策,不是客户端 bug。
 - 远程 agent、远程 LSP、SSH 各阶段继承本 ADR 的当前主机模型与注册表;它们增加的
   是能力,不是第二套连接机制。
+
+## 2026-07 operation 级能力契约
+
+上述粗粒度 placement capabilities 继续供 workflow 使用，但管理界面改用
+`host_feature_manifest`。版本化 manifest 将 `hostBuildId`、具体 operations 与运行
+限制绑定在一起；激活/重连时刷新，主机构建变化时丢弃缓存。缺失、未知或陈旧的
+manifest 对写操作一律表示拒绝，客户端不再用乐观写调用探测能力。
+
+设置页明确分成“远程主机执行”“控制端代理”“当前不可用”三类。未完成的功能不得
+广告；当前会话 Skill 附加、Bridge 托管 relay 与 direct TLS 在完整传输和安全链路
+落地前保持缺席。
+
+远程 Claude 响应命令携带服务端盖章的执行上下文（`hostId`、原设备、session、
+generation、request id、签发/过期时间）。传输层现在只把带上下文的事件交给
+来源设备，并拒绝错误设备、陈旧 generation、重放、重复和过期响应 ID。在所有
+响应都绑定真实 pending request、且具备 session 级工具授权前，
+`claude.controller-tool-proxy` 不会被广告。原子 Skill 写入和主机托管 Bridge
+生命周期也会保持未广告，直到 owner、过期、健康检查和迁移要求全部完成。

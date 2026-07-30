@@ -119,3 +119,28 @@ the implementation plan):
   server-side allow-list decision, not a client bug.
 - The remote-agent, remote-LSP, and SSH phases inherit this ADR's active-host
   model and registry; they add capability, not a second connection mechanism.
+
+## 2026-07 operation-level capability contract
+
+The coarse placement capabilities above remain available to workflows, but
+management surfaces now use `host_feature_manifest`. The versioned manifest
+binds a `hostBuildId` to concrete operations and runtime limits. It is refreshed
+on activation/reconnect and discarded when the reported build changes. A
+missing, unknown, or stale manifest is a deny signal for writes; clients do not
+probe write commands optimistically.
+
+Settings renders three explicit buckets: operations executed by the remote
+host, controller-proxied operations, and unavailable features. The manifest
+does not advertise incomplete work. In particular, session Skill attachment,
+managed Bridge relay, and direct TLS exposure remain absent until their full
+transport and security paths ship.
+
+Remote Claude response commands carry a server-stamped execution context
+(`hostId`, origin device, session, generation, request id, issued/expiry time).
+The transport now routes context-bearing events only to the origin device and
+rejects wrong-device, stale-generation, replayed, duplicate, and expired
+response identifiers. The controller-proxy feature remains unadvertised until
+every response is also registered against a concrete pending request and
+session-scoped tool consent is available. Atomic Skill writes and host-managed
+Bridge lifecycle are likewise unadvertised while their remaining ownership,
+expiry, health, and migration requirements are incomplete.

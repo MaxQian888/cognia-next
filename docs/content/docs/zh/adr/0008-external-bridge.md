@@ -216,3 +216,16 @@ Phase 1 中 `RepoMapAgent` 里的 PageRank 是基于体量的启发式
 
 完整计划 + 进度日志见
 `~/.claude/plans/llm-wiki-cognia-claudecode-agent-sleepy-moonbeam.md`。
+
+## 2026-07 主机托管 Bridge 加固
+
+远程 Bridge 管理不再传入 `sidecarPath` 或控制端持有的 bearer secret。主机持久化
+带 revision 的非秘密配置与每客户端不可逆 credential verifier；create/rotate 只
+返回一次明文。每个通过认证的请求由服务端盖章 client id 与 scopes，并在 MCP
+server 内与主机 allowlist 取交集。streaming session 绑定创建它的 credential，
+避免另一名合法客户端复用泄露的 session id。
+
+listener 继续仅监听 loopback。DNS rebinding 与非 loopback Host/Origin 在认证前
+即被拒绝。托管 HTTPS relay、LAN direct TLS 与 auto-start 在安全存储和证书
+preflight 完成前不做广告，配置尝试 fail closed。Headless 主机不会把 orchestration
+请求广播给已连接控制端；缺少 host-local executor 时相关工具保持 degraded。

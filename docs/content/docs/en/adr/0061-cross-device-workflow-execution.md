@@ -41,7 +41,7 @@ A study of the substrate (2026-07-02) found:
    capabilities, no way to ask "can this phone scan a barcode".
 4. **Strong transport foundations going unused**: the companion RPC
    allowlist is spec-parity tested with cross-transport idempotency; the
-   WebRTC DataChannel (`cognia.v1`, ADR 0021) is symmetric — a phone could
+   WebRTC DataChannel (`cognia.v2`, ADR 0021) is symmetric — a phone could
    *serve* RPCs; push + mobile approval-card plumbing exists but never
    carries workflow events; `lib/capacitor/` wraps camera / geolocation /
    barcode / voice / share, none exposed as workflow nodes.

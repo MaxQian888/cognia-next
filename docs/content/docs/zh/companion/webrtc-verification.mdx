@@ -27,8 +27,8 @@ description: WebRTC 移动端 ↔ 桌面端通道（ADR-0021）真机烟测清�
 1. 在桌面端点击 设置 → Mobile companion → Pair device → Generate QR
    生成配对二维码。
 2. 在手机上跑应用内配对流程：发现 → 配对 → 扫码。手机通过
-   `POST /api/v1/auth/pair` 兑换 JWT，返回的响应包含 `rendezvousId` 与
-   `rendezvousSecret`。
+   `POST /api/v1/auth/pair` 兑换 JWT，返回 `RoomDescriptorV2`，并安装
+   non-extractable mobile 角色私钥。
 3. 大约 5 秒内，桌面 WebRTC 卡片应当显示新设备依次经过
    **offline → awaiting → negotiating → connected**。
 4. 移动端的设置面板上，Transport 一行应当落在
@@ -40,12 +40,15 @@ description: WebRTC 移动端 ↔ 桌面端通道（ADR-0021）真机烟测清�
 ## 步骤 2 — 已选中的 ICE 候选类型
 
 1. DataChannel 打开后，在桌面打开 `chrome://webrtc-internals`。
-2. 找到 `RTCDataChannel:cognia.v1` 那一行 → 展开父 PeerConnection →
+2. 找到 `RTCDataChannel:cognia.v2` 那一行 → 展开父 PeerConnection →
    `RTCIceCandidatePair` → 查看**本地候选**的 `type` 字段。
 3. 期望值：`host`（同局域网；如果你在蜂窝网络上不该出现）或 `srflx`
    （典型蜂窝情况）。`prflx` 也算可接受。如果是 `relay`，
    见[步骤 4](#%E6%AD%A5%E9%AA%A4-4--%E5%AF%B9%E7%A7%B0-nat--turn)。
 4. 给 PR 描述截一张这一行的图。
+
+确认连接使用 `/v2/signaling`，状态显示 `v2 role-isolated`。出现任何
+v1 路由或协议降级都属于发布阻断问题。
 
 ## 步骤 3 — 会话中断后的重连
 

@@ -168,7 +168,7 @@ sequenceDiagram
   else first use
     R->>R: issue_device_jwt (jwt.rs:89) + rendezvous tuple (auth.rs:337)
     R-->>D: emit companion://device-paired (auth.rs:358)
-    R-->>P: { deviceId, deviceJwt, rendezvousId, rendezvousSecret }
+    R-->>P: { deviceId, deviceJwt, rendezvousId, roomDescriptor, signalingKeyRef }
     P->>R: GET /api/v1/whoami (auth.rs:389) — confirm JWT + re-pin TLS
   end
 ```
@@ -182,10 +182,10 @@ sequenceDiagram
 | `redeem_code_handler` | `auth.rs:211` | `RedeemCodeRequest { code, deviceLabel, … }`（`auth.rs:70`） | `PairResponse` |
 | `whoami_handler` | `auth.rs:389` | （device JWT） | `{ device_id, server_version, tls_fingerprint }` |
 
-`PairResponse`（`auth.rs:99`）为 `{ deviceId, deviceJwt, serverVersion, rendezvousId, rendezvousSecret }`。
-`rendezvousId`（UUIDv4）和 32 字节 URL-safe `rendezvousSecret`（`auth.rs:337-342`）是
-[WebRTC 平面](./signaling-webrtc)的种子——它们让手机和桌面端在同一房间中找到彼此，并对每个信令
-信封做 HMAC 校验。
+`PairResponse` 包含 `{ deviceId, deviceJwt, serverVersion, rendezvousId,
+roomDescriptor, signalingKeyRef }`。`rendezvousId` 是规范 descriptor 的 hash；
+descriptor 仅包含双方角色公钥，不包含 secret。host 私钥由 `signalingKeyRef` 指向
+原生安全存储，mobile 私钥不会跨过配对边界。详见 [v2 WebRTC 平面](./signaling-webrtc)。
 
 ### 单次使用强制执行
 

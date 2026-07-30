@@ -82,7 +82,7 @@ flowchart TB
 **发现** — `discover-step.tsx` 运行 `scanLan`，以雷达样式展示发现的服务器（`scan-radar.tsx` + `server-card.tsx`）；点击某一结果会预填其 `baseUrl`。
 </Step>
 <Step>
-**配对** — `pair-step.tsx`。可以扫描 QR（`barcode.ts` → 解析载荷）或手动输入 6 位码。提交后调用 `pair-api.ts`，向 `POST /api/v1/auth/pair`（QR）或 `/api/v1/auth/pair/redeem-code`（码）兑换，接收 `{ deviceJwt, deviceId, serverVersion, rendezvousId, rendezvousSecret, fingerprint }`。校验逻辑位于 `pair-helpers.ts`。
+**配对** — `pair-step.tsx`。可以扫描 QR（`barcode.ts` → 解析载荷）或手动输入 6 位码。`pair-api.ts` 先生成 mobile P-256 角色 key，再向 `POST /api/v1/auth/pair`（QR）或 `/api/v1/auth/pair/redeem-code`（码）兑换，接收 `{ deviceJwt, deviceId, serverVersion, rendezvousId, roomDescriptor, fingerprint }`。私钥单独进入安全存储，不写入公开配对记录；校验逻辑位于 `pair-helpers.ts`。
 </Step>
 <Step>
 **已配对** — `paired-step.tsx` 执行只读冒烟测试（`claude_sidecar_status`），验证 WS 路径，并提供诊断面板（服务器版本、绑定地址、fingerprint 前缀、最后一次心跳）。`saveCompanionConfig(...)` 将配置写入 keystore。解除配对操作受[生物特征守卫](./capacitor-shell#biometric-guard)保护。

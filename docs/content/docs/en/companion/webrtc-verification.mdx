@@ -31,8 +31,8 @@ You need:
 1. From the desktop, generate a pair QR (Settings → Mobile companion →
    Pair device → Generate QR).
 2. On the phone, run the in-app pair flow: Discover → Pair → scan the
-   QR. The phone redeems `POST /api/v1/auth/pair`; this returns
-   `rendezvousId` + `rendezvousSecret`.
+   QR. The phone redeems `POST /api/v1/auth/pair`; this returns a
+   `RoomDescriptorV2` and installs a non-extractable mobile role key.
 3. Within ~5 seconds the desktop's WebRTC card should show the new
    device transitioning **offline → awaiting → negotiating → connected**.
 4. On the mobile Settings panel, the Transport row should land on
@@ -45,13 +45,16 @@ minute, jump to [Step 4](#step-4--symmetric-nat--turn).
 
 1. With the DataChannel open, open `chrome://webrtc-internals` on the
    desktop.
-2. Find the `RTCDataChannel:cognia.v1` row → expand the parent peer
+2. Find the `RTCDataChannel:cognia.v2` row → expand the parent peer
    connection → `RTCIceCandidatePair` → look at the **local candidate's**
    `type`.
 3. Expected: `host` (same LAN; you shouldn't be on cellular if so) or
    `srflx` (typical cellular). `prflx` is also fine. If the type is
    `relay`, see [Step 4](#step-4--symmetric-nat--turn).
 4. Screenshot this row for the PR description.
+
+Confirm the connection uses `/v2/signaling` and the status reports
+`v2 role-isolated`. Any v1 route or downgrade is a release blocker.
 
 ## Step 3 — Mid-session reconnect
 

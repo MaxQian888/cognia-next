@@ -556,6 +556,117 @@ paths:
             content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
           }
 
+  /api/v1/_rpc/claude_restore:
+    post:
+      operationId: rpcClaudeRestore
+      tags: [rpc-chat]
+      summary: Restore a compacted host-side conversation.
+      description: Requires the remote-control grant.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [sessionId, messages]
+              properties:
+                sessionId: { type: string }
+                messages: {}
+      responses:
+        "200": { description: Restore command accepted. }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /api/v1/_rpc/claude_set_mode:
+    post:
+      operationId: rpcClaudeSetMode
+      tags: [rpc-chat]
+      summary: Change a live host session permission mode.
+      description: Requires the remote-control grant.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [sessionId, mode]
+              properties:
+                sessionId: { type: string }
+                mode:
+                  {
+                    type: string,
+                    enum: [default, plan, acceptEdits, bypassPermissions, dontAsk, auto],
+                  }
+      responses:
+        "200": { description: Mode command accepted. }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /api/v1/_rpc/claude_plugin_tool_response:
+    post:
+      operationId: rpcClaudePluginToolResponse
+      tags: [rpc-chat]
+      summary: Resolve a pending renderer-proxied tool call.
+      description: Requires the remote-control grant and a matching pending request.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [sessionId, toolUseId]
+              properties:
+                sessionId: { type: string }
+                toolUseId: { type: string }
+                result: {}
+                error: { type: string }
+      responses:
+        "200": { description: Response accepted. }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /api/v1/_rpc/claude_tool_result_decision:
+    post:
+      operationId: rpcClaudeToolResultDecision
+      tags: [rpc-chat]
+      summary: Resolve a pending host tool-result review.
+      description: Requires the remote-control grant and a matching pending review.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [sessionId, reviewId]
+              properties:
+                sessionId: { type: string }
+                reviewId: { type: string }
+                updatedToolOutput: {}
+      responses:
+        "200": { description: Decision accepted. }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /api/v1/_rpc/claude_protocol_adapter_message:
+    post:
+      operationId: rpcClaudeProtocolAdapterMessage
+      tags: [rpc-chat]
+      summary: Forward an allowlisted protocol-adapter response frame.
+      description: Requires the remote-control grant and validates the message type.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [message]
+              properties:
+                message: { type: object, additionalProperties: true }
+      responses:
+        "200": { description: Adapter frame accepted. }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
   /api/v1/_rpc/claude_approve:
     post:
       operationId: rpcClaudeApprove
@@ -1936,6 +2047,245 @@ paths:
             content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
           }
 
+  /api/v1/_rpc/skills_catalog_get:
+    post:
+      operationId: rpcSkillsCatalogGet
+      tags: [rpc-skills]
+      summary: Return the execution host's Cognia, Claude, and Codex Skills catalogs.
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/RpcArgs" } } }
+      responses:
+        "200":
+          description: Host-owned Skills catalog.
+          content: { application/json: { schema: { $ref: "#/components/schemas/RpcResult" } } }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+
+  /api/v1/_rpc/skills_bundle_upload_open:
+    post:
+      operationId: rpcSkillsBundleUploadOpen
+      tags: [rpc-skills]
+      summary: Open a hash-bound Skills bundle upload in the host Skills staging area.
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/RpcArgs" } } }
+      responses:
+        "200":
+          description: Upload handle and maximum raw chunk size.
+          content: { application/json: { schema: { $ref: "#/components/schemas/RpcResult" } } }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "403": { $ref: "#/components/responses/JwtRejected" }
+
+  /api/v1/_rpc/skills_bundle_upload_write:
+    post:
+      operationId: rpcSkillsBundleUploadWrite
+      tags: [rpc-skills]
+      summary: Append one offset- and hash-verified chunk to a Skills upload.
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/RpcArgs" } } }
+      responses:
+        "200":
+          description: Next accepted byte offset.
+          content: { application/json: { schema: { type: integer, format: int64 } } }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+
+  /api/v1/_rpc/skills_bundle_upload_commit:
+    post:
+      operationId: rpcSkillsBundleUploadCommit
+      tags: [rpc-skills]
+      summary: Verify the complete Skills upload and seal it for installation.
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/RpcArgs" } } }
+      responses:
+        "200": { description: Bundle verified and sealed. }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+
+  /api/v1/_rpc/skills_bundle_upload_abort:
+    post:
+      operationId: rpcSkillsBundleUploadAbort
+      tags: [rpc-skills]
+      summary: Abort a Skills upload and delete its staged bytes.
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/RpcArgs" } } }
+      responses:
+        "200": { description: Staging bytes removed. }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+
+  /api/v1/_rpc/skills_install_atomic:
+    post:
+      operationId: rpcSkillsInstallAtomic
+      tags: [rpc-skills]
+      summary: Atomically install a committed bundle across its requested host targets.
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/RpcArgs" } } }
+      responses:
+        "200":
+          description: Per-target install result.
+          content: { application/json: { schema: { $ref: "#/components/schemas/RpcResult" } } }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+
+  /api/v1/_rpc/skills_uninstall:
+    post:
+      operationId: rpcSkillsUninstall
+      tags: [rpc-skills]
+      summary: Remove one named Skill from an explicit host-owned target.
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/RpcArgs" } } }
+      responses:
+        "200":
+          description: Removal result.
+          content: { application/json: { schema: { $ref: "#/components/schemas/RpcResult" } } }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+
+  /api/v1/_rpc/external_bridge_config_get:
+    post:
+      operationId: rpcExternalBridgeConfigGet
+      tags: [rpc-external-bridge]
+      summary: Read the execution host's revisioned External Bridge configuration.
+      responses:
+        "200": { description: Host Bridge configuration. }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+
+  /api/v1/_rpc/external_bridge_config_update:
+    post:
+      operationId: rpcExternalBridgeConfigUpdate
+      tags: [rpc-external-bridge]
+      summary: Revision-guarded update of non-secret host Bridge configuration.
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      responses:
+        "200": { description: Updated Bridge configuration. }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+
+  /api/v1/_rpc/external_bridge_client_create:
+    post:
+      operationId: rpcExternalBridgeClientCreate
+      tags: [rpc-external-bridge]
+      summary: Create a scoped Bridge client and return its credential once.
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      responses:
+        "200": { description: Client metadata and one-time credential. }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+
+  /api/v1/_rpc/external_bridge_client_list:
+    post:
+      operationId: rpcExternalBridgeClientList
+      tags: [rpc-external-bridge]
+      summary: List Bridge client metadata without credentials or verifiers.
+      responses:
+        "200": { description: Bridge clients. }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+
+  /api/v1/_rpc/external_bridge_client_rotate:
+    post:
+      operationId: rpcExternalBridgeClientRotate
+      tags: [rpc-external-bridge]
+      summary: Rotate one Bridge client and return its replacement credential once.
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      responses:
+        "200": { description: Client metadata and replacement credential. }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+
+  /api/v1/_rpc/external_bridge_client_revoke:
+    post:
+      operationId: rpcExternalBridgeClientRevoke
+      tags: [rpc-external-bridge]
+      summary: Revoke one Bridge client immediately.
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      responses:
+        "200": { description: Revoked client metadata. }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+
+  /api/v1/_rpc/external_bridge_start:
+    post:
+      operationId: rpcExternalBridgeStart
+      tags: [rpc-external-bridge]
+      summary: Start the host-owned loopback Bridge using host-resolved sidecar resources.
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      responses:
+        "200": { description: Bound host port. }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+
+  /api/v1/_rpc/external_bridge_stop:
+    post:
+      operationId: rpcExternalBridgeStop
+      tags: [rpc-external-bridge]
+      summary: Stop the host-owned Bridge.
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      responses:
+        "200": { description: Bridge stopped. }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+
+  /api/v1/_rpc/external_bridge_restart:
+    post:
+      operationId: rpcExternalBridgeRestart
+      tags: [rpc-external-bridge]
+      summary: Restart the host-owned Bridge from its persisted revision.
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      responses:
+        "200": { description: Bound host port. }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+
+  /api/v1/_rpc/external_bridge_status:
+    post:
+      operationId: rpcExternalBridgeStatus
+      tags: [rpc-external-bridge]
+      summary: Read redacted Bridge lifecycle and health status.
+      responses:
+        "200": { description: Bridge state, endpoint, revision, and redacted health. }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+
+  /api/v1/_rpc/external_bridge_relay_enable:
+    post:
+      operationId: rpcExternalBridgeRelayEnable
+      tags: [rpc-external-bridge]
+      summary: Enable the authenticated Companion-managed relay when advertised.
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      responses:
+        "200": { description: Relay enabled. }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "501": { description: Host does not advertise managed relay. }
+
+  /api/v1/_rpc/external_bridge_relay_disable:
+    post:
+      operationId: rpcExternalBridgeRelayDisable
+      tags: [rpc-external-bridge]
+      summary: Disable the Companion-managed relay.
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      responses:
+        "200": { description: Relay disabled. }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+
+  /api/v1/_rpc/host_admin_lease_issue:
+    post:
+      operationId: rpcHostAdminLeaseIssue
+      tags: [rpc-host-admin]
+      summary: Issue a device- and operation-bound admin lease for at most 30 minutes.
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      responses:
+        "200": { description: Short-lived admin lease. }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+
+  /api/v1/_rpc/host_admin_lease_revoke:
+    post:
+      operationId: rpcHostAdminLeaseRevoke
+      tags: [rpc-host-admin]
+      summary: Revoke every active admin lease for the authenticated device.
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      responses:
+        "200": { description: Device leases revoked. }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+
   # ─────────────────────────────────────────────────────────────────────────
   # rpc — MCP
   # ─────────────────────────────────────────────────────────────────────────
@@ -2050,40 +2400,6 @@ paths:
           {
             description: Server is stopped.,
             content: { application/json: { schema: { type: "null" } } },
-          }
-        "401": { $ref: "#/components/responses/JwtRejected" }
-        "403": { $ref: "#/components/responses/RemoteControlForbidden" }
-
-  /api/v1/_rpc/orchestration_proxy_response:
-    post:
-      operationId: rpcOrchestrationProxyResponse
-      tags: [rpc-mcp]
-      summary: Resolve one pending MCP orchestration request.
-      description: First reply wins; unknown or already-resolved ids are a no-op. Requires remote-control authorization so an observation-only paired device cannot spoof agent, team, or plugin-tool results.
-      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [id, ok]
-              additionalProperties: false
-              properties:
-                id: { type: string }
-                ok: { type: boolean }
-                result: {}
-                error: { type: [string, "null"] }
-      responses:
-        "200":
-          {
-            description: Reply accepted or id was already resolved.,
-            content: { application/json: { schema: { type: "null" } } },
-          }
-        "400":
-          {
-            description: Invalid reply envelope.,
-            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
           }
         "401": { $ref: "#/components/responses/JwtRejected" }
         "403": { $ref: "#/components/responses/RemoteControlForbidden" }
@@ -2766,11 +3082,77 @@ paths:
               required: [patch]
               properties:
                 patch:
-                  {
-                    type: object,
-                    additionalProperties: true,
-                    description: "Allowlisted AppSettings keys only.",
-                  }
+                  type: object
+                  additionalProperties: true
+                  description: "Allowlisted AppSettings keys only."
+                  propertyNames:
+                    # BEGIN GENERATED settings-sync
+                    enum:
+                      - a11y
+                      - accentColor
+                      - activeCustomThemeId
+                      - activePluginThemeId
+                      - autoMode
+                      - bareMode
+                      - briefMode
+                      - cartesiaVoice
+                      - colorTheme
+                      - compaction
+                      - composerBehavior
+                      - conversationSidebar
+                      - conversationTimeline
+                      - conversationTitle
+                      - customCss
+                      - customCssEnabled
+                      - customThemes
+                      - debugMode
+                      - deepgramVoice
+                      - defaultMaxThinkingTokens
+                      - defaultModel
+                      - defaultSearchProvider
+                      - defaultSystemPrompt
+                      - density
+                      - edgeVoice
+                      - elevenlabsVoice
+                      - evalSettings
+                      - fontScale
+                      - geminiVoice
+                      - humeVoice
+                      - importedVscodeThemes
+                      - instructions
+                      - language
+                      - lastInboxViewedAt
+                      - lmntVoice
+                      - mistralVoiceId
+                      - mobileComputerUseEnabled
+                      - motion
+                      - notificationPreferences
+                      - openaiVoice
+                      - permissionMode
+                      - pinnedWorkflowIds
+                      - profile
+                      - radius
+                      - reduceMotion
+                      - searchEnabled
+                      - searchFallbackEnabled
+                      - searchMaxResults
+                      - sidebarLayout
+                      - streamPartialMessages
+                      - sttLanguage
+                      - surfaceSkillsEnabled
+                      - systemVoice
+                      - telemetryEnabled
+                      - theme
+                      - ttsAutoPlay
+                      - ttsEnabled
+                      - ttsPitch
+                      - ttsProvider
+                      - ttsRate
+                      - ttsVolume
+                      - typographyExt
+                      - wallpapers
+                      - xiaomiVoice
+                    # END GENERATED settings-sync
             examples:
               theme: { value: { patch: { theme: "dark" } } }
       responses:
@@ -2798,6 +3180,69 @@ paths:
   # ─────────────────────────────────────────────────────────────────────────
   # rpc — twin
   # ─────────────────────────────────────────────────────────────────────────
+
+  /api/v1/_rpc/host_capabilities:
+    post:
+      operationId: rpcHostCapabilities
+      tags: [rpc-data]
+      summary: Ask this host what it can do.
+      description: |
+        ADR-0097. Read-only — skips the idempotency cache. Routed through
+        desktop_writes_bridge, so the host's own TypeScript layer answers: the
+        renderer on a desktop, the brain on a headless server. That keeps the
+        capability vocabulary single-sourced in `lib/platform/capabilities.ts`
+        rather than duplicated in Rust.
+
+        A client driving a remote host previously had no way to ask this, so
+        workflow preflight judged the host by the client's own baseline and
+        rejected `always-on` / `headless` work a cloud server could have run.
+      responses:
+        "200":
+          description: The host's platform and its capability ids.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  platform: { type: string, enum: [tauri, mobile, web, headless] }
+                  capabilities: { type: array, items: { type: string } }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "503":
+          {
+            description: the host's TS layer is not attached,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
+  /api/v1/_rpc/host_feature_manifest:
+    post:
+      operationId: rpcHostFeatureManifest
+      tags: [rpc-data]
+      summary: Read the host's versioned remote feature contract.
+      description: |
+        Read-only. Returns operation-level support and transport limits so a
+        controller never infers remote support from its own platform or from
+        the coarse workflow capability vocabulary.
+      responses:
+        "200":
+          description: The host feature manifest.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [schemaVersion, hostBuildId, platform, generatedAt, features, limits]
+                properties:
+                  schemaVersion: { type: integer, enum: [1] }
+                  hostBuildId: { type: string }
+                  platform: { type: string, enum: [tauri, mobile, web, headless] }
+                  generatedAt: { type: integer }
+                  features: { type: object, additionalProperties: true }
+                  limits: { type: object, additionalProperties: true }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "503":
+          {
+            description: the host feature source is not attached,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
 
   /api/v1/_rpc/twin_profile_get:
     post:
@@ -2932,15 +3377,18 @@ paths:
     post:
       operationId: rpcSpawnExternalAgent
       tags: [rpc-control]
-      summary: Spawn an external agent process on the headless server (service scope only).
+      summary: Spawn an external agent process on the host (agent-control grant required).
       description: |
-        ADR-0059 R11. RCE-grade by construction, so the arm is triple-gated:
-        the JWT must carry the headless brain's `service` scope (loopback-
-        minted; a device JWT gets 403), the spawn request must clear the
-        preset-only SpawnPolicy allowlist (agent-CLI binaries, allowlisted
-        npx packages, workspace-rooted cwd, default-deny env), and every
-        decision — allow AND deny — is appended to the server audit log.
-        Unavailable on desktop installs.
+        ADR-0059 R11, ADR-0097. RCE-grade by construction, so the arm is
+        triple-gated: the caller must present either the headless brain's
+        `service` scope (loopback-minted) or a device JWT whose device holds
+        the **agent-control** grant — an explicit, separate grant from
+        remote control, made from the host's paired-devices settings or with
+        `cognia-server devices grant --agent-control <device-id>`; the spawn
+        request must clear the preset-only SpawnPolicy allowlist (agent-CLI
+        binaries, allowlisted npx packages, workspace-rooted cwd, default-deny
+        env); and every decision — allow AND deny — is appended to the server
+        audit log. An ungranted device gets 403. Requires headless services.
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
@@ -2982,10 +3430,11 @@ paths:
     post:
       operationId: rpcSendToExternalAgent
       tags: [rpc-control]
-      summary: Write one line to a spawned external agent's stdin (service scope only).
+      summary: Write one line to a spawned external agent's stdin (agent-control grant required).
       description: |
-        ADR-0059 R11. Service-scope companion of `spawn_external_agent`;
-        audited. Unavailable on desktop installs.
+        ADR-0059 R11, ADR-0097. Same gate as `spawn_external_agent` — service
+        scope or an agent-control-granted device; audited. Requires headless
+        services.
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
@@ -3020,10 +3469,11 @@ paths:
     post:
       operationId: rpcKillExternalAgent
       tags: [rpc-control]
-      summary: Kill a spawned external agent process (service scope only).
+      summary: Kill a spawned external agent process (agent-control grant required).
       description: |
-        ADR-0059 R11. Service-scope companion of `spawn_external_agent`;
-        audited. The exit event is emitted by the process supervisor.
+        ADR-0059 R11, ADR-0097. Same gate as `spawn_external_agent` — service
+        scope or an agent-control-granted device; audited. The exit event is
+        emitted by the process supervisor.
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
@@ -3057,11 +3507,12 @@ paths:
     post:
       operationId: rpcGetExternalAgentStatus
       tags: [rpc-control]
-      summary: Read a spawned external agent's process state (service scope only).
+      summary: Read a spawned external agent's process state (agent-control grant required).
       description: |
-        ADR-0059 R11. Read-only (skips the idempotency cache); reports the
-        exec backend's process state (Starting/Running/Stopping/Stopped/
-        Failed).
+        ADR-0059 R11, ADR-0097. Read-only (skips the idempotency cache);
+        reports the exec backend's process state (Starting/Running/Stopping/
+        Stopped/Failed). Gated like the other agent arms: knowing what is
+        running on a host is not public to every paired device.
       requestBody:
         required: true
         content:

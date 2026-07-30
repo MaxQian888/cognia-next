@@ -215,3 +215,20 @@ Total: 41 source files + 21 co-located test files; 349 tests across
 
 See `~/.claude/plans/llm-wiki-cognia-claudecode-agent-sleepy-moonbeam.md`
 for the full plan + progress log.
+
+## 2026-07 host-managed Bridge hardening
+
+Remote Bridge management no longer sends `sidecarPath` or a controller-owned
+bearer secret. The host persists revisioned non-secret configuration and
+irreversible per-client credential verifiers; create/rotate returns plaintext
+once. Each authenticated request is stamped with its client id and scopes,
+which are intersected with the host allowlist inside the MCP server. Streaming
+sessions are bound to the credential that created them, preventing another
+valid client from reusing a leaked session id.
+
+The listener remains loopback-only. DNS-rebinding and non-loopback
+Host/Origin values are rejected before authentication. Managed HTTPS relay,
+direct LAN/TLS, and auto-start are not advertised and configuration attempts
+fail closed until secure-storage and certificate preflight are complete.
+Headless hosts do not broadcast orchestration requests to connected
+controllers; without a host-local executor those tools remain degraded.

@@ -169,7 +169,7 @@ flowchart TB
   <Card title="RPC 命令清单" href="./rpc-manifest" description="rpc.rs：110 条命令的 KNOWN_COMMANDS allowlist、READ_ONLY 与 CONTROL 命令集、dispatch match、Tauri State 注入、幂等性、每设备限流器，以及 OpenAPI 一致性测试。" />
   <Card title="数据面与 WebView bridge" href="./data-plane-bridges" description="Rust handler 如何读写存储在 WebView Dexie 中的数据：三个 oneshot bridge、sync 表 allowlist，以及在无 WebView 时切换为 SQLite 存储的 headless DataPlane。" />
   <Card title="事件、WebSocket 与推送" href="./events-ws-push" description="事件总线环形缓冲区与 seq 游标、/ws/v1/events 重放与重同步协议、通过 /ws/v1/terminal 实现的可恢复远程终端，以及带 WebSocket 激活抑制的 FCM/APNs 推送。" />
-  <Card title="WebRTC 信令面" href="./signaling-webrtc" description="桌面端应答方：SignalingHub、rendezvous WSS 客户端、webrtc-rs peer、DataChannel→dispatch 泵、HMAC 签名的标准信封，以及每设备连接层级 FSM（ADR-0021）。" />
+  <Card title="WebRTC 信令面" href="./signaling-webrtc" description="仅 v2 的桌面/headless answerer：角色认证加密信令、受界 webrtc-rs peer、持久幂等、事件 replay/resync 与恢复 FSM（ADR-0021）。" />
   <Card title="发现、隧道与 TLS" href="./discovery-tunnel" description="mDNS 广播 _cognia._tcp.local.、cloudflared quick/named 隧道启动器、healthz 发现 endpoint、10 年期自签名证书，以及手机所 pin 的 SPKI 指纹。" />
 </Cards>
 
@@ -193,7 +193,7 @@ Companion API 是三个对外接口之一。另外两个共享相同的设计基
   泵（`signaling/dispatch.rs:195`）都调用同一个
   `dispatch(name, params, state, app, device_id)`（`rpc.rs:711`）。新命令只需编写一次。
 - **签名密钥即身份。** OS keyring 中一个 32 字节的 HS256 密钥（`secret.rs:21`）签发所有
-  pair JWT 和设备 JWT，并作为 WebRTC rendezvous HMAC 的种子；`healthz` 发布的 `server_id`
+  pair JWT 和设备 JWT；WebRTC 使用独立的双方 P-256 角色 key；`healthz` 发布的 `server_id`
   为 `SHA-256(secret)[..16]`（`healthz.rs:54`）。
 - **向发现失败，而非向暴露失败。** 只有 `healthz` 是无需认证的，且它故意只透露
   version + fingerprint + server_id，使手机能在发送任何凭证之前就完成 TLS pin。

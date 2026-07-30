@@ -170,7 +170,7 @@ Read the per-module page for line-accurate internals. Each card is one documenta
   <Card title="RPC command manifest" href="./rpc-manifest" description="rpc.rs: the 110-command KNOWN_COMMANDS allowlist, READ_ONLY and CONTROL command sets, the dispatch match, Tauri State injection, idempotency, the per-device rate limiter, and the OpenAPI parity test." />
   <Card title="Data plane & WebView bridges" href="./data-plane-bridges" description="How a Rust handler reads and writes data that lives in the WebView's Dexie: the three oneshot bridges, the sync-table allowlist, and the headless DataPlane that swaps in a SQLite store when there is no WebView." />
   <Card title="Events, WebSocket & push" href="./events-ws-push" description="The event bus ring buffer and seq cursor, the /ws/v1/events replay + resync protocol, the resumable remote terminal over /ws/v1/terminal, and FCM/APNs push with WebSocket-active suppression." />
-  <Card title="WebRTC signaling plane" href="./signaling-webrtc" description="The desktop answerer: SignalingHub, the rendezvous WSS client, the webrtc-rs peer, the DataChannel→dispatch pump, the HMAC-signed canonical envelope, and the per-device connection tier FSM (ADR-0021)." />
+  <Card title="WebRTC signaling plane" href="./signaling-webrtc" description="The v2-only desktop/headless answerer: role-authenticated encrypted signaling, bounded webrtc-rs peer, durable idempotency, event replay/resync, and recovery FSM (ADR-0021)." />
   <Card title="Discovery, tunnel & TLS" href="./discovery-tunnel" description="mDNS broadcast of _cognia._tcp.local., the cloudflared quick/named tunnel launcher, the healthz discovery endpoint, the 10-year self-signed certificate, and the SPKI fingerprint that the phone pins." />
 </Cards>
 
@@ -194,7 +194,7 @@ The Companion API is one of three external surfaces. The other two share the sam
   (`signaling/dispatch.rs:195`) both call the same `dispatch(name, params, state, app, device_id)`
   (`rpc.rs:711`). A new command is written once.
 - **The signing key is the identity.** A single 32-byte HS256 secret in the OS keyring
-  (`secret.rs:21`) signs every pair and device JWT and seeds the WebRTC rendezvous HMAC; the
+  (`secret.rs:21`) signs every pair and device JWT; WebRTC uses separate per-role P-256 keys, and the
   `server_id` published by `healthz` is `SHA-256(secret)[..16]` (`healthz.rs:54`).
 - **Fail toward discovery, not exposure.** Only `healthz` is unauthenticated, and it deliberately
   reveals just version + fingerprint + server_id so a phone can pin TLS before it ever sends a
