@@ -36,7 +36,7 @@ use super::session::{
     ActionEvidence, ActionMethod, ActionPolicyDecision, ActionRequest, ActionResult, ActionStatus,
     ActionStrategy, AppLocator, CapturedUiState, CoordinateSpace, ElementHandle, ExpandedElements,
     GetAppStateOptions, PreparedAction, SessionError, UiAction, UiSessionManager, UiStateRevision,
-    UiSurface, UiTreeNode,
+    UiSurface, UiTreeNode, UiTreeProjectionKind,
 };
 use super::types::*;
 
@@ -606,6 +606,7 @@ fn capture_app_state(
             roots,
             captured_at,
             max_nodes: options.max_nodes,
+            projection: options.projection,
         })
         .map_err(map_session_error)?;
     if options.disable_diff {
@@ -737,7 +738,11 @@ fn perform_session_action(
                     screenshot: None,
                     roots,
                     captured_at: unix_time_millis(),
-                    max_nodes: super::session::MODEL_TREE_MAX_NODES,
+                    max_nodes: match prepared.state.projection {
+                        UiTreeProjectionKind::Model => super::session::MODEL_TREE_MAX_NODES,
+                        UiTreeProjectionKind::Inspector => super::session::INSPECTOR_TREE_MAX_NODES,
+                    },
+                    projection: prepared.state.projection,
                 })
                 .map_err(map_session_error)?;
             let changed = state.diff.as_ref().is_some_and(|diff| {

@@ -21,6 +21,7 @@ use crate::automation::types::{
 pub const MODEL_TREE_MAX_NODES: usize = 1_000;
 pub const MODEL_TREE_MAX_BYTES: usize = 256 * 1024;
 pub const INSPECTOR_TREE_MAX_NODES: usize = 25_000;
+pub const INSPECTOR_TREE_MAX_BYTES: usize = 8 * 1024 * 1024;
 pub const EXPANSION_PAGE_MAX_NODES: usize = 250;
 pub const TURN_TOKEN_TTL: Duration = Duration::from_secs(30);
 
@@ -73,6 +74,16 @@ pub struct CapturedUiState {
     pub captured_at: i64,
     #[serde(default = "default_model_node_budget")]
     pub max_nodes: usize,
+    #[serde(default)]
+    pub projection: UiTreeProjectionKind,
+}
+
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum UiTreeProjectionKind {
+    #[default]
+    Model,
+    Inspector,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -82,6 +93,7 @@ pub struct GetAppStateOptions {
     pub allow_launch: bool,
     pub max_nodes: usize,
     pub max_depth: u32,
+    pub projection: UiTreeProjectionKind,
 }
 
 impl Default for GetAppStateOptions {
@@ -91,6 +103,7 @@ impl Default for GetAppStateOptions {
             allow_launch: false,
             max_nodes: MODEL_TREE_MAX_NODES,
             max_depth: 64,
+            projection: UiTreeProjectionKind::Model,
         }
     }
 }
@@ -160,6 +173,7 @@ pub struct UiStateRevision {
     pub app: ResolvedApplication,
     pub surface: UiSurface,
     pub screenshot: Option<Screenshot>,
+    pub projection: UiTreeProjectionKind,
     pub tree: UiTreeProjection,
     pub diff: Option<UiTreeDiff>,
     pub truncation: Vec<TruncationDescriptor>,
@@ -375,7 +389,11 @@ impl UiSessionManager {
             1
         };
 
-        let max_nodes = capture.max_nodes.clamp(1, MODEL_TREE_MAX_NODES);
+        let (projection_max_nodes, projection_max_bytes) = match capture.projection {
+            UiTreeProjectionKind::Model => (MODEL_TREE_MAX_NODES, MODEL_TREE_MAX_BYTES),
+            UiTreeProjectionKind::Inspector => (INSPECTOR_TREE_MAX_NODES, INSPECTOR_TREE_MAX_BYTES),
+        };
+        let max_nodes = capture.max_nodes.clamp(1, projection_max_nodes);
         let (canonical, total_nodes) = flatten_roots(&capture.roots, INSPECTOR_TREE_MAX_NODES);
         let mut nodes = Vec::new();
         let mut projected_bytes = 0usize;
@@ -394,9 +412,9 @@ impl UiSessionManager {
             };
             let node_bytes = serde_json::to_vec(&projected)
                 .map(|encoded| encoded.len())
-                .unwrap_or(MODEL_TREE_MAX_BYTES);
+                .unwrap_or(projection_max_bytes);
             if !nodes.is_empty()
-                && projected_bytes.saturating_add(node_bytes) > MODEL_TREE_MAX_BYTES
+                && projected_bytes.saturating_add(node_bytes) > projection_max_bytes
             {
                 byte_truncated = true;
                 break;
@@ -434,6 +452,7 @@ impl UiSessionManager {
             app: capture.app,
             surface: capture.surface,
             screenshot: capture.screenshot,
+            projection: capture.projection,
             tree,
             diff,
             truncation,
@@ -908,6 +927,7 @@ mod tests {
                 roots: vec![root],
                 captured_at: 1,
                 max_nodes: MODEL_TREE_MAX_NODES,
+                projection: UiTreeProjectionKind::Model,
             }
         }
     }
@@ -1018,6 +1038,31 @@ mod tests {
             second.nodes[49].element.automation_id.as_deref(),
             Some("row-299")
         );
+    }
+
+    #[test]
+    fn inspector_projection_materializes_beyond_the_model_node_limit() {
+        let mut parent = root("Notes");
+        parent.children = Some(
+            (0..1_250)
+                .map(|index| {
+                    let mut child = root(&format!("Row {index}"));
+                    child.automation_id = Some(format!("row-{index}"));
+                    child.control_type = Some("row".into());
+                    child
+                })
+                .collect(),
+        );
+        let mut capture = CapturedUiState::fixture(parent);
+        capture.max_nodes = INSPECTOR_TREE_MAX_NODES;
+        capture.projection = UiTreeProjectionKind::Inspector;
+        let state = UiSessionManager::default()
+            .record_state(capture)
+            .expect("inspector state");
+
+        assert_eq!(state.projection, UiTreeProjectionKind::Inspector);
+        assert_eq!(state.tree.nodes.len(), 1_251);
+        assert!(!state.tree.truncated);
     }
 
     #[test]

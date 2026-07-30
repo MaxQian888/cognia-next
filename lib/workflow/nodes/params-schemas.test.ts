@@ -621,12 +621,18 @@ describe("action: Desktop automation schemas", () => {
     expect(
       PARAMS_SCHEMAS["action.desktop.getAppState"].safeParse({
         locator: { kind: "bundleId", bundleId: "com.apple.TextEdit" },
-        options: { maxNodes: 1000, maxDepth: 64 },
+        options: { maxNodes: 1000, maxDepth: 64, projection: "model" },
       }).success
     ).toBe(true)
     expect(
       PARAMS_SCHEMAS["action.desktop.getAppState"].safeParse({
         locator: { bundleId: "com.apple.TextEdit" },
+      }).success
+    ).toBe(false)
+    expect(
+      PARAMS_SCHEMAS["action.desktop.getAppState"].safeParse({
+        locator: { kind: "bundleId", bundleId: "com.apple.TextEdit" },
+        options: { projection: "inspector" },
       }).success
     ).toBe(false)
     expect(

@@ -100,14 +100,14 @@ describe("desktop client", () => {
     await desktop.getAppState(
       "session-1",
       { kind: "bundleId", bundleId: "com.apple.Notes" },
-      {},
+      { projection: "inspector", maxNodes: 25_000 },
       { surface: "computerUse" }
     )
     expect(mockCall).toHaveBeenLastCalledWith("desktop_get_app_state", {
       args: {
         sessionId: "session-1",
         locator: { kind: "bundleId", bundleId: "com.apple.Notes" },
-        options: {},
+        options: { projection: "inspector", maxNodes: 25_000 },
         ctx: { surface: "computerUse" },
       },
     })

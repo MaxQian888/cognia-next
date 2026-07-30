@@ -1045,6 +1045,7 @@ const DesktopGetAppStateParams = z.object({
       allowLaunch: z.boolean().optional(),
       maxNodes: numberRange(1, 1000).optional(),
       maxDepth: numberRange(1, 64).optional(),
+      projection: z.literal("model").optional(),
     })
     .optional(),
 })

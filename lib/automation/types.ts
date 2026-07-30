@@ -159,7 +159,10 @@ export interface GetAppStateOptions {
   allowLaunch?: boolean
   maxNodes?: number
   maxDepth?: number
+  projection?: UiTreeProjectionKind
 }
+
+export type UiTreeProjectionKind = "model" | "inspector"
 
 export interface ElementHandle {
   sessionId: string
@@ -203,6 +206,7 @@ export interface UiStateRevision {
   app: ResolvedApplication
   surface: UiSurface
   screenshot: Screenshot | null
+  projection: UiTreeProjectionKind
   tree: UiTreeProjection
   diff: UiTreeDiff | null
   truncation: TruncationDescriptor[]

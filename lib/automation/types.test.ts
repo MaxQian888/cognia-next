@@ -5,6 +5,16 @@ import {
   keyChord,
   parseAutomationError,
 } from "./types"
+import type { GetAppStateOptions, UiTreeProjectionKind } from "./types"
+
+describe("app-state projection types", () => {
+  it("keeps model and inspector projections explicit", () => {
+    const projections: UiTreeProjectionKind[] = ["model", "inspector"]
+    const options: GetAppStateOptions = { projection: projections[1], maxNodes: 25_000 }
+
+    expect(options).toEqual({ projection: "inspector", maxNodes: 25_000 })
+  })
+})
 
 describe("element ref helpers", () => {
   it("round-trips through elementRef / elementRefValue", () => {

@@ -2,10 +2,8 @@ import type { Meta, StoryObj } from "@storybook/nextjs"
 
 import { InspectorTab } from "./inspector-tab"
 
-// Tauri-branching: the UIA tree inspector talks to the active accessibility
-// backend through Rust. In the Storybook browser (`isTauri()` is false) the tab
-// returns its "requires the Tauri runtime" alert before the tree / details
-// panes — the reachable web branch.
+// Tauri-branching: the app-session Inspector talks to the canonical automation
+// core through Rust. Storybook reaches the desktop-runtime-required branch.
 const meta = {
   title: "Settings/Automation/InspectorTab",
   component: InspectorTab,
