@@ -813,8 +813,6 @@ export const PLUGIN_CAPABILITY_CONTRACTS: readonly PluginCapabilityContract[] = 
       "lib/claude/build-options.ts",
       "lib/claude/computer-use-tools.ts",
       "sidecar/dispatch/anthropic.mjs",
-      "plugins/computer-use/rust/src/commands.rs",
-      "plugins/computer-use/rust/src/translator.rs",
       "crates/cognia-automation/src/automation/commands.rs",
     ],
     typescriptSdk: [
