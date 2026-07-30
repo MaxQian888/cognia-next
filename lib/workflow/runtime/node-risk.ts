@@ -4,8 +4,8 @@
  * The workflow counterpart of the Team/goal risk adapters. Those two classify a
  * whole run from its roster or objective; a workflow is a DAG whose nodes each
  * do one concrete thing, so the node KIND *is* the evidence — far stronger than
- * either. `action.desktop.click` does not merely have access to the mouse, it
- * IS a mouse click.
+ * either. `action.desktop.performAction` does not merely have access to the
+ * machine, it performs a revision-bound UI mutation.
  *
  * That strength is why this file does not go through `classifyRisk`'s text and
  * tool-id heuristics: it maps kinds to surfaces directly and reuses only the
@@ -31,9 +31,10 @@ import type { RiskAssessment, RiskTier } from "@/lib/policy/risk/classify-risk"
  *    `.reaction` toggles an emoji — both trivially reversible, both absent.
  *  - `action.connector.delete` destroys a message someone may rely on →
  *    `data-destructive`.
- *  - `action.desktop.*` drive the operator's machine → `computer-use`.
- *    `.screenshot` is included: it exfiltrates whatever is on screen, which is
- *    the same surface even though it moves nothing. `.wait` is not.
+ *  - `action.desktop.performAction` drives the operator's machine →
+ *    `computer-use`. `.getAppState` is included because its bound screenshot
+ *    can expose whatever is on screen. Structural reads without a screenshot
+ *    are not independently gated.
  *  - `action.system.terminal` / `action.terminal.script` / `.session.run`
  *    execute real shell → `native-command`.
  *  - `action.git.push` publishes commits to a remote others pull → it leaves the
@@ -59,11 +60,8 @@ export const RISKY_NODE_KINDS: Record<string, RiskSurfaceId> = {
   "action.mobile.share": "external-send",
   "action.git.push": "external-send",
   // ── Drives the operator's machine ──
-  "action.desktop.click": "computer-use",
-  "action.desktop.keys": "computer-use",
-  "action.desktop.type": "computer-use",
-  "action.desktop.paste": "computer-use",
-  "action.desktop.screenshot": "computer-use",
+  "action.desktop.getAppState": "computer-use",
+  "action.desktop.performAction": "computer-use",
   // ── Executes real shell ──
   "action.system.terminal": "native-command",
   "action.terminal.script": "native-command",

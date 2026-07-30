@@ -1110,97 +1110,74 @@ const FIXTURES = {
       params: { runId: "eval_run_fixture", minPassAt1: 0.8 },
     }),
 
-  // Desktop actions.
-  "action-desktop-screenshot": () =>
-    single("E2E Desktop Screenshot", {
-      id: "n_ds",
-      type: "action.desktop.screenshot",
-      label: "Screenshot",
-      params: { format: "png", region: { x: 0, y: 0, width: 640, height: 480 } },
-    }),
-  "action-desktop-find-element": () =>
-    single("E2E Desktop Find Element", {
-      id: "n_fe",
-      type: "action.desktop.findElement",
-      label: "Find",
-      params: { locator: { automationId: "btnOk", controlType: "button" } },
-    }),
-  "action-desktop-read-tree": () =>
-    single("E2E Desktop Read Tree", {
-      id: "n_rt",
-      type: "action.desktop.readTree",
-      label: "Tree",
-      params: { root: "window_fixture", maxDepth: 3 },
-    }),
-  "action-desktop-click": () =>
-    single("E2E Desktop Click", {
-      id: "n_dc",
-      type: "action.desktop.click",
-      label: "Click",
-      params: { elementRef: "button_fixture", button: "left" },
-    }),
-  "action-desktop-type": () =>
-    single("E2E Desktop Type", {
-      id: "n_dt",
-      type: "action.desktop.type",
-      label: "Type",
-      params: { target: "input_fixture", text: "hello" },
-    }),
-  "action-desktop-keys": () =>
-    single("E2E Desktop Keys", {
-      id: "n_dk",
-      type: "action.desktop.keys",
-      label: "Keys",
-      params: { chord: "ctrl+c" },
-    }),
-  "action-desktop-invoke-pattern": () =>
-    single("E2E Desktop Invoke Pattern", {
-      id: "n_ip",
-      type: "action.desktop.invokePattern",
-      label: "Invoke",
-      params: { target: "button_fixture", pattern: "invoke" },
-    }),
-  "action-desktop-window-focus": () =>
-    single("E2E Desktop Window Focus", {
-      id: "n_wf",
-      type: "action.desktop.windowFocus",
-      label: "Focus",
-      params: { selector: "Notepad" },
-    }),
-  "action-desktop-window-close": () =>
-    single("E2E Desktop Window Close", {
-      id: "n_wc",
-      type: "action.desktop.windowClose",
-      label: "Close",
-      params: { selector: "Notepad" },
-    }),
-  "action-desktop-window-resize": () =>
-    single("E2E Desktop Window Resize", {
-      id: "n_wr",
-      type: "action.desktop.windowResize",
-      label: "Resize",
-      params: { selector: "Notepad", width: 800, height: 600 },
-    }),
-  "action-desktop-wait": () =>
-    single("E2E Desktop Wait", {
-      id: "n_dw",
-      type: "action.desktop.wait",
-      label: "Wait",
-      params: { selector: "Toast", mode: "appear", timeoutMs: 1000 },
-    }),
-  "action-desktop-paste": () =>
-    single("E2E Desktop Paste", {
-      id: "n_dp",
-      type: "action.desktop.paste",
-      label: "Paste",
-      params: { text: "hello" },
-    }),
-  "action-desktop-launch-app": () =>
-    single("E2E Desktop Launch App", {
+  // Revision-bound desktop actions.
+  "action-desktop-list-apps": () =>
+    single("E2E Desktop List Apps", {
       id: "n_dla",
-      type: "action.desktop.launchApp",
-      label: "Launch App",
-      params: { app: "notepad.exe", action: "launch" },
+      type: "action.desktop.listApps",
+      label: "List apps",
+      params: {},
+    }),
+  "action-desktop-get-app-state": () =>
+    single("E2E Desktop Get App State", {
+      id: "n_dgs",
+      type: "action.desktop.getAppState",
+      label: "Get app state",
+      params: {
+        sessionId: "workflow_fixture",
+        locator: { kind: "bundleId", bundleId: "com.apple.TextEdit" },
+        options: { maxNodes: 1000 },
+      },
+    }),
+  "action-desktop-query-elements": () =>
+    single("E2E Desktop Query Elements", {
+      id: "n_dqe",
+      type: "action.desktop.queryElements",
+      label: "Query elements",
+      params: {
+        sessionId: "workflow_fixture",
+        lineageId: "lineage_fixture",
+        revision: 1,
+        locator: { controlType: "AXButton" },
+      },
+    }),
+  "action-desktop-expand-element": () =>
+    single("E2E Desktop Expand Element", {
+      id: "n_dee",
+      type: "action.desktop.expandElement",
+      label: "Expand element",
+      params: {
+        handle: {
+          sessionId: "workflow_fixture",
+          lineageId: "lineage_fixture",
+          revision: 1,
+          index: 0,
+          fingerprint: "fixture",
+        },
+      },
+    }),
+  "action-desktop-perform-action": () =>
+    single("E2E Desktop Perform Action", {
+      id: "n_dpa",
+      type: "action.desktop.performAction",
+      label: "Perform action",
+      params: {
+        request: {
+          turnToken: "turn_fixture",
+          target: {
+            kind: "element",
+            handle: {
+              sessionId: "workflow_fixture",
+              lineageId: "lineage_fixture",
+              revision: 1,
+              index: 0,
+              fingerprint: "fixture",
+            },
+          },
+          action: { kind: "click" },
+          strategy: "semantic",
+        },
+      },
     }),
 
   // Collaboration, mobile, pet, and composite nodes.

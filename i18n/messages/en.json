@@ -32713,57 +32713,25 @@
           }
         },
         "desktop": {
-          "click": {
-            "description": "Click an element or absolute screen coordinate.",
-            "label": "Click"
+          "expandElement": {
+            "description": "Page through children of an element in the canonical AX tree.",
+            "label": "Expand app element"
           },
-          "findElement": {
-            "description": "Locate a UI element by name / automation id / control type.",
-            "label": "Find element"
+          "getAppState": {
+            "description": "Capture a fresh AX revision and matching window screenshot.",
+            "label": "Get app state"
           },
-          "invokePattern": {
-            "description": "Dispatch a UIA pattern (Invoke / Toggle / Value / Transform / …).",
-            "label": "Invoke pattern"
+          "listApps": {
+            "description": "List applications available to an app-scoped Computer Use session.",
+            "label": "List desktop apps"
           },
-          "keys": {
-            "description": "Send a keyboard chord like ctrl+shift+t.",
-            "label": "Send keys"
+          "performAction": {
+            "description": "Perform one revision- and turn-bound semantic or pixel action.",
+            "label": "Perform app action"
           },
-          "launchApp": {
-            "description": "Launch an application by path/name, or focus an existing window by process.",
-            "label": "Launch app"
-          },
-          "paste": {
-            "description": "Paste text via the clipboard (saves + restores the user clipboard).",
-            "label": "Paste text"
-          },
-          "readTree": {
-            "description": "Snapshot the accessibility subtree as JSON for downstream nodes.",
-            "label": "Read tree"
-          },
-          "screenshot": {
-            "description": "Capture the primary monitor or a region. Returns PNG bytes + dims.",
-            "label": "Screenshot"
-          },
-          "type": {
-            "description": "Type a string into the focused element via SendInput.",
-            "label": "Type text"
-          },
-          "wait": {
-            "description": "Block until an element appears, disappears, or matches a property.",
-            "label": "Wait for element"
-          },
-          "windowClose": {
-            "description": "Close a window via the UIA Window pattern.",
-            "label": "Close window"
-          },
-          "windowFocus": {
-            "description": "Bring a window to the foreground.",
-            "label": "Focus window"
-          },
-          "windowResize": {
-            "description": "Move/resize a window via the UIA Transform pattern.",
-            "label": "Resize window"
+          "queryElements": {
+            "description": "Query elements in one captured app revision.",
+            "label": "Query app elements"
           }
         },
         "git": {

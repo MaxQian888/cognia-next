@@ -32713,57 +32713,25 @@
           }
         },
         "desktop": {
-          "click": {
-            "description": "点击某个元素或屏幕绝对坐标。",
-            "label": "点击"
+          "expandElement": {
+            "description": "分页展开 canonical AX 树中某个元素的子节点。",
+            "label": "展开应用元素"
           },
-          "findElement": {
-            "description": "按名称 / automation id / 控件类型定位 UI 元素。",
-            "label": "查找元素"
+          "getAppState": {
+            "description": "捕获最新 AX revision 及与之匹配的窗口截图。",
+            "label": "获取应用状态"
           },
-          "invokePattern": {
-            "description": "派发 UIA 模式（Invoke / Toggle / Value / Transform 等）。",
-            "label": "调用 UIA 模式"
+          "listApps": {
+            "description": "列出可用于应用级 Computer Use session 的应用。",
+            "label": "列出桌面应用"
           },
-          "keys": {
-            "description": "发送键盘组合键，例如 ctrl+shift+t。",
-            "label": "发送按键"
+          "performAction": {
+            "description": "执行一个绑定 revision 和 turn 的语义或像素操作。",
+            "label": "执行应用操作"
           },
-          "launchApp": {
-            "description": "按路径/名称启动应用，或按进程名聚焦已有窗口。",
-            "label": "启动应用"
-          },
-          "paste": {
-            "description": "通过剪贴板粘贴文本（自动保存并恢复用户剪贴板）。",
-            "label": "粘贴文本"
-          },
-          "readTree": {
-            "description": "把无障碍子树快照为 JSON，供下游节点使用。",
-            "label": "读取控件树"
-          },
-          "screenshot": {
-            "description": "截取主显示器或指定区域，返回 PNG 字节和尺寸。",
-            "label": "屏幕截图"
-          },
-          "type": {
-            "description": "通过 SendInput 把字符串键入到焦点元素。",
-            "label": "输入文本"
-          },
-          "wait": {
-            "description": "阻塞直到元素出现、消失或属性满足条件。",
-            "label": "等待元素"
-          },
-          "windowClose": {
-            "description": "通过 UIA Window 模式关闭窗口。",
-            "label": "关闭窗口"
-          },
-          "windowFocus": {
-            "description": "把指定窗口切到前台。",
-            "label": "聚焦窗口"
-          },
-          "windowResize": {
-            "description": "通过 UIA Transform 模式移动或调整窗口大小。",
-            "label": "调整窗口大小"
+          "queryElements": {
+            "description": "查询某个已捕获应用 revision 中的元素。",
+            "label": "查询应用元素"
           }
         },
         "git": {

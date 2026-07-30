@@ -13,11 +13,8 @@ describe("classifyNodeRisk", () => {
       ["action.connector.forward", "external-send", "high"],
       ["action.mobile.share", "external-send", "high"],
       ["action.git.push", "external-send", "high"],
-      ["action.desktop.click", "computer-use", "high"],
-      ["action.desktop.keys", "computer-use", "high"],
-      ["action.desktop.type", "computer-use", "high"],
-      ["action.desktop.paste", "computer-use", "high"],
-      ["action.desktop.screenshot", "computer-use", "high"],
+      ["action.desktop.getAppState", "computer-use", "high"],
+      ["action.desktop.performAction", "computer-use", "high"],
       ["action.system.terminal", "native-command", "high"],
       ["action.terminal.script", "native-command", "high"],
       ["action.terminal.session.run", "native-command", "high"],
@@ -47,7 +44,9 @@ describe("classifyNodeRisk", () => {
       "action.scheduler.task.delete",
       "action.plugin.invoke",
       "action.skill.invoke",
-      "action.desktop.wait",
+      "action.desktop.listApps",
+      "action.desktop.queryElements",
+      "action.desktop.expandElement",
     ])("%s stays low", (type) => {
       expect(classifyNodeRisk({ type }).tier).toBe("low")
     })

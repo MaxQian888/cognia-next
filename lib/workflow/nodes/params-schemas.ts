@@ -958,16 +958,10 @@ const PluginInvokeParams = z.object({
 // ── Desktop automation ──────────────────────────────────────────────────────
 
 const DesktopElementRef = z.union([requiredString("required"), z.array(z.string()).min(1)])
-const DesktopRectParams = z.object({
+const DesktopPoint = z.object({
   x: z.number(),
   y: z.number(),
-  width: numberRange(1),
-  height: numberRange(1),
 })
-const DesktopRouteTarget = z.object({
-  connectionId: optionalString,
-})
-
 const DesktopLocatorParams = z.object({
   name: optionalString,
   nameContains: optionalString,
@@ -979,109 +973,100 @@ const DesktopLocatorParams = z.object({
   windowTitleContains: optionalString,
   depth: numberRange(0).optional(),
 })
-
-const DesktopBaseParams = z.object({
-  selector: optionalString,
-  timeoutMs: numberRange(0).optional(),
-  retries: numberRange(0).optional(),
-  processName: optionalString,
-  windowTitle: optionalString,
-  target: z.union([DesktopElementRef, DesktopRouteTarget]).optional(),
+const DesktopAppLocator = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("bundleId"), bundleId: requiredString("required") }),
+  z.object({ kind: z.literal("path"), path: requiredString("required") }),
+  z.object({ kind: z.literal("displayName"), displayName: requiredString("required") }),
+])
+const DesktopElementHandle = z.object({
+  sessionId: requiredString("required"),
+  lineageId: requiredString("required"),
+  revision: positiveInteger(),
+  index: numberRange(0),
+  fingerprint: requiredString("required"),
 })
-
-const DesktopTargetableParams = DesktopBaseParams.extend({
-  locator: DesktopLocatorParams.optional(),
+const DesktopPixelTarget = z.object({
+  sessionId: requiredString("required"),
+  lineageId: requiredString("required"),
+  revision: positiveInteger(),
+  point: DesktopPoint,
+  screenshotWidth: positiveInteger(),
+  screenshotHeight: positiveInteger(),
 })
-
-function hasDesktopElementTarget(v: { selector?: string; target?: unknown }): boolean {
-  if (typeof v.selector === "string" && v.selector.trim() !== "") return true
-  if (typeof v.target === "string" && v.target.length > 0) return true
-  return Array.isArray(v.target) && typeof v.target[0] === "string" && v.target[0].length > 0
-}
-
-const DesktopScreenshotParams = DesktopBaseParams.extend({
-  format: z.enum(["png", "jpeg"]).optional(),
-  fullScreen: z.boolean().optional(),
-  outputPath: optionalString,
-  region: DesktopRectParams.optional(),
-})
-
-const DesktopFindElementParams = DesktopTargetableParams
-
-const DesktopReadTreeParams = DesktopTargetableParams.extend({
-  root: DesktopElementRef.optional(),
-  maxDepth: numberRange(1).optional(),
-})
-
-const DesktopClickParams = DesktopTargetableParams.extend({
-  elementRef: DesktopElementRef.optional(),
-  x: z.number().optional(),
-  y: z.number().optional(),
-  button: z.enum(["left", "right", "middle"]).optional(),
-  double: z.boolean().optional(),
-  clickCount: numberRange(1, 3).optional(),
-})
-
-const DesktopTypeParams = DesktopTargetableParams.extend({
-  text: requiredString("required"),
-  delayMs: numberRange(0).optional(),
-})
-
-const DesktopKeysParams = DesktopBaseParams.extend({
-  chord: requiredString("required"),
-})
-
-const DesktopPasteParams = DesktopBaseParams.extend({
-  text: requiredString("required"),
-})
-
-const DesktopLaunchAppParams = DesktopBaseParams.extend({
-  app: requiredString("required"),
-  action: z.enum(["launch", "focus"]).optional(),
-})
-
-const DesktopPatternKind = z.enum([
-  "invoke",
-  "toggle",
-  "selectionItem",
-  "value",
-  "text",
-  "rangeValue",
-  "window",
-  "transform",
-  "expandCollapse",
-  "scrollItem",
+const DesktopActionTarget = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("element"), handle: DesktopElementHandle }),
+  z.object({ kind: z.literal("pixel"), target: DesktopPixelTarget }),
+])
+const DesktopUiAction = z.discriminatedUnion("kind", [
+  z.object({
+    kind: z.literal("click"),
+    button: z.enum(["left", "right", "middle"]).optional(),
+    count: numberRange(1, 3).optional(),
+  }),
+  z.object({
+    kind: z.literal("drag"),
+    to: DesktopPoint,
+    opts: z
+      .object({
+        button: z.enum(["left", "right", "middle"]).optional(),
+        durationMs: numberRange(0).optional(),
+        steps: numberRange(1).optional(),
+      })
+      .optional(),
+  }),
+  z.object({
+    kind: z.literal("scroll"),
+    opts: z
+      .object({
+        dx: z.number().optional(),
+        dy: z.number().optional(),
+        amount: z.number().optional(),
+      })
+      .optional(),
+  }),
+  z.object({ kind: z.literal("pressKey"), chord: z.array(z.string()).length(1) }),
+  z.object({ kind: z.literal("typeText"), text: z.string() }),
+  z.object({ kind: z.literal("setValue"), value: z.string() }),
+  z.object({
+    kind: z.literal("selectText"),
+    start: numberRange(0),
+    end: numberRange(0),
+  }),
+  z.object({ kind: z.literal("secondaryAction"), name: requiredString("required") }),
 ])
 
-const DesktopInvokePatternParams = DesktopTargetableParams.extend({
-  pattern: DesktopPatternKind.optional(),
-  value: optionalString,
-  args: z.record(z.string(), z.unknown()).optional(),
-}).refine(hasDesktopElementTarget, { message: "required", path: ["target"] })
-
-const DesktopWindowTargetParams = DesktopTargetableParams.refine(hasDesktopElementTarget, {
-  message: "required",
-  path: ["target"],
+const DesktopListAppsParams = z.object({})
+const DesktopGetAppStateParams = z.object({
+  sessionId: optionalString,
+  locator: DesktopAppLocator,
+  options: z
+    .object({
+      disableDiff: z.boolean().optional(),
+      allowLaunch: z.boolean().optional(),
+      maxNodes: numberRange(1, 1000).optional(),
+      maxDepth: numberRange(1, 64).optional(),
+    })
+    .optional(),
 })
-
-const DesktopWindowResizeParams = DesktopTargetableParams.extend({
-  rect: DesktopRectParams.optional(),
-  x: z.number().optional(),
-  y: z.number().optional(),
-  width: numberRange(1).optional(),
-  height: numberRange(1).optional(),
+const DesktopQueryElementsParams = z.object({
+  sessionId: requiredString("required"),
+  lineageId: requiredString("required"),
+  revision: positiveInteger(),
+  locator: DesktopLocatorParams.optional(),
+  limit: numberRange(1, 1000).optional(),
 })
-  .refine(hasDesktopElementTarget, { message: "required", path: ["target"] })
-  .refine(
-    (v) =>
-      v.rect !== undefined ||
-      (typeof v.width === "number" && v.width > 0 && typeof v.height === "number" && v.height > 0),
-    { message: "required", path: ["rect"] }
-  )
-
-const DesktopWaitParams = DesktopTargetableParams.extend({
-  mode: z.enum(["appear", "disappear"]).optional(),
-  pollMs: numberRange(1).optional(),
+const DesktopExpandElementParams = z.object({
+  handle: DesktopElementHandle,
+  continuationToken: z.string().nullable().optional(),
+  limit: numberRange(1, 250).optional(),
+})
+const DesktopPerformActionParams = z.object({
+  request: z.object({
+    turnToken: requiredString("required"),
+    target: DesktopActionTarget,
+    action: DesktopUiAction,
+    strategy: z.enum(["semantic", "pixel", "auto"]),
+  }),
 })
 
 const DesktopEventKind = z.enum([
@@ -1756,19 +1741,11 @@ export const PARAMS_SCHEMAS = {
   // Actions: extensibility
   "action.mcp.invokeTool": McpInvokeToolParams,
   "action.plugin.invoke": PluginInvokeParams,
-  "action.desktop.screenshot": DesktopScreenshotParams,
-  "action.desktop.findElement": DesktopFindElementParams,
-  "action.desktop.readTree": DesktopReadTreeParams,
-  "action.desktop.click": DesktopClickParams,
-  "action.desktop.type": DesktopTypeParams,
-  "action.desktop.keys": DesktopKeysParams,
-  "action.desktop.invokePattern": DesktopInvokePatternParams,
-  "action.desktop.windowFocus": DesktopWindowTargetParams,
-  "action.desktop.windowClose": DesktopWindowTargetParams,
-  "action.desktop.windowResize": DesktopWindowResizeParams,
-  "action.desktop.wait": DesktopWaitParams,
-  "action.desktop.paste": DesktopPasteParams,
-  "action.desktop.launchApp": DesktopLaunchAppParams,
+  "action.desktop.listApps": DesktopListAppsParams,
+  "action.desktop.getAppState": DesktopGetAppStateParams,
+  "action.desktop.queryElements": DesktopQueryElementsParams,
+  "action.desktop.expandElement": DesktopExpandElementParams,
+  "action.desktop.performAction": DesktopPerformActionParams,
   "trigger.desktop.event": DesktopEventTriggerParams,
   // System: integrated terminal
   "action.system.terminal": SystemTerminalParams,

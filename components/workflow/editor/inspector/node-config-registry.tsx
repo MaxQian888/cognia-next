@@ -14,21 +14,6 @@ import type { WorkflowNodeKind } from "@/types/workflow/visual"
 import type { NodeCatalogEntry } from "@/lib/workflow/nodes/catalog"
 import { SchemaForm } from "./forms/schema-form"
 import {
-  DesktopScreenshotConfig,
-  DesktopFindElementConfig,
-  DesktopReadTreeConfig,
-  DesktopClickConfig,
-  DesktopTypeConfig,
-  DesktopKeysConfig,
-  DesktopInvokePatternConfig,
-  DesktopWindowFocusConfig,
-  DesktopWindowCloseConfig,
-  DesktopWindowResizeConfig,
-  DesktopWaitConfig,
-  DesktopPasteConfig,
-  DesktopLaunchAppConfig,
-} from "./forms/desktop"
-import {
   GitStageConfig,
   GitCommitConfig,
   GitPushConfig,
@@ -273,20 +258,14 @@ const REGISTRY: Partial<Record<WorkflowNodeKind, NodeConfigComponent>> = {
   // Actions: extensibility
   "action.mcp.invokeTool": McpInvokeToolConfig,
   "action.plugin.invoke": PluginInvokeConfig,
-  // Actions: desktop UI automation (forms in ./forms/desktop)
-  "action.desktop.screenshot": DesktopScreenshotConfig,
-  "action.desktop.findElement": DesktopFindElementConfig,
-  "action.desktop.readTree": DesktopReadTreeConfig,
-  "action.desktop.click": DesktopClickConfig,
-  "action.desktop.type": DesktopTypeConfig,
-  "action.desktop.keys": DesktopKeysConfig,
-  "action.desktop.invokePattern": DesktopInvokePatternConfig,
-  "action.desktop.windowFocus": DesktopWindowFocusConfig,
-  "action.desktop.windowClose": DesktopWindowCloseConfig,
-  "action.desktop.windowResize": DesktopWindowResizeConfig,
-  "action.desktop.wait": DesktopWaitConfig,
-  "action.desktop.paste": DesktopPasteConfig,
-  "action.desktop.launchApp": DesktopLaunchAppConfig,
+  // Actions: revision-bound desktop UI automation. These intentionally use the
+  // canonical JSON envelope instead of maintaining a second set of form-only
+  // coordinate and action types.
+  "action.desktop.listApps": GenericJsonConfig,
+  "action.desktop.getAppState": GenericJsonConfig,
+  "action.desktop.queryElements": GenericJsonConfig,
+  "action.desktop.expandElement": GenericJsonConfig,
+  "action.desktop.performAction": GenericJsonConfig,
   // Actions: system (Wave 3 — integrated terminal)
   "action.system.terminal": SystemTerminalConfig,
   "action.terminal.session.open": TerminalSessionOpenConfig,

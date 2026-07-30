@@ -55,7 +55,7 @@ const workflow = (over: Partial<VisualWorkflow> = {}): VisualWorkflow =>
     id: "wf1",
     schemaVersion: 2,
     name: "W",
-    nodes: [node("n1", "action.desktop.click")],
+    nodes: [node("n1", "action.desktop.performAction")],
     edges: [],
     settings: { riskGating: true },
     ...over,
@@ -109,7 +109,7 @@ describe("hasAncestorApproval", () => {
     nodes: [
       node("a", "action.approval.request"),
       node("b", "flow.set"),
-      node("risky", "action.desktop.click"),
+      node("risky", "action.desktop.performAction"),
       node("orphan", "action.system.terminal"),
     ],
     edges: [
@@ -141,7 +141,7 @@ describe("applyNodeRiskGate", () => {
   it("returns immediately when the workflow has gating off", async () => {
     await applyNodeRiskGate({
       workflow: workflow({ settings: { riskGating: false } } as never),
-      node: node("n1", "action.desktop.click"),
+      node: node("n1", "action.desktop.performAction"),
       runId: "r1",
     })
     expect(listPendingApprovals()).toHaveLength(0)
@@ -149,10 +149,14 @@ describe("applyNodeRiskGate", () => {
 
   it("does not double-gate a node already covered by an approval node", async () => {
     const wf = workflow({
-      nodes: [node("a", "action.approval.request"), node("n1", "action.desktop.click")],
+      nodes: [node("a", "action.approval.request"), node("n1", "action.desktop.performAction")],
       edges: [{ id: "e1", source: "a", target: "n1" }] as never,
     })
-    await applyNodeRiskGate({ workflow: wf, node: node("n1", "action.desktop.click"), runId: "r1" })
+    await applyNodeRiskGate({
+      workflow: wf,
+      node: node("n1", "action.desktop.performAction"),
+      runId: "r1",
+    })
     expect(notifyRequested).not.toHaveBeenCalled()
   })
 
@@ -160,7 +164,7 @@ describe("applyNodeRiskGate", () => {
     await expect(
       applyNodeRiskGate({
         workflow: workflow(),
-        node: node("n1", "action.desktop.click"),
+        node: node("n1", "action.desktop.performAction"),
         runId: "r1",
         triggeredBy: { source: "im", adapterId: "a", conversationKey: "c" } as never,
       })
@@ -169,7 +173,7 @@ describe("applyNodeRiskGate", () => {
     await expect(
       applyNodeRiskGate({
         workflow: workflow(),
-        node: node("n1", "action.desktop.click"),
+        node: node("n1", "action.desktop.performAction"),
         runId: "r1",
         triggeredBy: { source: "im", adapterId: "a", conversationKey: "c" } as never,
       })
@@ -181,7 +185,7 @@ describe("applyNodeRiskGate", () => {
   it("blocks interactively, then proceeds once approved", async () => {
     const p = applyNodeRiskGate({
       workflow: workflow(),
-      node: node("n1", "action.desktop.click"),
+      node: node("n1", "action.desktop.performAction"),
       runId: "r1",
     })
     await new Promise((r) => setTimeout(r, 20))
@@ -199,7 +203,7 @@ describe("applyNodeRiskGate", () => {
   it("throws when the human rejects", async () => {
     const p = applyNodeRiskGate({
       workflow: workflow(),
-      node: node("n1", "action.desktop.click"),
+      node: node("n1", "action.desktop.performAction"),
       runId: "r1",
     })
     await new Promise((r) => setTimeout(r, 20))
@@ -222,7 +226,7 @@ describe("applyNodeRiskGate", () => {
     })
     const p = applyNodeRiskGate({
       workflow: workflow(),
-      node: node("n1", "action.desktop.click"),
+      node: node("n1", "action.desktop.performAction"),
       runId: "r1",
     })
     await new Promise((r) => setTimeout(r, 20))
@@ -239,7 +243,7 @@ describe("applyNodeRiskGate", () => {
       seam.listRunEvents = () => Promise.reject(new Error("no event log"))
       const p = applyNodeRiskGate({
         workflow: workflow(),
-        node: node("n1", "action.desktop.click"),
+        node: node("n1", "action.desktop.performAction"),
         runId: "r1",
       })
       await new Promise((r) => setTimeout(r, 20))
@@ -257,7 +261,7 @@ describe("applyNodeRiskGate", () => {
       seam.appendEvent = () => Promise.reject(new Error("disk full"))
       const p = applyNodeRiskGate({
         workflow: workflow(),
-        node: node("n1", "action.desktop.click"),
+        node: node("n1", "action.desktop.performAction"),
         runId: "r1",
       })
       await new Promise((r) => setTimeout(r, 20))
@@ -276,7 +280,7 @@ describe("applyNodeRiskGate", () => {
       await expect(
         applyNodeRiskGate({
           workflow: workflow(),
-          node: node("n1", "action.desktop.click"),
+          node: node("n1", "action.desktop.performAction"),
           runId: "r1",
         })
       ).rejects.toThrow(/timed out unanswered/)
@@ -288,7 +292,7 @@ describe("applyNodeRiskGate", () => {
       await expect(
         applyNodeRiskGate({
           workflow: workflow(),
-          node: node("n1", "action.desktop.click"),
+          node: node("n1", "action.desktop.performAction"),
           runId: "r1",
         })
       ).rejects.toThrow(/aborted/)
@@ -310,7 +314,7 @@ describe("applyNodeRiskGate", () => {
     await expect(
       applyNodeRiskGate({
         workflow: workflow(),
-        node: node("n1", "action.desktop.click"),
+        node: node("n1", "action.desktop.performAction"),
         runId: "r1",
       })
     ).rejects.toThrow(/expired unanswered/)
