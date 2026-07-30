@@ -210,6 +210,7 @@ export type {
   PluginContextPanelRegistration,
   PluginContextWorkbenchState,
 } from "@/lib/plugin/api/context-panel-api"
+export type { PluginTemplatesAPI } from "../templates"
 
 /** @deprecated `PluginContext` is now the complete activated context. */
 export type FullPluginContext = CtxPluginContext

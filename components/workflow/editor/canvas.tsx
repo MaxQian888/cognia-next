@@ -58,6 +58,9 @@ import { ShortcutsCheatsheet } from "./shortcuts-cheatsheet"
 import * as ResizablePrimitive from "react-resizable-panels"
 import type { PanelImperativeHandle } from "react-resizable-panels"
 import { GripVerticalIcon } from "lucide-react"
+import { magnetAsPercent, snapPanelSize } from "@/lib/ui/panel-snap"
+import { WORKBENCH_RAIL_WIDTH_PX } from "@/types/shell/workbench-rail"
+import { useWorkbenchRailPersistent } from "@/components/shell/use-workbench-rail-layout"
 import type { NodeCatalogEntry } from "@/lib/workflow/nodes/catalog"
 import { useIsMobile } from "@/hooks/ui/use-mobile"
 import {
@@ -67,6 +70,10 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet"
+
+/** The right rail's shipped width and floor, as percentages of the editor. */
+const WORKFLOW_RIGHT_DEFAULT_PERCENT = 28
+const WORKFLOW_RIGHT_MIN_PERCENT = 20
 
 interface CanvasInnerProps {
   store: EditorStore
@@ -151,16 +158,34 @@ function CanvasInner({ store, onRequestRun }: CanvasInnerProps) {
   // panels snap collapsed) so the toolbar toggles always reflect reality.
   const leftPanelRef = useRef<PanelImperativeHandle | null>(null)
   const rightPanelRef = useRef<PanelImperativeHandle | null>(null)
+  const rightPanelElementRef = useRef<HTMLDivElement | null>(null)
+  const latestRightPercentRef = useRef(WORKFLOW_RIGHT_DEFAULT_PERCENT)
+  // The width to come back to. Distinct from `latestRightPercentRef`, which
+  // follows the pointer and reads back the rail's own width once the panel has
+  // collapsed — reopening at that is reopening at nothing.
+  const lastExpandedRightPercentRef = useRef(WORKFLOW_RIGHT_DEFAULT_PERCENT)
+  const rightDragStartCollapsedRef = useRef(false)
   const [leftCollapsed, setLeftCollapsed] = useState(false)
   const [rightCollapsed, setRightCollapsed] = useState(false)
+  const railPersistent = useWorkbenchRailPersistent()
+  // Collapsed means "shrunk to the activity rail" unless the user switched the
+  // persistent rail off — the same contract as the chat dock and Canvas.
+  const rightCollapsedSize = railPersistent ? `${WORKBENCH_RAIL_WIDTH_PX}px` : "0%"
   const handleLeftPanelResize = useCallback(
     (size: { asPercentage: number }) => setLeftCollapsed(size.asPercentage === 0),
     []
   )
-  const handleRightPanelResize = useCallback(
-    (size: { asPercentage: number }) => setRightCollapsed(size.asPercentage === 0),
-    []
-  )
+  // Asked of the panel rather than compared against 0: a collapse now settles
+  // at the activity rail's width, not at nothing, so the old `=== 0` test went
+  // permanently false and the toolbar toggle lost track of the real state.
+  const handleRightPanelResize = useCallback((size: { asPercentage: number }) => {
+    latestRightPercentRef.current = size.asPercentage
+    const collapsed = rightPanelRef.current?.isCollapsed() ?? false
+    if (!collapsed && size.asPercentage >= WORKFLOW_RIGHT_MIN_PERCENT) {
+      lastExpandedRightPercentRef.current = size.asPercentage
+    }
+    setRightCollapsed(collapsed)
+  }, [])
   const toggleLeftPanel = useCallback(() => {
     const panel = leftPanelRef.current
     if (!panel) return
@@ -181,6 +206,34 @@ function CanvasInner({ store, onRequestRun }: CanvasInnerProps) {
     if (isMobile) setMobileToolsOpen(false)
     else rightPanelRef.current?.collapse()
   }, [isMobile])
+  const revealRightWorkbench = useCallback(() => {
+    if (isMobile) setMobileToolsOpen(true)
+    else rightPanelRef.current?.expand()
+  }, [isMobile])
+
+  /** Release-snap for the right rail — see `lib/ui/panel-snap.ts`. */
+  const handleRightResizeRelease = useCallback(() => {
+    const panel = rightPanelRef.current
+    if (!panel) return
+    const groupWidthPx = rightPanelElementRef.current?.parentElement?.offsetWidth ?? 0
+    const wasCollapsed = rightDragStartCollapsedRef.current
+    const snapped = snapPanelSize(latestRightPercentRef.current, {
+      presets: [WORKFLOW_RIGHT_DEFAULT_PERCENT],
+      floor: WORKFLOW_RIGHT_MIN_PERCENT,
+      // Dragging a collapsed rail back open reopens it at the width it was
+      // left at, per ADR-0098 — not at the shipped default, which threw away
+      // whatever the user had chosen.
+      expandTo: lastExpandedRightPercentRef.current,
+      wasCollapsed,
+      magnet: magnetAsPercent(groupWidthPx),
+    })
+    if (snapped.kind === "collapsed") {
+      panel.collapse()
+      return
+    }
+    if (wasCollapsed) panel.expand()
+    panel.resize(`${snapped.size}%`)
+  }, [])
   // Canvas-toolbar view state. Local to this editor instance (the store is
   // recreated per workflow, so these reset on navigation) — see canvas-toolbar.
   // `interactive` mirrors React Flow's native lock; `minimapVisible` and
@@ -1131,8 +1184,14 @@ function CanvasInner({ store, onRequestRun }: CanvasInnerProps) {
         </ResizablePrimitive.Panel>
         {!isMobile ? (
           <>
+            {/* Stays grabbable over a persistent rail — dragging this edge
+                outward is how the collapsed workbench is reopened. */}
             <ResizablePrimitive.Separator
-              className={`relative flex w-px items-center justify-center bg-border after:absolute after:inset-y-0 after:left-1/2 after:w-1 after:-translate-x-1/2 focus-visible:outline-none ${rightCollapsed ? "hidden" : ""}`}
+              className={`relative flex w-px items-center justify-center bg-border after:absolute after:inset-y-0 after:left-1/2 after:w-1 after:-translate-x-1/2 focus-visible:outline-none ${rightCollapsed && !railPersistent ? "hidden" : ""}`}
+              onPointerDown={() => {
+                rightDragStartCollapsedRef.current = rightCollapsed
+              }}
+              onPointerUp={handleRightResizeRelease}
             >
               <div className="z-10 flex h-4 w-3 items-center justify-center rounded border bg-border">
                 <GripVerticalIcon className="size-2.5" />
@@ -1140,11 +1199,12 @@ function CanvasInner({ store, onRequestRun }: CanvasInnerProps) {
             </ResizablePrimitive.Separator>
             <ResizablePrimitive.Panel
               panelRef={rightPanelRef}
-              defaultSize="28%"
-              minSize="20%"
+              elementRef={rightPanelElementRef}
+              defaultSize={`${WORKFLOW_RIGHT_DEFAULT_PERCENT}%`}
+              minSize={`${WORKFLOW_RIGHT_MIN_PERCENT}%`}
               maxSize="42%"
               collapsible
-              collapsedSize="0%"
+              collapsedSize={rightCollapsedSize}
               onResize={handleRightPanelResize}
               className="overflow-hidden"
             >
@@ -1152,6 +1212,13 @@ function CanvasInner({ store, onRequestRun }: CanvasInnerProps) {
                 useStore={store}
                 className="h-full w-full"
                 reactFlowInstance={reactFlowInstance}
+                // Desktop used to pass neither, so its collapse fell through to
+                // the per-scope `mode: "collapsed"` while the panel around it
+                // had its own zero-width collapse — two notions of "shut" for
+                // one column. The host owns it now, like every other surface.
+                onCollapse={collapseRightWorkbench}
+                onEnsureVisible={revealRightWorkbench}
+                railOnly={rightCollapsed && railPersistent}
               />
             </ResizablePrimitive.Panel>
           </>

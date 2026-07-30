@@ -3,6 +3,7 @@
 // call into the commands re-exported from here. All commands return
 // `Result<T, String>` so the JS bridge gets a friendly error message.
 
+pub mod bundle;
 pub mod install;
 pub mod native;
 pub mod registry;

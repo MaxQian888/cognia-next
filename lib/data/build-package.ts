@@ -92,6 +92,9 @@ export async function buildBackupPackage(
     pluginPermissions,
     pluginReviews,
     pluginAnalytics,
+    templateDefinitions,
+    templatePackages,
+    templateInstances,
   ] = await Promise.all([
     getSettings(),
     db.characters.toArray(),
@@ -125,6 +128,9 @@ export async function buildBackupPackage(
     db.pluginPermissions.toArray(),
     db.pluginReviews.toArray(),
     db.pluginAnalytics.toArray(),
+    db.templateDefinitions.toArray(),
+    db.templatePackages.toArray(),
+    db.templateInstances.toArray(),
   ])
 
   // Strip the API key unless the user opted in.
@@ -178,6 +184,9 @@ export async function buildBackupPackage(
     pluginPermissions: pluginPermissions.filter((row) => keptPluginIds.has(row.pluginId)),
     pluginReviews: pluginReviews.filter((row) => keptPluginIds.has(row.pluginId)),
     pluginAnalytics: pluginAnalytics.filter((row) => keptPluginIds.has(row.pluginId)),
+    templateDefinitions,
+    templatePackages,
+    templateInstances,
   }
   if (opts.includeSessions) {
     const exportedSessions = filterExposedSessions(sessions, "standard-export")
@@ -214,6 +223,9 @@ export async function buildBackupPackage(
       "memoryEvidence",
       "memoryJobs",
       "memoryAuditEvents",
+      "templateDefinitions",
+      "templatePackages",
+      "templateInstances",
     ] satisfies (keyof BackupPayloadV3)[]) {
       delete payload[key]
     }

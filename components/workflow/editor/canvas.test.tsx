@@ -36,7 +36,24 @@ const reactFlowPropsRef: { current: Record<string, unknown> | null } = {
 // The sidebar and chat scope have dedicated tests.
 jest.mock("./right-sidebar", () => ({
   __esModule: true,
-  RightSidebar: () => null,
+  // Renders the collapse contract it is handed so the shell's half of the
+  // persistent-rail wiring is assertable without mounting the real workbench.
+  RightSidebar: ({
+    railOnly,
+    onCollapse,
+    onEnsureVisible,
+  }: {
+    railOnly?: boolean
+    onCollapse?: () => void
+    onEnsureVisible?: () => void
+  }) => (
+    <div
+      data-testid="right-sidebar"
+      data-rail-only={railOnly ? "true" : undefined}
+      data-has-collapse={onCollapse ? "true" : undefined}
+      data-has-ensure-visible={onEnsureVisible ? "true" : undefined}
+    />
+  ),
 }))
 
 // Mock the runtime so the run gate can be asserted without executing a real
@@ -499,5 +516,20 @@ describe("WorkflowEditorCanvas — extract to sub-workflow (C5)", () => {
     // n_b was replaced; the rewired edge feeds the subworkflow node from n_a.
     const sub = store.getState().nodes.find((n) => n.data.kind === "flow.subworkflow")!
     expect(store.getState().edges.some((e) => e.source === "n_a" && e.target === sub.id)).toBe(true)
+  })
+})
+
+describe("WorkflowEditorCanvas — persistent workbench rail", () => {
+  it("hands the sidebar both halves of the collapse contract", () => {
+    renderWithProviders(<WorkflowEditorCanvas workflow={buildSample()} />)
+    const sidebar = screen.getByTestId("right-sidebar")
+
+    // The desktop branch used to pass neither, so its collapse fell through to
+    // the per-scope `mode: "collapsed"` while the panel around it had its own
+    // zero-width collapse — two owners for one column.
+    expect(sidebar).toHaveAttribute("data-has-collapse", "true")
+    expect(sidebar).toHaveAttribute("data-has-ensure-visible", "true")
+    // Nothing is collapsed on a fresh editor.
+    expect(sidebar).not.toHaveAttribute("data-rail-only")
   })
 })

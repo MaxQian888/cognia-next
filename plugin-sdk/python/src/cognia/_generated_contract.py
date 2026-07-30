@@ -61,6 +61,10 @@ VALID_PERMISSIONS = (
     "agent:dispatch",
     "agent:shared-memory:read",
     "twin:read",
+    "templates:read",
+    "templates:contribute",
+    "templates:instantiate",
+    "templates:library:write",
     "ipc:call",
     "ipc:expose",
     "events:publish",
@@ -155,6 +159,7 @@ VALID_CAPABILITIES = (
     "lsp-server",
     "character-pack",
     "subagent",
+    "template-package",
     "agent-team-template",
     "shared-memory-adapter",
     "balance-adapter",
@@ -288,6 +293,9 @@ CAPABILITY_FIELDS = {
     "subagent": [
         "subagents",
     ],
+    "template-package": [
+        "templatePackages",
+    ],
     "agent-team-template": [
         "agentTeamTemplates",
     ],
@@ -406,6 +414,7 @@ CAPABILITY_SUPPORT = {
     "lsp-server": "supported",
     "character-pack": "supported",
     "subagent": "supported",
+    "template-package": "supported",
     "agent-team-template": "supported",
     "shared-memory-adapter": "supported",
     "balance-adapter": "supported",
@@ -476,6 +485,7 @@ CAPABILITY_INTRODUCED_VERSIONS = {
     "lsp-server": "0.1.0",
     "character-pack": "0.1.0",
     "subagent": "0.1.0",
+    "template-package": "0.1.0",
     "agent-team-template": "0.1.0",
     "shared-memory-adapter": "0.1.0",
     "balance-adapter": "0.1.0",
@@ -546,6 +556,7 @@ CAPABILITY_MINIMUM_HOST_VERSIONS = {
     "lsp-server": "0.1.0",
     "character-pack": "0.1.0",
     "subagent": "0.1.0",
+    "template-package": "0.1.0",
     "agent-team-template": "0.1.0",
     "shared-memory-adapter": "0.1.0",
     "balance-adapter": "0.1.0",
@@ -823,6 +834,13 @@ MANIFEST_CONTRIBUTIONS = [
         "field": "agentTeamTemplates",
         "capabilities": [
             "agent-team-template",
+        ],
+        "execution": "host",
+    },
+    {
+        "field": "templatePackages",
+        "capabilities": [
+            "template-package",
         ],
         "execution": "host",
     },

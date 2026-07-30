@@ -18,6 +18,7 @@ describe("plugin-sdk package exports", () => {
     "./hooks",
     "./permissions",
     "./extensions",
+    "./templates",
     "./api/tool",
     "./api/context-panel",
     "./api/editor",
@@ -34,6 +35,7 @@ describe("plugin-sdk package exports", () => {
   it("publishes dedicated artifacts for public subpaths with runtime values", () => {
     expect((exportsMap["./events"] as ConditionalExport).import).toBe("./dist/events.js")
     expect((exportsMap["./extensions"] as ConditionalExport).import).toBe("./dist/extensions.js")
+    expect((exportsMap["./templates"] as ConditionalExport).import).toBe("./dist/templates.js")
   })
 
   it("keeps the complete context in one canonical subpath", () => {

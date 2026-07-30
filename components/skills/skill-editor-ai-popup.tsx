@@ -109,9 +109,7 @@ export function SkillEditorAiPopup({
             <p className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
               {t("diff")}
             </p>
-            <div className="prose prose-sm dark:prose-invert max-w-none">
-              <MarkdownRenderer content={suggested} />
-            </div>
+            <MarkdownRenderer content={suggested} rhythm="document" />
           </Card>
         )}
 

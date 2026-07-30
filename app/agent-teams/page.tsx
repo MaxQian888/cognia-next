@@ -79,6 +79,8 @@ import {
 import { useAgentTeamStore } from "@/stores/agent/agent-team-store"
 import { useUIStore } from "@/stores/ui/ui-store"
 import { useTeamLiveStatus } from "@/hooks/agent-runs/use-team-live-status"
+import { usePlatform } from "@/hooks/use-platform"
+import { useTemplateCatalog } from "@/hooks/use-template-catalog"
 import { type AgentTeamTemplate } from "@/types/agent/agent-team"
 import type { AgentTeam } from "@/types/agent/agent-team"
 import { createSampleTeam } from "@/lib/ai/agent/sample-team"
@@ -91,8 +93,64 @@ import {
 } from "@/lib/plugin/registries/agent-team-template-registry"
 import { projectPluginTemplate } from "@/lib/agent-team/project-plugin-template"
 import { instantiateAgentTeamTemplate } from "@/lib/agent-team/instantiate-template"
+import { getTemplateRuntime } from "@/lib/templates/runtime"
+import type { AgentTeamTemplatePayload } from "@/lib/templates/adapters"
+import type { TemplateDefinitionEnvelope } from "@/lib/templates/contracts"
 
 const log = createLogger("agentTeams.list")
+
+function projectCatalogAgentTeam(
+  definition: TemplateDefinitionEnvelope
+): AgentTeamTemplate | undefined {
+  const payload = definition.payload as Partial<AgentTeamTemplatePayload>
+  if (!payload.team || !Array.isArray(payload.teammates) || !Array.isArray(payload.tasks)) {
+    return undefined
+  }
+  const categories = new Set<AgentTeamTemplate["category"]>([
+    "review",
+    "research",
+    "development",
+    "debugging",
+    "analysis",
+    "general",
+    "documentation",
+    "security",
+  ])
+  const category = categories.has(definition.metadata.category as AgentTeamTemplate["category"])
+    ? (definition.metadata.category as AgentTeamTemplate["category"])
+    : "general"
+  return {
+    id: `catalog:${definition.contentHash}`,
+    name: definition.metadata.name,
+    description: definition.metadata.description ?? payload.team.description,
+    category,
+    teammates: payload.teammates.map((teammate) => ({
+      name: teammate.name,
+      description: teammate.description,
+      specialization: teammate.specialization,
+      config: teammate.config as never,
+      systemPrompt: teammate.spawnPrompt,
+      capabilities: teammate.capabilities as never,
+      governanceHints: teammate.governanceHints as never,
+      tags: teammate.tags,
+      iconKey: teammate.iconKey,
+    })),
+    taskTemplates: payload.tasks.map((task) => {
+      const assignedToIndex = task.assignedToLocalId
+        ? payload.teammates!.findIndex((teammate) => teammate.localId === task.assignedToLocalId)
+        : -1
+      return {
+        title: task.title,
+        description: task.description,
+        priority: task.priority as never,
+        ...(assignedToIndex >= 0 ? { assignedToIndex } : {}),
+      }
+    }),
+    config: payload.team.config as never,
+    icon: definition.metadata.icon,
+    isBuiltIn: definition.provenance.source === "built-in",
+  }
+}
 
 /** Merge built-in / user templates with plugin-overlay templates + warnings. */
 function useMergedTemplates(localTemplates: AgentTeamTemplate[]): {
@@ -150,6 +208,7 @@ export default function AgentTeamsListPage() {
   const router = useRouter()
   const t = useTranslations("agentTeamsWorkspace")
   const tCat = useTranslations("agentTeamsWorkspace.templates.categories")
+  const platform = usePlatform()
   // Shared motion tokens, same vocabulary as the workspace panels.
   const cardVariants = useReducedMotionVariants(STAGGER_CHILD)
   const layoutTransition = useReducedMotionTransition(MOBILE_SPRING)
@@ -205,8 +264,20 @@ export default function AgentTeamsListPage() {
   }, [teams, teammates])
 
   const localTemplates = useMemo(() => Object.values(templates), [templates])
-  const { merged: allTemplates, warningsById: templateWarnings } =
+  const { merged: legacyTemplates, warningsById: templateWarnings } =
     useMergedTemplates(localTemplates)
+  const { definitions: catalogDefinitions } = useTemplateCatalog({ domain: "agentTeam" })
+  const catalogProjection = useMemo(() => {
+    const byPickerId = new Map<string, TemplateDefinitionEnvelope>()
+    const rows = catalogDefinitions.flatMap((definition) => {
+      const projected = projectCatalogAgentTeam(definition)
+      if (!projected) return []
+      byPickerId.set(projected.id, definition)
+      return [projected]
+    })
+    return { rows, byPickerId }
+  }, [catalogDefinitions])
+  const allTemplates = catalogProjection.rows.length > 0 ? catalogProjection.rows : legacyTemplates
 
   const filteredTemplates = useMemo(() => {
     const all = [...allTemplates].sort((a, b) => {
@@ -220,10 +291,34 @@ export default function AgentTeamsListPage() {
   }, [allTemplates, categoryFilter])
 
   /* ---- actions ---- */
-  const handlePickTemplate = (tpl: AgentTeamTemplate) => {
-    const team = instantiateAgentTeamTemplate(tpl, { createTeam, addTeammate, createTask })
-    log.info("template_used", { templateId: tpl.id, teamId: team.id })
-    router.push(`/agent-teams/workspace?teamId=${team.id}`)
+  const instantiatePickedTemplate = async (tpl: AgentTeamTemplate): Promise<string | undefined> => {
+    const definition = catalogProjection.byPickerId.get(tpl.id)
+    if (!definition) {
+      return instantiateAgentTeamTemplate(tpl, { createTeam, addTeammate, createTask }).id
+    }
+    const plan = await getTemplateRuntime().service.preflight({
+      definitionId: definition.id,
+      ...(definition.version ? { version: definition.version } : {}),
+      platform: platform === "mobile" ? "mobile" : platform === "web" ? "web" : "desktop",
+      bindings: {},
+    })
+    if (plan.status !== "ready") {
+      toast.info(t("templates.openStudioForBindings"))
+      router.push(`/templates?definition=${encodeURIComponent(definition.id)}`)
+      return undefined
+    }
+    const result = await getTemplateRuntime().service.instantiate({
+      plan,
+      confirmed: false,
+    })
+    return result.resources.find((resource) => resource.domain === "agentTeam")?.id
+  }
+
+  const handlePickTemplate = async (tpl: AgentTeamTemplate) => {
+    const teamId = await instantiatePickedTemplate(tpl)
+    if (!teamId) return
+    log.info("template_used", { templateId: tpl.id, teamId })
+    router.push(`/agent-teams/workspace?teamId=${teamId}`)
   }
 
   const handleDelete = (team: AgentTeam) => {
@@ -485,7 +580,11 @@ export default function AgentTeamsListPage() {
                     <span className="text-[10px] text-muted-foreground">
                       {tCat(tpl.category)} · {t("teammatesCount", { count: tpl.teammates.length })}
                     </span>
-                    <Button size="sm" variant="outline" onClick={() => handlePickTemplate(tpl)}>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => void handlePickTemplate(tpl)}
+                    >
                       <PlayIcon className="mr-1 size-3" />
                       {t("createTeam")}
                     </Button>
@@ -502,6 +601,7 @@ export default function AgentTeamsListPage() {
         open={createOpen}
         onOpenChange={setCreateOpen}
         templates={allTemplates}
+        onPickTemplate={instantiatePickedTemplate}
         onCreated={(teamId) => {
           setCreateOpen(false)
           router.push(`/agent-teams/workspace?teamId=${teamId}`)
@@ -719,14 +819,19 @@ interface CreateTeamDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   templates: AgentTeamTemplate[]
+  onPickTemplate: (template: AgentTeamTemplate) => Promise<string | undefined>
   onCreated: (teamId: string) => void
 }
 
-function CreateTeamDialog({ open, onOpenChange, templates, onCreated }: CreateTeamDialogProps) {
+function CreateTeamDialog({
+  open,
+  onOpenChange,
+  templates,
+  onPickTemplate,
+  onCreated,
+}: CreateTeamDialogProps) {
   const t = useTranslations("agentTeamsWorkspace")
   const createTeam = useAgentTeamStore((s) => s.createTeam)
-  const addTeammate = useAgentTeamStore((s) => s.addTeammate)
-  const createTask = useAgentTeamStore((s) => s.createTask)
 
   const [mode, setMode] = useState<"template" | "scratch">("template")
   const [name, setName] = useState("")
@@ -755,12 +860,13 @@ function CreateTeamDialog({ open, onOpenChange, templates, onCreated }: CreateTe
     }
   }
 
-  const handlePickTemplate = (tpl: AgentTeamTemplate) => {
+  const handlePickTemplate = async (tpl: AgentTeamTemplate) => {
     setSaving(true)
     try {
-      const team = instantiateAgentTeamTemplate(tpl, { createTeam, addTeammate, createTask })
-      toast.success(t("teamCreated", { name: team.name }))
-      onCreated(team.id)
+      const teamId = await onPickTemplate(tpl)
+      if (!teamId) return
+      toast.success(t("teamCreated", { name: tpl.name }))
+      onCreated(teamId)
       reset()
     } finally {
       setSaving(false)
@@ -827,7 +933,7 @@ function CreateTeamDialog({ open, onOpenChange, templates, onCreated }: CreateTe
                   key={tpl.id}
                   type="button"
                   disabled={saving}
-                  onClick={() => handlePickTemplate(tpl)}
+                  onClick={() => void handlePickTemplate(tpl)}
                   className="flex items-start gap-3 rounded-md border p-3 text-left transition-colors duration-150 hover:border-primary disabled:opacity-50"
                 >
                   <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-primary/10 text-xs font-medium">

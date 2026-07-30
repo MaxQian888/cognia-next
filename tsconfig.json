@@ -60,6 +60,7 @@
       "@cognia/plugin-sdk/hooks": ["./packages/plugin-sdk/src/hooks/index.ts"],
       "@cognia/plugin-sdk/permissions": ["./packages/plugin-sdk/src/permissions/index.ts"],
       "@cognia/plugin-sdk/extensions": ["./packages/plugin-sdk/src/extensions/index.ts"],
+      "@cognia/plugin-sdk/templates": ["./packages/plugin-sdk/src/templates/index.ts"],
       "@cognia/plugin-sdk/api/tool": ["./packages/plugin-sdk/src/api/tool.ts"],
       "@cognia/plugin-sdk/api/native-anthropic-tool": [
         "./packages/plugin-sdk/src/api/native-anthropic-tool.ts"

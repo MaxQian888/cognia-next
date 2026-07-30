@@ -97,6 +97,10 @@ interface RightSidebarProps {
   onOpenWorkflowSettings?: (tab?: string) => void
   reactFlowInstance?: ReactFlowInstance | null
   onCollapse?: () => void
+  /** Reopen the container this sidebar sits in — the dual of `onCollapse`. */
+  onEnsureVisible?: () => void
+  /** The container has shrunk to the activity rail; drop the panel body. */
+  railOnly?: boolean
   placement?: ContextWorkbenchPlacement
 }
 
@@ -429,6 +433,8 @@ function WorkflowContextWorkbench({
   onOpenWorkflowSettings,
   reactFlowInstance,
   onCollapse,
+  onEnsureVisible,
+  railOnly,
   placement,
 }: RightSidebarProps) {
   const workbenchInstanceId = useContextWorkbenchInstanceId("workflow")
@@ -679,6 +685,8 @@ function WorkflowContextWorkbench({
       placement={placement}
       onExitFocus={handleExitFocus}
       onCollapse={onCollapse}
+      onEnsureVisible={onEnsureVisible}
+      railOnly={railOnly}
       manageOwnWidth={false}
       className={cn("w-full", className)}
     />

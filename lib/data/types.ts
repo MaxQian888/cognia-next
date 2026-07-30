@@ -30,6 +30,8 @@ import type { TwinChunk, TwinDraft, TwinJob, TwinProfile, TwinSource } from "@/t
 import type { Memory } from "@/types/memory/memory"
 import type { MemoryAuditEvent, MemoryEvidence, MemoryJob } from "@/types/memory/governance"
 import type { LocalStorageSnapshot } from "./snapshots/types"
+import type { TemplateDefinitionRow, TemplatePackageRow } from "@/lib/db/template-platform"
+import type { TemplateInstanceRecord } from "@/lib/templates/repository"
 
 /** Schema version currently emitted by `buildBackupPackage`. */
 export const EXPORT_SCHEMA_VERSION = 3 as const
@@ -97,6 +99,10 @@ export interface BackupPayloadV3 {
   a2uiApps?: A2UIAppRow[]
   a2uiTemplates?: A2UITemplateRow[]
   a2uiEventHistory?: A2UIEventHistoryRow[]
+  /** Unified portable template data. Device bindings and migration rollback snapshots stay local. */
+  templateDefinitions?: TemplateDefinitionRow[]
+  templatePackages?: TemplatePackageRow[]
+  templateInstances?: TemplateInstanceRecord[]
   /**
    * Zustand-persist faces that live in `localStorage` (external agents,
    * custom modes, agent teams, custom themes, artifacts, canvas prefs, …).

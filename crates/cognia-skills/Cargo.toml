@@ -23,6 +23,12 @@ dirs = "6"
 tempfile = "3"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "stream", "socks", "http2", "multipart"] }
 tokio = { version = "1", features = ["sync", "time", "fs"] }
+base64 = "0.22"
+hex = "0.4"
+parking_lot = "0.12"
+sha2 = "0.10"
+uuid = { version = "1", features = ["v4"] }
+unicode-normalization = "0.1"
 
 [dev-dependencies]
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }

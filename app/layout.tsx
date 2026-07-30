@@ -185,6 +185,10 @@ export default async function RootLayout({
                   Inside LocaleGate because it needs i18n. Renders null until
                   `getDb()` actually gives up. */}
               <DbUpgradeBlockedDialog />
+              {/* E2E transport/fixture seams must mount even when AccountGate is
+                  waiting on a first-open schema upgrade. The component is a
+                  production no-op unless NEXT_PUBLIC_E2E=1. */}
+              <ExposeTestGlobals />
               <AccountGate>
                 <SettingsHydrator />
                 <AccountAutoLock />
@@ -348,7 +352,6 @@ export default async function RootLayout({
                          *  calls (agent_dispatch / team_run / plugin_tool_invoke)
                          *  to the renderer entry points. No-op in web. */}
                         <OrchestrationDispatchProvider />
-                        <ExposeTestGlobals />
                         {/* Dev-only perf HUD. In production it returns null
                          * unless `localStorage.cogniaPerfHud === "1"`. */}
                         <PerfHud />

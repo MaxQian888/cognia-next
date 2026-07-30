@@ -6,6 +6,19 @@ export * from "./ide"
 export type * from "./hooks"
 export type * from "./permissions"
 export type * from "./extensions"
+export type {
+  CreateTemplateDraftInput,
+  PluginTemplatePackageContribution,
+  TemplateCatalogQuery,
+  TemplateDefinitionDraft,
+  TemplateDefinitionEnvelope,
+  TemplateDependency,
+  TemplateDomain,
+  TemplateInputSpec,
+  TemplateInstantiationResult,
+  TemplatePackageManifest,
+  TemplatePreflightPlan,
+} from "./templates"
 export type * from "./api/integration"
 export type { PluginModalProps } from "./api/modal-mount"
 export type { PluginViewProps, TreeDataProvider } from "./api/view"
@@ -43,6 +56,7 @@ export {
   PLUGIN_CHARACTER_PACK_SOFT_LIMIT,
 } from "./define/define-character-pack"
 export { defineWorkflowTemplate } from "./define/define-workflow-template"
+export { defineTemplate, defineTemplatePackage, verifyTemplateDefinitionHash } from "./templates"
 export { defineAgentTool } from "./define/define-agent-tool"
 export { defineTool } from "./define/define-tool"
 export { defineGuardrail } from "./define/define-guardrail"

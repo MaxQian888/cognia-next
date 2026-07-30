@@ -39,6 +39,39 @@ beforeEach(async () => {
 })
 
 describe("applyBackupPackage — merge strategies", () => {
+  it("restores portable template rows without accepting device bindings", async () => {
+    const db = getDb()
+    await applyBackupPackage(
+      pkg({
+        templateDefinitions: [
+          {
+            storageKey: "draft:skill.restore",
+            apiVersion: "cognia.ai/templates/v1",
+            id: "skill.restore",
+            domain: "skill",
+            status: "draft",
+            revision: 1,
+            version: null,
+            metadata: { name: "Restore" },
+            payload: { content: "x" },
+            inputs: [],
+            dependencies: [],
+            capabilities: [],
+            compatibility: { platforms: ["desktop"] },
+            provenance: { source: "user" },
+            contentHash: "b".repeat(64),
+            createdAt: 1,
+            updatedAt: 1,
+          },
+        ],
+      }),
+      { mergeStrategy: "overwrite", includeSessions: false, includeApiKey: false }
+    )
+
+    expect(await db.templateDefinitions.get("draft:skill.restore")).toBeDefined()
+    expect(await db.templateDeviceBindings.toArray()).toEqual([])
+  })
+
   it("'skip' keeps the local row and counts the import row as skipped", async () => {
     const db = getDb()
     await db.promptPresets.put({

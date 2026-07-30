@@ -188,7 +188,7 @@ export function SkillMarketplaceDetailContent({
       </div>
 
       <ScrollArea className="min-h-0 flex-1">
-        <div className="prose prose-sm dark:prose-invert max-w-none px-5 py-4">
+        <div className="px-5 py-4">
           {loading ? (
             <div className="flex items-center gap-2 text-xs text-muted-foreground">
               <Spinner className="size-3" /> {tMp("loading")}
@@ -196,7 +196,7 @@ export function SkillMarketplaceDetailContent({
           ) : error ? (
             <p className="text-xs text-destructive">{error}</p>
           ) : readme ? (
-            <MarkdownRenderer content={readme} />
+            <MarkdownRenderer content={readme} rhythm="document" />
           ) : null}
         </div>
       </ScrollArea>

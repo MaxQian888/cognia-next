@@ -99,6 +99,12 @@
       "require": "./dist/extensions.cjs",
       "default": "./dist/extensions.js"
     },
+    "./templates": {
+      "types": "./dist/templates.d.ts",
+      "import": "./dist/templates.js",
+      "require": "./dist/templates.cjs",
+      "default": "./dist/templates.js"
+    },
     "./package.json": "./package.json"
   },
   "files": [

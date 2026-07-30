@@ -26,6 +26,45 @@ beforeEach(async () => {
   ])
 })
 
+it("backs up portable template data without device bindings", async () => {
+  const db = getDb()
+  await db.templateDefinitions.put({
+    storageKey: "draft:skill.backup",
+    apiVersion: "cognia.ai/templates/v1",
+    id: "skill.backup",
+    domain: "skill",
+    status: "draft",
+    revision: 1,
+    version: null,
+    metadata: { name: "Backup" },
+    payload: { content: "x" },
+    inputs: [],
+    dependencies: [],
+    capabilities: [],
+    compatibility: { platforms: ["desktop"] },
+    provenance: { source: "user" },
+    contentHash: "a".repeat(64),
+    createdAt: 1,
+    updatedAt: 1,
+  })
+  await db.templateDeviceBindings.put({
+    id: "binding",
+    definitionId: "skill.backup",
+    slotId: "secret",
+    kind: "credential",
+    localResourceId: "private",
+    updatedAt: 1,
+  })
+
+  const backup = await buildBackupPackage({
+    includeSessions: false,
+    includeApiKey: false,
+  })
+
+  expect(backup.payload.templateDefinitions).toHaveLength(1)
+  expect(backup.payload).not.toHaveProperty("templateDeviceBindings")
+})
+
 async function seedAll() {
   const db = getDb()
   await saveSettings({

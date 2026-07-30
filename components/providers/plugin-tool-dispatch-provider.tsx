@@ -23,6 +23,7 @@ import {
 } from "@/lib/claude/ipc"
 import { handlePluginToolExec } from "@/lib/claude/plugin-tool-ipc"
 import { dispatchProtocolAdapterExec } from "@/lib/claude/protocol-adapter-ipc"
+import { activeHostSupportsFeature } from "@/stores/remote-host/remote-host-store"
 import { loggers } from "@cognia/logging"
 
 export function PluginToolDispatchProvider({ children }: { children: React.ReactNode }) {
@@ -31,10 +32,34 @@ export function PluginToolDispatchProvider({ children }: { children: React.React
     let unlisten: (() => void) | null = null
 
     void subscribePluginToolExec((req) => {
+      if (
+        req.remoteExecutionContext &&
+        !activeHostSupportsFeature("claude.controller-tool-proxy", "plugin_tool_exec")
+      ) {
+        void sendPluginToolResponse(
+          {
+            type: "plugin_tool_response",
+            sessionId: req.sessionId,
+            toolUseId: req.toolUseId,
+            error: "REMOTE_FEATURE_UNSUPPORTED: controller tool proxy is not advertised",
+          },
+          req.remoteExecutionContext
+        ).catch((error) => {
+          loggers.app.error("unsupported remote plugin response failed", {
+            toolUseId: req.toolUseId,
+            error: String(error),
+          })
+        })
+        return
+      }
       // handlePluginToolExec never throws (it collapses every failure onto the
       // response.error field); the write-back is the only thing that can.
       void handlePluginToolExec(req)
-        .then((resp) => sendPluginToolResponse(resp))
+        .then((resp) =>
+          req.remoteExecutionContext
+            ? sendPluginToolResponse(resp, req.remoteExecutionContext)
+            : sendPluginToolResponse(resp)
+        )
         .catch((err) => {
           loggers.app.error("plugin_tool_response write failed", {
             toolUseId: req.toolUseId,
@@ -63,7 +88,29 @@ export function PluginToolDispatchProvider({ children }: { children: React.React
     const executions = new Map<string, ReturnType<typeof dispatchProtocolAdapterExec>>()
 
     void subscribeProtocolAdapterExec((req) => {
-      const handle = dispatchProtocolAdapterExec(req, { writeCommand: sendProtocolAdapterMessage })
+      if (
+        req.remoteExecutionContext &&
+        !activeHostSupportsFeature("claude.controller-tool-proxy", "protocol_adapter_exec")
+      ) {
+        void sendProtocolAdapterMessage(
+          {
+            type: "protocol_adapter_error",
+            sessionId: req.sessionId,
+            execId: req.execId,
+            error: "REMOTE_FEATURE_UNSUPPORTED: protocol adapter proxy is not advertised",
+          },
+          req.remoteExecutionContext
+        ).catch((error) => {
+          loggers.app.error("unsupported remote protocol adapter response failed", {
+            execId: req.execId,
+            error: String(error),
+          })
+        })
+        return
+      }
+      const handle = dispatchProtocolAdapterExec(req, {
+        writeCommand: (message) => sendProtocolAdapterMessage(message, req.remoteExecutionContext),
+      })
       executions.set(`${req.sessionId}:${req.execId}`, handle)
       void handle.done
         .catch((err) => {

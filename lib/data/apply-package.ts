@@ -19,6 +19,8 @@ import type {
   Team,
 } from "@cognia/agent-config-types"
 import type { TrustedWorkspace } from "@/lib/db/trusted-workspaces"
+import type { TemplateDefinitionRow, TemplatePackageRow } from "@/lib/db/template-platform"
+import type { TemplateInstanceRecord } from "@/lib/templates/repository"
 import type { CogniaDB, SessionStateRow, TtsProviderKeyRow } from "@/lib/db/schema"
 import { getDb } from "@/lib/db/schema"
 import { contextCommentRowFromCanvas } from "@/lib/db/context-comments"
@@ -133,6 +135,9 @@ export async function applyBackupPackage(
       db.memoryEvidence,
       db.memoryJobs,
       db.memoryAuditEvents,
+      db.templateDefinitions,
+      db.templatePackages,
+      db.templateInstances,
     ],
     async () => {
       // --- settings (singleton) -------------------------------------------
@@ -187,6 +192,30 @@ export async function applyBackupPackage(
         opts,
         summary,
         idPrefix: "team",
+      })
+      await applyKeyedCollection<TemplateDefinitionRow>({
+        rows: env.templateDefinitions,
+        table: db.templateDefinitions,
+        kind: "templateDefinitions",
+        opts,
+        summary,
+        keyOf: (row) => row.storageKey,
+      })
+      await applyKeyedCollection<TemplatePackageRow>({
+        rows: env.templatePackages,
+        table: db.templatePackages,
+        kind: "templatePackages",
+        opts,
+        summary,
+        keyOf: (row) => row.key,
+      })
+      await applyKeyedCollection<TemplateInstanceRecord>({
+        rows: env.templateInstances,
+        table: db.templateInstances,
+        kind: "templateInstances",
+        opts,
+        summary,
+        keyOf: (row) => row.id,
       })
 
       // --- presets / MCP servers / trusted workspaces / tts keys ---------

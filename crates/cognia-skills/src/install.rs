@@ -20,11 +20,17 @@
 // drift between the two paths.
 
 use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
+use std::sync::LazyLock;
+use unicode_normalization::UnicodeNormalization;
+use uuid::Uuid;
 
 use super::types::{InstallSkillRequest, InstallSkillResponse, NativeSkillResource};
 
 const ALLOWED_DIR_CHARS: &[char] = &['-', '_'];
+static ATOMIC_INSTALL_LOCK: LazyLock<parking_lot::Mutex<()>> =
+    LazyLock::new(|| parking_lot::Mutex::new(()));
 
 fn validate_dir_name(name: &str) -> Result<(), String> {
     if name.is_empty() {
@@ -45,7 +51,13 @@ fn validate_dir_name(name: &str) -> Result<(), String> {
 }
 
 fn validate_resource_path(rel: &str) -> Result<(), String> {
-    if rel.is_empty() || rel.contains("..") {
+    let has_windows_drive_prefix = rel.as_bytes().get(1) == Some(&b':')
+        && rel.as_bytes().first().is_some_and(u8::is_ascii_alphabetic);
+    if rel.is_empty()
+        || rel.contains("..")
+        || Path::new(rel).is_absolute()
+        || has_windows_drive_prefix
+    {
         return Err(format!("invalid resource path: {}", rel));
     }
     for component in rel.split(['/', '\\']) {
@@ -55,6 +67,9 @@ fn validate_resource_path(rel: &str) -> Result<(), String> {
     }
     Ok(())
 }
+
+const MAX_SKILL_RESOURCES: usize = 50;
+const MAX_SKILL_RESOURCE_BYTES: usize = 2 * 1024 * 1024;
 
 #[tauri::command]
 pub fn skills_install_native(request: InstallSkillRequest) -> Result<InstallSkillResponse, String> {
@@ -73,7 +88,7 @@ pub fn skills_install_native(request: InstallSkillRequest) -> Result<InstallSkil
 /// Skill bundle mirror target. The cognia-owned canonical is always
 /// writeable regardless of user settings; the other two are toggleable per
 /// `AppSettings.skillBundleMirrors`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum SkillsTarget {
     Cognia,
@@ -118,6 +133,270 @@ pub struct MirrorTargetOutcome {
     /// Set when a target was requested but skipped silently (e.g. no
     /// home dir). The frontend surfaces this as an info toast.
     pub note: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct SkillInstallRoots {
+    pub cognia: Option<PathBuf>,
+    pub claude: Option<PathBuf>,
+    pub codex: Option<PathBuf>,
+}
+
+impl SkillInstallRoots {
+    fn root_for(&self, target: SkillsTarget) -> Option<&Path> {
+        match target {
+            SkillsTarget::Cognia => self.cognia.as_deref(),
+            SkillsTarget::Claude => self.claude.as_deref(),
+            SkillsTarget::Codex => self.codex.as_deref(),
+        }
+    }
+}
+
+struct StagedTarget {
+    target: SkillsTarget,
+    root: PathBuf,
+    staged_dir: PathBuf,
+    destination: PathBuf,
+    written_relative: Vec<PathBuf>,
+}
+
+fn validate_atomic_request(request: &InstallSkillMirroredRequest) -> Result<(), String> {
+    validate_dir_name(&request.dir_name)?;
+    if request.resources.len() > MAX_SKILL_RESOURCES {
+        return Err(format!(
+            "too many skill resources: max {MAX_SKILL_RESOURCES}"
+        ));
+    }
+    let mut normalized_paths = HashSet::new();
+    for resource in &request.resources {
+        validate_resource_path(&resource.path)?;
+        let resolved = resolve_resource_path(Path::new(""), resource);
+        let normalized = resolved
+            .to_string_lossy()
+            .replace('\\', "/")
+            .nfkc()
+            .collect::<String>()
+            .to_lowercase();
+        if !normalized_paths.insert(normalized) {
+            return Err(format!(
+                "duplicate skill resource path after normalization: {}",
+                resource.path
+            ));
+        }
+        let actual_size = if resource.encoding == "base64" {
+            base64_decode(&resource.content)?.len()
+        } else {
+            resource.content.len()
+        };
+        if actual_size > MAX_SKILL_RESOURCE_BYTES {
+            return Err(format!(
+                "skill resource exceeds {MAX_SKILL_RESOURCE_BYTES} bytes: {}",
+                resource.path
+            ));
+        }
+        if resource.size != actual_size as u64 {
+            return Err(format!(
+                "skill resource size mismatch for {}: declared {}, actual {actual_size}",
+                resource.path, resource.size
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// Validate, stage and atomically switch every requested target. Each target
+/// is staged on its own filesystem so the final rename is atomic. A failure
+/// restores every destination already switched during this transaction.
+pub fn skills_install_atomic_at_roots(
+    roots: &SkillInstallRoots,
+    request: InstallSkillMirroredRequest,
+) -> Result<InstallSkillMirroredResponse, String> {
+    validate_atomic_request(&request)?;
+    // A transaction spans multiple filesystems and target roots. Serializing
+    // the switch phase prevents concurrent installs from moving each other's
+    // destination/backup paths while retaining atomic rename per target.
+    let _transaction_guard = ATOMIC_INSTALL_LOCK.lock();
+    let requested = if request.targets.is_empty() {
+        vec![
+            SkillsTarget::Cognia,
+            SkillsTarget::Claude,
+            SkillsTarget::Codex,
+        ]
+    } else {
+        request.targets.clone()
+    };
+    let mut seen = HashSet::new();
+    let targets: Vec<SkillsTarget> = requested
+        .into_iter()
+        .filter(|target| seen.insert(*target))
+        .collect();
+    let transaction_id = Uuid::new_v4().to_string();
+    let mut staged = Vec::new();
+
+    for target in targets {
+        let Some(root) = roots.root_for(target) else {
+            cleanup_staged(&staged);
+            return Err(format!("{} skill root is unavailable", target_name(target)));
+        };
+        if let Err(error) = std::fs::create_dir_all(root) {
+            cleanup_staged(&staged);
+            return Err(format!("mkdir {}: {error}", root.display()));
+        }
+        let stage_root = root.join(format!(".cognia-staging-{transaction_id}"));
+        let staged_dir = stage_root.join(&request.dir_name);
+        let written =
+            match write_skill_into_dir(&staged_dir, &request.content, &request.resources, true) {
+                Ok(written) => written,
+                Err(error) => {
+                    cleanup_staged(&staged);
+                    let _ = std::fs::remove_dir_all(stage_root);
+                    return Err(error);
+                }
+            };
+        let written_relative = written
+            .into_iter()
+            .filter_map(|path| {
+                PathBuf::from(path)
+                    .strip_prefix(&staged_dir)
+                    .ok()
+                    .map(Path::to_path_buf)
+            })
+            .collect();
+        staged.push(StagedTarget {
+            target,
+            root: root.to_path_buf(),
+            staged_dir,
+            destination: root.join(&request.dir_name),
+            written_relative,
+        });
+    }
+
+    let mut committed: Vec<(PathBuf, Option<PathBuf>)> = Vec::new();
+    let mut outcomes = Vec::new();
+    let mut trashed_from = None;
+    for item in &staged {
+        let backup = if item.destination.symlink_metadata().is_ok() {
+            let backup = if request.trash_before_clean && item.target == SkillsTarget::Cognia {
+                let trash = item.root.join(".trash");
+                if let Err(error) = std::fs::create_dir_all(&trash) {
+                    rollback_committed(&committed);
+                    cleanup_staged(&staged);
+                    return Err(format!("prepare skill trash: {error}"));
+                }
+                trash.join(format!("{}-{}", request.dir_name, timestamp_iso_ish()))
+            } else {
+                item.root.join(format!(
+                    ".cognia-backup-{transaction_id}-{}",
+                    target_name(item.target)
+                ))
+            };
+            if let Err(error) = std::fs::rename(&item.destination, &backup) {
+                rollback_committed(&committed);
+                cleanup_staged(&staged);
+                return Err(format!(
+                    "backup {} -> {}: {error}",
+                    item.destination.display(),
+                    backup.display()
+                ));
+            }
+            Some(backup)
+        } else {
+            None
+        };
+
+        if let Err(error) = std::fs::rename(&item.staged_dir, &item.destination) {
+            if let Some(backup) = backup.as_ref() {
+                let _ = std::fs::rename(backup, &item.destination);
+            }
+            rollback_committed(&committed);
+            cleanup_staged(&staged);
+            return Err(format!(
+                "activate staged skill {} -> {}: {error}",
+                item.staged_dir.display(),
+                item.destination.display()
+            ));
+        }
+        if request.trash_before_clean && item.target == SkillsTarget::Cognia {
+            trashed_from = backup
+                .as_ref()
+                .map(|path| path.to_string_lossy().to_string());
+        }
+        committed.push((item.destination.clone(), backup.clone()));
+        outcomes.push(MirrorTargetOutcome {
+            target: item.target,
+            directory: item.destination.to_string_lossy().to_string(),
+            written_files: item
+                .written_relative
+                .iter()
+                .map(|relative| {
+                    item.destination
+                        .join(relative)
+                        .to_string_lossy()
+                        .to_string()
+                })
+                .collect(),
+            note: None,
+        });
+    }
+
+    for (destination, backup) in &committed {
+        let keep_as_trash = trashed_from.as_deref().is_some_and(|path| {
+            backup
+                .as_ref()
+                .is_some_and(|backup| backup == Path::new(path))
+        });
+        if !keep_as_trash {
+            if let Some(backup) = backup {
+                let _ = remove_path(backup);
+            }
+        }
+        if let Some(root) = destination.parent() {
+            let _ = std::fs::remove_dir(root.join(format!(".cognia-staging-{transaction_id}")));
+        }
+    }
+
+    Ok(InstallSkillMirroredResponse {
+        targets: outcomes,
+        trashed_from,
+    })
+}
+
+fn target_name(target: SkillsTarget) -> &'static str {
+    match target {
+        SkillsTarget::Cognia => "cognia",
+        SkillsTarget::Claude => "claude",
+        SkillsTarget::Codex => "codex",
+    }
+}
+
+fn remove_path(path: &Path) -> Result<(), std::io::Error> {
+    if path
+        .symlink_metadata()
+        .map(|metadata| metadata.file_type().is_symlink())
+        .unwrap_or(false)
+        || path.is_file()
+    {
+        std::fs::remove_file(path)
+    } else {
+        std::fs::remove_dir_all(path)
+    }
+}
+
+fn cleanup_staged(staged: &[StagedTarget]) {
+    for item in staged {
+        if let Some(stage_root) = item.staged_dir.parent() {
+            let _ = std::fs::remove_dir_all(stage_root);
+        }
+    }
+}
+
+fn rollback_committed(committed: &[(PathBuf, Option<PathBuf>)]) {
+    for (destination, backup) in committed.iter().rev() {
+        let _ = remove_path(destination);
+        if let Some(backup) = backup {
+            let _ = std::fs::rename(backup, destination);
+        }
+    }
 }
 
 fn resolve_target_root(
@@ -513,6 +792,8 @@ mod tests {
         assert!(validate_resource_path("..").is_err());
         assert!(validate_resource_path("foo/../bar").is_err());
         assert!(validate_resource_path("../etc/passwd").is_err());
+        assert!(validate_resource_path("/etc/passwd").is_err());
+        assert!(validate_resource_path(r"C:\Windows\system.ini").is_err());
     }
 
     #[test]
@@ -700,5 +981,219 @@ mod tests {
         let back: InstallSkillMirroredRequest = serde_json::from_str(&json).unwrap();
         assert_eq!(back.targets.len(), 2);
         assert_eq!(back.targets[1], SkillsTarget::Codex);
+    }
+
+    #[test]
+    fn atomic_install_switches_all_targets_after_validation() {
+        let temp = tempfile::tempdir().unwrap();
+        let roots = SkillInstallRoots {
+            cognia: Some(temp.path().join("cognia")),
+            claude: Some(temp.path().join("claude")),
+            codex: Some(temp.path().join("codex")),
+        };
+        let request = InstallSkillMirroredRequest {
+            dir_name: "atomic-skill".into(),
+            content: "new".into(),
+            resources: vec![make_resource("reference", "references/a.md", "a")],
+            clean: true,
+            targets: vec![
+                SkillsTarget::Cognia,
+                SkillsTarget::Claude,
+                SkillsTarget::Codex,
+            ],
+            trash_before_clean: false,
+        };
+
+        let response = skills_install_atomic_at_roots(&roots, request).unwrap();
+        assert_eq!(response.targets.len(), 3);
+        for root in [
+            roots.cognia.unwrap(),
+            roots.claude.unwrap(),
+            roots.codex.unwrap(),
+        ] {
+            assert_eq!(
+                std::fs::read_to_string(root.join("atomic-skill/SKILL.md")).unwrap(),
+                "new"
+            );
+        }
+    }
+
+    #[test]
+    fn atomic_install_rejects_case_and_unicode_collisions_before_writing() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().join("claude");
+        let roots = SkillInstallRoots {
+            cognia: None,
+            claude: Some(root.clone()),
+            codex: None,
+        };
+        let request = InstallSkillMirroredRequest {
+            dir_name: "collision".into(),
+            content: "body".into(),
+            resources: vec![
+                make_resource("asset", "assets/Icon.png", "a"),
+                make_resource("asset", "assets/icon.png", "b"),
+            ],
+            clean: true,
+            targets: vec![SkillsTarget::Claude],
+            trash_before_clean: false,
+        };
+
+        assert!(skills_install_atomic_at_roots(&roots, request)
+            .unwrap_err()
+            .contains("duplicate"));
+        assert!(!root.join("collision").exists());
+    }
+
+    #[test]
+    fn atomic_install_detects_collisions_after_kind_prefix_resolution() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().join("claude");
+        let roots = SkillInstallRoots {
+            cognia: None,
+            claude: Some(root.clone()),
+            codex: None,
+        };
+        let request = InstallSkillMirroredRequest {
+            dir_name: "resolved-collision".into(),
+            content: "body".into(),
+            resources: vec![
+                make_resource("script", "same.sh", "a"),
+                make_resource("reference", "scripts/same.sh", "b"),
+            ],
+            clean: true,
+            targets: vec![SkillsTarget::Claude],
+            trash_before_clean: false,
+        };
+
+        assert!(skills_install_atomic_at_roots(&roots, request)
+            .unwrap_err()
+            .contains("duplicate"));
+        assert!(!root.join("resolved-collision").exists());
+    }
+
+    #[test]
+    fn atomic_install_cleans_prior_staging_when_a_later_root_cannot_be_created() {
+        let temp = tempfile::tempdir().unwrap();
+        let cognia = temp.path().join("cognia");
+        let blocked = temp.path().join("blocked-root");
+        std::fs::write(&blocked, b"not a directory").unwrap();
+        let roots = SkillInstallRoots {
+            cognia: Some(cognia.clone()),
+            claude: Some(blocked),
+            codex: None,
+        };
+        let request = InstallSkillMirroredRequest {
+            dir_name: "cleanup-root-error".into(),
+            content: "body".into(),
+            resources: vec![],
+            clean: true,
+            targets: vec![SkillsTarget::Cognia, SkillsTarget::Claude],
+            trash_before_clean: false,
+        };
+
+        assert!(skills_install_atomic_at_roots(&roots, request)
+            .unwrap_err()
+            .contains("mkdir"));
+        let leftovers = std::fs::read_dir(&cognia)
+            .unwrap()
+            .flatten()
+            .filter_map(|entry| entry.file_name().to_str().map(str::to_owned))
+            .filter(|name| name.starts_with(".cognia-staging-"))
+            .collect::<Vec<_>>();
+        assert!(
+            leftovers.is_empty(),
+            "leftover staging roots: {leftovers:?}"
+        );
+    }
+
+    #[test]
+    fn atomic_install_cleans_staging_when_trash_directory_cannot_be_created() {
+        let temp = tempfile::tempdir().unwrap();
+        let cognia = temp.path().join("cognia");
+        std::fs::create_dir_all(cognia.join("cleanup-trash-error")).unwrap();
+        std::fs::write(cognia.join("cleanup-trash-error/SKILL.md"), b"old").unwrap();
+        std::fs::write(cognia.join(".trash"), b"not a directory").unwrap();
+        let roots = SkillInstallRoots {
+            cognia: Some(cognia.clone()),
+            claude: None,
+            codex: None,
+        };
+        let request = InstallSkillMirroredRequest {
+            dir_name: "cleanup-trash-error".into(),
+            content: "new".into(),
+            resources: vec![],
+            clean: true,
+            targets: vec![SkillsTarget::Cognia],
+            trash_before_clean: true,
+        };
+
+        assert!(skills_install_atomic_at_roots(&roots, request)
+            .unwrap_err()
+            .contains("prepare skill trash"));
+        assert_eq!(
+            std::fs::read_to_string(cognia.join("cleanup-trash-error/SKILL.md")).unwrap(),
+            "old"
+        );
+        let leftovers = std::fs::read_dir(&cognia)
+            .unwrap()
+            .flatten()
+            .filter_map(|entry| entry.file_name().to_str().map(str::to_owned))
+            .filter(|name| name.starts_with(".cognia-staging-"))
+            .collect::<Vec<_>>();
+        assert!(
+            leftovers.is_empty(),
+            "leftover staging roots: {leftovers:?}"
+        );
+    }
+
+    #[test]
+    fn concurrent_atomic_installs_leave_one_complete_version_without_transaction_artifacts() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().join("cognia");
+        let roots = SkillInstallRoots {
+            cognia: Some(root.clone()),
+            claude: None,
+            codex: None,
+        };
+        let request = |content: &str| InstallSkillMirroredRequest {
+            dir_name: "concurrent".into(),
+            content: content.into(),
+            resources: vec![make_resource(
+                "reference",
+                "references/version.txt",
+                content,
+            )],
+            clean: true,
+            targets: vec![SkillsTarget::Cognia],
+            trash_before_clean: false,
+        };
+
+        std::thread::scope(|scope| {
+            let first_roots = roots.clone();
+            let second_roots = roots.clone();
+            scope.spawn(move || {
+                skills_install_atomic_at_roots(&first_roots, request("first")).unwrap();
+            });
+            scope.spawn(move || {
+                skills_install_atomic_at_roots(&second_roots, request("second")).unwrap();
+            });
+        });
+
+        let skill = root.join("concurrent");
+        let markdown = std::fs::read_to_string(skill.join("SKILL.md")).unwrap();
+        let resource = std::fs::read_to_string(skill.join("references/version.txt")).unwrap();
+        assert!(markdown == "first" || markdown == "second");
+        assert_eq!(resource, markdown);
+        let artifacts = std::fs::read_dir(&root)
+            .unwrap()
+            .flatten()
+            .filter_map(|entry| entry.file_name().to_str().map(str::to_owned))
+            .filter(|name| name.starts_with(".cognia-"))
+            .collect::<Vec<_>>();
+        assert!(
+            artifacts.is_empty(),
+            "leftover transaction artifacts: {artifacts:?}"
+        );
     }
 }

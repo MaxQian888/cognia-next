@@ -54,6 +54,10 @@
     "agent:dispatch",
     "agent:shared-memory:read",
     "twin:read",
+    "templates:read",
+    "templates:contribute",
+    "templates:instantiate",
+    "templates:library:write",
     "ipc:call",
     "ipc:expose",
     "events:publish",
@@ -372,6 +376,13 @@
       "id": "subagent",
       "support": "supported",
       "manifestFields": ["subagents"],
+      "introducedIn": "0.1.0",
+      "minimumHostVersion": "0.1.0"
+    },
+    {
+      "id": "template-package",
+      "support": "supported",
+      "manifestFields": ["templatePackages"],
       "introducedIn": "0.1.0",
       "minimumHostVersion": "0.1.0"
     },
@@ -1068,6 +1079,11 @@
     {
       "field": "agentTeamTemplates",
       "capabilities": ["agent-team-template"],
+      "execution": "host"
+    },
+    {
+      "field": "templatePackages",
+      "capabilities": ["template-package"],
       "execution": "host"
     },
     {

@@ -13,6 +13,8 @@ describe("plugin-sdk root barrel", () => {
       "defineAgentTeamTemplate",
       "defineCharacterPack",
       "defineWorkflowTemplate",
+      "defineTemplate",
+      "defineTemplatePackage",
       "defineAgentTool",
       "defineTool",
       "defineGuardrail",

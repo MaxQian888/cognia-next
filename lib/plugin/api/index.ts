@@ -90,6 +90,13 @@ export { createAutomationAPI } from "./automation-api"
 export { createCompanionAPI } from "./companion-api"
 export { createContextPanelAPI } from "./context-panel-api"
 export { createEditorAPI } from "./editor-api"
+export {
+  createTemplatesAPI,
+  clearTemplatesForPluginContext,
+  registerLegacyPluginTemplateCompatibility,
+  registerPluginTemplatePackages,
+} from "./templates-api"
+export type { PluginTemplatesAPI } from "./templates-api"
 
 // Re-export types
 export type {
