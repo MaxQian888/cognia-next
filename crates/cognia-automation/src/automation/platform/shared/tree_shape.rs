@@ -13,9 +13,10 @@
 use crate::automation::types::{ElementInfo, ElementRef, Locator, Point, Rect};
 use std::time::{Duration, Instant};
 
-/// Bounds for a depth-capped tree walk. The native backends don't expose the
+/// Bounds for a budget-capped tree walk. The native backends don't expose the
 /// full (potentially huge) accessibility tree — they walk the frontmost
-/// window's subtree under these caps so a snapshot stays bounded.
+/// window's subtree under node, byte, and time caps so a snapshot stays
+/// bounded. Depth is unlimited unless the caller explicitly narrows it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct TreeBudget {
     /// Maximum depth, counting the root as depth 0. `1` = root only.
@@ -30,18 +31,18 @@ pub struct TreeBudget {
 
 impl TreeBudget {
     pub const DEFAULT: TreeBudget = TreeBudget {
-        max_depth: 64,
+        max_depth: u32::MAX,
         max_nodes: 25_000,
         max_bytes: 8 * 1024 * 1024,
         max_duration: Duration::from_secs(10),
     };
 
     /// Resolve from a caller-supplied `max_depth` (e.g. `TreeOpts.max_depth`),
-    /// clamped to sane bounds so a hostile/confused caller can't request an
-    /// unbounded walk.
+    /// clamped to at least one level. The node, byte, and time budgets remain
+    /// authoritative even when no depth bound is supplied.
     pub fn from_opts(max_depth: Option<u32>) -> Self {
         TreeBudget {
-            max_depth: max_depth.unwrap_or(Self::DEFAULT.max_depth).clamp(1, 64),
+            max_depth: max_depth.unwrap_or(Self::DEFAULT.max_depth).max(1),
             ..Self::DEFAULT
         }
     }
@@ -159,65 +160,84 @@ pub fn rect_center(rect: &Rect) -> Point {
 /// stops materializing once `budget.max_nodes` nodes exist. Generic over the
 /// native handle `N` so it's exercised against a fake tree on the Windows dev
 /// host while the real backends pass `AXUIElement` / AT-SPI accessibles.
-pub fn walk_tree<N>(
+pub fn walk_tree<N: Clone>(
     root: &N,
     budget: TreeBudget,
     to_info: &impl Fn(&N) -> ElementInfo,
     children: &impl Fn(&N, usize) -> Vec<N>,
 ) -> ElementInfo {
-    let mut count = 0usize;
+    struct ArenaNode {
+        info: Option<ElementInfo>,
+        child_indices: Vec<usize>,
+    }
+
     let mut bytes = 0usize;
     let deadline = Instant::now() + budget.max_duration;
-    walk_inner(
-        root, budget, 0, &mut count, &mut bytes, deadline, to_info, children,
-    )
-}
+    let mut arena: Vec<ArenaNode> = Vec::new();
+    let mut stack = vec![(root.clone(), 0u32, None::<usize>)];
 
-fn walk_inner<N>(
-    node: &N,
-    budget: TreeBudget,
-    depth: u32,
-    count: &mut usize,
-    bytes: &mut usize,
-    deadline: Instant,
-    to_info: &impl Fn(&N) -> ElementInfo,
-    children: &impl Fn(&N, usize) -> Vec<N>,
-) -> ElementInfo {
-    *count += 1;
-    let mut info = to_info(node);
-    *bytes = bytes.saturating_add(
-        serde_json::to_vec(&info)
-            .map(|encoded| encoded.len())
-            .unwrap_or_default(),
-    );
-    // At the depth/node ceiling: emit this node as a leaf (drop any children).
-    if depth + 1 >= budget.max_depth
-        || *count >= budget.max_nodes
-        || *bytes >= budget.max_bytes
-        || Instant::now() >= deadline
-    {
-        info.children = None;
-        return info;
-    }
-    let mut out = Vec::new();
-    let remaining_nodes = budget.max_nodes.saturating_sub(*count);
-    for child in children(node, remaining_nodes) {
-        if *count >= budget.max_nodes || *bytes >= budget.max_bytes || Instant::now() >= deadline {
-            break;
+    while let Some((node, depth, parent_index)) = stack.pop() {
+        if !arena.is_empty()
+            && (arena.len() >= budget.max_nodes
+                || bytes >= budget.max_bytes
+                || Instant::now() >= deadline)
+        {
+            continue;
         }
-        out.push(walk_inner(
-            &child,
-            budget,
-            depth + 1,
-            count,
-            bytes,
-            deadline,
-            to_info,
-            children,
-        ));
+
+        let mut info = to_info(&node);
+        info.children = None;
+        bytes = bytes.saturating_add(
+            serde_json::to_vec(&info)
+                .map(|encoded| encoded.len())
+                .unwrap_or_default(),
+        );
+        let index = arena.len();
+        arena.push(ArenaNode {
+            info: Some(info),
+            child_indices: Vec::new(),
+        });
+        if let Some(parent_index) = parent_index {
+            arena[parent_index].child_indices.push(index);
+        }
+
+        if depth.saturating_add(1) >= budget.max_depth
+            || arena.len() >= budget.max_nodes
+            || bytes >= budget.max_bytes
+            || Instant::now() >= deadline
+        {
+            continue;
+        }
+        let remaining_nodes = budget.max_nodes.saturating_sub(arena.len());
+        let native_children = children(&node, remaining_nodes);
+        for child in native_children.into_iter().rev() {
+            stack.push((child, depth.saturating_add(1), Some(index)));
+        }
     }
-    info.children = if out.is_empty() { None } else { Some(out) };
-    info
+
+    for index in (0..arena.len()).rev() {
+        let child_indices = std::mem::take(&mut arena[index].child_indices);
+        let materialized_children = child_indices
+            .into_iter()
+            .filter_map(|child_index| arena[child_index].info.take())
+            .collect::<Vec<_>>();
+        if !materialized_children.is_empty() {
+            arena[index]
+                .info
+                .as_mut()
+                .expect("arena node must exist until its parent consumes it")
+                .children = Some(materialized_children);
+        }
+    }
+
+    arena
+        .first_mut()
+        .and_then(|node| node.info.take())
+        .unwrap_or_else(|| {
+            let mut fallback = to_info(root);
+            fallback.children = None;
+            fallback
+        })
 }
 
 #[cfg(test)]
@@ -301,11 +321,8 @@ mod tests {
     fn budget_clamps_caller_depth() {
         assert_eq!(TreeBudget::from_opts(Some(3)).max_depth, 3);
         assert_eq!(TreeBudget::from_opts(Some(0)).max_depth, 1); // clamped up
-        assert_eq!(TreeBudget::from_opts(Some(9999)).max_depth, 64); // clamped down
-        assert_eq!(
-            TreeBudget::from_opts(None).max_depth,
-            TreeBudget::DEFAULT.max_depth
-        );
+        assert_eq!(TreeBudget::from_opts(Some(9999)).max_depth, 9999);
+        assert_eq!(TreeBudget::from_opts(None).max_depth, u32::MAX);
     }
 
     // A toy native node for exercising walk_tree without an OS accessibility API.
@@ -355,6 +372,44 @@ mod tests {
         };
         let tree = walk_tree(&root, budget, &node_info, &node_children);
         assert_eq!(tree.children.as_ref().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn walk_tree_handles_a_ten_thousand_level_chain_without_recursion() {
+        #[derive(Clone)]
+        struct ChainNode(u32);
+
+        let tree = walk_tree(
+            &ChainNode(10_000),
+            TreeBudget {
+                max_nodes: 10_001,
+                max_bytes: 64 * 1024 * 1024,
+                ..TreeBudget::DEFAULT
+            },
+            &|node| info(&format!("depth-{}", node.0), "group"),
+            &|node, _| {
+                (node.0 > 0)
+                    .then(|| ChainNode(node.0 - 1))
+                    .into_iter()
+                    .collect()
+            },
+        );
+        let mut depth = 0usize;
+        let mut cursor = &tree;
+        while let Some(child) = cursor
+            .children
+            .as_ref()
+            .and_then(|children| children.first())
+        {
+            depth += 1;
+            cursor = child;
+        }
+        assert_eq!(depth, 10_000);
+
+        // The production tree is flattened into a session projection before
+        // release. Avoid making this test's deliberately pathological nested
+        // value exercise Rust's recursive derived Drop implementation.
+        std::mem::forget(tree);
     }
 
     #[test]

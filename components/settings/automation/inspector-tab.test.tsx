@@ -137,7 +137,7 @@ describe("InspectorTab canonical app sessions", () => {
     expect(mockedDesktop.getAppState).toHaveBeenCalledWith(
       "settings:automation-inspector",
       { kind: "bundleId", bundleId: "com.apple.TextEdit" },
-      { projection: "inspector", maxNodes: 25_000, maxDepth: 64 },
+      { projection: "inspector", maxNodes: 25_000 },
       expect.objectContaining({
         surface: "workflow",
         sessionKey: "settings:automation-inspector",

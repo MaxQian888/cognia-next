@@ -93,7 +93,7 @@ pub struct GetAppStateOptions {
     pub disable_diff: bool,
     pub allow_launch: bool,
     pub max_nodes: usize,
-    pub max_depth: u32,
+    pub max_depth: Option<u32>,
     pub projection: UiTreeProjectionKind,
 }
 
@@ -103,7 +103,7 @@ impl Default for GetAppStateOptions {
             disable_diff: false,
             allow_launch: false,
             max_nodes: MODEL_TREE_MAX_NODES,
-            max_depth: 64,
+            max_depth: None,
             projection: UiTreeProjectionKind::Model,
         }
     }
@@ -381,7 +381,7 @@ pub(crate) struct PreparedAction {
 impl UiSessionManager {
     pub fn record_state(
         &mut self,
-        capture: CapturedUiState,
+        mut capture: CapturedUiState,
     ) -> Result<UiStateRevision, SessionError> {
         let instruction_pack = capture
             .app
@@ -413,7 +413,9 @@ impl UiSessionManager {
             UiTreeProjectionKind::Inspector => (INSPECTOR_TREE_MAX_NODES, INSPECTOR_TREE_MAX_BYTES),
         };
         let max_nodes = capture.max_nodes.clamp(1, projection_max_nodes);
-        let (canonical, total_nodes) = flatten_roots(&capture.roots, INSPECTOR_TREE_MAX_NODES);
+        let roots = std::mem::take(&mut capture.roots);
+        let (canonical, total_nodes) = flatten_roots(&roots, INSPECTOR_TREE_MAX_NODES);
+        drop_element_trees_iteratively(roots);
         let mut nodes = Vec::new();
         let mut projected_bytes = 0usize;
         let mut byte_truncated = false;
@@ -738,36 +740,59 @@ fn tree_node_for(session: &SessionRecord, index: usize, node: &FlatNode) -> UiTr
 }
 
 fn flatten_roots(roots: &[ElementInfo], max_nodes: usize) -> (Vec<FlatNode>, usize) {
-    fn visit(
-        element: &ElementInfo,
-        parent_index: Option<usize>,
-        max_nodes: usize,
-        out: &mut Vec<FlatNode>,
-        total: &mut usize,
-    ) {
-        *total = total.saturating_add(1);
+    let mut out = Vec::new();
+    let mut total = 0usize;
+    let mut stack = roots
+        .iter()
+        .rev()
+        .map(|root| (root, None))
+        .collect::<Vec<_>>();
+    while let Some((element, parent_index)) = stack.pop() {
+        total = total.saturating_add(1);
         let this_index = (out.len() < max_nodes).then_some(out.len());
-        if this_index.is_some() {
-            let mut flat = element.clone();
-            flat.children = None;
+        if let Some(this_index) = this_index {
             out.push(FlatNode {
                 parent_index,
-                element: flat,
+                element: clone_without_children(element),
             });
-        }
-        if let Some(children) = element.children.as_ref() {
-            for child in children {
-                visit(child, this_index.or(parent_index), max_nodes, out, total);
+            if let Some(children) = element.children.as_ref() {
+                for child in children.iter().rev() {
+                    stack.push((child, Some(this_index)));
+                }
+            }
+        } else if let Some(children) = element.children.as_ref() {
+            for child in children.iter().rev() {
+                stack.push((child, parent_index));
             }
         }
     }
-
-    let mut out = Vec::new();
-    let mut total = 0usize;
-    for root in roots {
-        visit(root, None, max_nodes, &mut out, &mut total);
-    }
     (out, total)
+}
+
+fn clone_without_children(element: &ElementInfo) -> ElementInfo {
+    ElementInfo {
+        element_ref: element.element_ref.clone(),
+        name: element.name.clone(),
+        automation_id: element.automation_id.clone(),
+        control_type: element.control_type.clone(),
+        class_name: element.class_name.clone(),
+        bounding_rect: element.bounding_rect,
+        is_enabled: element.is_enabled,
+        is_focused: element.is_focused,
+        process_id: element.process_id,
+        process_name: element.process_name.clone(),
+        window_title: element.window_title.clone(),
+        children: None,
+    }
+}
+
+fn drop_element_trees_iteratively(roots: Vec<ElementInfo>) {
+    let mut stack = roots;
+    while let Some(mut element) = stack.pop() {
+        if let Some(children) = element.children.take() {
+            stack.extend(children);
+        }
+    }
 }
 
 fn application_identity(app: &ResolvedApplication) -> String {
@@ -1091,6 +1116,38 @@ mod tests {
         assert_eq!(state.projection, UiTreeProjectionKind::Inspector);
         assert_eq!(state.tree.nodes.len(), 1_251);
         assert!(!state.tree.truncated);
+    }
+
+    #[test]
+    fn session_flattens_and_releases_a_ten_thousand_level_tree_iteratively() {
+        #[derive(Clone)]
+        struct ChainNode(u32);
+
+        let deep_root = tree_shape::walk_tree(
+            &ChainNode(10_000),
+            crate::automation::platform::shared::tree_shape::TreeBudget {
+                max_nodes: 10_001,
+                max_bytes: 64 * 1024 * 1024,
+                ..crate::automation::platform::shared::tree_shape::TreeBudget::DEFAULT
+            },
+            &|node| root(&format!("Depth {}", node.0)),
+            &|node, _| {
+                (node.0 > 0)
+                    .then(|| ChainNode(node.0 - 1))
+                    .into_iter()
+                    .collect()
+            },
+        );
+        let mut capture = CapturedUiState::fixture(deep_root);
+        capture.max_nodes = INSPECTOR_TREE_MAX_NODES;
+        capture.projection = UiTreeProjectionKind::Inspector;
+
+        let state = UiSessionManager::default()
+            .record_state(capture)
+            .expect("deep state");
+
+        assert_eq!(state.tree.nodes.len(), 10_001);
+        assert_eq!(state.tree.nodes.last().unwrap().parent_index, Some(9_999));
     }
 
     #[test]

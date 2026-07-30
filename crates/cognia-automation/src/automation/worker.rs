@@ -493,7 +493,7 @@ fn capture_app_state(
     let roots = backend.read_application_tree(
         &app,
         TreeOpts {
-            max_depth: Some(options.max_depth),
+            max_depth: options.max_depth,
             cache_props: None,
         },
     )?;
@@ -1008,7 +1008,7 @@ fn settle_application_tree(
         let current = backend.read_application_tree(
             app,
             TreeOpts {
-                max_depth: Some(64),
+                max_depth: None,
                 cache_props: None,
             },
         )?;

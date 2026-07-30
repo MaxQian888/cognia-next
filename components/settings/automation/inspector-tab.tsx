@@ -166,7 +166,6 @@ export function InspectorTab() {
         {
           projection: "inspector",
           maxNodes: 25_000,
-          maxDepth: 64,
         },
         INSPECTOR_CONTEXT
       )
