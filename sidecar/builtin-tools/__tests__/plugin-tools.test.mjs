@@ -119,6 +119,33 @@ test("synthesized tool emits plugin_tool_exec and resolves with the response res
   assert.equal(result.content[0].text, "got: hi")
 })
 
+test("synthesized tool preserves the server-issued remote execution context", async () => {
+  const emitted = []
+  const pending = new Map()
+  const remoteExecutionContext = {
+    hostId: "host-a",
+    originDeviceId: "device-a",
+    sessionId: "session-a",
+    generation: 1,
+    requestId: "request-a",
+    issuedAt: 1,
+    expiresAt: 2,
+  }
+  const server = buildPluginToolsServer({
+    tools: [{ name: "remote-tool", jsonSchema: { type: "object", properties: {} } }],
+    emit: (event) => emitted.push(event),
+    sessionId: "session-a",
+    pendingPluginToolCalls: pending,
+    remoteExecutionContext,
+  })
+
+  const call = server.instance._registeredTools["remote-tool"].handler({})
+  await new Promise((resolve) => setImmediate(resolve))
+  assert.deepEqual(emitted[0].remoteExecutionContext, remoteExecutionContext)
+  pending.get(emitted[0].toolUseId).resolve({ result: "ok" })
+  await call
+})
+
 test("synthesized tool returns compact JSON for structured results", async () => {
   const pending = new Map()
   const server = buildPluginToolsServer({

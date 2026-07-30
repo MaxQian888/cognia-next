@@ -50,6 +50,8 @@ import { BUILT_IN_TEAM_TEMPLATES } from "@/types/agent/agent-team"
 import { listAgentTeamTemplateEntries } from "@/lib/plugin/registries/agent-team-template-registry"
 import { getAvailablePresets, getPresetDisplayInfo } from "@/lib/ai/agent/external/presets"
 import { resolveDispatchableSubagents } from "@/lib/claude/agents/subagents"
+import { useTemplateCatalog } from "@/hooks/use-template-catalog"
+import type { TemplateDefinitionEnvelope } from "@/lib/templates/contracts"
 
 /**
  * Normalized team-template shape shared by the built-in `BUILT_IN_TEAM_TEMPLATES`
@@ -131,7 +133,29 @@ function compareByRecent(aTs: number, bTs: number): number {
  * Synchronous — reads the static `BUILT_IN_TEAM_TEMPLATES` array and the
  * in-memory plugin overlay (`listAgentTeamTemplateEntries`).
  */
-function buildTeamTemplates(): DiscoverTeamTemplate[] {
+function buildTeamTemplates(
+  catalogDefinitions: readonly TemplateDefinitionEnvelope[]
+): DiscoverTeamTemplate[] {
+  if (catalogDefinitions.length > 0) {
+    return catalogDefinitions.map((definition) => {
+      const payload =
+        definition.payload &&
+        typeof definition.payload === "object" &&
+        !Array.isArray(definition.payload)
+          ? definition.payload
+          : {}
+      const teammates = Array.isArray(payload.teammates) ? payload.teammates : []
+      return {
+        id: `${definition.id}@${definition.version ?? `draft:${definition.revision}`}`,
+        name: definition.metadata.name,
+        description: definition.metadata.description ?? "",
+        teammateCount: teammates.length,
+        category: definition.metadata.category,
+        isBuiltIn: definition.provenance.source === "built-in",
+        pluginId: definition.provenance.pluginId,
+      }
+    })
+  }
   const builtIns = BUILT_IN_TEAM_TEMPLATES.map<DiscoverTeamTemplate>((tpl) => ({
     id: tpl.id,
     name: tpl.name,
@@ -188,6 +212,7 @@ export function useDiscoverQuery(
   const sort: DiscoverSort = opts.sort ?? "name"
   const filter: DiscoverFilter = opts.filter ?? "all"
   const favoriteKeys = opts.favoriteKeys ?? EMPTY_KEYS
+  const { definitions: catalogTeamTemplates } = useTemplateCatalog({ domain: "agentTeam" })
   // The favorites pseudo-category aggregates every kind, so its Dexie reads
   // must be live whenever it (not just the matching real category) is active.
   const isFavoritesView = category === FAVORITES_CATEGORY
@@ -411,7 +436,7 @@ export function useDiscoverQuery(
           return arr.map<DiscoverItem>((data) => ({ kind: "mcpPreset", id: data.id, data }))
         }
         case "teamTemplates": {
-          let arr = buildTeamTemplates().filter(
+          let arr = buildTeamTemplates(catalogTeamTemplates).filter(
             (tpl) => matchesQuery(tpl.name, trimmed) || matchesQuery(tpl.description, trimmed)
           )
           if (filter === "builtin") arr = arr.filter((tpl) => tpl.isBuiltIn)
@@ -499,7 +524,7 @@ export function useDiscoverQuery(
               data,
             })),
             ...MCP_PRESETS.map<DiscoverItem>((data) => ({ kind: "mcpPreset", id: data.id, data })),
-            ...buildTeamTemplates().map<DiscoverItem>((data) => ({
+            ...buildTeamTemplates(catalogTeamTemplates).map<DiscoverItem>((data) => ({
               kind: "teamTemplate",
               id: data.id,
               data,
@@ -543,6 +568,7 @@ export function useDiscoverQuery(
     sort,
     filter,
     favoriteKeys,
+    catalogTeamTemplates,
   ])
 
   // `useLiveQuery` returns `undefined` until its first read resolves. Treat

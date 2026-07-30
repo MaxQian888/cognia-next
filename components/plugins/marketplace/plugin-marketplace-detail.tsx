@@ -131,11 +131,12 @@ export function PluginMarketplaceDetail({
                 <Card className="p-3">
                   <div className="text-xs font-semibold mb-2">{t("readme")}</div>
                   <ScrollArea className="max-h-[40vh]">
-                    <div className="prose prose-sm dark:prose-invert max-w-none text-sm pr-2">
+                    <div className="text-sm pr-2">
                       <MarkdownRenderer
                         content={entry.readme}
                         enableMermaid={false}
                         enableMath={false}
+                        rhythm="document"
                       />
                     </div>
                   </ScrollArea>

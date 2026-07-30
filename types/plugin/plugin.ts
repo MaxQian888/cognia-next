@@ -195,6 +195,7 @@ export type PluginCapability =
   | "wallpapers" // Contributes built-in wallpaper entries (bundled images/gradients/colors)
   | "character-pack" // Bundles ready-to-use characters into a portable pack (ADR-0030)
   | "subagent" // Contributes Claude SDK subagents callable by teams + workflow editor
+  | "template-package" // Contributes immutable packages to the unified template catalog
   | "agent-team-template" // Contributes complete agent-team blueprints surfaced in the team picker
   | "shared-memory-adapter" // Contributes a bidirectional backing store for agent-team shared memory
   | "workflow-template" // Contributes complete visual-workflow blueprints surfaced in the editor (ADR-0017/0032)
@@ -443,6 +444,10 @@ export type PluginPermission =
   | "agent:dispatch" // Dispatch built-in subagents / agent teams in-process
   | "agent:shared-memory:read" // Read team shared-memory entries (ACL-gated)
   | "twin:read" // Query the employee twin's RAG memory
+  | "templates:read" // Read the unified template catalog and validation results
+  | "templates:contribute" // Register lifecycle-scoped template packages
+  | "templates:instantiate" // Request guarded preflight/instantiation
+  | "templates:library:write" // Create user-owned template drafts after confirmation
   | "ipc:call" // Call/send to another plugin over inter-plugin IPC (incl. RPC)
   | "ipc:expose" // Expose RPC methods other plugins can invoke over IPC
   | "events:publish" // Emit onto the cross-plugin event bus
@@ -927,6 +932,11 @@ export interface PluginManifest {
    * they never collide with built-in dispatcher names.
    */
   subagents?: import("./plugin-subagent").PluginSubagentDef[]
+  /**
+   * Immutable unified template packages (`template-package` capability).
+   * Definitions are overlay-only and are removed with the plugin lifecycle.
+   */
+  templatePackages?: import("@/packages/plugin-sdk/src/templates").PluginTemplatePackageContribution[]
   /**
    * Agent team templates contributed by this plugin (`agent-team-template`
    * capability). Each template carries a roster of teammates, optional
@@ -4748,6 +4758,10 @@ export type PluginAPIPermission =
   | "agent:dispatch"
   | "agent:shared-memory:read"
   | "twin:read"
+  | "templates:read"
+  | "templates:contribute"
+  | "templates:instantiate"
+  | "templates:library:write"
   | "export:session"
   | "export:project"
   | "theme:read"
@@ -4853,6 +4867,9 @@ export interface PluginContextAPI {
 
   /** Permission management API */
   permissions: PluginPermissionAPI
+
+  /** Unified template catalog, validation, contribution and guarded execution API. */
+  templates: import("@/packages/plugin-sdk/src/templates").PluginTemplatesAPI
 
   /**
    * Message-part renderer API — register a React component for a custom

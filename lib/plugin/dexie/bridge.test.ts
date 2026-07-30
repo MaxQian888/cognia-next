@@ -173,6 +173,39 @@ describe("applyPluginTables", () => {
     expect(db.verno).toBe(versionBefore + 2)
   })
 
+  it("does not expose a closed database between the schema declaration and reopen", async () => {
+    await db.open()
+    const close = db.close.bind(db)
+    let settleRacedRead: (result: { error?: unknown; value?: unknown }) => void = () => undefined
+    const racedRead = new Promise<{ error?: unknown; value?: unknown }>((resolve) => {
+      settleRacedRead = resolve
+    })
+    const closeSpy = jest.spyOn(db, "close").mockImplementation((options) => {
+      close(options)
+      // Model a sibling live query that was already queued when the plugin
+      // schema bridge closed the shared database. There must be no microtask
+      // checkpoint before version(...).stores(...).open() has been scheduled.
+      queueMicrotask(() => {
+        void db
+          .table("pluginDexieMeta")
+          .get("missing")
+          .then(
+            (value) => settleRacedRead({ value }),
+            (error) => settleRacedRead({ error })
+          )
+      })
+    })
+
+    try {
+      await applyPluginTables(db, "github-delivery", {
+        tables: [{ name: "repos", schema: "++id, fullName" }],
+      })
+      await expect(racedRead).resolves.toEqual({ value: undefined })
+    } finally {
+      closeSpy.mockRestore()
+    }
+  })
+
   it("re-bumps when meta claims tables but the live store is missing (drift)", async () => {
     // Fresh process: the meta row survived from a prior session, but the
     // namespaced store is absent from the live schema. The early-return must

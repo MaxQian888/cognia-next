@@ -225,11 +225,12 @@ export function PluginInstallFromGithubDialog({ open, onOpenChange, initialRef }
               {preview.readme && (
                 <Card className="p-3">
                   <div className="text-xs font-semibold mb-2">{t("readme")}</div>
-                  <div className="prose prose-sm dark:prose-invert max-w-none text-sm">
+                  <div className="text-sm">
                     <MarkdownRenderer
                       content={preview.readme}
                       enableMermaid={false}
                       enableMath={false}
+                      rhythm="document"
                     />
                   </div>
                 </Card>

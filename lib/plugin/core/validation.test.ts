@@ -31,6 +31,38 @@ describe("Plugin Validation", () => {
       expect(result.errors).toHaveLength(0)
     })
 
+    it("rejects malformed unified template package contributions", () => {
+      const manifest = createValidManifest()
+      manifest.capabilities = ["template-package"]
+      manifest.templatePackages = [
+        {
+          manifest: {
+            schemaVersion: 1,
+            apiVersion: "cognia.ai/templates/v1",
+            id: "another-plugin.templates",
+            version: "1.0.0",
+            name: "Templates",
+            entrypoints: ["missing@1.0.0"],
+            definitions: [],
+            assets: [],
+          },
+          definitions: [],
+        },
+      ]
+
+      const result = validatePluginManifest(manifest)
+
+      expect(result.valid).toBe(false)
+      expect(result.diagnostics).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            code: "manifest.templatePackages.manifest.invalid",
+            severity: "error",
+          }),
+        ])
+      )
+    })
+
     it("validates manifest.ide through the locked Code 1.128 catalog", () => {
       const manifest = createValidManifest()
       manifest.permissions = ["editor:read"]

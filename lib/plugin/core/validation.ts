@@ -34,6 +34,8 @@ import {
 import { PLUGIN_MODAL_SIZES, PLUGIN_MODAL_VARIANTS } from "@/types/plugin/plugin-modal"
 import { getPluginPathViolations, type PluginPathViolation } from "@/lib/plugin/core/plugin-path"
 import { IdeManifestError, normalizeIdeManifest } from "@/lib/plugin/ide/manifest"
+import { validateTemplateDefinition } from "@/lib/templates/contracts"
+import { validateTemplatePackageManifest } from "@/lib/templates/package"
 import {
   AUTHOR_CAPABILITY_CONTRACTS,
   CANONICAL_PLUGIN_PERMISSIONS,
@@ -2252,6 +2254,106 @@ export function validatePluginManifest(
       } else {
         pushError("ide", "manifest.ide.invalid", String(error))
       }
+    }
+  }
+
+  if (m.templatePackages !== undefined) {
+    if (!Array.isArray(m.templatePackages)) {
+      pushError(
+        "templatePackages",
+        "manifest.templatePackages.invalid_type",
+        '"templatePackages" must be an array'
+      )
+    } else {
+      const packageIds = new Set<string>()
+      m.templatePackages.forEach((value, packageIndex) => {
+        const field = `templatePackages[${packageIndex}]`
+        if (!isPlainObject(value)) {
+          pushError(field, "manifest.templatePackages.invalid_item", `${field} must be an object`)
+          return
+        }
+        try {
+          const manifest = validateTemplatePackageManifest(value.manifest)
+          if (typeof m.id === "string" && !manifest.id.startsWith(`${m.id}.`)) {
+            pushError(
+              `${field}.manifest.id`,
+              "manifest.templatePackages.id.namespace",
+              `${field}.manifest.id must be prefixed with "${m.id}."`
+            )
+          }
+          if (packageIds.has(manifest.id)) {
+            pushError(
+              `${field}.manifest.id`,
+              "manifest.templatePackages.id.duplicate",
+              `Duplicate template package "${manifest.id}"`
+            )
+          }
+          packageIds.add(manifest.id)
+          if (!Array.isArray(value.definitions)) {
+            pushError(
+              `${field}.definitions`,
+              "manifest.templatePackages.definitions.invalid",
+              `${field}.definitions must be an array`
+            )
+            return
+          }
+          const expected = new Set(
+            manifest.definitions.map((definition) => `${definition.id}@${definition.version}`)
+          )
+          const actual = new Set<string>()
+          value.definitions.forEach((definition, definitionIndex) => {
+            const definitionField = `${field}.definitions[${definitionIndex}]`
+            const validation = validateTemplateDefinition(definition as never)
+            if (!validation.ok) {
+              pushError(
+                definitionField,
+                "manifest.templatePackages.definition.invalid",
+                `${definitionField} is invalid: ${validation.issues
+                  .filter((issue) => issue.severity === "error")
+                  .map((issue) => issue.message)
+                  .join("; ")}`
+              )
+              return
+            }
+            const typed = definition as {
+              id: string
+              version: string | null
+              provenance: { source?: string; pluginId?: string; packageId?: string }
+              status: string
+            }
+            const identity = `${typed.id}@${typed.version}`
+            actual.add(identity)
+            if (
+              typed.status !== "published" ||
+              typed.provenance.source !== "plugin" ||
+              typed.provenance.pluginId !== m.id ||
+              typed.provenance.packageId !== manifest.id
+            ) {
+              pushError(
+                definitionField,
+                "manifest.templatePackages.definition.provenance",
+                `${definitionField} must be a published release owned by this plugin package`
+              )
+            }
+          })
+          if (
+            actual.size !== expected.size ||
+            [...expected].some((identity) => !actual.has(identity))
+          ) {
+            pushError(
+              `${field}.definitions`,
+              "manifest.templatePackages.definitions.mismatch",
+              `${field}.definitions must exactly match the manifest definition graph`
+            )
+          }
+        } catch (error) {
+          pushError(
+            `${field}.manifest`,
+            "manifest.templatePackages.manifest.invalid",
+            error instanceof Error ? error.message : String(error)
+          )
+        }
+      })
     }
   }
 

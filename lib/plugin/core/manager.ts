@@ -176,6 +176,12 @@ import { unregisterSkillsByPlugin } from "@/lib/plugin/registries/skill-registry
 import { registerPluginI18n, unregisterPluginI18n } from "@/lib/i18n/plugin-i18n-registry"
 import { registerExtensionsForPlugin } from "@/lib/plugin/bridge/extension-bridge"
 import { clearCustomThemesForPluginContext } from "@/lib/plugin/api/theme-api"
+import {
+  clearTemplatesForPluginContext,
+  registerLegacyPluginTemplateCompatibility,
+  registerPluginTemplatePackages,
+} from "@/lib/plugin/api/templates-api"
+import { getTemplateRuntime } from "@/lib/templates/runtime"
 import { dispatchPluginError } from "@/lib/plugin/error-bus"
 
 async function invokePluginRuntime<T = unknown>(
@@ -3733,6 +3739,31 @@ export class PluginManager {
     // Note: A2UI component implementations are provided by the plugin
     // and registered via context.a2ui.registerComponent API
 
+    if (plugin.manifest.templatePackages?.length) {
+      await registerPluginTemplatePackages(
+        pluginId,
+        plugin.manifest.templatePackages,
+        getTemplateRuntime().catalog
+      )
+    }
+    if (plugin.manifest.agentTeamTemplates?.length || plugin.manifest.workflowTemplates?.length) {
+      await registerLegacyPluginTemplateCompatibility({
+        pluginId,
+        agentTeams: plugin.manifest.agentTeamTemplates,
+        workflows: plugin.manifest.workflowTemplates,
+        catalog: getTemplateRuntime().catalog,
+      })
+      recordPluginPointDiagnostic(pluginId, {
+        code: "plugin.point.deprecated",
+        severity: "warning",
+        pointKind: "runtime",
+        pointId: "template-compatibility",
+        message:
+          "agentTeamTemplates/workflowTemplates are deprecated; use templatePackages or ctx.templates.register().",
+        hint: "Migrate the contribution through @cognia/plugin-sdk/templates.",
+      })
+    }
+
     // Register modes
     if (plugin.manifest.modes) {
       for (const modeDef of plugin.manifest.modes) {
@@ -4100,6 +4131,16 @@ export class PluginManager {
     // line handles the persistent Dexie-backed rows. Both are required to
     // avoid orphan entries lingering after disable.
     clearCustomThemesForPluginContext(pluginId)
+    const templateRuntime = getTemplateRuntime()
+    try {
+      await templateRuntime.service.tombstoneCatalogSource(`plugin:${pluginId}`)
+    } catch (error) {
+      loggers.manager.warn(
+        `[plugin:${pluginId}] failed to persist template source tombstones during teardown:`,
+        error
+      )
+    }
+    clearTemplatesForPluginContext(pluginId, templateRuntime.catalog)
     // Drop the `manifest.styles` sheet injected by registerPluginContributions.
     // Unconditional: cheaper than reading the manifest back, and a disabled
     // plugin leaving live CSS behind would keep restyling its old subtree.

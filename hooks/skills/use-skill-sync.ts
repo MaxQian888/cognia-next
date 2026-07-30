@@ -1,9 +1,11 @@
 "use client"
 
 import { useState } from "react"
+import { useTranslations } from "next-intl"
 import { toast } from "sonner"
-import { isTauri } from "@/lib/tauri"
 import {
+  canReadHostSkills,
+  canWriteHostSkills,
   pullAllFromNative,
   pushAllToNative,
   pushOneToNative,
@@ -19,16 +21,17 @@ export interface UseSkillSync {
 
 export function useSkillSync(): UseSkillSync {
   const [busy, setBusy] = useState(false)
+  const t = useTranslations("skills.sync")
 
   const push = async () => {
-    if (!isTauri()) {
-      toast.error("Sync requires desktop mode.")
+    if (!canWriteHostSkills()) {
+      toast.error(t("unavailableWrite"))
       return
     }
     setBusy(true)
     try {
       const result = await pushAllToNative()
-      summariseSync(result, "push")
+      summariseSync(result, "push", t)
     } catch (err) {
       toast.error(err instanceof Error ? err.message : String(err))
     } finally {
@@ -37,14 +40,14 @@ export function useSkillSync(): UseSkillSync {
   }
 
   const pull = async () => {
-    if (!isTauri()) {
-      toast.error("Sync requires desktop mode.")
+    if (!canReadHostSkills()) {
+      toast.error(t("unavailableRead"))
       return
     }
     setBusy(true)
     try {
       const result = await pullAllFromNative()
-      summariseSync(result, "pull")
+      summariseSync(result, "pull", t)
     } catch (err) {
       toast.error(err instanceof Error ? err.message : String(err))
     } finally {
@@ -53,14 +56,14 @@ export function useSkillSync(): UseSkillSync {
   }
 
   const pushOne = async (skillId: string) => {
-    if (!isTauri()) {
-      toast.error("Sync requires desktop mode.")
+    if (!canWriteHostSkills()) {
+      toast.error(t("unavailableWrite"))
       return
     }
     setBusy(true)
     try {
       const result = await pushOneToNative(skillId)
-      summariseSync(result, "push")
+      summariseSync(result, "push", t)
     } catch (err) {
       toast.error(err instanceof Error ? err.message : String(err))
     } finally {
@@ -71,16 +74,20 @@ export function useSkillSync(): UseSkillSync {
   return { busy, push, pull, pushOne }
 }
 
-function summariseSync(result: SyncResult, kind: "push" | "pull") {
+function summariseSync(
+  result: SyncResult,
+  kind: "push" | "pull",
+  t: ReturnType<typeof useTranslations>
+) {
   const parts: string[] = []
-  if (kind === "push" && result.pushed > 0) parts.push(`${result.pushed} pushed`)
-  if (kind === "pull" && result.pulled > 0) parts.push(`${result.pulled} pulled`)
-  if (result.skipped > 0) parts.push(`${result.skipped} skipped`)
-  if (result.errors.length > 0) parts.push(`${result.errors.length} errored`)
+  if (kind === "push" && result.pushed > 0) parts.push(t("pushed", { count: result.pushed }))
+  if (kind === "pull" && result.pulled > 0) parts.push(t("pulled", { count: result.pulled }))
+  if (result.skipped > 0) parts.push(t("skipped", { count: result.skipped }))
+  if (result.errors.length > 0) parts.push(t("errored", { count: result.errors.length }))
   if (result.errors.length > 0) {
-    toast.warning(parts.join(", ") || "No changes.")
+    toast.warning(parts.join(", ") || t("noChanges"))
   } else if (parts.length === 0) {
-    toast.info("No changes.")
+    toast.info(t("noChanges"))
   } else {
     toast.success(parts.join(", "))
   }

@@ -7,6 +7,8 @@ import { act, renderHook } from "@testing-library/react"
 import type { Character, Skill, Team } from "@cognia/agent-config-types"
 import type { PluginRow } from "@/lib/db/plugin-types"
 import type { TwinDraft } from "@/types/twin"
+import { templateCatalog } from "@/lib/templates/catalog"
+import { createTemplateDefinition } from "@/lib/templates/contracts"
 
 // Mock each lib/db source. The hook only calls these when the active
 // category demands them; tests can assert on the call counts to confirm the
@@ -633,6 +635,41 @@ describe("useDiscoverQuery", () => {
         id: "parallel-review",
         data: expect.objectContaining({ isBuiltIn: true, teammateCount: 2 }),
       })
+    })
+
+    it("prefers the live unified AgentTeam catalog when it is populated", async () => {
+      const definition = await createTemplateDefinition({
+        id: "team.review",
+        domain: "agentTeam",
+        status: "published",
+        revision: 1,
+        version: "1.0.0",
+        metadata: { name: "Unified review", description: "Review", category: "review" },
+        payload: {
+          team: { name: "Unified review", description: "Review", task: "", config: {} },
+          lead: { localId: "lead", name: "Lead", description: "", config: {} },
+          teammates: [{ localId: "reviewer", name: "Reviewer", description: "", config: {} }],
+          tasks: [],
+          twinSlots: [],
+        },
+        inputs: [],
+        dependencies: [],
+        capabilities: [],
+        compatibility: { platforms: ["desktop", "web", "mobile"] },
+        provenance: { source: "built-in", trust: "built-in" },
+      })
+      templateCatalog.replaceSource("test:discover", [definition])
+
+      const { result } = renderHook(() => useDiscoverQuery("teamTemplates", ""))
+
+      expect(result.current.items).toEqual([
+        expect.objectContaining({
+          kind: "teamTemplate",
+          id: "team.review@1.0.0",
+          data: expect.objectContaining({ name: "Unified review", teammateCount: 1 }),
+        }),
+      ])
+      templateCatalog.removeSource("test:discover")
     })
 
     it("combines external-agent presets and subagents under agentPresets", () => {

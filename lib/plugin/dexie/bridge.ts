@@ -151,7 +151,7 @@ export async function applyPluginTables(
     }
 
     const nextVersion = await nextSchemaVersion(db)
-    await db.close()
+    db.close()
     db.version(nextVersion).stores(patch)
     await db.open()
 
@@ -237,7 +237,7 @@ export async function restorePluginTables(
     const targetVersion = requiresCreate
       ? await nextSchemaVersion(db)
       : Math.max(db.verno, nativeVerno)
-    await db.close()
+    db.close()
     db.version(targetVersion).stores(patch)
     await db.open()
     return restored
@@ -270,7 +270,7 @@ export async function removePluginTables(
         patch[name] = null
       }
       const nextVersion = await nextSchemaVersion(db)
-      await db.close()
+      db.close()
       db.version(nextVersion).stores(patch)
       await db.open()
     }

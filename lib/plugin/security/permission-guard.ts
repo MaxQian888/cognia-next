@@ -117,6 +117,12 @@ export const PERMISSION_GROUPS: Record<string, PluginPermission[]> = {
     "automation:window",
   ],
   companion: ["companion:read", "companion:control", "companion:goal-control"],
+  templates: [
+    "templates:read",
+    "templates:contribute",
+    "templates:instantiate",
+    "templates:library:write",
+  ],
   native: ["native:input", "native:screen", "native:filesystem", "native:process"],
   dangerous: [
     "shell:execute",
@@ -239,6 +245,10 @@ export const PERMISSION_DESCRIPTIONS: Record<PluginPermission, string> = {
   "pet:interact": "Care for the desktop pet and grant budget-capped rewards",
   "hooks:chat-intercept":
     "Intercept every chat prompt, tool call, and tool result — can rewrite or block them",
+  "templates:read": "Read the unified template catalog and validation results",
+  "templates:contribute": "Register lifecycle-scoped template packages",
+  "templates:instantiate": "Preflight and instantiate templates after confirmation",
+  "templates:library:write": "Create user-owned template drafts after confirmation",
 }
 
 export const DANGEROUS_PERMISSIONS: PluginPermission[] = [

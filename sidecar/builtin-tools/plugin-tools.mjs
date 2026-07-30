@@ -124,6 +124,7 @@ export function buildPluginToolsServer({
   pendingPluginToolCalls,
   alwaysLoad,
   alwaysLoadToolNames,
+  remoteExecutionContext,
 }) {
   if (!Array.isArray(tools) || tools.length === 0) return null
 
@@ -153,6 +154,7 @@ export function buildPluginToolsServer({
           toolUseId,
           name: t.name,
           args,
+          ...(remoteExecutionContext ? { remoteExecutionContext } : {}),
         })
         const response = await pending
         if (response && response.error) {

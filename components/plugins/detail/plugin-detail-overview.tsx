@@ -144,8 +144,13 @@ export function PluginDetailOverview({ pluginId }: { pluginId: string }) {
         <Card className="p-3">
           <div className="text-xs font-semibold mb-2">{t("readme")}</div>
           <ScrollArea className="max-h-[50vh]">
-            <div className="prose prose-sm dark:prose-invert max-w-none text-sm pr-2">
-              <MarkdownRenderer content={plugin.readme} enableMermaid={false} enableMath={false} />
+            <div className="text-sm pr-2">
+              <MarkdownRenderer
+                content={plugin.readme}
+                enableMermaid={false}
+                enableMath={false}
+                rhythm="document"
+              />
             </div>
           </ScrollArea>
         </Card>

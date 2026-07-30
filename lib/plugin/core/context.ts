@@ -107,7 +107,7 @@ import type { AgentModeConfig } from "@/types/agent/agent-mode"
 import { usePluginStore } from "@/stores/plugin-runtime"
 import { useA2UIStore } from "@/stores/a2ui"
 import type { PluginManager } from "./manager"
-import type { PluginContextAPI } from "@/types/plugin/plugin"
+import type { IntrospectablePluginPermission, PluginContextAPI } from "@/types/plugin/plugin"
 import {
   createSessionAPI,
   createProjectAPI,
@@ -127,6 +127,7 @@ import {
   createMediaAPI,
   createStorageAPI,
   createContextPanelAPI,
+  createTemplatesAPI,
 } from "../api"
 import { createEditorAPI } from "../api/editor-api"
 import { createMessagePartAPI } from "../api/message-part-api"
@@ -154,6 +155,8 @@ import { createBackupAPI } from "../api/backup-api"
 import { createAutomationAPI } from "../api/automation-api"
 import { createCompanionAPI } from "../api/companion-api"
 import { createPetAPI } from "../api/pet-api"
+import { getPluginConsentBroker } from "@/lib/plugin/security/consent-broker"
+import { getTemplateRuntime } from "@/lib/templates/runtime"
 import { getDb } from "@/lib/db/schema"
 import { createIPCAPI } from "../messaging/ipc"
 import { createEventAPI } from "../messaging/message-bus"
@@ -283,6 +286,7 @@ export function createFullPluginContext(
   const baseContext = createPluginContext(plugin, manager, options)
 
   const permissionsAPI = createPermissionAPI(pluginId, plugin.manifest.permissions || [])
+  const templateRuntime = getTemplateRuntime()
 
   // Create feature APIs
   const contextAPI: PluginContextAPI = {
@@ -311,6 +315,24 @@ export function createFullPluginContext(
       permissionsAPI.hasPermission(permission as never)
     ),
     permissions: permissionsAPI,
+    templates: createTemplatesAPI(pluginId, {
+      catalog: templateRuntime.catalog,
+      service: templateRuntime.service,
+      // The templates API resolves a definition's declared *capabilities* into
+      // permission ids, and an unrecognised capability falls through as its own
+      // raw string — so what arrives here is `string`, not a known permission.
+      // The cast is safe because `hasPermission` is a set-membership check:
+      // a string that is not a real permission is simply denied.
+      hasPermission: (permission) =>
+        permissionsAPI.hasPermission(permission as IntrospectablePluginPermission),
+      confirm: ({ action, definitionId }) =>
+        getPluginConsentBroker().request({
+          pluginId,
+          permission:
+            action === "instantiate" ? "templates:instantiate" : "templates:library:write",
+          reason: `${action}:${definitionId}`,
+        }),
+    }),
     messagePart: createMessagePartAPI(pluginId),
     toolResult: createToolResultAPI(pluginId),
   }
