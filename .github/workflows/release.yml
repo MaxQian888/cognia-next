@@ -12,9 +12,10 @@ name: Release
 #    creates the draft GitHub release and uploads installers + the updater
 #    signatures (*.sig) and latest.json manifest the in-app updater consumes.
 #
-# `secrets: inherit` forwards TAURI_SIGNING_PRIVATE_KEY[_PASSWORD] to the
-# reusable build-tauri workflow so the release bundles are signed. See
-# src-tauri/UPDATER.md for the one-time signing-key setup.
+# `secrets: inherit` forwards updater signing plus Developer ID/notarization
+# credentials to the reusable build-tauri workflow. Tagged macOS jobs fail
+# closed if any required release credential is missing or inconsistent. See
+# src-tauri/UPDATER.md for setup.
 # ============================================================================
 
 on:

@@ -12,12 +12,16 @@ In-app auto-updates are **fully configured** and ready:
   with `releaseDraft: false`, so a tagged build **publishes** the release directly.
 - Signing secrets `TAURI_SIGNING_PRIVATE_KEY` / `..._PASSWORD` are already set in
   GitHub Actions.
+- Tagged macOS releases additionally require a `Developer ID Application`
+  certificate and notarization credentials. The release workflow validates the
+  identity and Team ID before building and never falls back to ad-hoc signing.
 
-**Nothing is left to configure** — the only reason the updater reports
+The updater channel itself is configured. The only reason it reports
 `Could not fetch a valid release JSON from the remote` is that **no release has
 been published yet**, so `releases/latest/download/latest.json` 404s. Cut the
-first `v*` tag (step 4) and the endpoint goes live. Until then the boot-time
-check logs this as a quiet `debug` (`about.autoUpdateCheckNoRelease`), not a warn.
+first `v*` tag after the macOS release secrets below are installed and the
+endpoint goes live. Until then the boot-time check logs this as a quiet `debug`
+(`about.autoUpdateCheckNoRelease`), not a warn.
 
 The sections below document the one-time signing setup (already done for this
 repo) so the steps aren't lost if the key ever needs rotating.
@@ -55,6 +59,20 @@ secrets exist in this repo's Actions settings.)**
 
 ## 4. Ship
 
+Before creating a tag, configure these additional repository secrets:
+
+- `APPLE_CERTIFICATE` — base64-encoded Developer ID Application `.p12`
+- `APPLE_CERTIFICATE_PASSWORD` — password used to export the `.p12`
+- `APPLE_SIGNING_IDENTITY` — full `Developer ID Application: … (TEAMID)` name
+- `APPLE_ID` — Apple account used for notarization
+- `APPLE_PASSWORD` — app-specific password for that account
+- `APPLE_TEAM_ID` — the 10-character Team ID present in the signing identity
+
+`scripts/ci/require-macos-release-signing.mjs` checks the complete set before a
+tagged macOS build. Tauri imports the certificate and performs signing,
+notarization, and stapling; the repository does not implement a second signing
+pipeline.
+
 ```bash
 git tag v0.1.1 && git push origin v0.1.1
 ```
@@ -90,10 +108,9 @@ use. Installation remains user-confirmed even when background download is on.
 ## Notes
 
 - OS trust signing is a **separate** concern from updater signing. macOS bundles
-  use Tauri's ad-hoc identity (`bundle.macOS.signingIdentity: "-"`) so Apple
-  Silicon does not reject Internet-downloaded builds as damaged. Ad-hoc signing
-  is not notarization: users may still need to approve the app in Privacy &
-  Security. Developer ID/notarization and Windows Authenticode remain optional
-  production hardening.
+  are hardened and require Developer ID signing plus notarization for tagged
+  releases. The signing identity stays in CI secrets rather than
+  `tauri.conf.json`; no ad-hoc production fallback is configured. Windows
+  Authenticode remains separate from this macOS requirement.
 - There is no `active` field in the Tauri v2 updater config — enablement is
   `createUpdaterArtifacts` + `endpoints` + `pubkey`.

@@ -22,9 +22,10 @@ name: Build Tauri
 # the bundles; without these secrets a tagged build FAILS by design (an unsigned
 # release would be un-updatable). Pass them through with `secrets: inherit`.
 #
-# OPTIONAL authenticated OS signing (Apple Developer ID / Windows Authenticode)
-# stays disabled. macOS still receives the ad-hoc identity configured in
-# tauri.conf.json so Apple Silicon accepts Internet-downloaded bundles.
+# Tagged macOS releases additionally REQUIRE Developer ID Application signing
+# and Apple notarization. The preflight below rejects missing credentials,
+# ad-hoc/development identities, and Team ID mismatches before compilation.
+# Untagged CI/nightly builds do not receive release credentials.
 # ============================================================================
 
 on:
@@ -110,9 +111,21 @@ jobs:
       - name: Install frontend dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Require Developer ID signing for tagged macOS releases
+        if: inputs.tagName != '' && runner.os == 'macOS'
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: node scripts/ci/require-macos-release-signing.mjs
+
       # tauri-action runs `pnpm build` (beforeBuildCommand) → `tauri build`,
-      # signs the updater bundles with TAURI_SIGNING_PRIVATE_KEY, and — when a
-      # tagName is supplied — creates the draft release with installers, `.sig`
+      # signs the updater bundles with TAURI_SIGNING_PRIVATE_KEY, applies
+      # Developer ID signing + notarization on tagged macOS builds, and — when
+      # a tagName is supplied — creates the release with installers, `.sig`
       # files, and the `latest.json` updater manifest (includeUpdaterJson).
       - name: Build Tauri app
         uses: tauri-apps/tauri-action@v0
@@ -120,6 +133,12 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          APPLE_CERTIFICATE: ${{ runner.os == 'macOS' && secrets.APPLE_CERTIFICATE || '' }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ runner.os == 'macOS' && secrets.APPLE_CERTIFICATE_PASSWORD || '' }}
+          APPLE_SIGNING_IDENTITY: ${{ runner.os == 'macOS' && secrets.APPLE_SIGNING_IDENTITY || '' }}
+          APPLE_ID: ${{ runner.os == 'macOS' && secrets.APPLE_ID || '' }}
+          APPLE_PASSWORD: ${{ runner.os == 'macOS' && secrets.APPLE_PASSWORD || '' }}
+          APPLE_TEAM_ID: ${{ runner.os == 'macOS' && secrets.APPLE_TEAM_ID || '' }}
         with:
           args: --target ${{ matrix.target }}
           tagName: ${{ inputs.tagName }}
