@@ -14,6 +14,25 @@
 //! app binary still gets its (single) manifest from `src-tauri/build.rs` — no
 //! duplicate-manifest CVT1100 / LNK1123. See tauri-apps/tauri #13419 and #13948.
 fn main() {
+    println!("cargo:rerun-if-changed=native/macos/screen_capture.m");
+
+    if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("macos") {
+        cc::Build::new()
+            .file("native/macos/screen_capture.m")
+            .flag("-fobjc-arc")
+            .flag("-fblocks")
+            .flag("-Werror")
+            .compile("cognia_screen_capture_kit");
+        println!("cargo:rustc-link-lib=framework=ScreenCaptureKit");
+        println!("cargo:rustc-link-lib=framework=CoreGraphics");
+        println!("cargo:rustc-link-lib=framework=CoreImage");
+        println!("cargo:rustc-link-lib=framework=CoreMedia");
+        println!("cargo:rustc-link-lib=framework=CoreVideo");
+        println!("cargo:rustc-link-lib=framework=CoreFoundation");
+        println!("cargo:rustc-link-lib=framework=ImageIO");
+        println!("cargo:rustc-link-lib=framework=Foundation");
+    }
+
     #[cfg(windows)]
     {
         let manifest = std::env::current_dir()

@@ -3075,48 +3075,86 @@
       "title": "Automation requests your consent"
     },
     "header": {
-      "description": "Configure desktop UI automation — screenshots, element finding, clicking, typing, and hotkeys.",
+      "description": "Configure revision-bound desktop automation, app approvals, capture, and policy.",
       "title": "Automation"
     },
     "inspector": {
-      "a11yOnlyNote": "This back-end reads the frontmost window's accessibility tree. Tree reading, element details, and locator export work here; element-targeted pattern tests and coordinate picking aren't available on this platform yet.",
-      "clickToPopulate": "Choose a root and click Refresh to populate the tree.",
-      "copyLocator": "Copy Locator",
-      "copyRef": "Copy Ref",
-      "elementDetails": "Element Details",
-      "elementDetailsDescription": "Properties and test patterns for the selected element.",
-      "elementRef": "Element Ref",
-      "elementRefPlaceholder": "e.g. windows/1234/5678",
-      "emptyResult": "No elements returned for the selected root.",
-      "invokeFailed": "Pattern invocation failed: {error}",
-      "invokeOk": "Pattern '{pattern}' invoked",
-      "locatorJson": "Locator JSON",
-      "maxDepth": "Max Depth",
-      "pickCancelAria": "Cancel point-and-pick countdown",
-      "pickCancelTooltip": "Cancel the countdown",
-      "pickCaptureNow": "Capture now",
-      "pickCaptureNowAria": "Capture cursor target immediately",
-      "pickCaptureNowTooltip": "Skip the countdown and pick the element under the cursor immediately",
-      "pickCountdown": "Cancel ({seconds}s)",
-      "pickFailed": "Pick failed: {error}",
-      "pickOk": "Element picked",
-      "pickStart": "Pick element",
-      "pickStartAria": "Start point-and-pick countdown",
-      "pickStartTooltip": "Start a 3-second countdown, then pick the element under the cursor",
-      "readTree": "Refresh",
-      "reading": "Reading…",
-      "requiresTauri": "The inspector requires the Tauri runtime so it can talk to the active accessibility back-end.",
-      "rootMode": {
-        "desktop": "Desktop",
-        "focused": "Focused",
-        "manual": "Manual Ref"
+      "actionFailed": "Action failed",
+      "app": "Application",
+      "appOption": "{name} · PID {pid}",
+      "appsFailed": "Failed to list applications",
+      "capabilitiesFailed": "Failed to read automation capabilities",
+      "captureState": "Capture state",
+      "clearQuery": "Clear",
+      "coordinates": "Coordinate spaces",
+      "coordinatesDescription": "Diagnostics for logical points, source pixels, model pixels, and the captured window.",
+      "details": {
+        "automationId": "Automation ID",
+        "className": "Class",
+        "coordinateSpace": "Active coordinate space",
+        "displayId": "Display ID",
+        "fingerprint": "Structural fingerprint",
+        "logicalBounds": "Global logical bounds",
+        "modelPixels": "Model pixels",
+        "name": "Name",
+        "revision": "Handle revision",
+        "role": "Role / control type",
+        "scaleFactor": "Scale factor",
+        "sourcePixels": "Source pixels",
+        "windowId": "Window ID"
       },
+      "elementDetails": "Element Details",
+      "elementDetailsDescription": "Canonical handle, properties, expansion, and action verification.",
+      "emptyResult": "No elements returned.",
+      "events": {
+        "action": "Action returned {status}.",
+        "capture": "Captured revision {revision}.",
+        "expand": "Expanded {count} child elements.",
+        "query": "Query returned {count} elements."
+      },
+      "expand": "Expand children",
+      "expandFailed": "Element expansion failed",
+      "expandMore": "Load more children",
+      "handleFresh": "Fresh handle",
+      "handleStale": "Stale handle",
+      "nextPage": "Next",
+      "noDiff": "Capture another revision to inspect a deterministic diff.",
+      "noEvents": "No inspector events yet.",
+      "noEvidence": "Perform an action to inspect its policy decision and evidence.",
+      "noScreenshot": "This revision has no matching screenshot.",
+      "none": "none",
+      "pageSummary": "Page {page} of {pages}",
+      "previousPage": "Previous",
+      "query": "Query elements",
+      "queryFailed": "Element query failed",
+      "queryPlaceholder": "Query element name",
+      "reading": "Capturing…",
+      "refreshApps": "Refresh apps",
+      "requiresTauri": "The inspector requires the Tauri runtime so it can talk to the active accessibility back-end.",
+      "screenshot": "Revision screenshot",
+      "screenshotAlt": "Captured application window",
+      "screenshotDescription": "Window-bound screenshot with the selected AX element overlaid.",
+      "selectedOverlay": "Selected element overlay",
+      "selectApp": "Select an application",
       "selectRow": "Select an element from the tree to see details.",
-      "testPatterns": "Test Patterns",
-      "testPatternsHint": "Invoke UIA patterns against the selected element to verify behavior.",
+      "semanticClick": "Test semantic click",
+      "session": {
+        "description": "Each capture binds one AX tree revision to the matching window screenshot and turn token.",
+        "title": "App session"
+      },
+      "stateFailed": "Failed to capture app state",
       "tree": "Accessibility Tree",
-      "treeDescription": "Inspect the UIA/accessibility tree of a target window.",
-      "unavailable": "The active platform back-end ({platform}) doesn't expose an accessibility tree yet, so there's nothing for the inspector to read. Tree support lands per platform in a later milestone."
+      "treeSummary": "Revision {revision}: {count} projected of {total} collected elements.",
+      "truncation": "Tree truncated by {reason}: materialized {materialized}, omitted {omitted}.",
+      "unavailable": "The active platform back-end ({platform}) doesn't expose an accessibility tree.",
+      "unnamed": "(unnamed)",
+      "views": {
+        "compact": "Compact tree",
+        "diff": "Revision diff",
+        "events": "Events",
+        "evidence": "Action evidence",
+        "raw": "Raw tree"
+      }
     },
     "overview": {
       "capabilities": {
@@ -10856,6 +10894,16 @@
         "reason": "Confirm granting remote control to {label}",
         "title": "Allow remote control",
         "toggleAria": "Toggle remote control for {label}"
+      },
+      "lockedComputerUse": {
+        "blocked": "Locked Use not enabled ({reason}).",
+        "col": "Locked Use",
+        "description": "Allows this device to request a short, task-bound Locked Use lease. Remote control must remain enabled. This does not permit administrator authentication or security-warning bypasses.",
+        "disabledToast": "Locked Use disabled for {label}.",
+        "enabledToast": "Locked Use enabled for {label}.",
+        "reason": "Confirm granting Locked Use to {label}",
+        "title": "Allow Locked Use",
+        "toggleAria": "Toggle Locked Use for {label}"
       },
       "resume": {
         "blocked": "Resume not completed ({reason}).",
@@ -33090,57 +33138,25 @@
           }
         },
         "desktop": {
-          "click": {
-            "description": "Click an element or absolute screen coordinate.",
-            "label": "Click"
+          "expandElement": {
+            "description": "Page through children of an element in the canonical AX tree.",
+            "label": "Expand app element"
           },
-          "findElement": {
-            "description": "Locate a UI element by name / automation id / control type.",
-            "label": "Find element"
+          "getAppState": {
+            "description": "Capture a fresh AX revision and matching window screenshot.",
+            "label": "Get app state"
           },
-          "invokePattern": {
-            "description": "Dispatch a UIA pattern (Invoke / Toggle / Value / Transform / …).",
-            "label": "Invoke pattern"
+          "listApps": {
+            "description": "List applications available to an app-scoped Computer Use session.",
+            "label": "List desktop apps"
           },
-          "keys": {
-            "description": "Send a keyboard chord like ctrl+shift+t.",
-            "label": "Send keys"
+          "performAction": {
+            "description": "Perform one revision- and turn-bound semantic or pixel action.",
+            "label": "Perform app action"
           },
-          "launchApp": {
-            "description": "Launch an application by path/name, or focus an existing window by process.",
-            "label": "Launch app"
-          },
-          "paste": {
-            "description": "Paste text via the clipboard (saves + restores the user clipboard).",
-            "label": "Paste text"
-          },
-          "readTree": {
-            "description": "Snapshot the accessibility subtree as JSON for downstream nodes.",
-            "label": "Read tree"
-          },
-          "screenshot": {
-            "description": "Capture the primary monitor or a region. Returns PNG bytes + dims.",
-            "label": "Screenshot"
-          },
-          "type": {
-            "description": "Type a string into the focused element via SendInput.",
-            "label": "Type text"
-          },
-          "wait": {
-            "description": "Block until an element appears, disappears, or matches a property.",
-            "label": "Wait for element"
-          },
-          "windowClose": {
-            "description": "Close a window via the UIA Window pattern.",
-            "label": "Close window"
-          },
-          "windowFocus": {
-            "description": "Bring a window to the foreground.",
-            "label": "Focus window"
-          },
-          "windowResize": {
-            "description": "Move/resize a window via the UIA Transform pattern.",
-            "label": "Resize window"
+          "queryElements": {
+            "description": "Query elements in one captured app revision.",
+            "label": "Query app elements"
           }
         },
         "git": {

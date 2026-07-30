@@ -7,13 +7,11 @@ name: Build Tauri
 # official `tauri-apps/tauri-action`.
 #
 # When called WITH a `tagName` (from release.yml on a `v*` tag), tauri-action
-# creates/updates a PUBLISHED GitHub release (releaseDraft: false) and uploads
-# each platform's installers PLUS the updater signatures (`*.sig`) and the
-# assembled `latest.json` manifest that the in-app updater endpoint serves.
-# Publishing immediately is required: `releases/latest` only resolves to a
-# published release, so a draft would keep the updater endpoint 404'ing. When
-# called via workflow_dispatch (no tag), it just builds — a config / compile
-# sanity check.
+# creates/updates a DRAFT GitHub release and uploads each platform's installers
+# plus updater signatures (`*.sig`) and `latest.json`. A final job publishes the
+# draft only after every platform succeeds, so a macOS signing/notarization
+# failure can never expose a partial production release. Without a tag, it only
+# builds.
 #
 # REQUIRED SECRETS for signed updater artifacts (see src-tauri/UPDATER.md):
 #   - TAURI_SIGNING_PRIVATE_KEY           Base64 of the updater private key.
@@ -22,9 +20,10 @@ name: Build Tauri
 # the bundles; without these secrets a tagged build FAILS by design (an unsigned
 # release would be un-updatable). Pass them through with `secrets: inherit`.
 #
-# OPTIONAL authenticated OS signing (Apple Developer ID / Windows Authenticode)
-# stays disabled. macOS still receives the ad-hoc identity configured in
-# tauri.conf.json so Apple Silicon accepts Internet-downloaded bundles.
+# Tagged macOS releases additionally REQUIRE Developer ID Application signing
+# and Apple notarization. The preflight below rejects missing credentials,
+# ad-hoc/development identities, and Team ID mismatches before compilation.
+# Untagged CI/nightly builds do not receive release credentials.
 # ============================================================================
 
 on:
@@ -38,8 +37,34 @@ on:
   workflow_dispatch:
 
 jobs:
+  release-preflight:
+    name: Release signing preflight
+    if: inputs.tagName != ''
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 26
+
+      - name: Require Developer ID signing for tagged macOS releases
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: node scripts/ci/require-macos-release-signing.mjs
+
   build-tauri:
     name: Build Tauri App (${{ matrix.platform }})
+    needs: release-preflight
+    if: always() && (inputs.tagName == '' || needs.release-preflight.result == 'success')
 
     # Deliberately NO job-level `permissions:` here. This is a REUSABLE
     # workflow, and a called workflow may not request more scope than its
@@ -111,8 +136,9 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       # tauri-action runs `pnpm build` (beforeBuildCommand) → `tauri build`,
-      # signs the updater bundles with TAURI_SIGNING_PRIVATE_KEY, and — when a
-      # tagName is supplied — creates the draft release with installers, `.sig`
+      # signs the updater bundles with TAURI_SIGNING_PRIVATE_KEY, applies
+      # Developer ID signing + notarization on tagged macOS builds, and — when
+      # a tagName is supplied — creates the release with installers, `.sig`
       # files, and the `latest.json` updater manifest (includeUpdaterJson).
       - name: Build Tauri app
         uses: tauri-apps/tauri-action@v0
@@ -120,15 +146,30 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          APPLE_CERTIFICATE: ${{ inputs.tagName != '' && runner.os == 'macOS' && secrets.APPLE_CERTIFICATE || '' }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ inputs.tagName != '' && runner.os == 'macOS' && secrets.APPLE_CERTIFICATE_PASSWORD || '' }}
+          APPLE_SIGNING_IDENTITY: ${{ inputs.tagName != '' && runner.os == 'macOS' && secrets.APPLE_SIGNING_IDENTITY || '' }}
+          APPLE_ID: ${{ inputs.tagName != '' && runner.os == 'macOS' && secrets.APPLE_ID || '' }}
+          APPLE_PASSWORD: ${{ inputs.tagName != '' && runner.os == 'macOS' && secrets.APPLE_PASSWORD || '' }}
+          APPLE_TEAM_ID: ${{ inputs.tagName != '' && runner.os == 'macOS' && secrets.APPLE_TEAM_ID || '' }}
         with:
           args: --target ${{ matrix.target }}
           tagName: ${{ inputs.tagName }}
           releaseName: ${{ inputs.tagName }}
-          # Publish immediately (NOT a draft): the updater endpoint points at
-          # `releases/latest/download/latest.json`, and GitHub resolves
-          # `releases/latest` only to a PUBLISHED, non-prerelease release — a
-          # draft would leave the endpoint 404'ing until someone manually hits
-          # Publish. quality + test gate this build in release.yml, so the
-          # bundles are already vetted by the time tauri-action publishes.
-          releaseDraft: false
+          # Every matrix leg uploads to the same draft. The publish-release job
+          # makes it visible only after all signed artifacts are complete.
+          releaseDraft: true
           includeUpdaterJson: true
+
+  publish-release:
+    name: Publish complete release
+    if: inputs.tagName != ''
+    needs: build-tauri
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Publish verified release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ inputs.tagName }}
+        run: gh release edit "$RELEASE_TAG" --draft=false --latest

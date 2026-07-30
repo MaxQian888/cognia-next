@@ -51,6 +51,7 @@ pub mod healthz;
 pub mod idempotency;
 pub mod jwt;
 pub mod lark_entry;
+pub mod locked_use_allow_list;
 pub mod mdns;
 pub mod metrics;
 pub mod middleware;

@@ -13,7 +13,12 @@ import { CompanionSection } from "./companion-section"
 import enMessages from "@/i18n/messages/en.json"
 import { transport } from "@/lib/tauri"
 import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
-import { addPairedDevice, listPairedDevices } from "@/lib/db/paired-devices"
+import {
+  addPairedDevice,
+  listPairedDevices,
+  setLockedComputerUseAllowed,
+  setRemoteControlAllowed,
+} from "@/lib/db/paired-devices"
 import { decodePairPayload } from "@/lib/qr/pair-payload"
 import { useAccountStore } from "@/stores/account/account-store"
 
@@ -91,13 +96,23 @@ describe("CompanionSection", () => {
 
   it("toggling the master switch calls companion_server_start", async () => {
     const user = userEvent.setup()
+    await addPairedDevice({
+      deviceId: "trusted-device",
+      label: "Trusted Phone",
+      platform: "ios",
+      pubkey: "key",
+      appVersion: "1.0.0",
+      nowMs: Date.now(),
+    })
+    await setRemoteControlAllowed("trusted-device", true)
+    await setLockedComputerUseAllowed("trusted-device", true)
     callSpy.mockImplementation(async (name: string, args?: unknown) => {
       if (name === "companion_server_status") return STATUS_STOPPED
       if (name === "companion_server_start") {
         const a = args as { port: number; bindLoopbackOnly: boolean }
-        expect(a.port).toBe(7890)
+        expect(a.port).toBe(27890)
         expect(a.bindLoopbackOnly).toBe(true)
-        return 7890
+        return 27890
       }
       return undefined as unknown as never
     })
@@ -109,6 +124,9 @@ describe("CompanionSection", () => {
     await waitFor(() => {
       const callNames = callSpy.mock.calls.map((c) => c[0])
       expect(callNames).toContain("companion_server_start")
+      expect(callSpy).toHaveBeenCalledWith("companion_seed_locked_computer_use", {
+        deviceIds: ["trusted-device"],
+      })
     })
   })
 

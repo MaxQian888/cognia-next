@@ -159,19 +159,11 @@ export type WorkflowNodeKind =
   | "action.git.branch"
   // Desktop UI automation (provided by the automation subsystem — see
   // `docs/superpowers/specs/2026-05-12-ui-automation-subsystem-design.md`)
-  | "action.desktop.screenshot"
-  | "action.desktop.findElement"
-  | "action.desktop.readTree"
-  | "action.desktop.click"
-  | "action.desktop.type"
-  | "action.desktop.keys"
-  | "action.desktop.invokePattern"
-  | "action.desktop.windowFocus"
-  | "action.desktop.windowClose"
-  | "action.desktop.windowResize"
-  | "action.desktop.wait"
-  | "action.desktop.paste"
-  | "action.desktop.launchApp"
+  | "action.desktop.listApps"
+  | "action.desktop.getAppState"
+  | "action.desktop.queryElements"
+  | "action.desktop.expandElement"
+  | "action.desktop.performAction"
   | "trigger.desktop.event"
   // Wave 3 — integrated terminal action. Runs a command in a dock tab
   // (or spawns a fresh tab), surfaces stdout / exit code downstream.
@@ -385,19 +377,11 @@ export const WORKFLOW_NODE_KINDS: readonly WorkflowNodeKind[] = [
   "action.git.commit",
   "action.git.push",
   "action.git.branch",
-  "action.desktop.screenshot",
-  "action.desktop.findElement",
-  "action.desktop.readTree",
-  "action.desktop.click",
-  "action.desktop.type",
-  "action.desktop.keys",
-  "action.desktop.invokePattern",
-  "action.desktop.windowFocus",
-  "action.desktop.windowClose",
-  "action.desktop.windowResize",
-  "action.desktop.wait",
-  "action.desktop.paste",
-  "action.desktop.launchApp",
+  "action.desktop.listApps",
+  "action.desktop.getAppState",
+  "action.desktop.queryElements",
+  "action.desktop.expandElement",
+  "action.desktop.performAction",
   "trigger.desktop.event",
   "action.system.terminal",
   "action.terminal.session.open",

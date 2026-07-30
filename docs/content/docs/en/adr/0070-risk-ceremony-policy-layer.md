@@ -191,9 +191,10 @@ added here.
 ## Phase 3 — Visual Workflow
 
 A workflow is a DAG whose nodes each do one concrete thing, so the node **kind is
-the evidence** — stronger than a roster or an objective. `action.desktop.click`
-does not merely have access to the mouse; it *is* a mouse click. `node-risk.ts`
-therefore maps kinds to surfaces directly (`RISKY_NODE_KINDS`, exhaustive
+the evidence** — stronger than a roster or an objective.
+`action.desktop.performAction` does not merely have access to the machine; it
+executes a revision-bound UI mutation. `node-risk.ts` therefore maps kinds to
+surfaces directly (`RISKY_NODE_KINDS`, exhaustive
 `Record`) and reuses only the severity table, so a node's tier and a roster's
 tier still mean the same thing.
 

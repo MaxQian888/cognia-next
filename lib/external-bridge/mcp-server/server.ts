@@ -309,11 +309,9 @@ function registerComputerUseTool(server: McpServer, settingsGetter: SettingsGett
     {
       title: "Drive the host computer",
       description:
-        "Take a screenshot, move the cursor, click, scroll, type, send keyboard " +
-        "chords, drag, or release mouse buttons on the user's desktop. Routes " +
-        "through Cognia's automation permission gate (`Surface::Mcp`) — denied " +
-        "by default until the user enables this scope in Settings → External " +
-        "Bridge.",
+        "Read and act on a revision-bound native application session. Call getAppState " +
+        "before each performAction; the state always includes a matching screenshot. " +
+        "Routes through Cognia's automation permission gate (`Surface::Mcp`).",
       annotations: {
         readOnlyHint: false,
         destructiveHint: true,
@@ -321,33 +319,23 @@ function registerComputerUseTool(server: McpServer, settingsGetter: SettingsGett
         openWorldHint: true,
       },
       inputSchema: {
-        action: z.enum([
-          "screenshot",
-          "click",
-          "type",
-          "keys",
-          "mouse_move",
-          "drag",
-          "scroll",
-          "hold_key",
-          "mouse_button",
+        operation: z.enum([
+          "listApps",
+          "getAppState",
+          "queryElements",
+          "expandElement",
+          "performAction",
         ]),
-        coordinate: z
-          .tuple([z.number().int(), z.number().int()])
-          .optional()
-          .describe("Target [x, y]. Required for click / mouse_move / drag / scroll."),
-        startCoordinate: z
-          .tuple([z.number().int(), z.number().int()])
-          .optional()
-          .describe("Drag origin [x, y]."),
-        button: z.enum(["left", "right", "middle"]).optional(),
-        double: z.boolean().optional(),
-        text: z.string().optional().describe("Text to type."),
-        chord: z.string().optional().describe('Keyboard chord, e.g. "ctrl+shift+t" or "{F4}".'),
-        dx: z.number().int().optional(),
-        dy: z.number().int().optional(),
-        durationMs: z.number().int().min(0).optional(),
-        transition: z.enum(["down", "up"]).optional(),
+        turnKey: z.string().min(1).optional(),
+        sessionId: z.string().min(1).optional(),
+        lineageId: z.string().min(1).optional(),
+        revision: z.number().int().min(1).optional(),
+        locator: z.object({}).passthrough().optional(),
+        options: z.object({}).passthrough().optional(),
+        limit: z.number().int().min(1).max(1000).optional(),
+        handle: z.object({}).passthrough().optional(),
+        continuationToken: z.string().nullable().optional(),
+        request: z.object({}).passthrough().optional(),
       },
     },
     async (args, extra) =>

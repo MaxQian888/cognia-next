@@ -10,6 +10,7 @@ import {
   resumePairedDevice,
   revokePairedDevice,
   setServerFingerprint,
+  setLockedComputerUseAllowed,
   setPushToken,
   setAgentControlAllowed,
   setRemoteControlAllowed,
@@ -526,6 +527,23 @@ describe("setAgentControlAllowed", () => {
     const row = await getPairedDevice("dev-ac4")
     expect(row?.allowRemoteControl).toBe(false)
     expect(row?.allowAgentControl).toBe(true)
+  })
+})
+
+describe("setLockedComputerUseAllowed", () => {
+  it("is a separate deny-by-default capability", async () => {
+    await addPairedDevice({
+      deviceId: "dev-locked",
+      label: "x",
+      platform: "ios",
+      pubkey: "pk",
+      appVersion: "0.1.0",
+      nowMs: 1,
+    })
+    expect((await getPairedDevice("dev-locked"))?.allowLockedComputerUse).toBeUndefined()
+    expect(await setLockedComputerUseAllowed("dev-locked", true)).toBe(true)
+    expect((await getPairedDevice("dev-locked"))?.allowLockedComputerUse).toBe(true)
+    expect(await setLockedComputerUseAllowed("missing", true)).toBe(false)
   })
 })
 

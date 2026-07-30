@@ -138,24 +138,24 @@ describe("applyComputerUseTools — auto chatConsentMode (audit fix)", () => {
     })
     expect(result.opts.suppressApprovalForTools).toEqual(
       expect.arrayContaining([
-        "computer_use",
-        "bash",
-        "text_editor",
-        "find_text",
-        "click_text",
-        "mcp__cognia-plugin-tools__computer_use",
-        "mcp__cognia-plugin-tools__bash",
-        "mcp__cognia-plugin-tools__text_editor",
-        "mcp__cognia-plugin-tools__find_text",
-        "mcp__cognia-plugin-tools__click_text",
+        "list_apps",
+        "get_app_state",
+        "query_elements",
+        "expand_element",
+        "perform_action",
+        "mcp__cognia-plugin-tools__list_apps",
+        "mcp__cognia-plugin-tools__get_app_state",
+        "mcp__cognia-plugin-tools__query_elements",
+        "mcp__cognia-plugin-tools__expand_element",
+        "mcp__cognia-plugin-tools__perform_action",
       ])
     )
   })
 
-  it("session grants suppress OCR visual tools by bare and bridged names", () => {
+  it("session grants suppress app-session tools by bare and bridged names", () => {
     resetSessionGrants()
-    recordSessionGrant("sess-grant", "find_text")
-    recordSessionGrant("sess-grant", "mcp__cognia-plugin-tools__click_text")
+    recordSessionGrant("sess-grant", "query_elements")
+    recordSessionGrant("sess-grant", "mcp__cognia-plugin-tools__perform_action")
     const char = {
       ...baseChar,
       computerUseSettings: { chatConsentMode: "session-grant" as const },
@@ -168,8 +168,8 @@ describe("applyComputerUseTools — auto chatConsentMode (audit fix)", () => {
     })
 
     expect(result.opts.suppressApprovalForTools).toEqual([
-      "find_text",
-      "mcp__cognia-plugin-tools__click_text",
+      "query_elements",
+      "mcp__cognia-plugin-tools__perform_action",
     ])
   })
 

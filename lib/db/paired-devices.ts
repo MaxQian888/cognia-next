@@ -240,3 +240,13 @@ export async function setAgentControlAllowed(deviceId: string, allowed: boolean)
   })
   return updated > 0
 }
+
+export async function setLockedComputerUseAllowed(
+  deviceId: string,
+  allowed: boolean
+): Promise<boolean> {
+  const updated = await getDb().pairedDevices.update(deviceId, {
+    allowLockedComputerUse: allowed,
+  })
+  return updated > 0
+}

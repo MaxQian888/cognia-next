@@ -1406,10 +1406,7 @@ export const PLUGIN_CAPABILITY_CONTRACTS: readonly PluginCapabilityContract[] = 
     typescriptSdk: ["packages/plugin-sdk/src/api/automation.ts"],
     pythonSdk: [],
     docs: "docs/content/docs/en/subsystems/plugin-system/contracts-and-registries.mdx#capabilities",
-    requiredTests: [
-      "lib/plugin/api/automation-api.test.ts",
-      "lib/automation/anthropic-action-mapper.test.ts",
-    ],
+    requiredTests: ["lib/plugin/api/automation-api.test.ts", "lib/automation/client.test.ts"],
   },
   {
     // Companion device pairing + remote-control grants. Gates `ctx.companion`

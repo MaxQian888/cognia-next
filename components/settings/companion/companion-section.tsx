@@ -107,6 +107,7 @@ async function startServer(bindMode: BindMode): Promise<number> {
   // semantics — a grant revoked while the desktop was down is not retained.
   // Best-effort: a failure here only means a granted phone must re-toggle.
   await seedRemoteControlAllowList()
+  await seedLockedComputerUseAllowList()
   return port
 }
 
@@ -126,6 +127,24 @@ async function seedRemoteControlAllowList(): Promise<void> {
     })
   } catch (err) {
     console.warn("seedRemoteControlAllowList failed", err)
+  }
+}
+
+async function seedLockedComputerUseAllowList(): Promise<void> {
+  if (!isTauri()) return
+  try {
+    const devices = await listPairedDevices()
+    const allowed = devices
+      .filter(
+        (device) =>
+          device.allowRemoteControl === true &&
+          device.allowLockedComputerUse === true &&
+          device.revokedAt === undefined
+      )
+      .map((device) => device.deviceId)
+    await transport.call<void>("companion_seed_locked_computer_use", { deviceIds: allowed })
+  } catch (err) {
+    console.warn("seedLockedComputerUseAllowList failed", err)
   }
 }
 

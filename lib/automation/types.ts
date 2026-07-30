@@ -123,12 +123,174 @@ export interface Screenshot {
   /**
    * Pre-downscale dimensions — present only when the Rust side shrank the
    * frame (Settings → Automation → Behavior → screenshot scaling). Absent
-   * means `width`/`height` ARE the physical pixels. Consumed by
-   * `lib/automation/coordinate-scaler.ts` to map model coordinates back
-   * to physical pixels.
+   * means `width`/`height` ARE the physical pixels. The canonical Rust
+   * session surface uses these dimensions for model/source transforms.
    */
   sourceWidth?: number
   sourceHeight?: number
+}
+
+export type AppLocator =
+  | { kind: "bundleId"; bundleId: string }
+  | { kind: "path"; path: string }
+  | { kind: "displayName"; displayName: string }
+
+export interface ResolvedApplication {
+  bundleId: string | null
+  path: string | null
+  displayName: string
+  processId: number
+}
+
+export type CoordinateSpace = "globalLogicalPoints" | "screenshotPixels" | "modelPixels"
+
+export interface UiSurface {
+  windowId: number | null
+  displayId: string | null
+  logicalBounds: Rect
+  pixelWidth: number
+  pixelHeight: number
+  scaleFactor: number
+  coordinateSpace: CoordinateSpace
+}
+
+export interface GetAppStateOptions {
+  disableDiff?: boolean
+  allowLaunch?: boolean
+  maxNodes?: number
+  maxDepth?: number
+  projection?: UiTreeProjectionKind
+}
+
+export type UiTreeProjectionKind = "model" | "inspector"
+
+export interface ElementHandle {
+  sessionId: string
+  lineageId: string
+  revision: number
+  index: number
+  fingerprint: string
+}
+
+export interface UiTreeNode {
+  handle: ElementHandle
+  parentIndex: number | null
+  element: ElementInfo
+}
+
+export interface UiTreeProjection {
+  nodes: UiTreeNode[]
+  totalNodes: number
+  truncated: boolean
+}
+
+export interface UiTreeDiff {
+  fromRevision: number
+  toRevision: number
+  added: ElementInfo[]
+  removed: string[]
+  updated: ElementInfo[]
+}
+
+export interface TruncationDescriptor {
+  reason: string
+  materializedNodes: number
+  omittedNodes: number
+}
+
+export interface PreferredLocator {
+  purpose: string
+  automationId: string | null
+  role: string | null
+  name: string | null
+}
+
+/**
+ * Cognia-authored, bundle-ID-scoped navigation guidance. The schema cannot
+ * express policy, consent, redaction, confirmations, or target allow-lists.
+ */
+export interface InstructionPack {
+  bundleId: string
+  version: number
+  guidance: string[]
+  preferredLocators: PreferredLocator[]
+  loadingRoleHints: string[]
+}
+
+export interface UiStateRevision {
+  sessionId: string
+  lineageId: string
+  revision: number
+  turnToken: string
+  app: ResolvedApplication
+  surface: UiSurface
+  screenshot: Screenshot | null
+  projection: UiTreeProjectionKind
+  tree: UiTreeProjection
+  diff: UiTreeDiff | null
+  truncation: TruncationDescriptor[]
+  instructionPack: InstructionPack | null
+  capturedAt: number
+}
+
+export interface ExpandedElements {
+  nodes: UiTreeNode[]
+  continuationToken: string | null
+}
+
+export type ActionStrategy = "semantic" | "pixel" | "auto"
+
+export interface PixelTarget {
+  sessionId: string
+  lineageId: string
+  revision: number
+  point: Point
+  screenshotWidth: number
+  screenshotHeight: number
+}
+
+export type ActionTarget =
+  { kind: "element"; handle: ElementHandle } | { kind: "pixel"; target: PixelTarget }
+
+export type UiAction =
+  | { kind: "click"; button?: MouseButton; count?: number }
+  | { kind: "drag"; to: Point; opts?: DragOpts }
+  | { kind: "scroll"; opts?: ScrollOpts }
+  | { kind: "pressKey"; chord: KeyChord }
+  | { kind: "typeText"; text: string }
+  | { kind: "setValue"; value: string }
+  | { kind: "selectText"; start: number; end: number }
+  | { kind: "secondaryAction"; name: string }
+
+export interface ActionRequest {
+  turnToken: string
+  target: ActionTarget
+  action: UiAction
+  strategy: ActionStrategy
+}
+
+export type ActionStatus = "delivered" | "notDelivered" | "refused" | "unknown"
+export type ActionMethod = "ax" | "synthetic"
+
+export interface ActionEvidence {
+  kind: string
+  message: string
+  revision: number | null
+}
+
+export interface ActionPolicyDecision {
+  allowed: boolean
+  reason: string | null
+}
+
+export interface ActionResult {
+  status: ActionStatus
+  method: ActionMethod | null
+  beforeRevision: number
+  afterRevision: number | null
+  evidence: ActionEvidence[]
+  policyDecision: ActionPolicyDecision
+  durationMs: number
 }
 
 export type ClickTarget =

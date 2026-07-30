@@ -43,12 +43,12 @@ describe("preflightCapabilities", () => {
       nodes: [
         node("n_t", "trigger.manual"),
         node("n_git", "action.git.commit"),
-        node("n_shot", "action.desktop.screenshot"),
+        node("n_state", "action.desktop.getAppState"),
       ],
     }
     expect(preflightCapabilities(wf, ["webview"])).toEqual([
       { nodeId: "n_git", kind: "action.git.commit", missing: ["shell"] },
-      { nodeId: "n_shot", kind: "action.desktop.screenshot", missing: ["uia-automation"] },
+      { nodeId: "n_state", kind: "action.desktop.getAppState", missing: ["uia-automation"] },
     ])
   })
 

@@ -32,6 +32,7 @@ import {
   resumePairedDevice,
   revokePairedDevice,
   setAgentControlAllowed,
+  setLockedComputerUseAllowed,
   setRemoteControlAllowed,
 } from "@/lib/db/paired-devices"
 import { useBiometricGuard } from "@/hooks/use-biometric-guard"
@@ -58,6 +59,11 @@ async function setAgentControlRustSide(deviceId: string, allowed: boolean): Prom
   await transport.call<void>("companion_set_agent_control", { deviceId, allowed })
 }
 
+async function setLockedComputerUseRustSide(deviceId: string, allowed: boolean): Promise<void> {
+  if (!isTauri()) return
+  await transport.call<void>("companion_set_locked_computer_use", { deviceId, allowed })
+}
+
 export function PairedDevicesCard() {
   const rows = useLiveQuery(() => listPairedDevices(), [], [])
   const guard = useBiometricGuard()
@@ -67,6 +73,7 @@ export function PairedDevicesCard() {
   const tResume = useTranslations("mobile.companion.resume")
   const tRc = useTranslations("mobile.companion.remoteControl")
   const tAc = useTranslations("mobile.companion.agentControl")
+  const tLocked = useTranslations("mobile.companion.lockedComputerUse")
 
   const onRevoke = useCallback(
     async (deviceId: string, label: string) => {
@@ -125,6 +132,8 @@ export function PairedDevicesCard() {
       // computer-use, so gate it on the biometric. Disabling reduces
       // privilege and applies immediately without a prompt.
       if (!next) {
+        await setLockedComputerUseAllowed(deviceId, false)
+        await setLockedComputerUseRustSide(deviceId, false)
         await setRemoteControlAllowed(deviceId, false)
         await setRemoteControlRustSide(deviceId, false)
         toast.success(tRc("disabledToast", { label }))
@@ -185,6 +194,35 @@ export function PairedDevicesCard() {
     [guard, tAc]
   )
 
+  const onToggleLockedComputerUse = useCallback(
+    async (deviceId: string, label: string, next: boolean) => {
+      if (!next) {
+        await setLockedComputerUseAllowed(deviceId, false)
+        await setLockedComputerUseRustSide(deviceId, false)
+        toast.success(tLocked("disabledToast", { label }))
+        return
+      }
+      const result = await guard(
+        {
+          reason: tLocked("reason", { label }),
+          title: tLocked("title"),
+          description: tLocked("description"),
+        },
+        async () => {
+          await setLockedComputerUseAllowed(deviceId, true)
+          await setLockedComputerUseRustSide(deviceId, true)
+        }
+      )
+      if (result.kind === "blocked") {
+        if (result.reason === "cancelled") return
+        toast.error(tLocked("blocked", { reason: result.reason }))
+        return
+      }
+      toast.success(tLocked("enabledToast", { label }))
+    },
+    [guard, tLocked]
+  )
+
   const onResume = useCallback(
     async (deviceId: string, label: string) => {
       // Resume undoes the deny-list entry pause put in place — gate it on
@@ -232,6 +270,7 @@ export function PairedDevicesCard() {
                   <TableHead className="whitespace-nowrap">{t("colLastSeen")}</TableHead>
                   <TableHead className="whitespace-nowrap text-center">{tRc("col")}</TableHead>
                   <TableHead className="whitespace-nowrap text-center">{tAc("col")}</TableHead>
+                  <TableHead className="whitespace-nowrap text-center">{tLocked("col")}</TableHead>
                   <TableHead className="w-[80px] whitespace-nowrap text-right">
                     {t("colActions")}
                   </TableHead>
@@ -300,6 +339,17 @@ export function PairedDevicesCard() {
                         }
                         aria-label={tAc("toggleAria", { label: row.label })}
                         data-testid={`paired-device-agent-control-${row.deviceId}`}
+                      />
+                    </TableCell>
+                    <TableCell className="text-center">
+                      <Switch
+                        checked={row.allowLockedComputerUse === true}
+                        disabled={row.revokedAt !== undefined || row.allowRemoteControl !== true}
+                        onCheckedChange={(next) =>
+                          onToggleLockedComputerUse(row.deviceId, row.label, next)
+                        }
+                        aria-label={tLocked("toggleAria", { label: row.label })}
+                        data-testid={`paired-device-locked-computer-use-${row.deviceId}`}
                       />
                     </TableCell>
                     <TableCell className="text-right">

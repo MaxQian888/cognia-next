@@ -607,101 +607,117 @@ describe("action: twin / connector / mcp / plugin", () => {
 })
 
 describe("action: Desktop automation schemas", () => {
-  it("validates desktop action required fields and executor enums", () => {
-    expect(PARAMS_SCHEMAS["action.desktop.screenshot"].safeParse({ format: "webp" }).success).toBe(
-      false
-    )
+  const handle = {
+    sessionId: "session-1",
+    lineageId: "lineage-1",
+    revision: 1,
+    index: 0,
+    fingerprint: "button:Save",
+  }
+
+  it("validates app resolution and state-read bounds", () => {
+    expect(PARAMS_SCHEMAS["action.desktop.listApps"].safeParse({}).success).toBe(true)
+    expect(PARAMS_SCHEMAS["action.desktop.getAppState"].safeParse({}).success).toBe(false)
     expect(
-      PARAMS_SCHEMAS["action.desktop.screenshot"].safeParse({
-        format: "png",
-        region: { x: 0, y: 0, width: 640, height: 480 },
+      PARAMS_SCHEMAS["action.desktop.getAppState"].safeParse({
+        locator: { kind: "bundleId", bundleId: "com.apple.TextEdit" },
+        options: { maxNodes: 1000, maxDepth: 64, projection: "model" },
       }).success
     ).toBe(true)
-
     expect(
-      PARAMS_SCHEMAS["action.desktop.click"].safeParse({ x: 10, y: 20, button: "primary" }).success
+      PARAMS_SCHEMAS["action.desktop.getAppState"].safeParse({
+        locator: { bundleId: "com.apple.TextEdit" },
+      }).success
     ).toBe(false)
     expect(
-      PARAMS_SCHEMAS["action.desktop.click"].safeParse({ selector: "Submit", button: "right" })
-        .success
-    ).toBe(true)
-
-    expect(PARAMS_SCHEMAS["action.desktop.keys"].safeParse({}).success).toBe(false)
-    expect(PARAMS_SCHEMAS["action.desktop.keys"].safeParse({ chord: "ctrl+shift+p" }).success).toBe(
-      true
-    )
-
-    expect(PARAMS_SCHEMAS["action.desktop.paste"].safeParse({ text: "" }).success).toBe(false)
-    expect(PARAMS_SCHEMAS["action.desktop.paste"].safeParse({ text: "hello" }).success).toBe(true)
-
-    expect(PARAMS_SCHEMAS["action.desktop.launchApp"].safeParse({ app: "" }).success).toBe(false)
+      PARAMS_SCHEMAS["action.desktop.getAppState"].safeParse({
+        locator: { kind: "bundleId", bundleId: "com.apple.TextEdit" },
+        options: { projection: "inspector" },
+      }).success
+    ).toBe(false)
     expect(
-      PARAMS_SCHEMAS["action.desktop.launchApp"].safeParse({ app: "notepad.exe", action: "focus" })
-        .success
-    ).toBe(true)
-    expect(
-      PARAMS_SCHEMAS["action.desktop.launchApp"].safeParse({
-        app: "notepad.exe",
-        action: "open",
+      PARAMS_SCHEMAS["action.desktop.getAppState"].safeParse({
+        locator: { kind: "bundleId", bundleId: "com.apple.TextEdit" },
+        options: { maxNodes: 1001 },
       }).success
     ).toBe(false)
   })
 
-  it("validates element-targeted desktop nodes without hiding direct runtime fields", () => {
+  it("requires an exact revision identity for query and expansion", () => {
     expect(
-      PARAMS_SCHEMAS["action.desktop.invokePattern"].safeParse({ pattern: "toggle" }).success
+      PARAMS_SCHEMAS["action.desktop.queryElements"].safeParse({
+        sessionId: "session-1",
+        lineageId: "lineage-1",
+        revision: 1,
+        locator: { controlType: "AXButton" },
+        limit: 100,
+      }).success
+    ).toBe(true)
+    expect(
+      PARAMS_SCHEMAS["action.desktop.queryElements"].safeParse({
+        sessionId: "session-1",
+        revision: 1,
+      }).success
     ).toBe(false)
     expect(
-      PARAMS_SCHEMAS["action.desktop.invokePattern"].safeParse({
-        selector: "Enable",
-        pattern: "toggle",
-        args: { state: "on" },
+      PARAMS_SCHEMAS["action.desktop.expandElement"].safeParse({
+        handle,
+        continuationToken: null,
+        limit: 250,
       }).success
     ).toBe(true)
     expect(
-      PARAMS_SCHEMAS["action.desktop.invokePattern"].safeParse({
-        target: "abc",
-        pattern: "Toggle",
+      PARAMS_SCHEMAS["action.desktop.expandElement"].safeParse({
+        handle,
+        limit: 251,
       }).success
     ).toBe(false)
-
-    for (const kind of ["action.desktop.windowFocus", "action.desktop.windowClose"] as const) {
-      expect(PARAMS_SCHEMAS[kind].safeParse({}).success).toBe(false)
-      expect(PARAMS_SCHEMAS[kind].safeParse({ selector: "Main" }).success).toBe(true)
-      expect(PARAMS_SCHEMAS[kind].safeParse({ target: "abc" }).success).toBe(true)
-    }
-
-    expect(PARAMS_SCHEMAS["action.desktop.windowResize"].safeParse({ target: "abc" }).success).toBe(
-      false
-    )
-    expect(
-      PARAMS_SCHEMAS["action.desktop.windowResize"].safeParse({
-        selector: "Main",
-        width: 1024,
-        height: 768,
-      }).success
-    ).toBe(true)
-    expect(
-      PARAMS_SCHEMAS["action.desktop.windowResize"].safeParse({
-        target: "abc",
-        rect: { x: 0, y: 0, width: 800, height: 600 },
-      }).success
-    ).toBe(true)
   })
 
-  it("validates desktop wait and trigger event fields", () => {
+  it("validates semantic and pixel action envelopes without legacy aliases", () => {
     expect(
-      PARAMS_SCHEMAS["action.desktop.wait"].safeParse({
-        selector: "Toast",
-        mode: "appear",
-        timeoutMs: 500,
-        pollMs: 50,
+      PARAMS_SCHEMAS["action.desktop.performAction"].safeParse({
+        request: {
+          turnToken: "turn-1",
+          target: { kind: "element", handle },
+          action: { kind: "pressKey", chord: ["cmd+s"] },
+          strategy: "semantic",
+        },
       }).success
     ).toBe(true)
     expect(
-      PARAMS_SCHEMAS["action.desktop.wait"].safeParse({ selector: "Toast", mode: "visible" })
-        .success
+      PARAMS_SCHEMAS["action.desktop.performAction"].safeParse({
+        request: {
+          turnToken: "turn-1",
+          target: {
+            kind: "pixel",
+            target: {
+              sessionId: "session-1",
+              lineageId: "lineage-1",
+              revision: 1,
+              point: { x: 10, y: 20 },
+              screenshotWidth: 1440,
+              screenshotHeight: 900,
+            },
+          },
+          action: { kind: "click", button: "left", count: 2 },
+          strategy: "pixel",
+        },
+      }).success
+    ).toBe(true)
+    expect(
+      PARAMS_SCHEMAS["action.desktop.performAction"].safeParse({
+        request: {
+          turnToken: "turn-1",
+          target: { kind: "element", elementRef: "legacy-ref" },
+          action: { kind: "click" },
+          strategy: "auto",
+        },
+      }).success
     ).toBe(false)
+  })
+
+  it("validates desktop event fields", () => {
     expect(
       PARAMS_SCHEMAS["trigger.desktop.event"].safeParse({ kinds: ["focus-changed"] }).success
     ).toBe(true)

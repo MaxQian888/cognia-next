@@ -450,16 +450,12 @@ pub struct TextEditorResult {
 // =============================================================================
 // Canonical Action
 //
-// The single internal representation every wire format converts INTO:
-//   - Anthropic `computer_20251124` (`ComputerAction`, snake_case) → via the
-//     adapter's `TryFrom` (see `automation/adapters/anthropic.rs`).
-//   - External Bridge MCP (`ComputerUseInput`) → via `toCanonicalAction`.
-//   - `desktop.*` renderer client → builds an `Action` directly.
+// The single internal representation used by workflow, plugin, and native
+// callers. Model-facing Computer Use actions now use the revision-bound
+// envelope in `session.rs` and are converted here only inside the core.
 //
 // The unified dispatcher matches on this enum exactly once. Payloads reuse the
-// existing structs above — no duplicate shapes. Anthropic's left/right/middle/
-// double/triple click variants collapse into `Click { target, opts }` via
-// `opts.button` + `opts.count`, exactly as the legacy translator did.
+// existing structs above — no duplicate shapes.
 // =============================================================================
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -659,7 +655,10 @@ mod tests {
             (EventKind::FocusChanged, "\"focus-changed\""),
             (EventKind::StructureChanged, "\"structure-changed\""),
             (EventKind::PropertyChanged, "\"property-changed\""),
-            (EventKind::TextSelectionChanged, "\"text-selection-changed\""),
+            (
+                EventKind::TextSelectionChanged,
+                "\"text-selection-changed\"",
+            ),
         ] {
             assert_eq!(serde_json::to_string(&kind).unwrap(), wire);
             assert_eq!(roundtrip(&kind), kind);

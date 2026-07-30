@@ -9,7 +9,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Weak};
 
 use parking_lot::Mutex;
-use tokio::sync::mpsc::{self, Receiver, Sender};
+use tokio::sync::mpsc::{self, Receiver, Sender, UnboundedReceiver, UnboundedSender};
 
 #[cfg(target_os = "macos")]
 mod hook_mac;
@@ -33,6 +33,11 @@ pub enum InputButton {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum InputEvent {
+    MouseMoved {
+        x: i32,
+        y: i32,
+        ts_ms: i64,
+    },
     MouseDown {
         x: i32,
         y: i32,
@@ -60,6 +65,7 @@ pub enum InputEvent {
 #[derive(Default)]
 struct SubscriberHub {
     subscribers: Mutex<HashMap<u64, Sender<InputEvent>>>,
+    safety_subscribers: Mutex<HashMap<u64, UnboundedSender<InputEvent>>>,
     next_id: AtomicU64,
 }
 
@@ -75,6 +81,17 @@ impl SubscriberHub {
         }
     }
 
+    fn subscribe_safety(self: &Arc<Self>) -> SafetyInputSubscription {
+        let id = self.next_id.fetch_add(1, Ordering::Relaxed);
+        let (tx, rx) = mpsc::unbounded_channel();
+        self.safety_subscribers.lock().insert(id, tx);
+        SafetyInputSubscription {
+            id,
+            receiver: Some(rx),
+            hub: Arc::downgrade(self),
+        }
+    }
+
     fn publish(&self, event: InputEvent) {
         self.subscribers
             .lock()
@@ -82,10 +99,36 @@ impl SubscriberHub {
                 Ok(()) | Err(mpsc::error::TrySendError::Full(_)) => true,
                 Err(mpsc::error::TrySendError::Closed(_)) => false,
             });
+        self.safety_subscribers
+            .lock()
+            .retain(|_, sender| sender.send(event).is_ok());
     }
 
     fn remove(&self, id: u64) {
         self.subscribers.lock().remove(&id);
+        self.safety_subscribers.lock().remove(&id);
+    }
+}
+
+pub struct SafetyInputSubscription {
+    id: u64,
+    receiver: Option<UnboundedReceiver<InputEvent>>,
+    hub: Weak<SubscriberHub>,
+}
+
+impl SafetyInputSubscription {
+    pub fn take_receiver(&mut self) -> UnboundedReceiver<InputEvent> {
+        self.receiver
+            .take()
+            .expect("safety input subscription receiver already taken")
+    }
+}
+
+impl Drop for SafetyInputSubscription {
+    fn drop(&mut self) {
+        if let Some(hub) = self.hub.upgrade() {
+            hub.remove(self.id);
+        }
     }
 }
 
@@ -123,10 +166,10 @@ pub struct InputMonitor {
 }
 
 impl InputMonitor {
-    pub fn subscribe(&self, capacity: usize) -> Result<InputSubscription, String> {
+    fn ensure_active(&self) -> Result<(), String> {
         let mut active = self.active.lock();
         if active.is_none() {
-            let (tx, mut rx) = mpsc::channel::<InputEvent>(256);
+            let (tx, mut rx) = mpsc::unbounded_channel::<InputEvent>();
             let hook = HookGuard::install(tx)?;
             let hub = self.hub.clone();
             let drain = tokio::spawn(async move {
@@ -136,18 +179,44 @@ impl InputMonitor {
             });
             *active = Some(ActiveMonitor { _hook: hook, drain });
         }
+        Ok(())
+    }
+
+    pub fn subscribe(&self, capacity: usize) -> Result<InputSubscription, String> {
+        self.ensure_active()?;
         Ok(self.hub.subscribe(capacity.max(1)))
+    }
+
+    pub fn subscribe_safety(&self) -> Result<SafetyInputSubscription, String> {
+        self.ensure_active()?;
+        Ok(self.hub.subscribe_safety())
     }
 
     pub fn stop_if_idle(&self) {
         let mut active_slot = self.active.lock();
-        if !self.hub.subscribers.lock().is_empty() {
+        if !self.hub.subscribers.lock().is_empty() || !self.hub.safety_subscribers.lock().is_empty()
+        {
             return;
         }
         if let Some(active) = active_slot.take() {
             active.drain.abort();
             drop(active);
         }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn inject_for_test(&self, event: InputEvent) {
+        self.hub.publish(event);
+    }
+
+    #[cfg(test)]
+    pub(crate) fn subscribe_for_test(&self, capacity: usize) -> InputSubscription {
+        self.hub.subscribe(capacity)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn subscribe_safety_for_test(&self) -> SafetyInputSubscription {
+        self.hub.subscribe_safety()
     }
 }
 
@@ -195,5 +264,18 @@ mod tests {
 
         assert_eq!(fast_rx.recv().await, Some(first));
         assert_eq!(fast_rx.recv().await, Some(second));
+    }
+
+    #[tokio::test]
+    async fn safety_subscriber_never_drops_bursty_input() {
+        let hub = Arc::new(SubscriberHub::default());
+        let mut safety = hub.subscribe_safety();
+        let mut rx = safety.take_receiver();
+        for vk in 0..1_000 {
+            hub.publish(InputEvent::KeyDown { vk, ts_ms: 1 });
+        }
+        for vk in 0..1_000 {
+            assert_eq!(rx.recv().await, Some(InputEvent::KeyDown { vk, ts_ms: 1 }));
+        }
     }
 }

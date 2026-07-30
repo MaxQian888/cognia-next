@@ -3075,48 +3075,86 @@
       "title": "自动化操作请求授权"
     },
     "header": {
-      "description": "配置桌面 UI 自动化 —— 截屏、查找元素、点击、键入与热键。",
+      "description": "配置绑定 revision 的桌面自动化、应用授权、捕获与策略。",
       "title": "自动化"
     },
     "inspector": {
-      "a11yOnlyNote": "此后端读取前台窗口的无障碍树。此处可读取树、查看元素详情并导出定位器；面向元素的模式测试与坐标拾取暂未在该平台提供。",
-      "clickToPopulate": "选择根并点击刷新以填充树。",
-      "copyLocator": "复制定位器",
-      "copyRef": "复制引用",
-      "elementDetails": "元素详情",
-      "elementDetailsDescription": "所选元素的属性与测试模式。",
-      "elementRef": "元素引用",
-      "elementRefPlaceholder": "如 windows/1234/5678",
-      "emptyResult": "所选根未返回任何元素。",
-      "invokeFailed": "模式调用失败：{error}",
-      "invokeOk": "模式“{pattern}”已调用",
-      "locatorJson": "定位器 JSON",
-      "maxDepth": "最大深度",
-      "pickCancelAria": "取消点选倒计时",
-      "pickCancelTooltip": "取消倒计时",
-      "pickCaptureNow": "立即捕获",
-      "pickCaptureNowAria": "立即捕获鼠标位置的目标",
-      "pickCaptureNowTooltip": "跳过倒计时，立即拾取当前鼠标位置下的元素",
-      "pickCountdown": "取消（{seconds} 秒）",
-      "pickFailed": "拾取失败：{error}",
-      "pickOk": "元素已拾取",
-      "pickStart": "拾取元素",
-      "pickStartAria": "开始点选倒计时",
-      "pickStartTooltip": "启动 3 秒倒计时，结束后拾取光标所在元素",
-      "readTree": "刷新",
-      "reading": "读取中……",
-      "requiresTauri": "检查器需要 Tauri 运行时才能与当前无障碍后端通信。",
-      "rootMode": {
-        "desktop": "桌面",
-        "focused": "焦点窗口",
-        "manual": "手动输入"
+      "actionFailed": "操作失败",
+      "app": "应用",
+      "appOption": "{name} · PID {pid}",
+      "appsFailed": "列出应用失败",
+      "capabilitiesFailed": "读取自动化能力失败",
+      "captureState": "捕获状态",
+      "clearQuery": "清除",
+      "coordinates": "坐标空间",
+      "coordinatesDescription": "查看逻辑点、源像素、模型像素与已捕获窗口的诊断信息。",
+      "details": {
+        "automationId": "Automation ID",
+        "className": "类",
+        "coordinateSpace": "当前坐标空间",
+        "displayId": "显示器 ID",
+        "fingerprint": "结构指纹",
+        "logicalBounds": "全局逻辑边界",
+        "modelPixels": "模型像素",
+        "name": "名称",
+        "revision": "Handle revision",
+        "role": "角色 / 控件类型",
+        "scaleFactor": "缩放系数",
+        "sourcePixels": "源像素",
+        "windowId": "窗口 ID"
       },
+      "elementDetails": "元素详情",
+      "elementDetailsDescription": "查看 canonical handle、属性、展开结果与操作验证。",
+      "emptyResult": "未返回任何元素。",
+      "events": {
+        "action": "操作返回 {status}。",
+        "capture": "已捕获 revision {revision}。",
+        "expand": "已展开 {count} 个子元素。",
+        "query": "查询返回 {count} 个元素。"
+      },
+      "expand": "展开子元素",
+      "expandFailed": "展开元素失败",
+      "expandMore": "加载更多子元素",
+      "handleFresh": "Handle 有效",
+      "handleStale": "Handle 已过期",
+      "nextPage": "下一页",
+      "noDiff": "再次捕获 revision 后即可查看确定性差异。",
+      "noEvents": "暂无检查器事件。",
+      "noEvidence": "执行操作后可查看策略决策与证据。",
+      "noScreenshot": "此 revision 没有匹配的截图。",
+      "none": "无",
+      "pageSummary": "第 {page} / {pages} 页",
+      "previousPage": "上一页",
+      "query": "查询元素",
+      "queryFailed": "查询元素失败",
+      "queryPlaceholder": "按元素名称查询",
+      "reading": "捕获中……",
+      "refreshApps": "刷新应用",
+      "requiresTauri": "检查器需要 Tauri 运行时才能与当前无障碍后端通信。",
+      "screenshot": "Revision 截图",
+      "screenshotAlt": "已捕获的应用窗口",
+      "screenshotDescription": "与窗口绑定的截图，并叠加显示所选 AX 元素。",
+      "selectedOverlay": "所选元素叠加框",
+      "selectApp": "选择应用",
       "selectRow": "从树中选择一个元素以查看详情。",
-      "testPatterns": "测试模式",
-      "testPatternsHint": "对所选元素调用 UIA 模式以验证行为。",
+      "semanticClick": "测试语义点击",
+      "session": {
+        "description": "每次捕获都会把一个 AX tree revision 与匹配的窗口截图及 turn token 绑定。",
+        "title": "应用 Session"
+      },
+      "stateFailed": "捕获应用状态失败",
       "tree": "无障碍树",
-      "treeDescription": "检查目标窗口的 UIA/无障碍树。",
-      "unavailable": "当前平台后端（{platform}）尚未暴露无障碍树，检查器暂无内容可读。各平台的树支持将在后续里程碑中陆续提供。"
+      "treeSummary": "Revision {revision}：已投影 {count} / 已采集 {total} 个元素。",
+      "truncation": "树因 {reason} 截断：已物化 {materialized}，省略 {omitted}。",
+      "unavailable": "当前平台后端（{platform}）未暴露无障碍树。",
+      "unnamed": "（未命名）",
+      "views": {
+        "compact": "紧凑树",
+        "diff": "Revision 差异",
+        "events": "事件",
+        "evidence": "操作证据",
+        "raw": "原始树"
+      }
     },
     "overview": {
       "capabilities": {
@@ -10856,6 +10894,16 @@
         "reason": "确认授予 {label} 远程控制权限",
         "title": "允许远程控制",
         "toggleAria": "切换 {label} 的远程控制"
+      },
+      "lockedComputerUse": {
+        "blocked": "Locked Use 未启用（{reason}）。",
+        "col": "Locked Use",
+        "description": "允许此设备请求短时、与任务绑定的 Locked Use lease；远程控制必须保持开启。此权限不允许管理员认证或绕过安全警告。",
+        "disabledToast": "已为 {label} 关闭 Locked Use。",
+        "enabledToast": "已为 {label} 启用 Locked Use。",
+        "reason": "确认授予 {label} Locked Use 权限",
+        "title": "允许 Locked Use",
+        "toggleAria": "切换 {label} 的 Locked Use"
       },
       "resume": {
         "blocked": "恢复未完成（{reason}）。",
@@ -33090,57 +33138,25 @@
           }
         },
         "desktop": {
-          "click": {
-            "description": "点击某个元素或屏幕绝对坐标。",
-            "label": "点击"
+          "expandElement": {
+            "description": "分页展开 canonical AX 树中某个元素的子节点。",
+            "label": "展开应用元素"
           },
-          "findElement": {
-            "description": "按名称 / automation id / 控件类型定位 UI 元素。",
-            "label": "查找元素"
+          "getAppState": {
+            "description": "捕获最新 AX revision 及与之匹配的窗口截图。",
+            "label": "获取应用状态"
           },
-          "invokePattern": {
-            "description": "派发 UIA 模式（Invoke / Toggle / Value / Transform 等）。",
-            "label": "调用 UIA 模式"
+          "listApps": {
+            "description": "列出可用于应用级 Computer Use session 的应用。",
+            "label": "列出桌面应用"
           },
-          "keys": {
-            "description": "发送键盘组合键，例如 ctrl+shift+t。",
-            "label": "发送按键"
+          "performAction": {
+            "description": "执行一个绑定 revision 和 turn 的语义或像素操作。",
+            "label": "执行应用操作"
           },
-          "launchApp": {
-            "description": "按路径/名称启动应用，或按进程名聚焦已有窗口。",
-            "label": "启动应用"
-          },
-          "paste": {
-            "description": "通过剪贴板粘贴文本（自动保存并恢复用户剪贴板）。",
-            "label": "粘贴文本"
-          },
-          "readTree": {
-            "description": "把无障碍子树快照为 JSON，供下游节点使用。",
-            "label": "读取控件树"
-          },
-          "screenshot": {
-            "description": "截取主显示器或指定区域，返回 PNG 字节和尺寸。",
-            "label": "屏幕截图"
-          },
-          "type": {
-            "description": "通过 SendInput 把字符串键入到焦点元素。",
-            "label": "输入文本"
-          },
-          "wait": {
-            "description": "阻塞直到元素出现、消失或属性满足条件。",
-            "label": "等待元素"
-          },
-          "windowClose": {
-            "description": "通过 UIA Window 模式关闭窗口。",
-            "label": "关闭窗口"
-          },
-          "windowFocus": {
-            "description": "把指定窗口切到前台。",
-            "label": "聚焦窗口"
-          },
-          "windowResize": {
-            "description": "通过 UIA Transform 模式移动或调整窗口大小。",
-            "label": "调整窗口大小"
+          "queryElements": {
+            "description": "查询某个已捕获应用 revision 中的元素。",
+            "label": "查询应用元素"
           }
         },
         "git": {

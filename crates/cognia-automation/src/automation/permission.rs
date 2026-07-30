@@ -317,7 +317,7 @@ impl<'a> Call<'a> {
         match self.command {
             "click" | "type" | "keys" | "invoke_pattern" | "window_op" | "mouse_move" | "drag"
             | "scroll" | "hold_key" | "mouse_button" | "paste" | "launch_app" | "computer_use"
-            | "bash" | "text_editor" => CallKind::Driving,
+            | "perform_action" | "bash" | "text_editor" => CallKind::Driving,
             _ => CallKind::ReadOnly,
         }
     }
@@ -702,7 +702,7 @@ mod tests {
     }
 
     #[test]
-    fn paste_and_launch_app_are_driving_calls() {
+    fn mutating_automation_commands_are_driving_calls() {
         let paste = Call {
             command: "paste",
             surface: Surface::Workflow,
@@ -717,6 +717,13 @@ mod tests {
             target: TargetMeta::default(),
         };
         assert!(matches!(launch.kind(), CallKind::Driving));
+        let perform_action = Call {
+            command: "perform_action",
+            surface: Surface::Plugin,
+            plugin_id: Some("computer-use"),
+            target: TargetMeta::default(),
+        };
+        assert!(matches!(perform_action.kind(), CallKind::Driving));
     }
 
     #[test]

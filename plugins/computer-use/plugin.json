@@ -1,10 +1,10 @@
 {
   "id": "cognia-computer-use",
   "name": "Computer Use",
-  "version": "0.1.0",
-  "description": "Native Anthropic Computer Use tool (computer_20251124) \u2014 screen capture, mouse/keyboard control via the Operator action protocol. Tauri Rust backend ships in a follow-up.",
+  "version": "1.0.0",
+  "description": "Revision-bound native app automation through the shared Cognia automation core.",
   "type": "frontend",
-  "capabilities": ["native-anthropic-tool", "commands", "tools", "subagent", "agent-team-template"],
+  "capabilities": ["commands", "tools", "subagent", "agent-team-template"],
   "main": "src/index.ts",
   "author": "cognia-next",
   "license": "MIT",
@@ -20,9 +20,9 @@
       "reason": "Requires Tauri Rust commands for screen capture and input synthesis \u2014 desktop only."
     },
     "tauri": {
-      "availability": "degraded",
+      "availability": "full",
       "entrypoint": "src/index.ts",
-      "reason": "The plugin registers the native tool definitions and renderer-side dispatch wiring. Drives the Rust uiautomation/xcap backend in src-tauri/src/automation/ via the plugin_computer_use_* Tauri commands."
+      "reason": "The plugin is a thin model-tool adapter over the canonical cognia-automation app-session commands."
     },
     "mobile": {
       "availability": "blocked",
@@ -33,7 +33,7 @@
     {
       "id": "cu",
       "name": "/cu",
-      "description": "Show computer-use status and available actions.",
+      "description": "Show Computer Use status and app-session capabilities.",
       "icon": "MousePointer"
     }
   ]

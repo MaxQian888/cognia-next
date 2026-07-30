@@ -89,6 +89,86 @@ pub enum Decision {
     Deny { reason: String },
 }
 
+/// Non-overridable target facts. Unlike the user-editable [`Policy`], this
+/// policy cannot be weakened by consent, a whitelist, a plugin, or an app
+/// instruction pack.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct HardTargetFacts<'a> {
+    pub bundle_id: Option<&'a str>,
+    pub process_name: Option<&'a str>,
+    pub window_title: Option<&'a str>,
+    pub target_url: Option<&'a str>,
+}
+
+/// Enforce the Codex-style handoff boundary for targets that could bypass the
+/// host's own security policy or macOS authentication boundary.
+pub fn evaluate_hard_target(facts: HardTargetFacts<'_>) -> Decision {
+    let bundle = facts.bundle_id.unwrap_or_default().to_ascii_lowercase();
+    let process = facts.process_name.unwrap_or_default().to_ascii_lowercase();
+
+    if bundle == "com.cognia.desktop" || bundle.starts_with("com.cognia.computer-use") {
+        return hard_deny("Cognia cannot automate itself or its Computer Use helpers");
+    }
+    if matches!(
+        bundle.as_str(),
+        "com.openai.chat"
+            | "com.openai.codex"
+            | "com.apple.terminal"
+            | "com.googlecode.iterm2"
+            | "dev.warp.warp-stable"
+            | "com.mitchellh.ghostty"
+            | "org.alacritty"
+            | "net.kovidgoyal.kitty"
+    ) || matches!(
+        process.as_str(),
+        "terminal" | "iterm2" | "warp" | "ghostty" | "alacritty" | "kitty"
+    ) {
+        return hard_deny("terminal and automation-host applications require human handoff");
+    }
+    if matches!(
+        process.as_str(),
+        "securityagent" | "authorizationhost" | "loginwindow"
+    ) {
+        return hard_deny("macOS authentication and login processes cannot be automated");
+    }
+    if matches!(
+        bundle.as_str(),
+        "com.apple.systempreferences" | "com.apple.systemsettings"
+    ) {
+        return hard_deny("macOS security and privacy settings require human handoff");
+    }
+
+    let title = facts.window_title.unwrap_or_default().to_ascii_lowercase();
+    let url = facts.target_url.unwrap_or_default().to_ascii_lowercase();
+    let browser_security_warning = [
+        "your connection is not private",
+        "privacy error",
+        "certificate not trusted",
+        "deceptive site ahead",
+    ]
+    .iter()
+    .any(|marker| title.contains(marker));
+    let browser_security_settings = [
+        "chrome://settings/security",
+        "chrome://settings/privacy",
+        "edge://settings/privacy",
+        "about:config",
+    ]
+    .iter()
+    .any(|prefix| url.starts_with(prefix));
+    if browser_security_warning || browser_security_settings {
+        return hard_deny("browser security warnings and security settings require human handoff");
+    }
+
+    Decision::Allow
+}
+
+fn hard_deny(reason: &str) -> Decision {
+    Decision::Deny {
+        reason: reason.to_string(),
+    }
+}
+
 /// Internal — what `PolicyState` actually holds. Pre-compiled regex
 /// instances eliminate the per-action allocator hit that the W1 plan
 /// flagged on `policy.rs::evaluate`. `from_raw` returns an error if any
@@ -299,6 +379,36 @@ mod tests {
 
     fn facts<'a>() -> ActionFacts<'a> {
         ActionFacts::default()
+    }
+
+    #[test]
+    fn hard_target_policy_refuses_terminals_self_and_system_security_processes() {
+        for (bundle_id, process_name) in [
+            (Some("com.cognia.desktop"), Some("Cognia")),
+            (Some("com.apple.Terminal"), Some("Terminal")),
+            (Some("com.googlecode.iterm2"), Some("iTerm2")),
+            (None, Some("SecurityAgent")),
+            (Some("com.apple.systempreferences"), Some("System Settings")),
+        ] {
+            assert!(matches!(
+                evaluate_hard_target(HardTargetFacts {
+                    bundle_id,
+                    process_name,
+                    window_title: None,
+                    target_url: None,
+                }),
+                Decision::Deny { .. }
+            ));
+        }
+        assert_eq!(
+            evaluate_hard_target(HardTargetFacts {
+                bundle_id: Some("com.apple.Notes"),
+                process_name: Some("Notes"),
+                window_title: Some("Shopping list"),
+                target_url: None,
+            }),
+            Decision::Allow
+        );
     }
 
     /// Test-only mirror of the pre-W1 free `evaluate` entry point. We keep

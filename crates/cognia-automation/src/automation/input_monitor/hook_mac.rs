@@ -30,7 +30,7 @@ use core_graphics::event::{
     CGEvent, CGEventTap, CGEventTapLocation, CGEventTapOptions, CGEventTapPlacement,
     CGEventTapProxy, CGEventType, CallbackResult, EventField,
 };
-use tokio::sync::mpsc::Sender;
+use tokio::sync::mpsc::UnboundedSender;
 
 use super::{InputButton, InputEvent};
 
@@ -49,6 +49,10 @@ const WHEEL_DELTA: i32 = 120;
 
 fn now_ms() -> i64 {
     chrono::Utc::now().timestamp_millis()
+}
+
+fn is_own_synthetic_event(source_pid: i64, current_pid: u32) -> bool {
+    source_pid > 0 && source_pid == i64::from(current_pid)
 }
 
 /// A raw CoreFoundation pointer we promise to use only in thread-safe ways
@@ -134,6 +138,10 @@ pub(crate) fn to_signal(
     ts_ms: i64,
 ) -> Option<InputEvent> {
     match etype {
+        CGEventType::MouseMoved
+        | CGEventType::LeftMouseDragged
+        | CGEventType::RightMouseDragged
+        | CGEventType::OtherMouseDragged => Some(InputEvent::MouseMoved { x, y, ts_ms }),
         CGEventType::LeftMouseDown => Some(InputEvent::MouseDown {
             x,
             y,
@@ -188,7 +196,7 @@ pub(crate) fn to_signal(
 /// signal. Disable notifications re-enable the tap so a transient timeout /
 /// secure-input switch doesn't silently kill the session mid-recording.
 fn on_event(
-    tx: &Sender<InputEvent>,
+    tx: &UnboundedSender<InputEvent>,
     port: &OnceLock<SendPtr>,
     etype: CGEventType,
     event: &CGEvent,
@@ -200,6 +208,14 @@ fn on_event(
             }
         }
         _ => {
+            // Enigo and the canonical action core post CGEvents from this
+            // process. A Locked Use safety subscriber must react to physical
+            // input, not immediately relock on its own synthetic action.
+            let source_pid =
+                event.get_integer_value_field(EventField::EVENT_SOURCE_UNIX_PROCESS_ID);
+            if is_own_synthetic_event(source_pid, std::process::id()) {
+                return;
+            }
             let loc = event.location();
             let scroll_dy =
                 event.get_integer_value_field(EventField::SCROLL_WHEEL_EVENT_DELTA_AXIS_1) as i32
@@ -213,9 +229,9 @@ fn on_event(
                 keycode,
                 now_ms(),
             ) {
-                // Non-blocking: a full buffer drops coarse observational noise
-                // rather than stalling the event stream.
-                let _ = tx.try_send(sig);
+                // Unbounded send is non-blocking and does not silently drop
+                // physical input needed by Locked Use's fail-closed relock.
+                let _ = tx.send(sig);
             }
         }
     }
@@ -230,7 +246,7 @@ pub(crate) struct HookGuard {
 }
 
 impl HookGuard {
-    pub(crate) fn install(tx: Sender<InputEvent>) -> Result<HookGuard, String> {
+    pub(crate) fn install(tx: UnboundedSender<InputEvent>) -> Result<HookGuard, String> {
         let (ready_tx, ready_rx) = channel::<Result<SendRunLoop, String>>();
         let join = thread::Builder::new()
             .name("skill-recorder-hook".into())
@@ -257,6 +273,10 @@ impl HookGuard {
                         CGEventType::LeftMouseUp,
                         CGEventType::RightMouseUp,
                         CGEventType::OtherMouseUp,
+                        CGEventType::MouseMoved,
+                        CGEventType::LeftMouseDragged,
+                        CGEventType::RightMouseDragged,
+                        CGEventType::OtherMouseDragged,
                         CGEventType::ScrollWheel,
                         CGEventType::KeyDown,
                     ],
@@ -403,8 +423,15 @@ mod tests {
             to_signal(CGEventType::LeftMouseDown, 0, 0, 0, 0, 0),
             Some(InputEvent::MouseDown { .. })
         ));
-        // Moves and disable notifications produce no observation.
-        assert!(to_signal(CGEventType::MouseMoved, 0, 0, 0, 0, 0).is_none());
+        assert!(matches!(
+            to_signal(CGEventType::MouseMoved, 1, 2, 0, 0, 3),
+            Some(InputEvent::MouseMoved {
+                x: 1,
+                y: 2,
+                ts_ms: 3
+            })
+        ));
+        // Disable notifications produce no observation.
         assert!(to_signal(CGEventType::TapDisabledByTimeout, 0, 0, 0, 0, 0).is_none());
     }
 
@@ -430,6 +457,13 @@ mod tests {
         ));
     }
 
+    #[test]
+    fn own_synthetic_source_pid_is_distinct_from_hardware() {
+        assert!(is_own_synthetic_event(42, 42));
+        assert!(!is_own_synthetic_event(0, 42));
+        assert!(!is_own_synthetic_event(41, 42));
+    }
+
     // A real tap round-trip needs Accessibility permission and a live run loop,
     // so it can't run unattended in CI (mirrors the Windows hook's reliance on a
     // real desktop). Run locally with `cargo test -- --ignored` after granting
@@ -437,7 +471,7 @@ mod tests {
     #[test]
     #[ignore = "requires Accessibility/Input Monitoring permission + live run loop"]
     fn install_and_drop_round_trip() {
-        let (tx, _rx) = tokio::sync::mpsc::channel::<InputEvent>(8);
+        let (tx, _rx) = tokio::sync::mpsc::unbounded_channel::<InputEvent>();
         let guard = HookGuard::install(tx).expect("install tap (permission granted)");
         drop(guard); // stops the run loop + joins — must not hang
     }

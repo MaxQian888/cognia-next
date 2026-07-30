@@ -95,6 +95,12 @@ export interface PairedDeviceRow {
   allowAgentControl?: boolean
 
   /**
+   * Separate Locked Use grant. This is meaningful only together with
+   * `allowRemoteControl`; the native lease validator requires both.
+   */
+  allowLockedComputerUse?: boolean
+
+  /**
    * Phone app version reported in the pair payload — surfaced in the
    * paired-devices table so the owner can spot stale clients.
    */

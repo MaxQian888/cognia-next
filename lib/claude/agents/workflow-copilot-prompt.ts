@@ -102,9 +102,11 @@ export const WORKFLOW_COPILOT_DISALLOWED_TOOLS: readonly string[] = [
   // `mcp__cognia-plugin-tools__` that isn't `wf_*`. Listing the
   // high-risk surfaces; finer-grained denials are handled by the implicit
   // whitelist semantics above.
-  "mcp__cognia-plugin-tools__computer_use",
-  "mcp__cognia-plugin-tools__bash",
-  "mcp__cognia-plugin-tools__text_editor",
+  "mcp__cognia-plugin-tools__list_apps",
+  "mcp__cognia-plugin-tools__get_app_state",
+  "mcp__cognia-plugin-tools__query_elements",
+  "mcp__cognia-plugin-tools__expand_element",
+  "mcp__cognia-plugin-tools__perform_action",
 ] as const
 
 /**

@@ -33,17 +33,11 @@ const INTENTIONAL_FALLBACKS = new Set<WorkflowNodeKind>([
 ])
 
 const DESKTOP_KINDS: WorkflowNodeKind[] = [
-  "action.desktop.screenshot",
-  "action.desktop.findElement",
-  "action.desktop.readTree",
-  "action.desktop.click",
-  "action.desktop.type",
-  "action.desktop.keys",
-  "action.desktop.invokePattern",
-  "action.desktop.windowFocus",
-  "action.desktop.windowClose",
-  "action.desktop.windowResize",
-  "action.desktop.wait",
+  "action.desktop.listApps",
+  "action.desktop.getAppState",
+  "action.desktop.queryElements",
+  "action.desktop.expandElement",
+  "action.desktop.performAction",
 ]
 
 const NEWLY_WIRED: WorkflowNodeKind[] = [
