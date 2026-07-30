@@ -42,7 +42,7 @@ interface DbCoreTableLike {
  */
 export function installWriteFlush(
   db: DexieLike,
-  onWrite: () => void,
+  onWrite: (tableName: string) => void,
   opts: { ignoreTables?: readonly string[] } = {}
 ): void {
   const ignored = new Set(opts.ignoreTables ?? [])
@@ -60,7 +60,7 @@ export function installWriteFlush(
             mutate(req: unknown) {
               const result = table.mutate(req)
               void Promise.resolve(result)
-                .then(() => onWrite())
+                .then(() => onWrite(name))
                 .catch(() => {
                   // A failed mutation persisted nothing; skip the flush.
                 })
@@ -80,6 +80,10 @@ export interface DurabilityOptions {
   debounceMs?: number
   /** Injected process for signal hooks (tests). */
   proc?: Pick<NodeJS.Process, "on" | "off" | "memoryUsage">
+  /** Warn when the long-lived brain crosses this RSS ceiling. */
+  rssWarningBytes?: number
+  /** Injected alert sink (tests/embedding). */
+  onRssWarning?: (rssBytes: number, limitBytes: number) => void
 }
 
 export interface DurabilityHandle {
@@ -106,6 +110,16 @@ export interface DurabilityHandle {
 export async function startDurability(opts: DurabilityOptions): Promise<DurabilityHandle> {
   const proc = opts.proc ?? process
   let lastFlushAt = 0
+  const rssWarningBytes = opts.rssWarningBytes ?? 1_500 * 1024 * 1024
+  const onRssWarning =
+    opts.onRssWarning ??
+    ((rssBytes: number, limitBytes: number) => {
+      process.emitWarning(
+        `cognia serve RSS ${rssBytes} bytes exceeded the ${limitBytes} byte durability ceiling`,
+        { code: "COGNIA_SERVE_RSS_HIGH" }
+      )
+    })
+  let rssWarningActive = false
 
   // scheduleFlush becomes available only after ensureCliDb resolves; the
   // middleware (installed during ensureCliDb's open) reaches it via this ref.
@@ -125,10 +139,16 @@ export async function startDurability(opts: DurabilityOptions): Promise<Durabili
       const { schedulerDb, SCHEDULER_DB_NAME, SCHEDULER_SNAPSHOT_EXCLUDED_TABLES } =
         await import("@/lib/scheduler/scheduler-db")
       const primary = getDb()
-      installWriteFlush(primary as unknown as DexieLike, notifyDbWrite)
-      installWriteFlush(schedulerDb as unknown as DexieLike, notifyDbWrite, {
-        ignoreTables: SCHEDULER_SNAPSHOT_EXCLUDED_TABLES,
-      })
+      installWriteFlush(primary as unknown as DexieLike, (tableName) =>
+        handleRef.current?.scheduleTableFlush(primary.name, tableName)
+      )
+      installWriteFlush(
+        schedulerDb as unknown as DexieLike,
+        (tableName) => handleRef.current?.scheduleTableFlush(SCHEDULER_DB_NAME, tableName),
+        {
+          ignoreTables: SCHEDULER_SNAPSHOT_EXCLUDED_TABLES,
+        }
+      )
       return [
         { name: primary.name, db: primary as unknown as DbLike },
         {
@@ -167,10 +187,21 @@ export async function startDurability(opts: DurabilityOptions): Promise<Durabili
     await db.dispose()
   }
 
+  function readRss(): { rssBytes: number; lastFlushAt: number } {
+    const rssBytes = proc.memoryUsage().rss
+    if (rssBytes >= rssWarningBytes) {
+      if (!rssWarningActive) onRssWarning(rssBytes, rssWarningBytes)
+      rssWarningActive = true
+    } else {
+      rssWarningActive = false
+    }
+    return { rssBytes, lastFlushAt }
+  }
+
   return {
     db,
     notifyDbWrite,
-    rss: () => ({ rssBytes: proc.memoryUsage().rss, lastFlushAt }),
+    rss: readRss,
     dispose,
   }
 }

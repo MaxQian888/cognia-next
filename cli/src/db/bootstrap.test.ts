@@ -243,6 +243,53 @@ describe("ensureCliDb", () => {
     expect(written.dbs.CogniaDB.tables.goals).toEqual([{ id: "g1" }, { id: "g2" }])
   })
 
+  it("persists production snapshots per table and rewrites only dirty tables", async () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), "cognia-cli-db-tables-"))
+    const goals = new FakeTable("goals", [{ id: "g1" }])
+    const sessions = new FakeTable("sessions", [{ id: "s1" }])
+    const db: DbLike = { verno: 82, tables: [goals, sessions], name: "CogniaDB" }
+
+    try {
+      const handle = await ensureCliDb({
+        home,
+        getDatabase: () => db,
+        installGlobals: async () => {},
+        whenReady: async () => {},
+        schedule: () => () => {},
+      })
+      await handle.flush()
+
+      const tableDir = path.join(home, "db.json.tables")
+      const manifest = JSON.parse(fs.readFileSync(path.join(tableDir, "manifest.json"), "utf8"))
+      expect(manifest.snapshotFormat).toBe(3)
+      expect(manifest.dbs.CogniaDB).toEqual({
+        version: 82,
+        tables: ["goals", "sessions"],
+      })
+      const files = fs
+        .readdirSync(tableDir)
+        .filter((name) => name !== "manifest.json" && !name.endsWith(".bak"))
+        .sort()
+      expect(files).toHaveLength(2)
+      const sessionsFile = files.find((name) => name.includes("sessions"))!
+      const goalsFile = files.find((name) => name.includes("goals"))!
+      const sessionsBefore = fs.readFileSync(path.join(tableDir, sessionsFile), "utf8")
+
+      goals.rows = [{ id: "g2" }]
+      sessions.rows = [{ id: "s2" }]
+      handle.scheduleTableFlush("CogniaDB", "goals")
+      await handle.flush()
+
+      expect(JSON.parse(fs.readFileSync(path.join(tableDir, goalsFile), "utf8"))).toEqual([
+        { id: "g2" },
+      ])
+      expect(fs.readFileSync(path.join(tableDir, sessionsFile), "utf8")).toBe(sessionsBefore)
+    } finally {
+      __resetCliDbForTesting()
+      fs.rmSync(home, { recursive: true, force: true })
+    }
+  })
+
   it("atomically replaces the snapshot and keeps one backup generation", async () => {
     const home = fs.mkdtempSync(path.join(os.tmpdir(), "cognia-cli-db-atomic-"))
     const file = path.join(home, "db.json")
