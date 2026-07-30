@@ -86,11 +86,11 @@ export function AsideSwitcher({ binding, activeId, onSelect, primaryId }: Props)
   const [busy, setBusy] = useState(false)
 
   const bindingJson = JSON.stringify(binding)
-  const asides =
-    useLiveQuery(
-      () => listResourceWorkbenchSessions(JSON.parse(bindingJson) as SessionSurfaceBinding),
-      [bindingJson]
-    ) ?? []
+  const queriedAsides = useLiveQuery(
+    () => listResourceWorkbenchSessions(JSON.parse(bindingJson) as SessionSurfaceBinding),
+    [bindingJson]
+  )
+  const asides = useMemo(() => queriedAsides ?? [], [queriedAsides])
 
   const active = useMemo(() => asides.find((a) => a.id === activeId), [asides, activeId])
 
