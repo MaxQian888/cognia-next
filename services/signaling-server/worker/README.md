@@ -24,17 +24,17 @@ Room admission and the origin check call the **same**
 `cognia-signaling-core::policy` functions the axum server uses, so the two
 deployments can't drift:
 
-- **Room cap / role cardinality** — `evaluate_subscribe` rejects a `Subscribe`
-  past `SIGNALING_MAX_PEERS_PER_ROOM` (`room_full`) or a second desktop
-  (`role_taken`). The socket stays open so the client can surface the reason.
+- **Role-authenticated single-active sessions** — a challenge-bound ECDSA
+  P-256 proof admits exactly one desktop and one mobile role. A newer valid
+  session replaces the old socket for that role.
 - **Upgrade room binding** — the upgrade URL's `?rid=` is persisted on the
   socket attachment. Later `Subscribe`, `Relay`, and `Unsubscribe` frames must
   carry the same `rendezvousId`; mismatches get `room_mismatch` and are not
   fanned out.
 - **Subscribed-only fan-out** — relays and `peerJoined`/`peerLeft` go only to
   peers that have actually `Subscribe`d. A socket that connects but never
-  subscribes receives nothing, so it cannot silently eavesdrop a room's SDP/ICE
-  by knowing the `rid` (the relay payload is HMAC-signed but not encrypted).
+  subscribes receives nothing. SDP/ICE are additionally AES-256-GCM encrypted
+  end to end, so the relay cannot inspect them even for an admitted room.
 - **Origin allowlist** — `SIGNALING_ALLOWED_ORIGINS` (empty = allow all; a
   missing `Origin`, as native clients send, is always allowed). A present,
   unlisted browser `Origin` gets `403`.
@@ -51,7 +51,7 @@ deployments can't drift:
 
 | Var                                  | Default | Meaning                                                                                                                            |
 | ------------------------------------ | ------- | ---------------------------------------------------------------------------------------------------------------------------------- |
-| `SIGNALING_MAX_PEERS_PER_ROOM`       | `4`     | Max peers per room (slack above 1 desktop + 1 mobile for reconnect overlap).                                                       |
+| `SIGNALING_MAX_PEERS_PER_ROOM`       | `2`     | One desktop plus one mobile; same-role reconnects replace atomically.                                                              |
 | `SIGNALING_MAX_DESKTOPS`             | `1`     | Max desktop peers per room.                                                                                                        |
 | `SIGNALING_MAX_CONN_PER_IP_PER_ROOM` | `4`     | Max sockets one IP may hold in one room (needs `cf-connecting-ip`, i.e. a real edge — a no-op under local `wrangler dev`).         |
 | `SIGNALING_ALLOWED_ORIGINS`          | `""`    | Comma-separated browser Origin allowlist; empty = allow all. e.g. `https://app.cognia.cn,capacitor://localhost,https://localhost`. |
@@ -77,10 +77,9 @@ wrangler dev                    # serves http://127.0.0.1:8787
 ```
 
 Smoke-test a running instance (Node 22+, no deps) with real WS clients —
-covers subscribe/relay, the subscribed-only fan-out (eavesdrop) guarantee,
-duplicate subscribe idempotence, `room_mismatch`, `malformed_frame`,
-`frame_too_large`, ping/pong, `binary_not_supported`, `role_taken`, and the
-room cap / per-IP cap:
+covers challenge-bound role admission, encrypted-payload relay,
+subscribed-only fan-out, `room_mismatch`, tamper rejection, single-active
+takeover, ping/pong, and authenticated `peerLeft`:
 
 ```bash
 node tests/integration.mjs                                  # against wrangler dev
@@ -95,7 +94,7 @@ connections share one IP. The test accepts either outcome.
 ## Deploy
 
 ```bash
-wrangler deploy                 # first deploy applies the v1 DO migration
+wrangler deploy                 # first deploy applies the initial DO storage migration
 curl https://<host>/healthz     # → {"ok":true,"version":"...","backend":"worker"}
 ```
 
@@ -110,7 +109,7 @@ The signaling hostname is configured in **one** place per side, kept in sync:
 
 - **App default** — `DEFAULT_SIGNALING_URL` in `lib/signaling/types.ts` reads
   the `NEXT_PUBLIC_SIGNALING_URL` build var, falling back to
-  `wss://signaling.cognia.cn/v1/signaling`. Set the env var at `pnpm build`
+  `wss://signaling.cognia.cn/v2/signaling`. Set the env var at `pnpm build`
   time to point every shell (browser/Tauri/Capacitor) and the Rust desktop
   peer (via `option_env!`) at your domain. Users can override per-install at
   runtime in Settings → Companion → WebRTC.
@@ -139,7 +138,7 @@ a Cloudflare **Rate Limiting rule** (dashboard → Security → WAF → Rate lim
 rules) on this Worker — this is the analogue of the axum server's `ip_limits.rs`
 (50/IP process-wide):
 
-- Match: URI Path equals `/v1/signaling`
+- Match: URI Path equals `/v2/signaling`
 - Rate: 60 requests per 1 minute, counting by IP
 - Action: Block (or Managed Challenge)
 

@@ -1,382 +1,339 @@
 /** @jest-environment jsdom */
 
-/**
- * SignalingClient unit tests — pure-JS WebSocket mock, no network. Verifies
- * the full subscribe → relay → reconnect lifecycle plus HMAC + replay
- * rejection paths.
- */
-
-import { buildSignedEnvelope } from "./envelope"
+import {
+  buildRoomDescriptorV2,
+  buildSubscribeProofV2,
+  buildV2Envelope,
+  deriveV2DirectionKey,
+  generateV2EcdhKeyPair,
+  generateV2SigningKeyPair,
+  importV2EcdhPublicKey,
+  verifyAndDecryptV2Envelope,
+  type RoomDescriptorV2,
+  type SubscribeProofV2,
+  type V2KeyPair,
+} from "./v2-crypto"
 import { SignalingClient } from "./client"
 import type { ClientFrame, ServerFrame } from "./types"
 
-/**
- * Drain pending microtasks (Promise resolutions + queued .then callbacks).
- * `handleRaw → handleRelay → verifySignedEnvelope` chains five awaits, so
- * two `Promise.resolve()`s isn't enough — a real macrotask boundary lets
- * everything settle.
- */
-function flushAsync(): Promise<void> {
-  // Web Crypto's `subtle.sign` is dispatched to libuv's worker pool in Node,
-  // so a single microtask flush isn't enough. 30ms reliably waits past both
-  // worker-pool turnaround and any subsequent microtask cascade.
-  return new Promise<void>((resolve) => setTimeout(resolve, 30))
-}
-
-// ---------------------------------------------------------------------------
-// In-memory WebSocket double
-// ---------------------------------------------------------------------------
-
 class FakeWebSocket {
-  static OPEN = 1
-  static CLOSED = 3
+  static readonly CONNECTING = 0
+  static readonly OPEN = 1
+  static readonly CLOSING = 2
+  static readonly CLOSED = 3
 
-  readyState: number = 0
-  onopen: ((ev: Event) => void) | null = null
-  onmessage: ((ev: MessageEvent) => void) | null = null
-  onerror: ((ev: Event) => void) | null = null
-  onclose: ((ev: CloseEvent) => void) | null = null
+  readonly url: string
+  readyState = FakeWebSocket.CONNECTING
+  sent: string[] = []
+  onopen: (() => void) | null = null
+  onmessage: ((event: MessageEvent) => void) | null = null
+  onerror: (() => void) | null = null
+  onclose: (() => void) | null = null
 
-  readonly sent: string[] = []
-
-  constructor(public url: string) {
+  constructor(url: string) {
+    this.url = url
     instances.push(this)
   }
 
-  send(data: string): void {
-    this.sent.push(data)
-  }
-
-  // Test helpers
   open(): void {
     this.readyState = FakeWebSocket.OPEN
-    this.onopen?.(new Event("open"))
+    this.onopen?.()
   }
+
   push(frame: ServerFrame): void {
-    this.onmessage?.({ data: JSON.stringify(frame) } as MessageEvent)
+    this.onmessage?.(new MessageEvent("message", { data: JSON.stringify(frame) }))
   }
-  pushRaw(text: string): void {
-    this.onmessage?.({ data: text } as MessageEvent)
+
+  send(text: string): void {
+    this.sent.push(text)
   }
+
   close(): void {
     this.readyState = FakeWebSocket.CLOSED
-    this.onclose?.(new CloseEvent("close"))
+    this.onclose?.()
   }
 }
 
-const SECRET = "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8"
+interface Fixture {
+  client: SignalingClient
+  descriptor: RoomDescriptorV2
+  mobileIdentity: V2KeyPair
+  desktopIdentity: V2KeyPair
+  desktopEcdh: V2KeyPair
+}
+
 const instances: FakeWebSocket[] = []
+const clients: SignalingClient[] = []
 
 beforeEach(() => {
   instances.length = 0
+  clients.length = 0
   ;(globalThis as unknown as { WebSocket: typeof FakeWebSocket }).WebSocket = FakeWebSocket
 })
 
 afterEach(() => {
+  for (const client of clients) client.close()
   jest.useRealTimers()
 })
 
-function makeClient(): SignalingClient {
-  return new SignalingClient({
-    url: "wss://signaling.test/v1/signaling",
-    rendezvousId: "room-1",
-    rendezvousSecret: SECRET,
+async function fixture(
+  overrides: Partial<ConstructorParameters<typeof SignalingClient>[0]> = {}
+): Promise<Fixture> {
+  const [mobileIdentity, desktopIdentity, desktopEcdh] = await Promise.all([
+    generateV2SigningKeyPair(),
+    generateV2SigningKeyPair(),
+    generateV2EcdhKeyPair(),
+  ])
+  const descriptor = await buildRoomDescriptorV2({
+    roomNonce: "AAECAwQFBgcICQoLDA0ODw",
+    desktopSigningKey: desktopIdentity.encodedPublicKey,
+    mobileSigningKey: mobileIdentity.encodedPublicKey,
+    notAfter: Date.now() + 60_000,
+  })
+  const client = new SignalingClient({
+    url: "wss://signaling.test/v2/signaling",
+    descriptor,
+    signingPrivateKey: mobileIdentity.privateKey,
     role: "mobile",
     webSocketFactory: (url) => new FakeWebSocket(url) as unknown as WebSocket,
+    ...overrides,
   })
+  clients.push(client)
+  return { client, descriptor, mobileIdentity, desktopIdentity, desktopEcdh }
 }
 
-function parseSent(ws: FakeWebSocket, idx: number): ClientFrame {
-  return JSON.parse(ws.sent[idx]) as ClientFrame
+async function flush(): Promise<void> {
+  for (let index = 0; index < 8; index++) await Promise.resolve()
 }
 
-// ---------------------------------------------------------------------------
-// Lifecycle
-// ---------------------------------------------------------------------------
-
-describe("SignalingClient", () => {
-  it("sends subscribe on open and transitions to subscribed on ack", async () => {
-    const client = makeClient()
-    const events: string[] = []
-    const snapshots: unknown[] = []
-    client.on("state", (s) => events.push(s))
-    client.on("subscribed", (snapshot) => snapshots.push(snapshot))
-    client.connect()
-
-    expect(events).toEqual(["connecting"])
-    const ws = instances[0]
-    ws.open()
-    expect(parseSent(ws, 0)).toMatchObject({
-      kind: "subscribe",
-      rendezvousId: "room-1",
-      role: "mobile",
-    })
-
-    ws.push({
-      kind: "subscribed",
-      rendezvousId: "room-1",
-      peers: [{ role: "desktop", joinedAtMs: 123 }],
-    })
-    expect(client.getState()).toBe("subscribed")
-    expect(events).toEqual(["connecting", "subscribed"])
-    expect(snapshots).toEqual([{ peers: [{ role: "desktop", joinedAtMs: 123 }] }])
-  })
-
-  it("emits an empty peer snapshot for an older server without peers", () => {
-    const client = makeClient()
-    const snapshots: unknown[] = []
-    client.on("subscribed", (snapshot) => snapshots.push(snapshot))
-    client.connect()
-    const ws = instances[0]
-    ws.open()
-
-    ws.push({ kind: "subscribed", rendezvousId: "room-1" } as ServerFrame)
-
-    expect(snapshots).toEqual([{ peers: [] }])
-  })
-
-  it("enters rejected and stops reconnecting on a terminal room_full error", async () => {
-    const client = makeClient()
-    const states: string[] = []
-    const errors: { code: string; message: string }[] = []
-    client.on("state", (s) => states.push(s))
-    client.on("error", (e) => errors.push(e))
-    client.connect()
-    const ws = instances[0]
-    ws.open()
-
-    ws.push({ kind: "error", code: "room_full", message: "rendezvous room is full" })
-
-    expect(errors).toEqual([{ code: "room_full", message: "rendezvous room is full" }])
-    expect(client.getState()).toBe("rejected")
-    expect(ws.readyState).toBe(FakeWebSocket.CLOSED)
-
-    // No auto-reconnect: even after timers fire, no new socket is created.
-    await flushAsync()
-    expect(instances).toHaveLength(1)
-    expect(states).toEqual(["connecting", "rejected"])
-  })
-
-  it("treats role_taken as terminal too", () => {
-    const client = makeClient()
-    client.connect()
-    instances[0].open()
-    instances[0].push({
-      kind: "error",
-      code: "role_taken",
-      message: "a desktop peer already owns this room",
-    })
-    expect(client.getState()).toBe("rejected")
-  })
-
-  it("does not reject on a non-terminal error and keeps the socket open", () => {
-    const client = makeClient()
-    client.connect()
-    const ws = instances[0]
-    ws.open()
-    ws.push({ kind: "subscribed", rendezvousId: "room-1", peers: [] })
-    ws.push({ kind: "error", code: "rate_limited", message: "too many frames" })
-    expect(client.getState()).toBe("subscribed")
-    expect(ws.readyState).toBe(FakeWebSocket.OPEN)
-  })
-
-  it("appends the rendezvous id as a rid query param on connect", () => {
-    const client = makeClient()
-    client.connect()
-    expect(instances[0].url).toBe("wss://signaling.test/v1/signaling?rid=room-1")
-  })
-
-  it("uses & when the signaling url already has a query string", () => {
-    const client = new SignalingClient({
-      url: "wss://signaling.test/v1/signaling?region=eu",
-      rendezvousId: "room-1",
-      rendezvousSecret: SECRET,
-      role: "mobile",
-      webSocketFactory: (url) => new FakeWebSocket(url) as unknown as WebSocket,
-    })
-    client.connect()
-    expect(instances[0].url).toBe("wss://signaling.test/v1/signaling?region=eu&rid=room-1")
-  })
-
-  it("emits peerJoined and peerLeft", () => {
-    const client = makeClient()
-    const joined: string[] = []
-    const left: string[] = []
-    client.on("peerJoined", (r) => joined.push(r))
-    client.on("peerLeft", (r) => left.push(r))
-    client.connect()
-    const ws = instances[0]
-    ws.open()
-    ws.push({ kind: "peerJoined", rendezvousId: "room-1", role: "desktop" })
-    ws.push({ kind: "peerLeft", rendezvousId: "room-1", role: "desktop" })
-    expect(joined).toEqual(["desktop"])
-    expect(left).toEqual(["desktop"])
-  })
-
-  it("verifies and forwards relay envelopes from the peer", async () => {
-    const client = makeClient()
-    const received: Array<{ role: string; kind: string }> = []
-    client.on("envelope", ({ fromRole, envelope }) => {
-      received.push({ role: fromRole, kind: envelope.kind })
-    })
-    client.connect()
-    const ws = instances[0]
-    ws.open()
-
-    const env = await buildSignedEnvelope({
-      seq: 1,
-      kind: "hello",
-      body: { deviceId: "desk-1" },
-      rendezvousSecret: SECRET,
-    })
-    const payload = btoa(JSON.stringify(env))
-      .replace(/\+/g, "-")
-      .replace(/\//g, "_")
-      .replace(/=+$/g, "")
-    ws.push({
-      kind: "relay",
-      rendezvousId: "room-1",
-      fromRole: "desktop",
-      payload,
-    })
-
-    await flushAsync()
-    expect(received).toEqual([{ role: "desktop", kind: "hello" }])
-  })
-
-  it("rejects relay envelopes with bad HMAC", async () => {
-    const client = makeClient()
-    const errs: string[] = []
-    client.on("error", ({ code }) => errs.push(code))
-    client.connect()
-    const ws = instances[0]
-    ws.open()
-
-    const env = await buildSignedEnvelope({
-      seq: 1,
-      kind: "hello",
-      body: { deviceId: "desk-1" },
-      rendezvousSecret: SECRET,
-    })
-    const tampered = { ...env, body: { deviceId: "attacker" } }
-    const payload = btoa(JSON.stringify(tampered))
-      .replace(/\+/g, "-")
-      .replace(/\//g, "_")
-      .replace(/=+$/g, "")
-    ws.push({
-      kind: "relay",
-      rendezvousId: "room-1",
-      fromRole: "desktop",
-      payload,
-    })
-
-    await flushAsync()
-    expect(errs).toContain("relay_mac_mismatch")
-  })
-
-  it("rejects replayed envelopes", async () => {
-    const client = makeClient()
-    const errs: string[] = []
-    client.on("error", ({ code }) => errs.push(code))
-    client.connect()
-    const ws = instances[0]
-    ws.open()
-
-    const env = await buildSignedEnvelope({
-      seq: 7,
-      kind: "rtc:ice",
-      body: { candidate: {} },
-      rendezvousSecret: SECRET,
-    })
-    const payload = btoa(JSON.stringify(env))
-      .replace(/\+/g, "-")
-      .replace(/\//g, "_")
-      .replace(/=+$/g, "")
-    ws.push({
-      kind: "relay",
-      rendezvousId: "room-1",
-      fromRole: "desktop",
-      payload,
-    })
-    ws.push({
-      kind: "relay",
-      rendezvousId: "room-1",
-      fromRole: "desktop",
-      payload,
-    })
-
-    await flushAsync()
-    expect(errs).toContain("replayed")
-  })
-
-  it("send() signs with the configured secret and increments seq", async () => {
-    const client = makeClient()
-    client.connect()
-    const ws = instances[0]
-    ws.open()
-    ws.push({ kind: "subscribed", rendezvousId: "room-1", peers: [] })
-
-    await client.send("hello", { deviceId: "mob-1" })
-    await client.send("rtc:offer", { sdp: "x" })
-
-    // Sent frames: [0] subscribe, [1] hello relay, [2] offer relay.
-    const helloFrame = parseSent(ws, 1)
-    const offerFrame = parseSent(ws, 2)
-    expect(helloFrame.kind).toBe("relay")
-    expect(offerFrame.kind).toBe("relay")
-
-    const decode = (frame: ClientFrame) => {
-      if (frame.kind !== "relay") throw new Error("not a relay")
-      const padded = frame.payload + "=".repeat((4 - (frame.payload.length % 4)) % 4)
-      const json = atob(padded.replace(/-/g, "+").replace(/_/g, "/"))
-      return JSON.parse(json)
+async function waitForSent(socket: FakeWebSocket, kind: ClientFrame["kind"]): Promise<void> {
+  for (let index = 0; index < 50; index++) {
+    if (
+      socket.sent.some((raw) => {
+        return (JSON.parse(raw) as ClientFrame).kind === kind
+      })
+    ) {
+      return
     }
-    const helloEnv = decode(helloFrame)
-    const offerEnv = decode(offerFrame)
-    expect(helloEnv.seq).toBe(1)
-    expect(offerEnv.seq).toBe(2)
-    expect(helloEnv.kind).toBe("hello")
-    expect(offerEnv.kind).toBe("rtc:offer")
+    await new Promise((resolve) => setTimeout(resolve, 0))
+  }
+  throw new Error(`timed out waiting for ${kind}`)
+}
+
+async function waitForState(client: SignalingClient, expected: string): Promise<void> {
+  for (let index = 0; index < 50; index++) {
+    if (client.getState() === expected) return
+    await new Promise((resolve) => setTimeout(resolve, 0))
+  }
+  throw new Error(`timed out waiting for state ${expected}; got ${client.getState()}`)
+}
+
+async function authenticateClient(value: Fixture): Promise<{
+  socket: FakeWebSocket
+  mobileProof: SubscribeProofV2
+  desktopProof: SubscribeProofV2
+}> {
+  value.client.connect()
+  const socket = instances[0]
+  socket.open()
+  socket.push({
+    kind: "challenge",
+    challenge: "mobile-challenge",
+    issuedAt: Date.now(),
+    expiresAt: Date.now() + 5_000,
+  })
+  await waitForSent(socket, "subscribe")
+  const subscribe = socket.sent
+    .map((raw) => JSON.parse(raw) as ClientFrame)
+    .find((frame): frame is Extract<ClientFrame, { kind: "subscribe" }> => {
+      return frame.kind === "subscribe"
+    })
+  expect(subscribe).toBeDefined()
+  const mobileProof = subscribe!.proof
+  const desktopProof = await buildSubscribeProofV2({
+    roomId: value.descriptor.roomId,
+    role: "desktop",
+    sessionId: "desktop-session",
+    epoch: "desktop-epoch",
+    challenge: "desktop-challenge",
+    ecdhPublicKey: value.desktopEcdh.encodedPublicKey,
+    signingPrivateKey: value.desktopIdentity.privateKey,
+  })
+  socket.push({
+    kind: "subscribed",
+    rendezvousId: value.descriptor.roomId,
+    peers: [{ proof: desktopProof, joinedAtMs: Date.now() }],
+  })
+  await waitForState(value.client, "subscribed")
+  return { socket, mobileProof, desktopProof }
+}
+
+describe("SignalingClient v2", () => {
+  it("waits for a challenge and sends a role-authenticated v2 subscription", async () => {
+    const value = await fixture()
+    value.client.connect()
+    const socket = instances[0]
+    socket.open()
+    expect(socket.sent).toHaveLength(0)
+
+    socket.push({
+      kind: "challenge",
+      challenge: "server-challenge",
+      issuedAt: Date.now(),
+      expiresAt: Date.now() + 5_000,
+    })
+    await waitForSent(socket, "subscribe")
+
+    const frame = JSON.parse(socket.sent[0]) as ClientFrame
+    expect(frame.kind).toBe("subscribe")
+    if (frame.kind !== "subscribe") throw new Error("expected subscribe")
+    expect(frame.descriptor).toEqual(value.descriptor)
+    expect(frame.proof).toMatchObject({
+      v: 2,
+      roomId: value.descriptor.roomId,
+      role: "mobile",
+      challenge: "server-challenge",
+    })
+    expect(socket.url).toContain(`rid=${encodeURIComponent(value.descriptor.roomId)}`)
   })
 
-  it("schedules reconnect after disconnect", async () => {
-    jest.useFakeTimers()
-    const client = makeClient()
-    client.connect()
-    const ws = instances[0]
-    ws.open()
-    ws.push({ kind: "subscribed", rendezvousId: "room-1", peers: [] })
+  it("encrypts signaling payloads and serializes asynchronous sends by sequence", async () => {
+    let releaseFirst!: () => void
+    const firstGate = new Promise<void>((resolve) => {
+      releaseFirst = resolve
+    })
+    const started: number[] = []
+    const value = await fixture({
+      buildEnvelope: async (args) => {
+        started.push(args.seq)
+        if (args.seq === 1) await firstGate
+        return buildV2Envelope(args)
+      },
+    })
+    const { socket, mobileProof } = await authenticateClient(value)
 
-    ws.close()
-    expect(client.getState()).toBe("reconnecting")
-    jest.runAllTimers()
-    expect(instances.length).toBe(2)
+    const first = value.client.send("hello", { deviceId: "secret-device" })
+    const second = value.client.send("rtc:offer", { sdp: "private-sdp" })
+    await flush()
+    expect(started).toEqual([1])
+    releaseFirst()
+    await Promise.all([first, second])
+
+    const relays = socket.sent
+      .map((raw) => JSON.parse(raw) as ClientFrame)
+      .filter((frame): frame is Extract<ClientFrame, { kind: "relay" }> => frame.kind === "relay")
+    expect(relays).toHaveLength(2)
+    expect(relays.map((relay) => JSON.parse(relay.payload).seq)).toEqual([1, 2])
+    expect(relays.map((relay) => relay.payload).join("")).not.toContain("private-sdp")
+
+    const mobilePublic = await importV2EcdhPublicKey(mobileProof.ecdhPublicKey)
+    const receiveKey = await deriveV2DirectionKey({
+      privateKey: value.desktopEcdh.privateKey,
+      peerPublicKey: mobilePublic,
+      roomId: value.descriptor.roomId,
+      senderRole: "mobile",
+      epoch: mobileProof.epoch,
+    })
+    await expect(
+      verifyAndDecryptV2Envelope(JSON.parse(relays[1].payload), {
+        expectedRoomId: value.descriptor.roomId,
+        expectedSenderRole: "mobile",
+        signingPublicKey: value.mobileIdentity.publicKey,
+        encryptionKey: receiveKey,
+      })
+    ).resolves.toEqual({ kind: "rtc:offer", body: { sdp: "private-sdp" } })
   })
 
-  it("close() stops further reconnect attempts", async () => {
-    jest.useFakeTimers()
-    const client = makeClient()
-    client.connect()
-    const ws = instances[0]
-    ws.open()
-    ws.close()
-    expect(client.getState()).toBe("reconnecting")
-    client.close()
-    jest.runAllTimers()
-    expect(instances.length).toBe(1)
-    expect(client.getState()).toBe("closed")
+  it("authenticates inbound session metadata and suppresses replays", async () => {
+    const value = await fixture()
+    const { socket, mobileProof, desktopProof } = await authenticateClient(value)
+    const events: unknown[] = []
+    const errors: string[] = []
+    value.client.on("envelope", ({ envelope }) => events.push(envelope))
+    value.client.on("error", ({ code }) => errors.push(code))
+
+    const mobilePublic = await importV2EcdhPublicKey(mobileProof.ecdhPublicKey)
+    const outboundKey = await deriveV2DirectionKey({
+      privateKey: value.desktopEcdh.privateKey,
+      peerPublicKey: mobilePublic,
+      roomId: value.descriptor.roomId,
+      senderRole: "desktop",
+      epoch: desktopProof.epoch,
+    })
+    const envelope = await buildV2Envelope({
+      roomId: value.descriptor.roomId,
+      senderRole: "desktop",
+      sessionId: desktopProof.sessionId,
+      epoch: desktopProof.epoch,
+      seq: 1,
+      kind: "rtc:answer",
+      body: { sdp: "answer" },
+      signingPrivateKey: value.desktopIdentity.privateKey,
+      encryptionKey: outboundKey,
+    })
+    const relay: ServerFrame = {
+      kind: "relay",
+      rendezvousId: value.descriptor.roomId,
+      fromRole: "desktop",
+      fromSessionId: desktopProof.sessionId,
+      payload: JSON.stringify(envelope),
+    }
+    socket.push(relay)
+    for (let index = 0; index < 50 && events.length === 0 && errors.length === 0; index++) {
+      await new Promise((resolve) => setTimeout(resolve, 0))
+    }
+    socket.push(relay)
+    for (let index = 0; index < 50 && !errors.includes("replayed"); index++) {
+      await new Promise((resolve) => setTimeout(resolve, 0))
+    }
+
+    expect({ events, errors }).toMatchObject({ events: expect.any(Array) })
+    expect(events).toHaveLength(1)
+    expect(events[0]).toMatchObject({ ver: 2, kind: "rtc:answer", body: { sdp: "answer" } })
+    expect(errors).toContain("replayed")
   })
 
-  it("send() throws when the socket is not open", async () => {
-    const client = makeClient()
-    await expect(client.send("hello", {})).rejects.toThrow(/not connected/)
+  it("enters awaiting-peer and only honors peer-left for the active session", async () => {
+    const value = await fixture()
+    value.client.connect()
+    const socket = instances[0]
+    socket.open()
+    socket.push({
+      kind: "challenge",
+      challenge: "challenge",
+      issuedAt: Date.now(),
+      expiresAt: Date.now() + 5_000,
+    })
+    await flush()
+    socket.push({
+      kind: "subscribed",
+      rendezvousId: value.descriptor.roomId,
+      peers: [],
+    })
+    await waitForState(value.client, "awaiting-peer")
+    expect(value.client.getState()).toBe("awaiting-peer")
+
+    socket.push({
+      kind: "peerLeft",
+      rendezvousId: value.descriptor.roomId,
+      role: "desktop",
+      sessionId: "stale-session",
+    })
+    expect(value.client.getState()).toBe("awaiting-peer")
   })
 
-  it("ignores duplicate connect() calls", () => {
-    const client = makeClient()
-    client.connect()
-    client.connect()
-    expect(instances.length).toBe(1)
+  it("treats authenticated session replacement as terminal", async () => {
+    const value = await fixture()
+    value.client.connect()
+    const socket = instances[0]
+    socket.open()
+    socket.push({
+      kind: "error",
+      code: "session_replaced",
+      message: "new session",
+    })
+    await waitForState(value.client, "rejected")
+    expect(value.client.getState()).toBe("rejected")
+    expect(socket.readyState).toBe(FakeWebSocket.CLOSED)
   })
 })
-/** @jest-environment jsdom */

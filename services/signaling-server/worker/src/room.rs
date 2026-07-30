@@ -15,12 +15,13 @@
 //! evaluated by the SAME `cognia-signaling-core::policy` functions the axum
 //! server uses, so the two deployments cannot diverge.
 
+use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 use cognia_signaling_core::limits::TokenBucket;
 use cognia_signaling_core::policy::{
-    evaluate_subscribe, rendezvous_id_matches_upgrade_room, RoomLimits, SubscribeDecision,
-    ROOM_MISMATCH_CODE, ROOM_MISMATCH_MESSAGE,
+    rendezvous_id_matches_upgrade_room, ROOM_MISMATCH_CODE, ROOM_MISMATCH_MESSAGE,
 };
 use cognia_signaling_core::proto::{ClientFrame, PeerRole, PeerSnapshot, ServerFrame};
+use cognia_signaling_core::v2::verify_subscribe_proof;
 use serde::{Deserialize, Serialize};
 use worker::*;
 
@@ -33,6 +34,8 @@ const MAX_FRAME_BYTES: usize = 8 * 1024;
 /// Fallback caps when the corresponding `wrangler.toml` `[vars]` are unset.
 const DEFAULT_MAX_CONN_PER_IP: usize = 4;
 const DEFAULT_AE_SAMPLE_N: u32 = 10;
+const SOCKET_LEASE_MS: i64 = 45_000;
+const LEASE_SCAN_MS: i64 = 10_000;
 
 /// State attached to each hibernatable WebSocket. Restored on every message
 /// via `deserialize_attachment`, so it must round-trip through `serde`.
@@ -47,7 +50,15 @@ struct Attachment {
     /// with `not_subscribed`.
     rendezvous_id: Option<String>,
     role: Option<PeerRole>,
+    #[serde(default)]
+    session_id: Option<String>,
+    #[serde(default)]
+    proof: Option<cognia_signaling_core::proto::SubscribeProofV2>,
+    challenge: String,
+    challenge_expires_at: i64,
     joined_at_ms: i64,
+    #[serde(default)]
+    last_activity_ms: i64,
     bucket: TokenBucket,
     /// Source IP (`cf-connecting-ip`) captured at accept time, used for the
     /// per-room per-IP connection cap. `None` when the header was absent.
@@ -61,12 +72,22 @@ struct Attachment {
 }
 
 impl Attachment {
-    fn fresh(now_ms: f64, ip: Option<String>, upgrade_rendezvous_id: String) -> Self {
+    fn fresh(
+        now_ms: f64,
+        ip: Option<String>,
+        upgrade_rendezvous_id: String,
+        challenge: String,
+    ) -> Self {
         Self {
             upgrade_rendezvous_id,
             rendezvous_id: None,
             role: None,
+            session_id: None,
+            proof: None,
+            challenge,
+            challenge_expires_at: now_ms as i64 + 5_000,
             joined_at_ms: now_ms as i64,
+            last_activity_ms: now_ms as i64,
             bucket: TokenBucket::new(RATE_CAPACITY, RATE_REFILL_PER_SEC),
             ip,
             sample_n: 0,
@@ -95,14 +116,6 @@ impl DurableObject for RoomDurableObject {
         let Some(upgrade_rendezvous_id) = upgrade_rendezvous_id else {
             return Response::error("missing rid query parameter", 400);
         };
-
-        // App-level Ping/Pong is answered by the runtime without waking the DO.
-        // Re-setting on each accept is idempotent and survives reconstruction.
-        if let Ok(pair) =
-            WebSocketRequestResponsePair::new(r#"{"kind":"ping"}"#, r#"{"kind":"pong"}"#)
-        {
-            self.state.set_websocket_auto_response(&pair);
-        }
 
         // Per-room per-IP connection cap. The axum server caps 50/IP process-
         // wide; a DO only sees its own room, so this bounds how many sockets
@@ -135,7 +148,21 @@ impl DurableObject for RoomDurableObject {
         let server = pair.server;
         self.state.accept_web_socket(&server);
         let now = Date::now().as_millis() as f64;
-        server.serialize_attachment(Attachment::fresh(now, ip, upgrade_rendezvous_id))?;
+        let mut challenge_bytes = [0u8; 32];
+        getrandom::getrandom(&mut challenge_bytes)
+            .map_err(|_| Error::RustError("secure random challenge failed".into()))?;
+        let challenge = URL_SAFE_NO_PAD.encode(challenge_bytes);
+        let attachment = Attachment::fresh(now, ip, upgrade_rendezvous_id, challenge.clone());
+        server.serialize_attachment(&attachment)?;
+        self.state.storage().set_alarm(LEASE_SCAN_MS).await?;
+        send_frame(
+            &server,
+            &ServerFrame::Challenge {
+                challenge,
+                issued_at: now as i64,
+                expires_at: attachment.challenge_expires_at,
+            },
+        );
         Response::from_websocket(pair.client)
     }
 
@@ -161,7 +188,9 @@ impl DurableObject for RoomDurableObject {
         let now = Date::now().as_millis() as f64;
         let mut attach = ws
             .deserialize_attachment::<Attachment>()?
-            .unwrap_or_else(|| Attachment::fresh(now, None, String::new()));
+            .unwrap_or_else(|| Attachment::fresh(now, None, String::new(), String::new()));
+        attach.last_activity_ms = now as i64;
+        self.state.storage().set_alarm(LEASE_SCAN_MS).await?;
 
         if text.len() > MAX_FRAME_BYTES {
             console_log!("signaling: frame_too_large len={}", text.len());
@@ -195,11 +224,9 @@ impl DurableObject for RoomDurableObject {
         };
 
         match frame {
-            ClientFrame::Subscribe {
-                rendezvous_id,
-                role,
-                ..
-            } => {
+            ClientFrame::Subscribe { descriptor, proof } => {
+                let rendezvous_id = descriptor.room_id.clone();
+                let role = proof.role;
                 if !rendezvous_id_matches_upgrade_room(
                     &attach.upgrade_rendezvous_id,
                     &rendezvous_id,
@@ -220,25 +247,42 @@ impl DurableObject for RoomDurableObject {
                     ws.serialize_attachment(&attach)?;
                     return Ok(());
                 }
+                if now as i64 > attach.challenge_expires_at
+                    || verify_subscribe_proof(&descriptor, &proof, &attach.challenge, now as i64)
+                        .is_err()
+                {
+                    self.record("auth_failed", Some(role.as_str()), 1.0, 0.0);
+                    ws.serialize_attachment(&attach)?;
+                    send_error(
+                        &ws,
+                        "auth_failed",
+                        "signaling v2 subscription authentication failed",
+                    );
+                    return Ok(());
+                }
                 // Existing *subscribed* peers — both for the policy check and
                 // the `Subscribed.peers` reply (peer_snapshots already filters
                 // to peers that carry a role).
-                let peers = self.peer_snapshots(&ws, &rendezvous_id)?;
-                let existing_roles: Vec<PeerRole> = peers.iter().map(|p| p.role).collect();
-                if let SubscribeDecision::Reject { code, message } =
-                    evaluate_subscribe(&existing_roles, role, &self.room_limits())
-                {
-                    console_log!("signaling: subscribe rejected code={}", code);
-                    self.record(code, Some(role.as_str()), 1.0, 0.0);
-                    // Persist the consumed token; keep the socket open so the
-                    // client can surface the reason and stop retrying.
-                    ws.serialize_attachment(&attach)?;
-                    send_error(&ws, code, message);
-                    return Ok(());
+                for old in self.subscribed_others(&ws, &rendezvous_id)? {
+                    if old
+                        .deserialize_attachment::<Attachment>()?
+                        .and_then(|old_attach| old_attach.role)
+                        == Some(role)
+                    {
+                        send_error(
+                            &old,
+                            "session_replaced",
+                            "a newer authenticated session took over this role",
+                        );
+                        let _ = old.close(Some(4001), Some("session_replaced"));
+                    }
                 }
+                let peers = self.peer_snapshots(&ws, &rendezvous_id)?;
 
                 attach.rendezvous_id = Some(rendezvous_id.clone());
                 attach.role = Some(role);
+                attach.session_id = Some(proof.session_id.clone());
+                attach.proof = Some(proof.as_ref().clone());
                 ws.serialize_attachment(&attach)?;
 
                 send_frame(
@@ -253,7 +297,10 @@ impl DurableObject for RoomDurableObject {
                         &other,
                         &ServerFrame::PeerJoined {
                             rendezvous_id: rendezvous_id.clone(),
-                            role,
+                            peer: PeerSnapshot {
+                                proof: proof.as_ref().clone(),
+                                joined_at_ms: now as i64,
+                            },
                         },
                     );
                 }
@@ -281,9 +328,11 @@ impl DurableObject for RoomDurableObject {
                     return Ok(());
                 }
                 let was_role = attach.role.take();
+                let was_session_id = attach.session_id.take();
+                attach.proof = None;
                 attach.rendezvous_id = None;
                 ws.serialize_attachment(&attach)?;
-                if let Some(role) = was_role {
+                if let (Some(role), Some(session_id)) = (was_role, was_session_id) {
                     self.record("peer_left", Some(role.as_str()), 1.0, 0.0);
                     for other in self.subscribed_others(&ws, &rendezvous_id)? {
                         send_frame(
@@ -291,6 +340,7 @@ impl DurableObject for RoomDurableObject {
                             &ServerFrame::PeerLeft {
                                 rendezvous_id: rendezvous_id.clone(),
                                 role,
+                                session_id: session_id.clone(),
                             },
                         );
                     }
@@ -319,6 +369,10 @@ impl DurableObject for RoomDurableObject {
                         "not_subscribed",
                         "subscribe to the room before relaying",
                     );
+                    return Ok(());
+                };
+                let Some(from_session_id) = attach.session_id.clone() else {
+                    send_error(&ws, "not_subscribed", "missing authenticated session");
                     return Ok(());
                 };
                 if attach.rendezvous_id.as_deref() != Some(rendezvous_id.as_str()) {
@@ -350,6 +404,7 @@ impl DurableObject for RoomDurableObject {
                         &ServerFrame::Relay {
                             rendezvous_id: rendezvous_id.clone(),
                             from_role,
+                            from_session_id: from_session_id.clone(),
                             payload: payload.clone(),
                         },
                     );
@@ -382,19 +437,33 @@ impl DurableObject for RoomDurableObject {
         self.announce_left(&ws);
         Ok(())
     }
+
+    async fn alarm(&self) -> Result<Response> {
+        let now = Date::now().as_millis() as i64;
+        let mut remaining = 0usize;
+        for ws in self.state.get_websockets() {
+            let stale = ws
+                .deserialize_attachment::<Attachment>()?
+                .map(|attachment| {
+                    now.saturating_sub(attachment.last_activity_ms) >= SOCKET_LEASE_MS
+                })
+                .unwrap_or(true);
+            if stale {
+                self.announce_left(&ws);
+                let _ = ws.close(Some(4000), Some("lease_expired"));
+                self.record("lease_expired", None, 1.0, 0.0);
+            } else {
+                remaining += 1;
+            }
+        }
+        if remaining > 0 {
+            self.state.storage().set_alarm(LEASE_SCAN_MS).await?;
+        }
+        Response::ok("ok")
+    }
 }
 
 impl RoomDurableObject {
-    /// Room admission caps, read from `wrangler.toml` `[vars]` (falling back to
-    /// `RoomLimits::default()` — `max_peers = 4`, `max_desktops = 1`).
-    fn room_limits(&self) -> RoomLimits {
-        let d = RoomLimits::default();
-        RoomLimits {
-            max_peers: self.env_usize("SIGNALING_MAX_PEERS_PER_ROOM", d.max_peers),
-            max_desktops: self.env_usize("SIGNALING_MAX_DESKTOPS", d.max_desktops),
-        }
-    }
-
     fn max_conn_per_ip(&self) -> usize {
         self.env_usize(
             "SIGNALING_MAX_CONN_PER_IP_PER_ROOM",
@@ -487,9 +556,9 @@ impl RoomDurableObject {
                 if attach.rendezvous_id.as_deref() != Some(rendezvous_id) {
                     continue;
                 }
-                if let Some(role) = attach.role {
+                if let Some(proof) = attach.proof {
                     peers.push(PeerSnapshot {
-                        role,
+                        proof,
                         joined_at_ms: attach.joined_at_ms,
                     });
                 }
@@ -503,6 +572,9 @@ impl RoomDurableObject {
         let attach = ws.deserialize_attachment::<Attachment>().ok().flatten();
         let Some(attach) = attach else { return };
         let Some(role) = attach.role else { return };
+        let Some(session_id) = attach.session_id else {
+            return;
+        };
         let Some(rendezvous_id) = attach.rendezvous_id else {
             return;
         };
@@ -514,6 +586,7 @@ impl RoomDurableObject {
                     &ServerFrame::PeerLeft {
                         rendezvous_id: rendezvous_id.clone(),
                         role,
+                        session_id: session_id.clone(),
                     },
                 );
             }

@@ -11,16 +11,17 @@
 //!
 //! Submodules:
 //!
-//! - [`envelope`] — canonical JSON + HMAC-SHA256 sign/verify. Mirror of
-//!   `lib/signaling/envelope.ts`.
+//! - [`envelope_v2`] — ECDSA/ECDH/AES-GCM signaling protocol.
 //! - [`peer`] — `webrtc-rs` `RTCPeerConnection` wrapper.
 //! - [`dispatch`] — DataChannel ↔ `rpc::dispatch` + `EventBus` bridge.
 //! - [`client`] — long-lived WSS client (one task per paired device).
 
 pub mod client;
+pub mod datachannel_framing;
 pub mod dispatch;
-pub mod envelope;
+pub mod envelope_v2;
 pub mod peer;
+pub mod registration_store;
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -32,8 +33,31 @@ use webrtc::ice_transport::ice_server::RTCIceServer;
 use std::time::{Duration, Instant};
 
 use self::client::{spawn as spawn_client, ClientConfig, ClientHandle};
-use self::envelope::now_ms;
+use self::envelope_v2::{now_ms, SIGNALING_KEY_NAMESPACE};
 use crate::companion_api::SharedState;
+
+static INSTALLED_HUB: once_cell::sync::Lazy<
+    parking_lot::RwLock<Option<std::sync::Weak<SignalingHub>>>,
+> = once_cell::sync::Lazy::new(|| parking_lot::RwLock::new(None));
+
+pub fn install_hub(hub: Option<&Arc<SignalingHub>>) {
+    *INSTALLED_HUB.write() = hub.map(Arc::downgrade);
+}
+
+pub fn refresh_installed_hub() -> Result<(), String> {
+    let Some(store) = registration_store::installed() else {
+        return Ok(());
+    };
+    let registrations = store.load_all().map_err(|error| error.to_string())?;
+    if let Some(hub) = INSTALLED_HUB
+        .read()
+        .as_ref()
+        .and_then(std::sync::Weak::upgrade)
+    {
+        hub.sync_devices(registrations);
+    }
+    Ok(())
+}
 
 /// Minimum spacing between two `reconnect_device` calls for the same
 /// rendezvous id. Enforces an in-process throttle so a renderer-side XSS
@@ -50,7 +74,7 @@ const RECONNECT_DEVICE_MIN_SPACING: Duration = Duration::from_secs(5);
 /// overrides still arrive from the renderer via `AppSettings.signalingUrl`.
 pub const DEFAULT_SIGNALING_URL: &str = match option_env!("NEXT_PUBLIC_SIGNALING_URL") {
     Some(url) => url,
-    None => "wss://signaling.cognia.cn/v1/signaling",
+    None => "wss://signaling.cognia.cn/v2/signaling",
 };
 
 /// Default STUN servers (Google + Cloudflare public). Mirrored in the
@@ -155,7 +179,7 @@ impl SignalingHub {
         // configuration mutation. We don't want to hold the parking_lot
         // mutex across `spawn_client`, which doesn't await but does touch
         // the global tokio runtime.
-        let devices_to_restart: Vec<(String, String, String)>;
+        let devices_to_restart: Vec<DeviceRegistration>;
         let binding: Option<Binding>;
         {
             let mut inner = self.inner.lock();
@@ -166,12 +190,11 @@ impl SignalingHub {
             devices_to_restart = inner
                 .clients
                 .values()
-                .map(|h| {
-                    (
-                        h.config.rendezvous_id.clone(),
-                        h.config.rendezvous_secret.clone(),
-                        h.config.device_id.clone(),
-                    )
+                .map(|h| DeviceRegistration {
+                    device_id: h.config.device_id.clone(),
+                    rendezvous_id: h.config.rendezvous_id.clone(),
+                    room_descriptor: h.config.room_descriptor.clone(),
+                    signaling_key_ref: h.config.signaling_key_ref.clone(),
                 })
                 .collect();
         }
@@ -180,8 +203,8 @@ impl SignalingHub {
         // Restart under the new config (if enabled + bound).
         if enabled {
             if let Some(binding) = binding {
-                for (rid, secret, device_id) in devices_to_restart {
-                    self.spawn_device_locked(&binding, rid, secret, device_id);
+                for registration in devices_to_restart {
+                    self.spawn_device_locked(&binding, registration);
                 }
             }
         }
@@ -229,17 +252,13 @@ impl SignalingHub {
         }
         let Some(binding) = binding else { return };
         for d in to_add {
-            self.spawn_device_locked(&binding, d.rendezvous_id, d.rendezvous_secret, d.device_id);
+            self.spawn_device_locked(&binding, d);
         }
     }
 
-    fn spawn_device_locked(
-        &self,
-        binding: &Binding,
-        rendezvous_id: String,
-        rendezvous_secret: String,
-        device_id: String,
-    ) {
+    fn spawn_device_locked(&self, binding: &Binding, registration: DeviceRegistration) {
+        let rendezvous_id = registration.rendezvous_id.clone();
+        let device_id = registration.device_id.clone();
         let (signaling_url, ice_servers) = {
             let inner = self.inner.lock();
             (inner.signaling_url.clone(), inner.ice_servers.clone())
@@ -249,10 +268,32 @@ impl SignalingHub {
         // `sync_devices` already shows the device — clients land in
         // `Offline` until the WSS task transitions them to `Awaiting`.
         tier_writer.set(DeviceTier::Offline);
+        let signing_private_key = match cognia_secrets::keyring_secrets::get(
+            SIGNALING_KEY_NAMESPACE,
+            &registration.signaling_key_ref,
+        ) {
+            Ok(Some(key)) => key,
+            Ok(None) => {
+                tier_writer.set_with_error(
+                    DeviceTier::Failed,
+                    "signaling v2 identity is missing from the host keyring",
+                );
+                return;
+            }
+            Err(error) => {
+                tier_writer.set_with_error(
+                    DeviceTier::Failed,
+                    format!("failed to load signaling v2 identity: {error}"),
+                );
+                return;
+            }
+        };
         let config = ClientConfig {
             signaling_url,
             rendezvous_id: rendezvous_id.clone(),
-            rendezvous_secret,
+            room_descriptor: registration.room_descriptor,
+            signaling_key_ref: registration.signaling_key_ref,
+            signing_private_key,
             device_id,
             ice_servers,
             tier_writer,
@@ -260,6 +301,45 @@ impl SignalingHub {
         let handle = spawn_client(config, binding.state.clone());
         let mut inner = self.inner.lock();
         inner.clients.insert(rendezvous_id, handle);
+    }
+
+    #[cfg(feature = "webrtc-harness")]
+    pub fn sync_harness_device(
+        &self,
+        registration: DeviceRegistration,
+        signing_private_key: String,
+    ) -> Result<(), String> {
+        let binding = self
+            .inner
+            .lock()
+            .bound
+            .clone()
+            .ok_or_else(|| "signaling hub is not bound".to_string())?;
+        self.cancel_one(&registration.rendezvous_id);
+        let (signaling_url, ice_servers) = {
+            let inner = self.inner.lock();
+            (inner.signaling_url.clone(), inner.ice_servers.clone())
+        };
+        let tier_writer =
+            self.new_tier_writer(&registration.rendezvous_id, &registration.device_id);
+        tier_writer.set(DeviceTier::Offline);
+        let config = ClientConfig {
+            signaling_url,
+            rendezvous_id: registration.rendezvous_id.clone(),
+            room_descriptor: registration.room_descriptor,
+            signaling_key_ref: registration.signaling_key_ref,
+            signing_private_key,
+            device_id: registration.device_id,
+            ice_servers,
+            tier_writer,
+        };
+        let handle = spawn_client(config, binding.state);
+        let mut inner = self.inner.lock();
+        inner
+            .pending_devices
+            .retain(|item| item.rendezvous_id != registration.rendezvous_id);
+        inner.clients.insert(registration.rendezvous_id, handle);
+        Ok(())
     }
 
     fn cancel_one(&self, rendezvous_id: &str) {
@@ -297,6 +377,10 @@ impl SignalingHub {
     /// Snapshot of currently-registered rendezvous ids — diagnostic only.
     pub fn registered_rendezvous_ids(&self) -> Vec<String> {
         self.inner.lock().clients.keys().cloned().collect()
+    }
+
+    pub fn registrations_snapshot(&self) -> Vec<DeviceRegistration> {
+        self.inner.lock().pending_devices.clone()
     }
 
     /// Force-restart the signaling client task for one paired device. Used
@@ -367,12 +451,7 @@ impl SignalingHub {
         let Some(binding) = binding else {
             return Err("reconnect_device: hub is not bound yet".to_string());
         };
-        self.spawn_device_locked(
-            &binding,
-            registration.rendezvous_id,
-            registration.rendezvous_secret,
-            registration.device_id,
-        );
+        self.spawn_device_locked(&binding, registration);
         Ok(())
     }
 
@@ -428,14 +507,14 @@ impl Default for SignalingHub {
 
 /// Per-device configuration the renderer pushes via
 /// `companion_signaling_sync_devices`. One entry per paired device that
-/// has a `rendezvousId` + `rendezvousSecret` (i.e., was paired after the
-/// pair-flow extension landed).
+/// has a v2 room descriptor and a host signing-key reference.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DeviceRegistration {
     pub device_id: String,
     pub rendezvous_id: String,
-    pub rendezvous_secret: String,
+    pub room_descriptor: cognia_signaling_core::proto::RoomDescriptorV2,
+    pub signaling_key_ref: String,
 }
 
 /// Configuration patch the renderer pushes via
@@ -586,6 +665,11 @@ pub mod commands {
         hub: tauri::State<'_, Arc<SignalingHub>>,
         devices: Vec<DeviceRegistration>,
     ) -> Result<(), String> {
+        if let Some(store) = super::registration_store::installed() {
+            store
+                .replace_all(&devices, super::now_ms())
+                .map_err(|error| error.to_string())?;
+        }
         hub.sync_devices(devices);
         Ok(())
     }
@@ -650,6 +734,22 @@ pub mod commands {
 mod tests {
     use super::*;
 
+    fn registration(device_id: &str, rendezvous_id: &str) -> DeviceRegistration {
+        DeviceRegistration {
+            device_id: device_id.into(),
+            rendezvous_id: rendezvous_id.into(),
+            room_descriptor: cognia_signaling_core::proto::RoomDescriptorV2 {
+                v: 2,
+                room_id: rendezvous_id.into(),
+                room_nonce: "nonce".into(),
+                desktop_signing_key: "desktop-key".into(),
+                mobile_signing_key: "mobile-key".into(),
+                not_after: 1_800_000_000_000,
+            },
+            signaling_key_ref: device_id.into(),
+        }
+    }
+
     #[test]
     fn ice_server_spec_converts_to_rtc_ice_server() {
         let spec = IceServerSpec {
@@ -701,11 +801,7 @@ mod tests {
         // and apply it once the binding lands; otherwise the device would
         // never receive an inbound rtc:offer.
         let hub = SignalingHub::new();
-        hub.sync_devices(vec![DeviceRegistration {
-            device_id: "d1".into(),
-            rendezvous_id: "r1".into(),
-            rendezvous_secret: "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8".into(),
-        }]);
+        hub.sync_devices(vec![registration("d1", "r1")]);
         // No binding yet — no clients spawned.
         assert!(hub.registered_rendezvous_ids().is_empty());
         // Cached for replay.
@@ -718,11 +814,7 @@ mod tests {
     fn sync_devices_with_disabled_flag_skips_spawn() {
         let hub = SignalingHub::new();
         hub.configure(false, DEFAULT_SIGNALING_URL.to_string(), vec![]);
-        hub.sync_devices(vec![DeviceRegistration {
-            device_id: "d1".into(),
-            rendezvous_id: "r1".into(),
-            rendezvous_secret: "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8".into(),
-        }]);
+        hub.sync_devices(vec![registration("d1", "r1")]);
         assert!(hub.registered_rendezvous_ids().is_empty());
         // …but still cached so re-enabling will pick it up.
         let inner = hub.inner.lock();
@@ -732,24 +824,9 @@ mod tests {
     #[test]
     fn sync_devices_diff_removes_missing_ids() {
         let hub = SignalingHub::new();
-        hub.sync_devices(vec![
-            DeviceRegistration {
-                device_id: "d1".into(),
-                rendezvous_id: "r1".into(),
-                rendezvous_secret: "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8".into(),
-            },
-            DeviceRegistration {
-                device_id: "d2".into(),
-                rendezvous_id: "r2".into(),
-                rendezvous_secret: "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8".into(),
-            },
-        ]);
+        hub.sync_devices(vec![registration("d1", "r1"), registration("d2", "r2")]);
         // Reducing to a single device should evict r2 from pending.
-        hub.sync_devices(vec![DeviceRegistration {
-            device_id: "d1".into(),
-            rendezvous_id: "r1".into(),
-            rendezvous_secret: "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8".into(),
-        }]);
+        hub.sync_devices(vec![registration("d1", "r1")]);
         let inner = hub.inner.lock();
         assert_eq!(inner.pending_devices.len(), 1);
         assert_eq!(inner.pending_devices[0].rendezvous_id, "r1");
@@ -825,11 +902,7 @@ mod tests {
         // succeed silently — flipping the toggle back on will re-spawn.
         let hub = SignalingHub::new();
         hub.configure(false, DEFAULT_SIGNALING_URL.to_string(), vec![]);
-        hub.sync_devices(vec![DeviceRegistration {
-            device_id: "d1".into(),
-            rendezvous_id: "r1".into(),
-            rendezvous_secret: "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8".into(),
-        }]);
+        hub.sync_devices(vec![registration("d1", "r1")]);
         // Pre-condition: no clients spawned because hub is disabled.
         assert!(hub.registered_rendezvous_ids().is_empty());
         // The device is still in the pending_devices cache, so a
@@ -842,11 +915,7 @@ mod tests {
     #[test]
     fn reconnect_device_unknown_rendezvous_id_errors_after_some_devices() {
         let hub = SignalingHub::new();
-        hub.sync_devices(vec![DeviceRegistration {
-            device_id: "d1".into(),
-            rendezvous_id: "r1".into(),
-            rendezvous_secret: "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8".into(),
-        }]);
+        hub.sync_devices(vec![registration("d1", "r1")]);
         // r1 is in pending_devices but no `bind()` was called, so
         // reconnect should surface the "hub not bound" condition rather
         // than the "not found" condition.
@@ -864,11 +933,7 @@ mod tests {
         // map is updated either way.
         let hub = SignalingHub::new();
         hub.configure(false, DEFAULT_SIGNALING_URL.to_string(), vec![]);
-        hub.sync_devices(vec![DeviceRegistration {
-            device_id: "d1".into(),
-            rendezvous_id: "r1".into(),
-            rendezvous_secret: "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8".into(),
-        }]);
+        hub.sync_devices(vec![registration("d1", "r1")]);
         // First call: clears the throttle (empty map), succeeds.
         assert!(hub.reconnect_device("r1").is_ok());
         // Second call within the spacing window: must be rejected with
@@ -885,18 +950,7 @@ mod tests {
     fn reconnect_device_throttle_independent_per_rendezvous_id() {
         let hub = SignalingHub::new();
         hub.configure(false, DEFAULT_SIGNALING_URL.to_string(), vec![]);
-        hub.sync_devices(vec![
-            DeviceRegistration {
-                device_id: "d1".into(),
-                rendezvous_id: "r1".into(),
-                rendezvous_secret: "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8".into(),
-            },
-            DeviceRegistration {
-                device_id: "d2".into(),
-                rendezvous_id: "r2".into(),
-                rendezvous_secret: "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8".into(),
-            },
-        ]);
+        hub.sync_devices(vec![registration("d1", "r1"), registration("d2", "r2")]);
         assert!(hub.reconnect_device("r1").is_ok());
         // A different rendezvous id must NOT inherit r1's throttle.
         assert!(hub.reconnect_device("r2").is_ok());
@@ -908,11 +962,7 @@ mod tests {
     fn reset_reconnect_throttle_allows_immediate_repeat() {
         let hub = SignalingHub::new();
         hub.configure(false, DEFAULT_SIGNALING_URL.to_string(), vec![]);
-        hub.sync_devices(vec![DeviceRegistration {
-            device_id: "d1".into(),
-            rendezvous_id: "r1".into(),
-            rendezvous_secret: "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8".into(),
-        }]);
+        hub.sync_devices(vec![registration("d1", "r1")]);
         assert!(hub.reconnect_device("r1").is_ok());
         hub.reset_reconnect_throttle();
         assert!(hub.reconnect_device("r1").is_ok());

@@ -7,7 +7,7 @@
  * Responsibilities:
  *
  * 1. **Hydrate at boot.** After Dexie is open, push the current list of
- *    paired devices (those with a `rendezvousId` + `rendezvousSecret`)
+ *    paired devices (those with a v2 room descriptor + host key reference)
  *    plus the current signaling URL / ICE / TURN configuration to the
  *    Rust hub via Tauri commands.
  * 2. **Subscribe to changes.** Dexie's `liveQuery` fires on every
@@ -49,15 +49,18 @@ import {
   startTurnProvisioner,
   type ProvisionerHandle,
 } from "@/lib/credentials/turn-provisioning-cache"
+import { publishProvisionedTurnServers } from "@/lib/signaling/provisioned-turn-state"
 // Leaf `types` module (constants only) — avoids the `@/lib/signaling` barrel
 // and its TDZ cycle described above.
 import { DEFAULT_SIGNALING_URL } from "@/lib/signaling/types"
+import type { RoomDescriptorV2 } from "@/lib/signaling/v2-crypto"
 import type { AppSettings } from "@cognia/agent-config-types"
 
 interface DeviceRegistration {
   deviceId: string
   rendezvousId: string
-  rendezvousSecret: string
+  roomDescriptor: RoomDescriptorV2
+  signalingKeyRef: string
 }
 
 interface IceServerSpec {
@@ -112,12 +115,14 @@ export function installDesktopSignalingController(
         (r) =>
           !r.revokedAt &&
           typeof r.rendezvousId === "string" &&
-          typeof r.rendezvousSecret === "string"
+          r.signalingRoomDescriptor?.v === 2 &&
+          typeof r.signalingKeyRef === "string"
       )
       const payload: DeviceRegistration[] = eligible.map((r) => ({
         deviceId: r.deviceId,
         rendezvousId: r.rendezvousId!,
-        rendezvousSecret: r.rendezvousSecret!,
+        roomDescriptor: r.signalingRoomDescriptor!,
+        signalingKeyRef: r.signalingKeyRef!,
       }))
       void transport
         .call<void>("companion_signaling_sync_devices", { devices: payload })
@@ -138,12 +143,15 @@ export function installDesktopSignalingController(
   // and mints independent ephemeral credentials (TURN allocations are
   // per-credential, so the peers don't share secrets).
   let provisioner: ProvisionerHandle | null = null
-  let lastProviderKey = ""
+  let lastProviderKey: string | null = null
   let lastSettings: AppSettings | null = null
+  let providerGeneration = 0
+  let configurationGeneration = 0
 
   const pushConfigure = async (
     settings: AppSettings,
-    providerServers: RTCIceServer[]
+    providerServers: RTCIceServer[],
+    generation: number
   ): Promise<void> => {
     // Resolve any `"kr:<keyId>"` sentinels in turnServers into real
     // credentials from the OS keyring before handing them to the Rust hub
@@ -151,6 +159,7 @@ export function installDesktopSignalingController(
     const turn = settings.turnServers
       ? await resolveTurnServerCredentials(settings.turnServers)
       : []
+    if (generation !== configurationGeneration) return
     const patch = buildSignalingConfigPatch(settings, turn, providerServers)
     await transport.call<void>("companion_signaling_configure", { patch })
   }
@@ -161,24 +170,31 @@ export function installDesktopSignalingController(
     const key = tp && tp.kind !== "none" ? JSON.stringify(tp) : ""
     if (key === lastProviderKey) return
     lastProviderKey = key
+    const generation = ++providerGeneration
     provisioner?.stop()
     provisioner = null
+    publishProvisionedTurnServers([])
     if (key && tp) {
       provisioner = startProvisioner({
         provider: tp,
-        onRefresh: () => {
-          if (!lastSettings) return
-          void pushConfigure(lastSettings, provisioner?.current() ?? []).catch((err) => {
+        onRefresh: (iceServers) => {
+          if (generation !== providerGeneration || !lastSettings) return
+          publishProvisionedTurnServers(iceServers)
+          const configureGeneration = ++configurationGeneration
+          void pushConfigure(lastSettings, iceServers, configureGeneration).catch((err) => {
             console.warn("desktop-signaling-controller: provisioner re-push failed", err)
           })
         },
       })
+      const current = provisioner.current()
+      if (current.length > 0) publishProvisionedTurnServers(current)
     }
   }
 
   const handleSettings = (settings: AppSettings): void => {
     manageProvisioner(settings)
-    void pushConfigure(settings, provisioner?.current() ?? []).catch((err) => {
+    const generation = ++configurationGeneration
+    void pushConfigure(settings, provisioner?.current() ?? [], generation).catch((err) => {
       console.warn("companion_signaling_configure failed", err)
     })
   }
@@ -203,7 +219,10 @@ export function installDesktopSignalingController(
   return () => {
     devicesSub.unsubscribe()
     settingsSub.unsubscribe()
+    providerGeneration += 1
+    configurationGeneration += 1
     provisioner?.stop()
+    publishProvisionedTurnServers([])
   }
 }
 

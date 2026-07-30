@@ -58,7 +58,7 @@ pub struct RoomLimits {
 impl Default for RoomLimits {
     fn default() -> Self {
         Self {
-            max_peers: 4,
+            max_peers: 2,
             max_desktops: 1,
         }
     }
@@ -172,12 +172,12 @@ mod tests {
     }
 
     #[test]
-    fn extra_mobiles_allowed_within_peer_cap() {
-        let limits = RoomLimits::default(); // max_peers = 4
-        let roles = [PeerRole::Desktop, PeerRole::Mobile, PeerRole::Mobile];
+    fn extra_mobile_is_rejected_at_the_two_peer_cap() {
+        let limits = RoomLimits::default(); // one desktop + one mobile
+        let roles = [PeerRole::Desktop, PeerRole::Mobile];
         assert_eq!(
-            evaluate_subscribe(&roles, PeerRole::Mobile, &limits),
-            SubscribeDecision::Accept
+            reject_code(evaluate_subscribe(&roles, PeerRole::Mobile, &limits)),
+            Some("room_full")
         );
     }
 

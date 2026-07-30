@@ -6,7 +6,7 @@
 //! into tokio mpsc channels that the signaling client task consumes.
 //!
 //! Role split (matches `lib/tauri/transport-rtc.ts`):
-//! - **mobile** is the offerer — it calls `pc.createDataChannel("cognia.v1", ...)`
+//! - **mobile** is the offerer — it calls `pc.createDataChannel("cognia.v2", ...)`
 //!   and produces the SDP offer.
 //! - **desktop** (this file) is the answerer — it waits for the offer via
 //!   signaling, calls `set_remote_description` + `create_answer` +
@@ -29,7 +29,10 @@ use webrtc::peer_connection::RTCPeerConnection;
 
 /// DataChannel label both peers agree on. Mirrored in
 /// `lib/signaling/types.ts:DATACHANNEL_LABEL`.
-pub const DATACHANNEL_LABEL: &str = "cognia.v1";
+pub const DATACHANNEL_LABEL: &str = "cognia.v2";
+pub const ICE_QUEUE_CAPACITY: usize = 256;
+pub const INBOUND_FRAME_QUEUE_CAPACITY: usize = 128;
+pub const STATE_QUEUE_CAPACITY: usize = 32;
 
 /// Wraps an `RTCPeerConnection` and its (single) data channel, fanning the
 /// callback world out to plain mpsc channels for the signaling client to
@@ -49,12 +52,12 @@ pub struct PeerCallbacks {
     /// Local ICE candidates discovered after `setLocalDescription`. The
     /// signaling client wraps each in a `rtc:ice` envelope and relays it
     /// to the mobile peer.
-    pub outbound_ice: mpsc::UnboundedSender<RTCIceCandidateInit>,
+    pub outbound_ice: mpsc::Sender<RTCIceCandidateInit>,
     /// Inbound DataChannel binary messages (the RPC / event JSON
     /// envelopes from the mobile peer).
-    pub inbound_data: mpsc::UnboundedSender<Vec<u8>>,
+    pub inbound_data: mpsc::Sender<Vec<u8>>,
     /// `RTCPeerConnectionState` transitions for failure detection.
-    pub state_change: mpsc::UnboundedSender<RTCPeerConnectionState>,
+    pub state_change: mpsc::Sender<RTCPeerConnectionState>,
 }
 
 impl PeerSession {
@@ -89,7 +92,11 @@ impl PeerSession {
                 if let Some(c) = candidate {
                     match c.to_json() {
                         Ok(init) => {
-                            let _ = ice_tx.send(init);
+                            if ice_tx.try_send(init).is_err() {
+                                log::warn!(
+                                    "signaling::peer: ICE queue overflow or receiver closed"
+                                );
+                            }
                         }
                         Err(e) => {
                             log::warn!("signaling::peer: ice candidate to_json failed: {e}");
@@ -104,7 +111,9 @@ impl PeerSession {
         pc.on_peer_connection_state_change(Box::new(move |s: RTCPeerConnectionState| {
             let state_tx = state_tx.clone();
             Box::pin(async move {
-                let _ = state_tx.send(s);
+                if state_tx.try_send(s).is_err() {
+                    log::warn!("signaling::peer: state queue overflow or receiver closed");
+                }
             })
         }));
 
@@ -142,12 +151,17 @@ impl PeerSession {
 
                 // on_message → forward bytes to the dispatcher.
                 let forward = inbound_tx.clone();
+                let overflow_channel = Arc::clone(&channel);
                 channel.on_message(Box::new(move |msg: DataChannelMessage| {
                     let forward = forward.clone();
+                    let overflow_channel = Arc::clone(&overflow_channel);
                     Box::pin(async move {
                         let bytes = msg.data.to_vec();
-                        if forward.send(bytes).is_err() {
-                            log::warn!("signaling::peer: inbound channel dropped, dispatcher gone");
+                        if forward.try_send(bytes).is_err() {
+                            log::warn!(
+                                "signaling::peer: inbound frame queue overflow; closing peer channel"
+                            );
+                            let _ = overflow_channel.close().await;
                         }
                     })
                 }));
@@ -208,13 +222,17 @@ impl PeerSession {
     pub async fn send_bytes(&self, bytes: Vec<u8>) -> Result<(), PeerSendError> {
         let dc = self.dc.read().await;
         let channel = dc.as_ref().ok_or(PeerSendError::ChannelClosed)?;
-        let result = match String::from_utf8(bytes) {
-            Ok(text) => channel.send_text(text).await,
-            Err(err) => channel.send(&Bytes::from(err.into_bytes())).await,
-        };
-        result
-            .map(|_| ())
-            .map_err(|e| PeerSendError::Webrtc(e.to_string()))
+        let message_id = uuid::Uuid::new_v4().to_string();
+        let frames = super::datachannel_framing::encode_message(&bytes, &message_id)
+            .map_err(|error| PeerSendError::Webrtc(error.to_string()))?;
+        for frame in frames {
+            let result = match String::from_utf8(frame) {
+                Ok(text) => channel.send_text(text).await,
+                Err(err) => channel.send(&Bytes::from(err.into_bytes())).await,
+            };
+            result.map_err(|e| PeerSendError::Webrtc(e.to_string()))?;
+        }
+        Ok(())
     }
 
     /// Wait until the data channel transitions to the `open` state. Returns
@@ -268,18 +286,17 @@ pub enum PeerSendError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tokio::sync::mpsc::unbounded_channel;
     use webrtc::peer_connection::offer_answer_options::RTCOfferOptions;
 
     fn callbacks() -> (
         PeerCallbacks,
-        mpsc::UnboundedReceiver<RTCIceCandidateInit>,
-        mpsc::UnboundedReceiver<Vec<u8>>,
-        mpsc::UnboundedReceiver<RTCPeerConnectionState>,
+        mpsc::Receiver<RTCIceCandidateInit>,
+        mpsc::Receiver<Vec<u8>>,
+        mpsc::Receiver<RTCPeerConnectionState>,
     ) {
-        let (ice_tx, ice_rx) = unbounded_channel();
-        let (data_tx, data_rx) = unbounded_channel();
-        let (state_tx, state_rx) = unbounded_channel();
+        let (ice_tx, ice_rx) = mpsc::channel(ICE_QUEUE_CAPACITY);
+        let (data_tx, data_rx) = mpsc::channel(INBOUND_FRAME_QUEUE_CAPACITY);
+        let (state_tx, state_rx) = mpsc::channel(STATE_QUEUE_CAPACITY);
         (
             PeerCallbacks {
                 outbound_ice: ice_tx,

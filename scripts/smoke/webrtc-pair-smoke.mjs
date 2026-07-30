@@ -38,7 +38,7 @@
 
 import { spawn, spawnSync } from "node:child_process"
 import { setTimeout as delay } from "node:timers/promises"
-import { randomUUID, randomBytes } from "node:crypto"
+import { randomBytes, webcrypto } from "node:crypto"
 import { existsSync } from "node:fs"
 import path from "node:path"
 import process from "node:process"
@@ -158,10 +158,21 @@ async function bootSignaling() {
  * Start the Rust answerer. Returns a controller that parses the JSON stdout
  * protocol so scenarios can await a tier, push an event, or stop it.
  */
-function startHarnessPeer({ signalingUrl, rid, secret, deviceId }) {
+function startHarnessPeer({ signalingUrl, rid, roomDescriptor, desktopPrivateKey, deviceId }) {
   const child = spawn(
     HARNESS_BIN,
-    ["--signaling", signalingUrl, "--rid", rid, "--secret", secret, "--device-id", deviceId],
+    [
+      "--signaling",
+      signalingUrl,
+      "--rid",
+      rid,
+      "--room-descriptor",
+      JSON.stringify(roomDescriptor),
+      "--signing-private-key",
+      desktopPrivateKey,
+      "--device-id",
+      deviceId,
+    ],
     {
       stdio: ["pipe", "pipe", "pipe"],
       env: { ...process.env, COGNIA_LOG: process.env.COGNIA_LOG ?? "info" },
@@ -277,10 +288,53 @@ async function waitForAnyBrowserState(api, targets, timeoutMs = 15_000) {
 // Scenarios
 // ---------------------------------------------------------------------------
 
-function freshRoom() {
+function encodeFields(fields) {
+  const encoded = fields.map((field) => Buffer.from(String(field), "utf8"))
+  const parts = []
+  for (const field of encoded) {
+    const length = Buffer.alloc(4)
+    length.writeUInt32BE(field.byteLength)
+    parts.push(length, field)
+  }
+  return Buffer.concat(parts)
+}
+
+async function signingIdentity() {
+  const pair = await webcrypto.subtle.generateKey({ name: "ECDSA", namedCurve: "P-256" }, true, [
+    "sign",
+    "verify",
+  ])
+  const [publicRaw, privateJwk] = await Promise.all([
+    webcrypto.subtle.exportKey("raw", pair.publicKey),
+    webcrypto.subtle.exportKey("jwk", pair.privateKey),
+  ])
   return {
-    rid: randomUUID(),
-    secret: randomBytes(32).toString("base64url"),
+    publicKey: Buffer.from(publicRaw).toString("base64url"),
+    privateJwk,
+  }
+}
+
+async function freshRoom() {
+  const [desktop, mobile] = await Promise.all([signingIdentity(), signingIdentity()])
+  const roomNonce = randomBytes(16).toString("base64url")
+  const notAfter = Date.now() + 60 * 60 * 1000
+  const digest = await webcrypto.subtle.digest(
+    "SHA-256",
+    encodeFields([2, roomNonce, desktop.publicKey, mobile.publicKey, notAfter])
+  )
+  const rid = Buffer.from(digest).toString("base64url")
+  return {
+    rid,
+    roomDescriptor: {
+      v: 2,
+      roomId: rid,
+      roomNonce,
+      desktopSigningKey: desktop.publicKey,
+      mobileSigningKey: mobile.publicKey,
+      notAfter,
+    },
+    desktopPrivateKey: desktop.privateJwk.d,
+    mobilePrivateKeyJwk: mobile.privateJwk,
     deviceId: `dev-${randomBytes(4).toString("hex")}`,
   }
 }
@@ -290,7 +344,7 @@ async function run() {
   ensureExport()
 
   const { child: sigChild, port } = await bootSignaling()
-  const signalingUrl = `ws://127.0.0.1:${port}/v1/signaling`
+  const signalingUrl = `ws://127.0.0.1:${port}/v2/signaling`
   log(`signaling server on ${signalingUrl}`)
 
   const outServer = createOutServer(OUT_ROOT)
@@ -313,20 +367,64 @@ async function run() {
 
   try {
     const page = await browser.newPage()
+    const browserDiagnostics = []
+    page.on("console", (message) => {
+      if (message.type() === "error" || message.type() === "warning") {
+        browserDiagnostics.push(`console.${message.type()}: ${message.text()}`)
+      }
+    })
+    page.on("pageerror", (error) => {
+      browserDiagnostics.push(`pageerror: ${error.message}`)
+    })
+    page.on("requestfailed", (request) => {
+      browserDiagnostics.push(
+        `requestfailed: ${request.url()} (${request.failure()?.errorText ?? "unknown"})`
+      )
+    })
     await page.goto(pageUrl)
-    await page.waitForFunction(() => window.__cogniaTestGlobalsReady === true, { timeout: 30_000 })
+    try {
+      await page.waitForFunction(() => window.__cogniaE2EWebRtcReady === true, {
+        timeout: 20_000,
+      })
+    } catch (error) {
+      // The plugin schema can race the base Dexie open on a brand-new browser
+      // profile. Reloading closes the old realm's connection so the already-
+      // pending upgrade can complete; retry once instead of turning this
+      // unrelated first-open race into a false WebRTC failure.
+      if (browserDiagnostics.some((line) => line.includes("schema upgrade still blocked"))) {
+        browserDiagnostics.push("retry: reloading after the first-open Dexie upgrade race")
+        await page.reload()
+        try {
+          await page.waitForFunction(() => window.__cogniaE2EWebRtcReady === true, {
+            timeout: 30_000,
+          })
+          browserDiagnostics.length = 0
+        } catch {
+          // Fall through to the diagnostic error below.
+        }
+      }
+      if (await page.evaluate(() => window.__cogniaE2EWebRtcReady === true)) {
+        // The retry succeeded.
+      } else {
+        const details = browserDiagnostics.length
+          ? browserDiagnostics.slice(-20).join("\n")
+          : "no browser diagnostics captured"
+        throw new Error(`E2E globals did not become ready:\n${details}`, { cause: error })
+      }
+    }
     const api = makeBrowserApi(page)
 
     // ── P1 — cold start, desktop already present ────────────────────────────
     {
       log("P1: cold start (desktop already in room)")
-      const room = freshRoom()
+      const room = await freshRoom()
       peer = startHarnessPeer({ signalingUrl, ...room })
       await peer.waitForTier("awaiting") // desktop subscribed, room ready
       await api.connect({
         signalingUrl,
         rendezvousId: room.rid,
-        rendezvousSecret: room.secret,
+        signalingRoomDescriptor: room.roomDescriptor,
+        signalingPrivateKeyJwk: room.mobilePrivateKeyJwk,
         deviceId: "mobile-p1",
         peerWaitTimeoutMs: 15_000,
         negotiationTimeoutMs: 15_000,
@@ -398,13 +496,14 @@ async function run() {
     // ── P2 — cold-start RACE (mobile subscribes first) ──────────────────────
     {
       log("P2: cold-start race (mobile subscribes before desktop) — F1 regression guard")
-      const room = freshRoom()
+      const room = await freshRoom()
       // Browser connects into an EMPTY room. Pre-F1 it would fire an offer the
       // server drops, then 8s-timeout. Post-F1 it must hold in awaiting-peer.
       await api.connectNoWait({
         signalingUrl,
         rendezvousId: room.rid,
-        rendezvousSecret: room.secret,
+        signalingRoomDescriptor: room.roomDescriptor,
+        signalingPrivateKeyJwk: room.mobilePrivateKeyJwk,
         deviceId: "mobile-p2",
         peerWaitTimeoutMs: 25_000,
         negotiationTimeoutMs: 8_000,

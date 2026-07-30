@@ -17,16 +17,16 @@
  *   5. `/healthz` returns `{ ok: true, rooms, peers, uptimeSeconds }`.
  *   6. `/metrics` returns Prometheus text exposition.
  *
- * HMAC verification is intentionally NOT covered here — by design, the
- * rendezvous is opaque to envelope contents and the signing/verifying
- * roundtrip lives in `lib/signaling/envelope.test.ts`. The signaling
- * server only enforces transport-layer guards.
+ * Relay decryption is intentionally not covered here — the rendezvous is
+ * opaque to ciphertext. This smoke does cover the v2 challenge and signed
+ * role admission enforced by the server.
  *
  * Exit code is `0` on success, `1` otherwise. Designed to slot into
  * `pnpm webrtc:smoke` (added in W7) and CI.
  */
 
 import { spawn, spawnSync } from "node:child_process"
+import { randomBytes, webcrypto } from "node:crypto"
 import { setTimeout as delay } from "node:timers/promises"
 import process from "node:process"
 
@@ -113,7 +113,7 @@ async function bootServer() {
 }
 
 function connect(port, label) {
-  const ws = new WebSocket(`ws://127.0.0.1:${port}/v1/signaling`)
+  const ws = new WebSocket(`ws://127.0.0.1:${port}/v2/signaling`)
   const inbox = []
   const waiters = []
   const drainWaiters = () => {
@@ -202,13 +202,92 @@ async function fetchText(port, path) {
 // Scenarios
 // ---------------------------------------------------------------------------
 
-function subscribeFrame(rendezvousId, role) {
+function encodeFields(fields) {
+  const parts = []
+  for (const value of fields) {
+    const field = Buffer.from(String(value), "utf8")
+    const length = Buffer.alloc(4)
+    length.writeUInt32BE(field.byteLength)
+    parts.push(length, field)
+  }
+  return Buffer.concat(parts)
+}
+
+async function signingIdentity() {
+  const pair = await webcrypto.subtle.generateKey({ name: "ECDSA", namedCurve: "P-256" }, true, [
+    "sign",
+    "verify",
+  ])
+  return {
+    privateKey: pair.privateKey,
+    publicKey: Buffer.from(await webcrypto.subtle.exportKey("raw", pair.publicKey)).toString(
+      "base64url"
+    ),
+  }
+}
+
+async function createRoom() {
+  const [desktop, mobile] = await Promise.all([signingIdentity(), signingIdentity()])
+  const roomNonce = randomBytes(16).toString("base64url")
+  const notAfter = Date.now() + 60_000
+  const digest = await webcrypto.subtle.digest(
+    "SHA-256",
+    encodeFields([2, roomNonce, desktop.publicKey, mobile.publicKey, notAfter])
+  )
+  const roomId = Buffer.from(digest).toString("base64url")
+  return {
+    descriptor: {
+      v: 2,
+      roomId,
+      roomNonce,
+      desktopSigningKey: desktop.publicKey,
+      mobileSigningKey: mobile.publicKey,
+      notAfter,
+    },
+    desktop,
+    mobile,
+  }
+}
+
+async function subscribeFrame(room, role, challenge) {
+  const ecdh = await webcrypto.subtle.generateKey({ name: "ECDH", namedCurve: "P-256" }, true, [
+    "deriveBits",
+  ])
+  const proof = {
+    v: 2,
+    roomId: room.descriptor.roomId,
+    role,
+    sessionId: randomBytes(16).toString("base64url"),
+    epoch: randomBytes(16).toString("base64url"),
+    issuedAt: Date.now(),
+    challenge,
+    ecdhPublicKey: Buffer.from(await webcrypto.subtle.exportKey("raw", ecdh.publicKey)).toString(
+      "base64url"
+    ),
+  }
+  const signature = await webcrypto.subtle.sign(
+    { name: "ECDSA", hash: "SHA-256" },
+    room[role].privateKey,
+    encodeFields([
+      proof.v,
+      proof.roomId,
+      proof.role,
+      proof.sessionId,
+      proof.epoch,
+      proof.issuedAt,
+      proof.challenge,
+      proof.ecdhPublicKey,
+    ])
+  )
   return {
     kind: "subscribe",
-    rendezvousId,
-    role,
-    clientNonce: "smoke-" + Math.random().toString(36).slice(2, 10),
+    descriptor: room.descriptor,
+    proof: { ...proof, signature: Buffer.from(signature).toString("base64url") },
   }
+}
+
+async function expectChallenge(client) {
+  return expectFrame(client, (frame) => frame.kind === "challenge", 1_000, "challenge")
 }
 
 async function scenarioSubscribeRelay(port) {
@@ -217,28 +296,30 @@ async function scenarioSubscribeRelay(port) {
   const b = connect(port, "B")
   await a.open()
   await b.open()
+  const [aChallenge, bChallenge] = await Promise.all([expectChallenge(a), expectChallenge(b)])
+  const room = await createRoom()
 
-  a.send(subscribeFrame("room-1", "desktop"))
+  a.send(await subscribeFrame(room, "desktop", aChallenge.challenge))
   await expectFrame(
     a,
-    (f) => f.kind === "subscribed" && f.rendezvousId === "room-1",
+    (f) => f.kind === "subscribed" && f.rendezvousId === room.descriptor.roomId,
     1_000,
     "A.subscribed"
   )
 
-  b.send(subscribeFrame("room-1", "mobile"))
+  b.send(await subscribeFrame(room, "mobile", bChallenge.challenge))
   await expectFrame(b, (f) => f.kind === "subscribed", 1_000, "B.subscribed")
   await expectFrame(
     a,
-    (f) => f.kind === "peerJoined" && f.role === "mobile",
+    (f) => f.kind === "peerJoined" && f.peer?.proof?.role === "mobile",
     1_000,
     "A.peerJoined(mobile)"
   )
 
   // Payload is an opaque base64-encoded application envelope — for the
   // server smoke we just need a stable string so the relay is forwarded.
-  const payload = Buffer.from(JSON.stringify({ hello: "from-mobile" })).toString("base64url")
-  b.send({ kind: "relay", rendezvousId: "room-1", payload })
+  const payload = JSON.stringify({ ciphertext: "opaque" })
+  b.send({ kind: "relay", rendezvousId: room.descriptor.roomId, payload })
   await expectFrame(
     a,
     (f) => f.kind === "relay" && f.fromRole === "mobile" && f.payload === payload,
@@ -246,7 +327,7 @@ async function scenarioSubscribeRelay(port) {
     "A.relay(from mobile)"
   )
 
-  b.send({ kind: "unsubscribe", rendezvousId: "room-1" })
+  b.send({ kind: "unsubscribe", rendezvousId: room.descriptor.roomId })
   await expectFrame(
     a,
     (f) => f.kind === "peerLeft" && f.role === "mobile",
@@ -262,6 +343,7 @@ async function scenarioRelayWithoutSubscribe(port) {
   log("scenario: relay without subscribe → not_subscribed")
   const c = connect(port, "C")
   await c.open()
+  await expectChallenge(c)
   c.send({ kind: "relay", rendezvousId: "ghost", payload: "Zm9v" })
   await expectFrame(
     c,
@@ -276,6 +358,7 @@ async function scenarioMalformedFrame(port) {
   log("scenario: malformed JSON → malformed_frame")
   const d = connect(port, "D")
   await d.open()
+  await expectChallenge(d)
   d.sendRaw("{ this is not valid json")
   await expectFrame(
     d,
@@ -290,7 +373,9 @@ async function scenarioRateLimit(port) {
   log("scenario: rate limit fires past the 20-frame burst")
   const e = connect(port, "E")
   await e.open()
-  e.send(subscribeFrame("rl", "desktop"))
+  const challenge = await expectChallenge(e)
+  const room = await createRoom()
+  e.send(await subscribeFrame(room, "desktop", challenge.challenge))
   await expectFrame(e, (f) => f.kind === "subscribed", 1_000, "E.subscribed")
   // Track close so we can assert backpressure even when the rate_limited
   // frame races the WebSocket teardown (observed on Windows with the

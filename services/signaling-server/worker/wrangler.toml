@@ -15,13 +15,13 @@
 #   2. Global, per-IP: a DO only sees its own room, so cross-room flooding is
 #      the edge's job. Add a Cloudflare Rate Limiting rule (Security → WAF →
 #      Rate limiting rules) on this Worker, e.g.:
-#        - When incoming requests match:  URI Path equals "/v1/signaling"
+#        - When incoming requests match:  URI Path equals "/v2/signaling"
 #        - Rate:  60 requests per 1 minute, counting by  IP
 #        - Action:  Block (or Managed Challenge)
 #      This mirrors the axum server's `ip_limits.rs` (50/IP process-wide).
 name = "cognia-signaling"
 main = "build/worker/shim.mjs"
-compatibility_date = "2024-11-01"
+compatibility_date = "2026-07-29"
 
 # Custom domain — THE single place to set the deploy hostname. Keep it in sync
 # with the app's signaling URL (the `NEXT_PUBLIC_SIGNALING_URL` build var, or
@@ -42,9 +42,9 @@ routes = [{ pattern = "signaling.cognia.cn", custom_domain = true }]
 # router (lib.rs); shared verbatim with the axum server's env vars via
 # cognia-signaling-core::policy. Override per-deployment as needed.
 [vars]
-# Max peers admitted to one room. Default 4 leaves slack for reconnect overlap
-# (an old socket may still count until its close event fires).
-SIGNALING_MAX_PEERS_PER_ROOM = "4"
+# Signaling v2 has exactly one mobile and one desktop role. A newer valid
+# session atomically replaces the old socket for its role.
+SIGNALING_MAX_PEERS_PER_ROOM = "2"
 # Max desktop peers per room (the home server). A second desktop is rejected
 # with `role_taken`.
 SIGNALING_MAX_DESKTOPS = "1"
@@ -96,7 +96,7 @@ enabled = true
 name = "cognia-signaling-staging"
 
 [env.staging.vars]
-SIGNALING_MAX_PEERS_PER_ROOM = "4"
+SIGNALING_MAX_PEERS_PER_ROOM = "2"
 SIGNALING_MAX_DESKTOPS = "1"
 SIGNALING_MAX_CONN_PER_IP_PER_ROOM = "4"
 SIGNALING_ALLOWED_ORIGINS = ""

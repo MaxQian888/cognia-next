@@ -23,7 +23,7 @@ pub struct Metrics {
     pub frames_in_total: AtomicU64,
     pub frames_relayed_total: AtomicU64,
     pub frames_rejected_replay: AtomicU64,
-    pub frames_rejected_hmac: AtomicU64,
+    pub frames_rejected_auth: AtomicU64,
     pub frames_rejected_malformed: AtomicU64,
     pub frames_rejected_rate: AtomicU64,
     pub frames_rejected_not_subscribed: AtomicU64,
@@ -43,7 +43,7 @@ impl Metrics {
             frames_in_total: AtomicU64::new(0),
             frames_relayed_total: AtomicU64::new(0),
             frames_rejected_replay: AtomicU64::new(0),
-            frames_rejected_hmac: AtomicU64::new(0),
+            frames_rejected_auth: AtomicU64::new(0),
             frames_rejected_malformed: AtomicU64::new(0),
             frames_rejected_rate: AtomicU64::new(0),
             frames_rejected_not_subscribed: AtomicU64::new(0),
@@ -70,7 +70,7 @@ impl Metrics {
     pub fn frame_rejected(&self, reason: RejectReason) {
         let counter = match reason {
             RejectReason::Replay => &self.frames_rejected_replay,
-            RejectReason::Hmac => &self.frames_rejected_hmac,
+            RejectReason::Auth => &self.frames_rejected_auth,
             RejectReason::Malformed => &self.frames_rejected_malformed,
             RejectReason::Rate => &self.frames_rejected_rate,
             RejectReason::NotSubscribed => &self.frames_rejected_not_subscribed,
@@ -94,7 +94,7 @@ impl Metrics {
         let frames_in = self.frames_in_total.load(Ordering::Relaxed);
         let frames_relayed = self.frames_relayed_total.load(Ordering::Relaxed);
         let rej_replay = self.frames_rejected_replay.load(Ordering::Relaxed);
-        let rej_hmac = self.frames_rejected_hmac.load(Ordering::Relaxed);
+        let rej_auth = self.frames_rejected_auth.load(Ordering::Relaxed);
         let rej_malformed = self.frames_rejected_malformed.load(Ordering::Relaxed);
         let rej_rate = self.frames_rejected_rate.load(Ordering::Relaxed);
         let rej_not_sub = self.frames_rejected_not_subscribed.load(Ordering::Relaxed);
@@ -126,8 +126,8 @@ impl Metrics {
             rej_replay
         ));
         out.push_str(&format!(
-            "signaling_frames_rejected_total{{reason=\"hmac\"}} {}\n",
-            rej_hmac
+            "signaling_frames_rejected_total{{reason=\"auth\"}} {}\n",
+            rej_auth
         ));
         out.push_str(&format!(
             "signaling_frames_rejected_total{{reason=\"malformed\"}} {}\n",
@@ -189,7 +189,7 @@ impl Default for Metrics {
 #[derive(Debug, Clone, Copy)]
 pub enum RejectReason {
     Replay,
-    Hmac,
+    Auth,
     Malformed,
     Rate,
     NotSubscribed,
@@ -236,8 +236,8 @@ mod tests {
         m.frame_in();
         m.frame_relayed(3);
         m.frame_rejected(RejectReason::Replay);
-        m.frame_rejected(RejectReason::Hmac);
-        m.frame_rejected(RejectReason::Hmac);
+        m.frame_rejected(RejectReason::Auth);
+        m.frame_rejected(RejectReason::Auth);
         m.frame_rejected(RejectReason::Malformed);
         m.frame_rejected(RejectReason::Rate);
         m.frame_rejected(RejectReason::NotSubscribed);
@@ -250,7 +250,7 @@ mod tests {
         assert!(s.contains("signaling_frames_in_total 2\n"));
         assert!(s.contains("signaling_frames_relayed_total 3\n"));
         assert!(s.contains("signaling_frames_rejected_total{reason=\"replay\"} 1\n"));
-        assert!(s.contains("signaling_frames_rejected_total{reason=\"hmac\"} 2\n"));
+        assert!(s.contains("signaling_frames_rejected_total{reason=\"auth\"} 2\n"));
         assert!(s.contains("signaling_frames_rejected_total{reason=\"malformed\"} 1\n"));
         assert!(s.contains("signaling_frames_rejected_total{reason=\"rate\"} 1\n"));
         assert!(s.contains("signaling_frames_rejected_total{reason=\"not_subscribed\"} 1\n"));
@@ -281,7 +281,7 @@ mod tests {
         // The enum is surfaced through `tracing` fields; keep its Debug repr
         // stable and ensure every arm is constructible.
         assert_eq!(format!("{:?}", RejectReason::Replay), "Replay");
-        assert_eq!(format!("{:?}", RejectReason::Hmac), "Hmac");
+        assert_eq!(format!("{:?}", RejectReason::Auth), "Auth");
         assert_eq!(format!("{:?}", RejectReason::TooLarge), "TooLarge");
     }
 

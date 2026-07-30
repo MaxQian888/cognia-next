@@ -17,8 +17,17 @@ import type {
   RtcIceBody,
   SignalingClient,
 } from "@/lib/signaling"
+import { remoteEventResyncCoordinator } from "./resync-coordinator"
 
-const SECRET = "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8"
+const ROOM_DESCRIPTOR = {
+  v: 2 as const,
+  roomId: "room-1",
+  roomNonce: "nonce",
+  desktopSigningKey: "desktop-key",
+  mobileSigningKey: "mobile-key",
+  notAfter: Number.MAX_SAFE_INTEGER,
+}
+const SIGNALING_PRIVATE_KEY = {} as CryptoKey
 
 // ---------------------------------------------------------------------------
 // Mock SignalingClient
@@ -33,7 +42,22 @@ type Listeners = {
   peerLeft: Set<(r: PeerRole) => void>
 }
 
-const DESKTOP_PRESENT: PeerSnapshot[] = [{ role: "desktop", joinedAtMs: 0 }]
+const DESKTOP_PRESENT: PeerSnapshot[] = [
+  {
+    proof: {
+      v: 2,
+      roomId: "room-1",
+      role: "desktop",
+      sessionId: "desktop-session",
+      epoch: "desktop-epoch",
+      issuedAt: 0,
+      challenge: "challenge",
+      ecdhPublicKey: "key",
+      signature: "signature",
+    },
+    joinedAtMs: 0,
+  },
+]
 
 class FakeSignaling {
   readonly sent: Array<{ kind: string; body: unknown }> = []
@@ -132,6 +156,7 @@ class FakePeerConnection {
   iceCandidates: RTCIceCandidateInit[] = []
   /** Stats entries injected by tests for `getSelectedCandidateKind`. */
   statsEntries: Array<Record<string, unknown>> = []
+  configuration: RTCConfiguration | undefined
   /** Set to true to make `getStats()` reject. */
   statsThrows = false
 
@@ -163,6 +188,9 @@ class FakePeerConnection {
       },
     } as unknown as RTCStatsReport
   }
+  setConfiguration(configuration: RTCConfiguration): void {
+    this.configuration = configuration
+  }
   close(): void {
     this.connectionState = "closed"
   }
@@ -182,15 +210,24 @@ class FakePeerConnection {
 // Helpers
 // ---------------------------------------------------------------------------
 
+const activeRtcs = new Set<TransportRtc>()
+
+afterEach(() => {
+  for (const rtc of activeRtcs) rtc.close()
+  activeRtcs.clear()
+})
+
 function envelope(kind: Envelope["kind"], body: unknown, seq = 1): Envelope {
   return {
-    ver: 1,
-    ts: Date.now(),
-    nonce: "n",
+    ver: 2,
+    roomId: "room-1",
+    senderRole: "desktop",
+    sessionId: "desktop-session",
+    epoch: "desktop-epoch",
     seq,
+    issuedAt: Date.now(),
     kind,
     body,
-    mac: "",
   }
 }
 
@@ -198,16 +235,17 @@ function makeRtc(
   overrides: Partial<
     Pick<
       ConstructorParameters<typeof TransportRtc>[0],
-      "peerWaitTimeoutMs" | "negotiationTimeoutMs"
+      "peerWaitTimeoutMs" | "negotiationTimeoutMs" | "disconnectedGraceMs"
     >
   > = {}
 ) {
   const sig = new FakeSignaling()
   const pcs: FakePeerConnection[] = []
   const rtc = new TransportRtc({
-    signalingUrl: "wss://signaling.test/v1/signaling",
+    signalingUrl: "wss://signaling.test/v2/signaling",
     rendezvousId: "room-1",
-    rendezvousSecret: SECRET,
+    signalingRoomDescriptor: ROOM_DESCRIPTOR,
+    signalingPrivateKey: SIGNALING_PRIVATE_KEY,
     deviceId: "dev-1",
     role: "mobile",
     peerConnectionFactory: () => {
@@ -218,6 +256,7 @@ function makeRtc(
     signalingClientFactory: () => sig as unknown as SignalingClient,
     ...overrides,
   })
+  activeRtcs.add(rtc)
   return { rtc, sig, pcs }
 }
 
@@ -332,7 +371,7 @@ describe("TransportRtc", () => {
   })
 
   it("forwards local ICE candidates through signaling", async () => {
-    const { rtc, sig, pcs } = makeRtc()
+    const { rtc, sig, pcs } = makeRtc({ disconnectedGraceMs: 0 })
     void rtc.connect()
     await new Promise((r) => setTimeout(r, 5))
     pcs[0].fireIceCandidate({ candidate: "candidate:1 1 udp" } as RTCIceCandidateInit)
@@ -350,7 +389,9 @@ describe("TransportRtc", () => {
     const pending = rtc.call<{ count: number }>("ping", { n: 1 })
     const dc = pcs[0].channels[0]
     // Inspect the sent envelope.
-    const sent = JSON.parse(dc.sent[0]) as RtcMessage
+    const sent = dc.sent
+      .map((raw) => JSON.parse(raw) as RtcMessage)
+      .find((frame) => typeof frame.id === "string")!
     expect(sent.method).toBe("ping")
     // Server replies.
     dc.push({ id: sent.id, ok: true, result: { count: 42 } } satisfies RtcResponse)
@@ -376,18 +417,134 @@ describe("TransportRtc", () => {
     })
     expect(received).toEqual([{ hello: "world" }])
     expect(rtc.getSeqCursor()).toEqual({ topic: 5 })
+    expect(pcs[0].channels[0].sent.map((raw) => JSON.parse(raw))).toContainEqual({
+      kind: "event-ack",
+      seq: 5,
+    })
+  })
+
+  it("surfaces an explicit resync requirement to every registered event domain", async () => {
+    const resolveSnapshot = jest.fn(async () => {})
+    const removeResolver = remoteEventResyncCoordinator.register("topic", resolveSnapshot)
+    const { rtc, sig, pcs } = makeRtc()
+    const connect = rtc.connect()
+    await new Promise((resolve) => setTimeout(resolve, 5))
+    sig.emitEnvelope(envelope("rtc:answer", { sdp: "x" } as RtcAnswerBody))
+    pcs[0].channels[0].open()
+    await connect
+
+    const received: unknown[] = []
+    rtc.subscribe("topic", (payload) => received.push(payload))
+    pcs[0].channels[0].push({
+      kind: "resync_required",
+      domains: ["topic"],
+      cursor: 7,
+    })
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    expect(resolveSnapshot).toHaveBeenCalledTimes(1)
+    expect(received).toEqual([{ type: "resync_required", domains: ["topic"] }])
+    expect(pcs[0].channels[0].sent.map((raw) => JSON.parse(raw))).toContainEqual({
+      kind: "event-resume",
+      since: 0,
+    })
+    expect(pcs[0].channels[0].sent.map((raw) => JSON.parse(raw))).toContainEqual({
+      kind: "event-ack",
+      seq: 7,
+    })
+    removeResolver()
+  })
+
+  it("does not dispatch duplicate or out-of-order events", async () => {
+    const { rtc, sig, pcs } = makeRtc()
+    const connect = rtc.connect()
+    await new Promise((r) => setTimeout(r, 5))
+    sig.emitEnvelope(envelope("rtc:answer", { sdp: "x" } as RtcAnswerBody))
+    pcs[0].channels[0].open()
+    await connect
+
+    const received: unknown[] = []
+    rtc.subscribe("topic", (payload) => received.push(payload))
+    const dc = pcs[0].channels[0]
+    dc.push({ kind: "event", event: "topic", seq: 5, payload: "fresh" })
+    dc.push({ kind: "event", event: "topic", seq: 5, payload: "duplicate" })
+    dc.push({ kind: "event", event: "topic", seq: 4, payload: "stale" })
+
+    expect(received).toEqual(["fresh"])
+    expect(rtc.getSeqCursor()).toEqual({ topic: 5 })
+  })
+
+  it("queues remote ICE until the answer has been applied", async () => {
+    const { rtc, sig, pcs } = makeRtc()
+    void rtc.connect()
+    await new Promise((r) => setTimeout(r, 5))
+    const candidate = { candidate: "candidate:remote 1 udp" } as RTCIceCandidateInit
+
+    sig.emitEnvelope(envelope("rtc:ice", { candidate } as RtcIceBody))
+    await new Promise((r) => setTimeout(r, 0))
+    expect(pcs[0].iceCandidates).toEqual([])
+
+    sig.emitEnvelope(envelope("rtc:answer", { sdp: "x" } as RtcAnswerBody))
+    await new Promise((r) => setTimeout(r, 0))
+    expect(pcs[0].iceCandidates).toEqual([candidate])
+    rtc.close()
+  })
+
+  it("serializes the idempotency key at the RPC top level", async () => {
+    const { rtc, sig, pcs } = makeRtc()
+    const connect = rtc.connect()
+    await new Promise((r) => setTimeout(r, 5))
+    sig.emitEnvelope(envelope("rtc:answer", { sdp: "x" } as RtcAnswerBody))
+    pcs[0].channels[0].open()
+    await connect
+
+    const pending = rtc.call("mutate", { value: 1 }, { idempotencyKey: "idem-1" })
+    const sent = pcs[0].channels[0].sent
+      .map((raw) => JSON.parse(raw) as RtcMessage)
+      .find((frame) => typeof frame.id === "string")!
+    expect(sent).toMatchObject({
+      method: "mutate",
+      params: { value: 1 },
+      idempotencyKey: "idem-1",
+      protocolVersion: 2,
+    })
+    expect(sent.params).not.toHaveProperty("idempotencyKey")
+    pcs[0].channels[0].push({ id: sent.id, ok: true, result: null } satisfies RtcResponse)
+    await pending
   })
 
   it("negotiation timeout transitions to failed and rejects connect", async () => {
     jest.useFakeTimers()
     const { rtc } = makeRtc()
     const connect = rtc.connect()
-    // Drive past the negotiation timeout (default 8s).
+    // Drive past the negotiation timeout (default 20s).
     await Promise.resolve()
-    jest.advanceTimersByTime(8500)
+    jest.advanceTimersByTime(20_500)
     await expect(connect).rejects.toThrow(/timed out/i)
     expect(rtc.getState()).toBe("failed")
     jest.useRealTimers()
+  })
+
+  it("applies refreshed TURN configuration to the live peer and future rebuilds", async () => {
+    const { rtc, sig, pcs } = makeRtc()
+    const connect = rtc.connect()
+    await new Promise((r) => setTimeout(r, 5))
+    sig.emitEnvelope(envelope("rtc:answer", { sdp: "x" } as RtcAnswerBody))
+    pcs[0].channels[0].open()
+    await connect
+
+    const refreshed: RTCConfiguration = {
+      iceServers: [
+        {
+          urls: "turns:turn.example.com:5349?transport=tcp",
+          username: "ephemeral",
+          credential: "rotated",
+        },
+      ],
+    }
+    rtc.updateRtcConfiguration(refreshed)
+
+    expect(pcs[0].configuration).toEqual(refreshed)
   })
 
   it("ICE failure mid-session attempts an ICE restart before tearing down", async () => {
@@ -396,7 +553,7 @@ describe("TransportRtc", () => {
     // data channel) rather than tearing everything down. The dedicated
     // "ICE restart" block below covers recovery / escalation. `makeRtc`
     // leaves iceRestartMaxAttempts at its default (2).
-    const { rtc, sig, pcs } = makeRtc()
+    const { rtc, sig, pcs } = makeRtc({ disconnectedGraceMs: 0 })
     const connect = rtc.connect()
     await new Promise((r) => setTimeout(r, 5))
     sig.emitEnvelope(envelope("rtc:answer", { sdp: "x" } as RtcAnswerBody))
@@ -569,12 +726,16 @@ describe("TransportRtc", () => {
       const sigs: FakeSignaling[] = []
       const pcs: FakePeerConnection[] = []
       const rtc = new TransportRtc({
-        signalingUrl: "wss://signaling.test/v1/signaling",
+        signalingUrl: "wss://signaling.test/v2/signaling",
         rendezvousId: "room-1",
-        rendezvousSecret: SECRET,
+        signalingRoomDescriptor: ROOM_DESCRIPTOR,
+        signalingPrivateKey: SIGNALING_PRIVATE_KEY,
         deviceId: "dev-1",
         role: "mobile",
         reconnectBackoffMs,
+        reconnectRandom: () => 0.999_999,
+        disconnectedGraceMs: 0,
+        healthyResetMs: 0,
         // These tests exercise the full teardown/backoff ladder, so disable
         // the ICE-restart fast path — an ICE failure escalates straight to a
         // reconnect, matching the pre-ICE-restart behavior they assert.
@@ -590,6 +751,7 @@ describe("TransportRtc", () => {
           return sig as unknown as SignalingClient
         },
       })
+      activeRtcs.add(rtc)
       return { rtc, sigs, pcs }
     }
 
@@ -606,12 +768,12 @@ describe("TransportRtc", () => {
       await new Promise((r) => setTimeout(r, 0))
     }
 
-    it("RECONNECT_BACKOFF_MS is monotonically increasing and caps at 60s", () => {
+    it("RECONNECT_BACKOFF_MS is monotonically increasing and caps at 30s", () => {
       expect(RECONNECT_BACKOFF_MS.length).toBeGreaterThanOrEqual(5)
       for (let i = 1; i < RECONNECT_BACKOFF_MS.length; i++) {
         expect(RECONNECT_BACKOFF_MS[i]).toBeGreaterThan(RECONNECT_BACKOFF_MS[i - 1])
       }
-      expect(RECONNECT_BACKOFF_MS[RECONNECT_BACKOFF_MS.length - 1]).toBe(60_000)
+      expect(RECONNECT_BACKOFF_MS[RECONNECT_BACKOFF_MS.length - 1]).toBe(30_000)
       expect(RECONNECT_BACKOFF_MS[0]).toBe(1_000)
     })
 
@@ -844,19 +1006,24 @@ describe("TransportRtc", () => {
         iceRestartTimeoutMs?: number
         iceRestartMaxAttempts?: number
         reconnectBackoffMs?: readonly number[]
+        disconnectedGraceMs?: number
       } = {}
     ) {
       const sigs: FakeSignaling[] = []
       const pcs: FakePeerConnection[] = []
       const rtc = new TransportRtc({
-        signalingUrl: "wss://signaling.test/v1/signaling",
+        signalingUrl: "wss://signaling.test/v2/signaling",
         rendezvousId: "room-1",
-        rendezvousSecret: SECRET,
+        signalingRoomDescriptor: ROOM_DESCRIPTOR,
+        signalingPrivateKey: SIGNALING_PRIVATE_KEY,
         deviceId: "dev-1",
         role: "mobile",
         iceRestartTimeoutMs: opts.iceRestartTimeoutMs ?? 50,
         iceRestartMaxAttempts: opts.iceRestartMaxAttempts ?? 2,
         reconnectBackoffMs: opts.reconnectBackoffMs ?? [1000],
+        disconnectedGraceMs: opts.disconnectedGraceMs ?? 0,
+        healthyResetMs: 0,
+        reconnectRandom: () => 0.999_999,
         peerConnectionFactory: () => {
           const pc = new FakePeerConnection()
           pcs.push(pc)
@@ -868,6 +1035,7 @@ describe("TransportRtc", () => {
           return sig as unknown as SignalingClient
         },
       })
+      activeRtcs.add(rtc)
       return { rtc, sigs, pcs }
     }
 
@@ -894,6 +1062,21 @@ describe("TransportRtc", () => {
       // hello + initial offer + restart offer.
       expect(sigs[0].sent.filter((m) => m.kind === "rtc:offer")).toHaveLength(2)
       rtc.close()
+    })
+
+    it("cancels recovery when a transient disconnect heals within the 5s grace phase", async () => {
+      const { rtc, sigs, pcs } = makeIceRestartable({ disconnectedGraceMs: 20 })
+      const connect = rtc.connect()
+      await open(sigs, pcs)
+      await connect
+
+      pcs[0].setIceState("disconnected")
+      await new Promise((r) => setTimeout(r, 5))
+      pcs[0].setIceState("connected")
+      await new Promise((r) => setTimeout(r, 25))
+
+      expect(pcs[0].offerOptions.some((o) => o?.iceRestart === true)).toBe(false)
+      expect(rtc.getState()).toBe("open")
     })
 
     it("escalates to a full reconnect after the restart budget on a flapping link", async () => {

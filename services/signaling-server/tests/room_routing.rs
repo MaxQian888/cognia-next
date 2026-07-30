@@ -1,11 +1,14 @@
 //! End-to-end smoke test: boot the server on an ephemeral port, open two
 //! WS clients, drive a subscribe→relay→leave dance, assert ordering.
 
+use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
+use cognia_signaling_core::v2::{derive_room_id, subscribe_proof_bytes};
 use cognia_signaling_server::{
-    proto::{ClientFrame, PeerRole, ServerFrame},
+    proto::{ClientFrame, PeerRole, RoomDescriptorV2, ServerFrame, SubscribeProofV2},
     serve_for_test,
 };
 use futures_util::{SinkExt, StreamExt};
+use p256::ecdsa::{signature::Signer, Signature, SigningKey};
 use std::time::Duration;
 use tokio::net::TcpStream;
 use tokio_tungstenite::{
@@ -15,7 +18,7 @@ use tokio_tungstenite::{
 type WsClient = WebSocketStream<MaybeTlsStream<TcpStream>>;
 
 async fn connect(addr: std::net::SocketAddr) -> WsClient {
-    connect_path(addr, "/v1/signaling").await
+    connect_path(addr, "/v2/signaling").await
 }
 
 async fn connect_path(addr: std::net::SocketAddr, path: &str) -> WsClient {
@@ -45,21 +48,72 @@ async fn recv(client: &mut WsClient) -> ServerFrame {
     }
 }
 
-#[tokio::test]
-async fn two_peers_relay_via_room() {
-    let (addr, _handle) = serve_for_test().await.expect("server spawn");
+fn identity(role: PeerRole) -> SigningKey {
+    let byte = if role == PeerRole::Desktop { 1 } else { 2 };
+    SigningKey::from_slice(&[byte; 32]).unwrap()
+}
 
-    // Desktop subscribes first.
-    let mut desktop = connect(addr).await;
+fn descriptor(seed: u8) -> RoomDescriptorV2 {
+    let encode = |key: &SigningKey| {
+        URL_SAFE_NO_PAD.encode(key.verifying_key().to_encoded_point(false).as_bytes())
+    };
+    let mut descriptor = RoomDescriptorV2 {
+        v: 2,
+        room_id: String::new(),
+        room_nonce: URL_SAFE_NO_PAD.encode([seed; 16]),
+        desktop_signing_key: encode(&identity(PeerRole::Desktop)),
+        mobile_signing_key: encode(&identity(PeerRole::Mobile)),
+        not_after: i64::MAX,
+    };
+    descriptor.room_id = derive_room_id(&descriptor);
+    descriptor
+}
+
+async fn subscribe(client: &mut WsClient, descriptor: &RoomDescriptorV2, role: PeerRole) {
+    let challenge = match recv(client).await {
+        ServerFrame::Challenge { challenge, .. } => challenge,
+        other => panic!("expected Challenge, got {other:?}"),
+    };
+    let ephemeral = SigningKey::from_slice(&[3u8; 32]).unwrap();
+    let mut proof = SubscribeProofV2 {
+        v: 2,
+        room_id: descriptor.room_id.clone(),
+        role,
+        session_id: format!("session-{}", role.as_str()),
+        epoch: format!("epoch-{}", role.as_str()),
+        issued_at: std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as i64,
+        challenge,
+        ecdh_public_key: URL_SAFE_NO_PAD
+            .encode(ephemeral.verifying_key().to_encoded_point(false).as_bytes()),
+        signature: String::new(),
+    };
+    let signature: Signature = identity(role).sign(&subscribe_proof_bytes(&proof));
+    proof.signature = URL_SAFE_NO_PAD.encode(signature.to_bytes());
     send(
-        &mut desktop,
+        client,
         ClientFrame::Subscribe {
-            rendezvous_id: "room-1".into(),
-            role: PeerRole::Desktop,
-            client_nonce: "nd".into(),
+            descriptor: Box::new(descriptor.clone()),
+            proof: Box::new(proof),
         },
     )
     .await;
+}
+
+async fn consume_challenge(client: &mut WsClient) {
+    assert!(matches!(recv(client).await, ServerFrame::Challenge { .. }));
+}
+
+#[tokio::test]
+async fn two_peers_relay_via_room() {
+    let (addr, _handle) = serve_for_test().await.expect("server spawn");
+    let room = descriptor(1);
+
+    // Desktop subscribes first.
+    let mut desktop = connect(addr).await;
+    subscribe(&mut desktop, &room, PeerRole::Desktop).await;
     match recv(&mut desktop).await {
         ServerFrame::Subscribed { peers, .. } => assert!(peers.is_empty()),
         other => panic!("expected Subscribed, got {other:?}"),
@@ -67,26 +121,20 @@ async fn two_peers_relay_via_room() {
 
     // Mobile subscribes second; desktop must observe `peerJoined`.
     let mut mobile = connect(addr).await;
-    send(
-        &mut mobile,
-        ClientFrame::Subscribe {
-            rendezvous_id: "room-1".into(),
-            role: PeerRole::Mobile,
-            client_nonce: "nm".into(),
-        },
-    )
-    .await;
+    subscribe(&mut mobile, &room, PeerRole::Mobile).await;
     let mobile_subscribed = recv(&mut mobile).await;
     let desktop_notified = recv(&mut desktop).await;
     match mobile_subscribed {
         ServerFrame::Subscribed { peers, .. } => {
             assert_eq!(peers.len(), 1);
-            assert_eq!(peers[0].role, PeerRole::Desktop);
+            assert_eq!(peers[0].proof.role, PeerRole::Desktop);
         }
         other => panic!("expected Subscribed, got {other:?}"),
     }
     match desktop_notified {
-        ServerFrame::PeerJoined { role, .. } => assert_eq!(role, PeerRole::Mobile),
+        ServerFrame::PeerJoined { peer, .. } => {
+            assert_eq!(peer.proof.role, PeerRole::Mobile)
+        }
         other => panic!("expected PeerJoined, got {other:?}"),
     }
 
@@ -94,7 +142,7 @@ async fn two_peers_relay_via_room() {
     send(
         &mut mobile,
         ClientFrame::Relay {
-            rendezvous_id: "room-1".into(),
+            rendezvous_id: room.room_id.clone(),
             payload: "opaque-base64==".into(),
         },
     )
@@ -121,6 +169,7 @@ async fn two_peers_relay_via_room() {
 async fn relay_to_unsubscribed_room_errors() {
     let (addr, _handle) = serve_for_test().await.expect("server spawn");
     let mut client = connect(addr).await;
+    consume_challenge(&mut client).await;
 
     send(
         &mut client,
@@ -140,6 +189,7 @@ async fn relay_to_unsubscribed_room_errors() {
 async fn ping_round_trips() {
     let (addr, _handle) = serve_for_test().await.expect("server spawn");
     let mut client = connect(addr).await;
+    consume_challenge(&mut client).await;
     send(&mut client, ClientFrame::Ping).await;
     match recv(&mut client).await {
         ServerFrame::Pong => {}
@@ -151,6 +201,7 @@ async fn ping_round_trips() {
 async fn malformed_frame_does_not_disconnect() {
     let (addr, _handle) = serve_for_test().await.expect("server spawn");
     let mut client = connect(addr).await;
+    consume_challenge(&mut client).await;
     client
         .send(TgMessage::Text("not-json".into()))
         .await
@@ -168,6 +219,7 @@ async fn malformed_frame_does_not_disconnect() {
 async fn binary_frame_is_rejected_gracefully() {
     let (addr, _handle) = serve_for_test().await.expect("server spawn");
     let mut client = connect(addr).await;
+    consume_challenge(&mut client).await;
     client.send(TgMessage::Binary(vec![1, 2, 3])).await.unwrap();
     match recv(&mut client).await {
         ServerFrame::Error { code, .. } => assert_eq!(code, "binary_not_supported"),
@@ -181,32 +233,17 @@ async fn binary_frame_is_rejected_gracefully() {
 #[tokio::test]
 async fn explicit_unsubscribe_announces_peer_left() {
     let (addr, _handle) = serve_for_test().await.expect("server spawn");
+    let room = descriptor(2);
 
     let mut desktop = connect(addr).await;
-    send(
-        &mut desktop,
-        ClientFrame::Subscribe {
-            rendezvous_id: "u".into(),
-            role: PeerRole::Desktop,
-            client_nonce: "d".into(),
-        },
-    )
-    .await;
+    subscribe(&mut desktop, &room, PeerRole::Desktop).await;
     assert!(matches!(
         recv(&mut desktop).await,
         ServerFrame::Subscribed { .. }
     ));
 
     let mut mobile = connect(addr).await;
-    send(
-        &mut mobile,
-        ClientFrame::Subscribe {
-            rendezvous_id: "u".into(),
-            role: PeerRole::Mobile,
-            client_nonce: "m".into(),
-        },
-    )
-    .await;
+    subscribe(&mut mobile, &room, PeerRole::Mobile).await;
     assert!(matches!(
         recv(&mut mobile).await,
         ServerFrame::Subscribed { .. }
@@ -221,7 +258,7 @@ async fn explicit_unsubscribe_announces_peer_left() {
     send(
         &mut mobile,
         ClientFrame::Unsubscribe {
-            rendezvous_id: "u".into(),
+            rendezvous_id: room.room_id,
         },
     )
     .await;
@@ -232,18 +269,40 @@ async fn explicit_unsubscribe_announces_peer_left() {
 }
 
 #[tokio::test]
-async fn one_socket_can_join_multiple_rooms() {
+async fn one_socket_can_join_multiple_self_certifying_rooms() {
     let (addr, _handle) = serve_for_test().await.expect("server spawn");
 
     // A single socket subscribes to two rooms.
     let mut hub = connect(addr).await;
-    for room in ["a", "b"] {
+    let challenge = match recv(&mut hub).await {
+        ServerFrame::Challenge { challenge, .. } => challenge,
+        other => panic!("expected Challenge, got {other:?}"),
+    };
+    let rooms = [descriptor(3), descriptor(4)];
+    for room in &rooms {
+        let ephemeral = SigningKey::from_slice(&[3u8; 32]).unwrap();
+        let mut proof = SubscribeProofV2 {
+            v: 2,
+            room_id: room.room_id.clone(),
+            role: PeerRole::Desktop,
+            session_id: format!("session-{}", room.room_nonce),
+            epoch: format!("epoch-{}", room.room_nonce),
+            issued_at: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_millis() as i64,
+            challenge: challenge.clone(),
+            ecdh_public_key: URL_SAFE_NO_PAD
+                .encode(ephemeral.verifying_key().to_encoded_point(false).as_bytes()),
+            signature: String::new(),
+        };
+        let signature: Signature = identity(PeerRole::Desktop).sign(&subscribe_proof_bytes(&proof));
+        proof.signature = URL_SAFE_NO_PAD.encode(signature.to_bytes());
         send(
             &mut hub,
             ClientFrame::Subscribe {
-                rendezvous_id: room.into(),
-                role: PeerRole::Desktop,
-                client_nonce: "h".into(),
+                descriptor: Box::new(room.clone()),
+                proof: Box::new(proof),
             },
         )
         .await;
@@ -255,15 +314,7 @@ async fn one_socket_can_join_multiple_rooms() {
 
     // A peer in room "b" relays; the hub must receive it tagged room "b".
     let mut other = connect(addr).await;
-    send(
-        &mut other,
-        ClientFrame::Subscribe {
-            rendezvous_id: "b".into(),
-            role: PeerRole::Mobile,
-            client_nonce: "o".into(),
-        },
-    )
-    .await;
+    subscribe(&mut other, &rooms[1], PeerRole::Mobile).await;
     assert!(matches!(
         recv(&mut other).await,
         ServerFrame::Subscribed { .. }
@@ -276,7 +327,7 @@ async fn one_socket_can_join_multiple_rooms() {
     send(
         &mut other,
         ClientFrame::Relay {
-            rendezvous_id: "b".into(),
+            rendezvous_id: rooms[1].room_id.clone(),
             payload: "p".into(),
         },
     )
@@ -287,7 +338,7 @@ async fn one_socket_can_join_multiple_rooms() {
             payload,
             ..
         } => {
-            assert_eq!(rendezvous_id, "b");
+            assert_eq!(rendezvous_id, rooms[1].room_id);
             assert_eq!(payload, "p");
         }
         other => panic!("expected Relay on room b, got {other:?}"),
@@ -297,32 +348,19 @@ async fn one_socket_can_join_multiple_rooms() {
 #[tokio::test]
 async fn upgrade_rid_rejects_mismatched_frame_room() {
     let (addr, _handle) = serve_for_test().await.expect("server spawn");
+    let bound = descriptor(5);
+    let other_room = descriptor(6);
 
-    let mut desktop = connect_path(addr, "/v1/signaling?rid=bound").await;
-    send(
-        &mut desktop,
-        ClientFrame::Subscribe {
-            rendezvous_id: "bound".into(),
-            role: PeerRole::Desktop,
-            client_nonce: "d".into(),
-        },
-    )
-    .await;
+    let path = format!("/v2/signaling?rid={}", bound.room_id);
+    let mut desktop = connect_path(addr, &path).await;
+    subscribe(&mut desktop, &bound, PeerRole::Desktop).await;
     assert!(matches!(
         recv(&mut desktop).await,
         ServerFrame::Subscribed { .. }
     ));
 
-    let mut mismatch = connect_path(addr, "/v1/signaling?rid=bound").await;
-    send(
-        &mut mismatch,
-        ClientFrame::Subscribe {
-            rendezvous_id: "other".into(),
-            role: PeerRole::Mobile,
-            client_nonce: "m".into(),
-        },
-    )
-    .await;
+    let mut mismatch = connect_path(addr, &path).await;
+    subscribe(&mut mismatch, &other_room, PeerRole::Mobile).await;
     match recv(&mut mismatch).await {
         ServerFrame::Error { code, .. } => assert_eq!(code, "room_mismatch"),
         other => panic!("expected room_mismatch, got {other:?}"),
@@ -331,7 +369,7 @@ async fn upgrade_rid_rejects_mismatched_frame_room() {
     send(
         &mut mismatch,
         ClientFrame::Relay {
-            rendezvous_id: "other".into(),
+            rendezvous_id: other_room.room_id,
             payload: "leak".into(),
         },
     )

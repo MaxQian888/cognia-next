@@ -24,11 +24,14 @@ use axum::{
     http::{HeaderMap, StatusCode, Uri},
     response::Response,
 };
+use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 use cognia_signaling_core::policy::{
-    is_origin_allowed, rendezvous_id_matches_upgrade_room, SubscribeDecision, ROOM_MISMATCH_CODE,
+    is_origin_allowed, rendezvous_id_matches_upgrade_room, ROOM_MISMATCH_CODE,
     ROOM_MISMATCH_MESSAGE,
 };
+use cognia_signaling_core::v2::verify_subscribe_proof;
 use futures_util::{SinkExt, StreamExt};
+use rand::RngCore;
 use tokio::sync::mpsc;
 use tracing::{debug, info, warn};
 
@@ -60,7 +63,9 @@ const MAX_WS_MESSAGE_BYTES: usize = 64 * 1024;
 /// How long the server waits between idle keepalive pings sent down the WS
 /// frame layer. WebSocket pings are separate from `ClientFrame::Ping` —
 /// these are what `axum::extract::ws` calls "control frame" pings.
-const KEEPALIVE_INTERVAL: Duration = Duration::from_secs(25);
+const KEEPALIVE_INTERVAL: Duration = Duration::from_secs(20);
+const SOCKET_LEASE: Duration = Duration::from_secs(45);
+const SUBSCRIBE_DEADLINE: Duration = Duration::from_secs(5);
 
 pub async fn ws_upgrade(
     State(state): State<AppState>,
@@ -119,7 +124,18 @@ async fn handle_socket(
     let (mut sink, mut stream) = socket.split();
     let (tx, mut rx) = mpsc::channel::<ServerFrame>(PEER_OUTBOUND_BUFFER);
     let mut bucket = TokenBucket::new(RATE_CAPACITY, RATE_REFILL_PER_SEC);
-    let mut subscribed_rooms: Vec<(String, PeerRole)> = Vec::new();
+    let mut subscribed_rooms: Vec<(String, PeerRole, String)> = Vec::new();
+    let challenge_issued_at = now_ms();
+    let challenge_expires_at =
+        challenge_issued_at.saturating_add(SUBSCRIBE_DEADLINE.as_millis() as i64);
+    let mut challenge_bytes = [0u8; 32];
+    rand::thread_rng().fill_bytes(&mut challenge_bytes);
+    let challenge = URL_SAFE_NO_PAD.encode(challenge_bytes);
+    let _ = tx.try_send(ServerFrame::Challenge {
+        challenge: challenge.clone(),
+        issued_at: challenge_issued_at,
+        expires_at: challenge_expires_at,
+    });
 
     debug!(target: "signaling", peer_id, "connection opened");
 
@@ -153,7 +169,15 @@ async fn handle_socket(
     });
 
     // Inbound loop: dispatch ClientFrames.
-    while let Some(msg) = stream.next().await {
+    loop {
+        let next = match tokio::time::timeout(SOCKET_LEASE, stream.next()).await {
+            Ok(next) => next,
+            Err(_) => {
+                debug!(target: "signaling", peer_id, "socket lease expired");
+                break;
+            }
+        };
+        let Some(msg) = next else { break };
         let msg = match msg {
             Ok(m) => m,
             Err(e) => {
@@ -192,6 +216,15 @@ async fn handle_socket(
                             message: "too many frames".into(),
                         })
                         .await;
+                    // Drain the already-buffered burst before closing. Closing
+                    // a TCP socket with unread client bytes can produce an RST
+                    // that races and discards the queued error frame, leaving
+                    // well-behaved clients unable to distinguish throttling
+                    // from a network failure.
+                    while matches!(
+                        tokio::time::timeout(Duration::from_millis(10), stream.next()).await,
+                        Ok(Some(_))
+                    ) {}
                     break;
                 }
                 let frame: ClientFrame = match serde_json::from_str(&text) {
@@ -217,10 +250,14 @@ async fn handle_socket(
                 handle_frame(
                     &state,
                     peer_id,
-                    upgrade_rendezvous_id.as_deref(),
                     frame,
                     &tx,
                     &mut subscribed_rooms,
+                    AdmissionContext {
+                        upgrade_rendezvous_id: upgrade_rendezvous_id.as_deref(),
+                        challenge: &challenge,
+                        challenge_expires_at,
+                    },
                 )
                 .await;
             }
@@ -241,28 +278,26 @@ async fn handle_socket(
     }
 
     // Tear-down.
-    for (rid, role) in &subscribed_rooms {
+    for (rid, role, session_id) in &subscribed_rooms {
         let others = state.registry.leave(rid, peer_id);
         for sender in others {
-            let _ = sender
-                .send(ServerFrame::PeerLeft {
-                    rendezvous_id: rid.clone(),
-                    role: *role,
-                })
-                .await;
+            let _ = sender.try_send(ServerFrame::PeerLeft {
+                rendezvous_id: rid.clone(),
+                role: *role,
+                session_id: session_id.clone(),
+            });
         }
     }
     // leave_all is a belt-and-braces sweep for rooms we forgot in
     // subscribed_rooms (shouldn't happen, but cheap to ensure).
     let extra = state.registry.leave_all(peer_id);
-    for (rid, role, others) in extra {
+    for (rid, role, session_id, others) in extra {
         for sender in others {
-            let _ = sender
-                .send(ServerFrame::PeerLeft {
-                    rendezvous_id: rid.clone(),
-                    role,
-                })
-                .await;
+            let _ = sender.try_send(ServerFrame::PeerLeft {
+                rendezvous_id: rid.clone(),
+                role,
+                session_id: session_id.clone(),
+            });
         }
     }
 
@@ -271,21 +306,25 @@ async fn handle_socket(
     debug!(target: "signaling", peer_id, "connection closed");
 }
 
+struct AdmissionContext<'a> {
+    upgrade_rendezvous_id: Option<&'a str>,
+    challenge: &'a str,
+    challenge_expires_at: i64,
+}
+
 async fn handle_frame(
     state: &AppState,
     peer_id: u64,
-    upgrade_rendezvous_id: Option<&str>,
     frame: ClientFrame,
     tx: &mpsc::Sender<ServerFrame>,
-    subscribed_rooms: &mut Vec<(String, PeerRole)>,
+    subscribed_rooms: &mut Vec<(String, PeerRole, String)>,
+    admission: AdmissionContext<'_>,
 ) {
     match frame {
-        ClientFrame::Subscribe {
-            rendezvous_id,
-            role,
-            client_nonce: _,
-        } => {
-            if let Some(upgrade_room) = upgrade_rendezvous_id {
+        ClientFrame::Subscribe { descriptor, proof } => {
+            let rendezvous_id = descriptor.room_id.clone();
+            let role = proof.role;
+            if let Some(upgrade_room) = admission.upgrade_rendezvous_id {
                 if !rendezvous_id_matches_upgrade_room(upgrade_room, &rendezvous_id) {
                     state.metrics.frame_rejected(RejectReason::RoomMismatch);
                     warn!(
@@ -306,61 +345,49 @@ async fn handle_frame(
             }
             if subscribed_rooms
                 .iter()
-                .any(|(rid, _)| rid == &rendezvous_id)
+                .any(|(rid, _, _)| rid == &rendezvous_id)
             {
                 // Idempotent: ignore duplicate subscribe.
                 return;
             }
             let joined_at_ms = now_ms();
+            if joined_at_ms > admission.challenge_expires_at
+                || verify_subscribe_proof(&descriptor, &proof, admission.challenge, joined_at_ms)
+                    .is_err()
+            {
+                state.metrics.frame_rejected(RejectReason::Malformed);
+                let _ = tx.try_send(ServerFrame::Error {
+                    code: "auth_failed".into(),
+                    message: "signaling v2 subscription authentication failed".into(),
+                });
+                return;
+            }
             let handle = PeerHandle {
                 peer_id,
                 role,
+                session_id: proof.session_id.clone(),
+                proof: proof.as_ref().clone(),
                 joined_at_ms,
                 tx: tx.clone(),
             };
-            let (existing, others) =
-                match state
-                    .registry
-                    .try_join(&rendezvous_id, handle, &state.room_limits)
-                {
-                    Ok(joined) => joined,
-                    Err(SubscribeDecision::Reject { code, message }) => {
-                        state.metrics.frame_rejected(match code {
-                            "role_taken" => RejectReason::RoleTaken,
-                            _ => RejectReason::RoomFull,
-                        });
-                        warn!(
-                            target: "signaling",
-                            peer_id,
-                            rendezvous_id = %rendezvous_id,
-                            role = role.as_str(),
-                            code,
-                            "subscribe rejected"
-                        );
-                        // Graceful: keep the socket open so the client can
-                        // surface the reason and stop retrying.
-                        let _ = tx
-                            .send(ServerFrame::Error {
-                                code: code.to_string(),
-                                message: message.to_string(),
-                            })
-                            .await;
-                        return;
-                    }
-                    // `evaluate_subscribe` only ever returns Accept / Reject;
-                    // Accept is unwrapped as the Ok arm above.
-                    Err(SubscribeDecision::Accept) => unreachable!(),
-                };
-            subscribed_rooms.push((rendezvous_id.clone(), role));
+            let joined = state.registry.join_authenticated(&rendezvous_id, handle);
+            subscribed_rooms.push((rendezvous_id.clone(), role, proof.session_id.clone()));
+            if let Some(replaced) = joined.replaced {
+                let _ = replaced.try_send(ServerFrame::Error {
+                    code: "session_replaced".into(),
+                    message: "a newer authenticated session took over this role".into(),
+                });
+            }
 
             // Tell the joiner who is already in the room.
             let _ = tx
                 .send(ServerFrame::Subscribed {
                     rendezvous_id: rendezvous_id.clone(),
-                    peers: existing
+                    peers: joined
+                        .existing
                         .iter()
                         .map(|h| PeerSnapshot {
-                            role: h.role,
+                            proof: h.proof.clone(),
                             joined_at_ms: h.joined_at_ms,
                         })
                         .collect(),
@@ -368,13 +395,14 @@ async fn handle_frame(
                 .await;
 
             // Announce the join to everyone else.
-            for other in others {
-                let _ = other
-                    .send(ServerFrame::PeerJoined {
-                        rendezvous_id: rendezvous_id.clone(),
-                        role,
-                    })
-                    .await;
+            for other in joined.others {
+                let _ = other.try_send(ServerFrame::PeerJoined {
+                    rendezvous_id: rendezvous_id.clone(),
+                    peer: PeerSnapshot {
+                        proof: proof.as_ref().clone(),
+                        joined_at_ms,
+                    },
+                });
             }
             info!(
                 target: "signaling",
@@ -385,7 +413,7 @@ async fn handle_frame(
             );
         }
         ClientFrame::Unsubscribe { rendezvous_id } => {
-            if let Some(upgrade_room) = upgrade_rendezvous_id {
+            if let Some(upgrade_room) = admission.upgrade_rendezvous_id {
                 if !rendezvous_id_matches_upgrade_room(upgrade_room, &rendezvous_id) {
                     state.metrics.frame_rejected(RejectReason::RoomMismatch);
                     let _ = tx
@@ -399,24 +427,23 @@ async fn handle_frame(
             }
             let pos = subscribed_rooms
                 .iter()
-                .position(|(rid, _)| rid == &rendezvous_id);
+                .position(|(rid, _, _)| rid == &rendezvous_id);
             let Some(idx) = pos else { return };
-            let (_, role) = subscribed_rooms.remove(idx);
+            let (_, role, session_id) = subscribed_rooms.remove(idx);
             let others = state.registry.leave(&rendezvous_id, peer_id);
             for sender in others {
-                let _ = sender
-                    .send(ServerFrame::PeerLeft {
-                        rendezvous_id: rendezvous_id.clone(),
-                        role,
-                    })
-                    .await;
+                let _ = sender.try_send(ServerFrame::PeerLeft {
+                    rendezvous_id: rendezvous_id.clone(),
+                    role,
+                    session_id: session_id.clone(),
+                });
             }
         }
         ClientFrame::Relay {
             rendezvous_id,
             payload,
         } => {
-            if let Some(upgrade_room) = upgrade_rendezvous_id {
+            if let Some(upgrade_room) = admission.upgrade_rendezvous_id {
                 if !rendezvous_id_matches_upgrade_room(upgrade_room, &rendezvous_id) {
                     state.metrics.frame_rejected(RejectReason::RoomMismatch);
                     let _ = tx
@@ -428,7 +455,9 @@ async fn handle_frame(
                     return;
                 }
             }
-            let Some((sender_role, others)) = state.registry.others(&rendezvous_id, peer_id) else {
+            let Some((sender_role, sender_session_id, others)) =
+                state.registry.others(&rendezvous_id, peer_id)
+            else {
                 state.metrics.frame_rejected(RejectReason::NotSubscribed);
                 let _ = tx
                     .send(ServerFrame::Error {
@@ -439,14 +468,26 @@ async fn handle_frame(
                 return;
             };
             let fanout = others.len() as u64;
-            for sender in others {
-                let _ = sender
-                    .send(ServerFrame::Relay {
+            for (target_peer_id, sender) in others {
+                if sender
+                    .try_send(ServerFrame::Relay {
                         rendezvous_id: rendezvous_id.clone(),
                         from_role: sender_role,
+                        from_session_id: sender_session_id.clone(),
                         payload: payload.clone(),
                     })
-                    .await;
+                    .is_err()
+                {
+                    warn!(
+                        target: "signaling",
+                        peer_id = target_peer_id,
+                        rendezvous_id = %rendezvous_id,
+                        "evicting slow signaling consumer"
+                    );
+                    state
+                        .registry
+                        .evict_slow_peer(&rendezvous_id, target_peer_id);
+                }
             }
             state.metrics.frame_relayed(fanout);
         }
@@ -487,6 +528,12 @@ mod tests {
         metrics::Metrics,
         room::{RoomRegistry, PEER_OUTBOUND_BUFFER},
     };
+    use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+    use cognia_signaling_core::{
+        proto::{RoomDescriptorV2, SubscribeProofV2},
+        v2::{derive_room_id, subscribe_proof_bytes},
+    };
+    use p256::ecdsa::{signature::Signer, Signature, SigningKey};
     use std::sync::atomic::Ordering;
     use std::sync::Arc;
 
@@ -515,6 +562,8 @@ mod tests {
             PeerHandle {
                 peer_id,
                 role,
+                session_id: format!("seed-{}", role.as_str()),
+                proof: proof(role, "challenge"),
                 joined_at_ms: 1,
                 tx,
             },
@@ -522,11 +571,57 @@ mod tests {
         rx
     }
 
-    fn subscribe(rid: &str, role: PeerRole) -> ClientFrame {
-        ClientFrame::Subscribe {
-            rendezvous_id: rid.into(),
+    fn identity(role: PeerRole) -> SigningKey {
+        let byte = if role == PeerRole::Desktop { 1 } else { 2 };
+        SigningKey::from_slice(&[byte; 32]).unwrap()
+    }
+
+    fn descriptor() -> RoomDescriptorV2 {
+        let desktop = identity(PeerRole::Desktop);
+        let mobile = identity(PeerRole::Mobile);
+        let encode = |key: &SigningKey| {
+            URL_SAFE_NO_PAD.encode(key.verifying_key().to_encoded_point(false).as_bytes())
+        };
+        let mut descriptor = RoomDescriptorV2 {
+            v: 2,
+            room_id: String::new(),
+            room_nonce: "AAECAwQFBgcICQoLDA0ODw".into(),
+            desktop_signing_key: encode(&desktop),
+            mobile_signing_key: encode(&mobile),
+            not_after: i64::MAX,
+        };
+        descriptor.room_id = derive_room_id(&descriptor);
+        descriptor
+    }
+
+    fn room_id() -> String {
+        descriptor().room_id
+    }
+
+    fn proof(role: PeerRole, challenge: &str) -> SubscribeProofV2 {
+        let descriptor = descriptor();
+        let ephemeral = SigningKey::from_slice(&[3u8; 32]).unwrap();
+        let mut proof = SubscribeProofV2 {
+            v: 2,
+            room_id: descriptor.room_id,
             role,
-            client_nonce: "nonce".into(),
+            session_id: format!("session-{}", role.as_str()),
+            epoch: format!("epoch-{}", role.as_str()),
+            issued_at: now_ms(),
+            challenge: challenge.into(),
+            ecdh_public_key: URL_SAFE_NO_PAD
+                .encode(ephemeral.verifying_key().to_encoded_point(false).as_bytes()),
+            signature: String::new(),
+        };
+        let signature: Signature = identity(role).sign(&subscribe_proof_bytes(&proof));
+        proof.signature = URL_SAFE_NO_PAD.encode(signature.to_bytes());
+        proof
+    }
+
+    fn subscribe(_rid: &str, role: PeerRole) -> ClientFrame {
+        ClientFrame::Subscribe {
+            descriptor: Box::new(descriptor()),
+            proof: Box::new(proof(role, "challenge")),
         }
     }
 
@@ -535,27 +630,39 @@ mod tests {
         peer_id: u64,
         frame: ClientFrame,
         tx: &mpsc::Sender<ServerFrame>,
-        subscribed_rooms: &mut Vec<(String, PeerRole)>,
+        subscribed_rooms: &mut Vec<(String, PeerRole, String)>,
     ) {
-        super::handle_frame(state, peer_id, None, frame, tx, subscribed_rooms).await;
+        super::handle_frame(
+            state,
+            peer_id,
+            frame,
+            tx,
+            subscribed_rooms,
+            super::AdmissionContext {
+                upgrade_rendezvous_id: None,
+                challenge: "challenge",
+                challenge_expires_at: i64::MAX,
+            },
+        )
+        .await;
     }
 
     #[test]
     fn upgrade_room_from_uri_reads_non_empty_rid() {
         assert_eq!(
-            super::upgrade_room_from_uri(&"/v1/signaling?rid=room-a".parse().unwrap()),
+            super::upgrade_room_from_uri(&"/v2/signaling?rid=room-a".parse().unwrap()),
             Some("room-a".to_string())
         );
         assert_eq!(
-            super::upgrade_room_from_uri(&"/v1/signaling?foo=1&rid=room-b".parse().unwrap()),
+            super::upgrade_room_from_uri(&"/v2/signaling?foo=1&rid=room-b".parse().unwrap()),
             Some("room-b".to_string())
         );
         assert_eq!(
-            super::upgrade_room_from_uri(&"/v1/signaling?rid=".parse().unwrap()),
+            super::upgrade_room_from_uri(&"/v2/signaling?rid=".parse().unwrap()),
             None
         );
         assert_eq!(
-            super::upgrade_room_from_uri(&"/v1/signaling".parse().unwrap()),
+            super::upgrade_room_from_uri(&"/v2/signaling".parse().unwrap()),
             None
         );
     }
@@ -581,20 +688,23 @@ mod tests {
                 rendezvous_id,
                 peers,
             } => {
-                assert_eq!(rendezvous_id, "r");
+                assert_eq!(rendezvous_id, room_id());
                 assert!(peers.is_empty());
             }
             other => panic!("expected Subscribed, got {other:?}"),
         }
         assert_eq!(state.registry.stats().peers, 1);
-        assert_eq!(rooms, vec![("r".to_string(), PeerRole::Desktop)]);
+        assert_eq!(
+            rooms,
+            vec![(room_id(), PeerRole::Desktop, "session-desktop".to_string())]
+        );
     }
 
     #[tokio::test]
-    async fn second_desktop_subscribe_is_rejected_role_taken() {
+    async fn second_desktop_subscribe_atomically_replaces_the_old_session() {
         let state = state();
         // Seed a desktop already owning the room.
-        let _owner = seed_peer(&state, "r", PeerRole::Desktop);
+        let mut owner = seed_peer(&state, &room_id(), PeerRole::Desktop);
         let (tx, mut rx) = mpsc::channel(PEER_OUTBOUND_BUFFER);
         let peer_id = state.registry.next_peer_id();
         let mut rooms = Vec::new();
@@ -608,46 +718,22 @@ mod tests {
         )
         .await;
 
-        match rx.try_recv().expect("error frame") {
-            ServerFrame::Error { code, .. } => assert_eq!(code, "role_taken"),
-            other => panic!("expected Error role_taken, got {other:?}"),
+        match rx.try_recv().expect("subscribed frame") {
+            ServerFrame::Subscribed { peers, .. } => assert!(peers.is_empty()),
+            other => panic!("expected Subscribed, got {other:?}"),
         }
-        // Rejected peer is not added and does not track the room.
-        assert_eq!(state.registry.stats().peers, 1);
-        assert!(rooms.is_empty());
-    }
-
-    #[tokio::test]
-    async fn subscribe_past_peer_cap_is_rejected_room_full() {
-        let state = state_with(cognia_signaling_core::policy::RoomLimits {
-            max_peers: 1,
-            max_desktops: 1,
-        });
-        let _owner = seed_peer(&state, "r", PeerRole::Desktop);
-        let (tx, mut rx) = mpsc::channel(PEER_OUTBOUND_BUFFER);
-        let peer_id = state.registry.next_peer_id();
-        let mut rooms = Vec::new();
-
-        handle_frame(
-            &state,
-            peer_id,
-            subscribe("r", PeerRole::Mobile),
-            &tx,
-            &mut rooms,
-        )
-        .await;
-
-        match rx.try_recv().expect("error frame") {
-            ServerFrame::Error { code, .. } => assert_eq!(code, "room_full"),
-            other => panic!("expected Error room_full, got {other:?}"),
+        match owner.try_recv().expect("replacement notice") {
+            ServerFrame::Error { code, .. } => assert_eq!(code, "session_replaced"),
+            other => panic!("expected session_replaced, got {other:?}"),
         }
         assert_eq!(state.registry.stats().peers, 1);
+        assert_eq!(rooms.len(), 1);
     }
 
     #[tokio::test]
     async fn subscribe_with_existing_peer_announces_join() {
         let state = state();
-        let mut other_rx = seed_peer(&state, "r", PeerRole::Desktop);
+        let mut other_rx = seed_peer(&state, &room_id(), PeerRole::Desktop);
         let (tx, mut rx) = mpsc::channel(PEER_OUTBOUND_BUFFER);
         let peer_id = state.registry.next_peer_id();
         let mut rooms = Vec::new();
@@ -664,12 +750,14 @@ mod tests {
         match rx.try_recv().expect("subscribed") {
             ServerFrame::Subscribed { peers, .. } => {
                 assert_eq!(peers.len(), 1);
-                assert_eq!(peers[0].role, PeerRole::Desktop);
+                assert_eq!(peers[0].proof.role, PeerRole::Desktop);
             }
             other => panic!("expected Subscribed, got {other:?}"),
         }
         match other_rx.try_recv().expect("peer joined") {
-            ServerFrame::PeerJoined { role, .. } => assert_eq!(role, PeerRole::Mobile),
+            ServerFrame::PeerJoined { peer, .. } => {
+                assert_eq!(peer.proof.role, PeerRole::Mobile)
+            }
             other => panic!("expected PeerJoined, got {other:?}"),
         }
     }
@@ -707,7 +795,8 @@ mod tests {
     #[tokio::test]
     async fn unsubscribe_announces_peer_left() {
         let state = state();
-        let mut other_rx = seed_peer(&state, "r", PeerRole::Desktop);
+        let rid = room_id();
+        let mut other_rx = seed_peer(&state, &rid, PeerRole::Desktop);
         let (tx, _rx) = mpsc::channel(PEER_OUTBOUND_BUFFER);
         let peer_id = state.registry.next_peer_id();
         let mut rooms = Vec::new();
@@ -725,9 +814,7 @@ mod tests {
         handle_frame(
             &state,
             peer_id,
-            ClientFrame::Unsubscribe {
-                rendezvous_id: "r".into(),
-            },
+            ClientFrame::Unsubscribe { rendezvous_id: rid },
             &tx,
             &mut rooms,
         )
@@ -770,7 +857,8 @@ mod tests {
     #[tokio::test]
     async fn relay_fans_out_to_other_peers_and_counts() {
         let state = state();
-        let mut other_rx = seed_peer(&state, "r", PeerRole::Desktop);
+        let rid = room_id();
+        let mut other_rx = seed_peer(&state, &rid, PeerRole::Desktop);
         let (tx, _rx) = mpsc::channel(PEER_OUTBOUND_BUFFER);
         let peer_id = state.registry.next_peer_id();
         let mut rooms = Vec::new();
@@ -789,7 +877,7 @@ mod tests {
             &state,
             peer_id,
             ClientFrame::Relay {
-                rendezvous_id: "r".into(),
+                rendezvous_id: rid,
                 payload: "AAAA".into(),
             },
             &tx,

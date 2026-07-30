@@ -1,277 +1,283 @@
-// End-to-end smoke test for the Cloudflare Worker signaling rendezvous.
-//
-// Drives a running Worker (local `wrangler dev`, or a deployed URL) with two
-// real WebSocket clients and asserts the relay contract the axum server and
-// the TS/Rust clients depend on. Uses Node's global `WebSocket` (Node 22+),
-// so it needs no dependencies.
-//
-//   Terminal 1:  cd signaling-server/worker && wrangler dev
-//   Terminal 2:  node signaling-server/worker/tests/integration.mjs
-//
-// Override the base URL with SIGNALING_URL (default ws://127.0.0.1:8787).
+// Black-box v2 conformance smoke for the Cloudflare Worker rendezvous.
+// Run against `wrangler dev` or a deployed Worker via SIGNALING_URL.
+
+import { randomBytes, webcrypto } from "node:crypto"
 
 const BASE = process.env.SIGNALING_URL ?? "ws://127.0.0.1:8787"
-const RID = `it-${Date.now()}`
-const TIMEOUT_MS = 5000
+const TIMEOUT_MS = 5_000
 
-function connect(role, rid = RID) {
-  const ws = new WebSocket(`${BASE}/v1/signaling?rid=${rid}`)
-  ws._inbox = []
-  ws._waiters = []
-  ws.addEventListener("message", (ev) => {
-    const frame = JSON.parse(typeof ev.data === "string" ? ev.data : ev.data.toString())
-    const waiter = ws._waiters.shift()
-    if (waiter) waiter(frame)
-    else ws._inbox.push(frame)
-  })
-  ws._role = role
-  return ws
+function assert(condition, message) {
+  if (!condition) throw new Error(`assertion failed: ${message}`)
 }
 
-function nextFrame(ws) {
-  if (ws._inbox.length) return Promise.resolve(ws._inbox.shift())
-  return new Promise((resolve, reject) => {
-    const timer = setTimeout(
-      () => reject(new Error(`${ws._role}: timed out waiting for a frame`)),
-      TIMEOUT_MS
-    )
-    ws._waiters.push((frame) => {
-      clearTimeout(timer)
-      resolve(frame)
-    })
-  })
+function encodeFields(fields) {
+  const parts = []
+  for (const value of fields) {
+    const field = Buffer.from(String(value), "utf8")
+    const length = Buffer.alloc(4)
+    length.writeUInt32BE(field.byteLength)
+    parts.push(length, field)
+  }
+  return Buffer.concat(parts)
 }
 
-function open(ws) {
-  return new Promise((resolve, reject) => {
-    const timer = setTimeout(
-      () => reject(new Error(`${ws._role}: connection did not open`)),
-      TIMEOUT_MS
-    )
+async function identity() {
+  const pair = await webcrypto.subtle.generateKey({ name: "ECDSA", namedCurve: "P-256" }, true, [
+    "sign",
+    "verify",
+  ])
+  return {
+    privateKey: pair.privateKey,
+    publicKey: Buffer.from(await webcrypto.subtle.exportKey("raw", pair.publicKey)).toString(
+      "base64url"
+    ),
+  }
+}
+
+async function createRoom() {
+  const [desktop, mobile] = await Promise.all([identity(), identity()])
+  const roomNonce = randomBytes(16).toString("base64url")
+  const notAfter = Date.now() + 60_000
+  const digest = await webcrypto.subtle.digest(
+    "SHA-256",
+    encodeFields([2, roomNonce, desktop.publicKey, mobile.publicKey, notAfter])
+  )
+  return {
+    descriptor: {
+      v: 2,
+      roomId: Buffer.from(digest).toString("base64url"),
+      roomNonce,
+      desktopSigningKey: desktop.publicKey,
+      mobileSigningKey: mobile.publicKey,
+      notAfter,
+    },
+    desktop,
+    mobile,
+  }
+}
+
+async function subscribeFrame(room, role, challenge) {
+  const ecdh = await webcrypto.subtle.generateKey({ name: "ECDH", namedCurve: "P-256" }, true, [
+    "deriveBits",
+  ])
+  const proof = {
+    v: 2,
+    roomId: room.descriptor.roomId,
+    role,
+    sessionId: randomBytes(16).toString("base64url"),
+    epoch: randomBytes(16).toString("base64url"),
+    issuedAt: Date.now(),
+    challenge,
+    ecdhPublicKey: Buffer.from(await webcrypto.subtle.exportKey("raw", ecdh.publicKey)).toString(
+      "base64url"
+    ),
+  }
+  const signature = await webcrypto.subtle.sign(
+    { name: "ECDSA", hash: "SHA-256" },
+    room[role].privateKey,
+    encodeFields([
+      proof.v,
+      proof.roomId,
+      proof.role,
+      proof.sessionId,
+      proof.epoch,
+      proof.issuedAt,
+      proof.challenge,
+      proof.ecdhPublicKey,
+    ])
+  )
+  return {
+    kind: "subscribe",
+    descriptor: room.descriptor,
+    proof: { ...proof, signature: Buffer.from(signature).toString("base64url") },
+  }
+}
+
+function connect(label, roomId) {
+  const ws = new WebSocket(`${BASE}/v2/signaling?rid=${encodeURIComponent(roomId)}`)
+  const inbox = []
+  const waiters = []
+  ws.addEventListener("message", (event) => {
+    const frame = JSON.parse(String(event.data))
+    const waiter = waiters.shift()
+    if (waiter) {
+      clearTimeout(waiter.timer)
+      waiter.resolve(frame)
+    } else inbox.push(frame)
+  })
+  const opened = new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`${label}: open timeout`)), TIMEOUT_MS)
     ws.addEventListener("open", () => {
       clearTimeout(timer)
       resolve()
     })
-    ws.addEventListener("error", (e) =>
-      reject(new Error(`${ws._role}: ${e.message ?? "ws error"}`))
-    )
+    ws.addEventListener("error", () => reject(new Error(`${label}: websocket error`)))
   })
-}
-
-// Like open() but resolves {ok} instead of throwing — used where an upgrade
-// rejection (e.g. the per-IP cap returning 429) is an acceptable outcome.
-function tryOpen(ws, ms) {
-  return new Promise((resolve) => {
-    const timer = setTimeout(() => resolve({ ok: false, reason: "timeout" }), ms)
-    ws.addEventListener("open", () => {
-      clearTimeout(timer)
-      resolve({ ok: true })
-    })
-    ws.addEventListener("error", () => {
-      clearTimeout(timer)
-      resolve({ ok: false, reason: "upgrade-rejected" })
-    })
+  const closed = new Promise((resolve) => {
+    ws.addEventListener("close", resolve, { once: true })
   })
+  return {
+    label,
+    ws,
+    opened,
+    closed,
+    send(frame) {
+      ws.send(JSON.stringify(frame))
+    },
+    next(timeoutMs = TIMEOUT_MS) {
+      if (inbox.length) return Promise.resolve(inbox.shift())
+      return new Promise((resolve, reject) => {
+        const waiter = { resolve, reject, timer: undefined }
+        waiter.timer = setTimeout(() => {
+          const index = waiters.indexOf(waiter)
+          if (index >= 0) waiters.splice(index, 1)
+          reject(new Error(`${label}: frame timeout`))
+        }, timeoutMs)
+        waiters.push(waiter)
+      })
+    },
+    close() {
+      ws.close()
+    },
+  }
 }
 
-function send(ws, frame) {
-  ws.send(JSON.stringify(frame))
+async function authenticated(room, role, label) {
+  const client = connect(label, room.descriptor.roomId)
+  await client.opened
+  const challenge = await client.next()
+  assert(challenge.kind === "challenge", `${label} receives challenge`)
+  const subscribe = await subscribeFrame(room, role, challenge.challenge)
+  client.send(subscribe)
+  const accepted = await client.next()
+  assert(accepted.kind === "subscribed", `${label} authenticated subscribe`)
+  return { client, subscribe, accepted }
 }
 
-// Resolve if NO frame arrives within `ms`; reject if one does. Used to prove
-// an unsubscribed observer receives nothing.
-function expectNoFrame(ws, ms) {
-  return new Promise((resolve, reject) => {
-    if (ws._inbox.length) {
-      reject(new Error(`${ws._role}: unexpected buffered frame ${JSON.stringify(ws._inbox[0])}`))
-      return
-    }
-    // The pushed function and the one removed on timeout must be the SAME
-    // reference, or a stale waiter lingers and eats the next real frame.
-    const waiter = (frame) =>
-      reject(new Error(`${ws._role}: unexpected frame ${JSON.stringify(frame)}`))
-    setTimeout(() => {
-      const i = ws._waiters.indexOf(waiter)
-      if (i >= 0) ws._waiters.splice(i, 1)
-      resolve()
-    }, ms)
-    ws._waiters.push(waiter)
-  })
+async function expectNoFrame(client, timeoutMs = 250) {
+  try {
+    await client.next(timeoutMs)
+    return false
+  } catch {
+    return true
+  }
 }
 
-// Subscribe and await the `subscribed` ack.
-async function subscribe(ws, rid, role, nonce) {
-  send(ws, { kind: "subscribe", rendezvousId: rid, role, clientNonce: nonce })
-  const frame = await nextFrame(ws)
-  return frame
-}
-
-function assert(cond, msg) {
-  if (!cond) throw new Error(`assertion failed: ${msg}`)
+async function nextMatching(client, predicate, message, maxFrames = 4) {
+  const observed = []
+  for (let index = 0; index < maxFrames; index += 1) {
+    const frame = await client.next()
+    observed.push(frame.kind)
+    if (predicate(frame)) return frame
+  }
+  throw new Error(`assertion failed: ${message}; observed=${observed.join(",")}`)
 }
 
 async function main() {
-  const desktop = connect("desktop")
-  await open(desktop)
-  send(desktop, { kind: "subscribe", rendezvousId: RID, role: "desktop", clientNonce: "n-d" })
-  const dSub = await nextFrame(desktop)
-  assert(dSub.kind === "subscribed", `desktop expected subscribed, got ${dSub.kind}`)
-  assert(Array.isArray(dSub.peers) && dSub.peers.length === 0, "desktop joins an empty room")
+  const room = await createRoom()
+  const desktop = await authenticated(room, "desktop", "desktop")
+  assert(desktop.accepted.peers.length === 0, "desktop joins empty room")
 
-  const mobile = connect("mobile")
-  await open(mobile)
-  send(mobile, { kind: "subscribe", rendezvousId: RID, role: "mobile", clientNonce: "n-m" })
-  const mSub = await nextFrame(mobile)
-  assert(mSub.kind === "subscribed", `mobile expected subscribed, got ${mSub.kind}`)
+  const mobile = await authenticated(room, "mobile", "mobile")
   assert(
-    mSub.peers.some((p) => p.role === "desktop"),
-    "mobile sees the desktop peer in its snapshot"
+    mobile.accepted.peers.some((peer) => peer.proof?.role === "desktop"),
+    "mobile snapshot contains desktop proof"
+  )
+  const joined = await desktop.client.next()
+  assert(joined.kind === "peerJoined" && joined.peer?.proof?.role === "mobile", "peerJoined")
+
+  const payload = JSON.stringify({ ciphertext: randomBytes(48).toString("base64url") })
+  mobile.client.send({ kind: "relay", rendezvousId: room.descriptor.roomId, payload })
+  const relay = await desktop.client.next()
+  assert(
+    relay.kind === "relay" &&
+      relay.fromRole === "mobile" &&
+      relay.fromSessionId === mobile.subscribe.proof.sessionId &&
+      relay.payload === payload,
+    "opaque relay preserves authenticated sender"
   )
 
-  const joined = await nextFrame(desktop)
-  assert(
-    joined.kind === "peerJoined" && joined.role === "mobile",
-    "desktop is notified of the mobile peer"
-  )
-
-  // Duplicate Subscribe for the same room/socket is idempotent. It must not
-  // produce a second subscribed ack, role change, or peerJoined notification.
-  send(mobile, { kind: "subscribe", rendezvousId: RID, role: "mobile", clientNonce: "n-m2" })
-  await expectNoFrame(mobile, 300)
-  await expectNoFrame(desktop, 300)
-
-  // Relay round-trip: payload is opaque, forwarded verbatim.
-  send(mobile, { kind: "relay", rendezvousId: RID, payload: "AAAA" })
-  const relayed = await nextFrame(desktop)
-  assert(
-    relayed.kind === "relay" && relayed.fromRole === "mobile" && relayed.payload === "AAAA",
-    "relay forwarded verbatim"
-  )
-
-  // 8 KiB soft cap.
-  send(mobile, { kind: "relay", rendezvousId: RID, payload: "x".repeat(9 * 1024) })
-  const tooLarge = await nextFrame(mobile)
-  assert(
-    tooLarge.kind === "error" && tooLarge.code === "frame_too_large",
-    "oversized frame is rejected gracefully"
-  )
-
-  // Ping/pong (auto-response).
-  send(mobile, { kind: "ping" })
-  const pong = await nextFrame(mobile)
-  assert(pong.kind === "pong", "ping is answered with pong")
-
-  // Subscribed-only fan-out (the security fix): an observer that connects but
-  // never subscribes must NOT receive relayed envelopes, and must not trip a
-  // peerJoined to the subscribed peers.
-  const observer = connect("observer")
-  await open(observer)
-  await expectNoFrame(desktop, 300) // no peerJoined for an unsubscribed socket
-  send(mobile, { kind: "relay", rendezvousId: RID, payload: "BBBB" })
-  const relayed2 = await nextFrame(desktop)
-  assert(
-    relayed2.kind === "relay" && relayed2.payload === "BBBB",
-    "relay still reaches the desktop"
-  )
-  await expectNoFrame(observer, 300) // observer eavesdrops nothing
+  // Connected-but-unauthenticated sockets cannot observe room traffic.
+  const observer = connect("observer", room.descriptor.roomId)
+  await observer.opened
+  assert((await observer.next()).kind === "challenge", "observer receives only challenge")
+  mobile.client.send({ kind: "relay", rendezvousId: room.descriptor.roomId, payload: "opaque-2" })
+  assert((await desktop.client.next()).payload === "opaque-2", "desktop receives second relay")
+  assert(await expectNoFrame(observer), "observer cannot eavesdrop")
   observer.close()
 
-  // The Durable Object is selected by ?rid= at upgrade time. A later frame
-  // claiming a different rendezvousId is a protocol violation and must not
-  // appear as a peer in the actor's real room.
-  const mismatch = connect("mismatch", RID)
-  await open(mismatch)
-  send(mismatch, {
-    kind: "subscribe",
-    rendezvousId: `${RID}-wrong`,
-    role: "mobile",
-    clientNonce: "n-mm",
-  })
-  const mmSub = await nextFrame(mismatch)
-  assert(
-    mmSub.kind === "error" && mmSub.code === "room_mismatch",
-    "mismatched subscribe is rejected"
+  // A newer valid session atomically replaces the old mobile role.
+  const replacement = await authenticated(room, "mobile", "mobile-replacement")
+  const replaced = await mobile.client.next()
+  assert(replaced.kind === "error" && replaced.code === "session_replaced", "role takeover")
+  let replacementJoined = false
+  let oldSessionLeft = false
+  for (let index = 0; index < 4 && (!replacementJoined || !oldSessionLeft); index += 1) {
+    const frame = await desktop.client.next()
+    replacementJoined ||= Boolean(
+      frame.kind === "peerJoined" &&
+      frame.peer?.proof?.sessionId === replacement.subscribe.proof.sessionId
+    )
+    oldSessionLeft ||= Boolean(
+      frame.kind === "peerLeft" && frame.sessionId === mobile.subscribe.proof.sessionId
+    )
+  }
+  assert(replacementJoined, "desktop observes replacement session join")
+  assert(oldSessionLeft, "desktop observes replaced session leave")
+
+  replacement.client.send({ kind: "ping" })
+  await nextMatching(
+    replacement.client,
+    (frame) => frame.kind === "pong",
+    "heartbeat survives hibernation API"
   )
-  await expectNoFrame(desktop, 300)
-  send(mismatch, { kind: "relay", rendezvousId: `${RID}-wrong`, payload: "CCCC" })
-  const mmRelay = await nextFrame(mismatch)
+
+  // Upgrade room and signed descriptor must agree.
+  const mismatchUpgradeRoom = await createRoom()
+  const otherRoom = await createRoom()
+  const mismatch = connect("mismatch", mismatchUpgradeRoom.descriptor.roomId)
+  await mismatch.opened
+  const mismatchChallenge = await mismatch.next()
+  mismatch.send(await subscribeFrame(otherRoom, "mobile", mismatchChallenge.challenge))
+  const mismatchError = await mismatch.next()
   assert(
-    mmRelay.kind === "error" && mmRelay.code === "room_mismatch",
-    "mismatched relay is rejected"
+    mismatchError.kind === "error" && mismatchError.code === "room_mismatch",
+    "room mismatch rejected"
   )
-  await expectNoFrame(desktop, 300)
   mismatch.close()
 
-  // Malformed JSON uses the same stable error code as the axum backend.
-  mobile.send("not-json")
-  const malformed = await nextFrame(mobile)
+  // Tampering with a challenge-bound proof fails role admission.
+  const attackerRoom = await createRoom()
+  const attacker = connect("attacker", attackerRoom.descriptor.roomId)
+  await attacker.opened
+  const attackerChallenge = await attacker.next()
+  const bad = await subscribeFrame(attackerRoom, "mobile", attackerChallenge.challenge)
+  bad.proof.epoch = "tampered-after-signing"
+  attacker.send(bad)
+  const authError = await attacker.next()
+  assert(authError.kind === "error" && authError.code === "auth_failed", "tamper rejected")
+
+  replacement.client.send({ kind: "unsubscribe", rendezvousId: room.descriptor.roomId })
+  const left = await desktop.client.next()
   assert(
-    malformed.kind === "error" && malformed.code === "malformed_frame",
-    "malformed frame is rejected with malformed_frame"
+    left.kind === "peerLeft" && left.sessionId === replacement.subscribe.proof.sessionId,
+    "authenticated peerLeft"
   )
 
-  // Binary frames are explicitly rejected (parity with the axum server).
-  mobile.send(new Uint8Array([1, 2, 3]))
-  const bin = await nextFrame(mobile)
-  assert(
-    bin.kind === "error" && bin.code === "binary_not_supported",
-    "binary frame is rejected with binary_not_supported"
-  )
-
-  desktop.close()
-  mobile.close()
-
-  // Role cardinality: a second desktop into a fresh room is role_taken.
-  const ridA = `${RID}-roles`
-  const d1 = connect("desktop", ridA)
-  await open(d1)
-  const s1 = await subscribe(d1, ridA, "desktop", "n-d1")
-  assert(s1.kind === "subscribed", "first desktop subscribes")
-  const d2 = connect("desktop2", ridA)
-  await open(d2)
-  const s2 = await subscribe(d2, ridA, "desktop", "n-d2")
-  assert(s2.kind === "error" && s2.code === "role_taken", "second desktop is role_taken")
-  d1.close()
-  d2.close()
-
-  // Room cap: with the default cap of 4, the 5th subscriber is room_full.
-  const ridB = `${RID}-cap`
-  const cap = []
-  const capDesktop = connect("desktop", ridB)
-  await open(capDesktop)
-  await subscribe(capDesktop, ridB, "desktop", "c-d")
-  cap.push(capDesktop)
-  for (let i = 0; i < 3; i++) {
-    const m = connect(`mobile${i}`, ridB)
-    await open(m)
-    const s = await subscribe(m, ridB, "mobile", `c-m${i}`)
-    assert(s.kind === "subscribed", `mobile ${i} fills a room slot`)
-    cap.push(m)
+  for (const client of [
+    desktop.client,
+    mobile.client,
+    replacement.client,
+    observer,
+    mismatch,
+    attacker,
+  ]) {
+    client.close()
   }
-  // The 5th is rejected one of two ways depending on environment: against a
-  // real Cloudflare edge (cf-connecting-ip present) the per-IP cap (default 4,
-  // = room cap) refuses the UPGRADE first since all 5 share one IP; locally
-  // (no cf-connecting-ip) per-IP is a no-op so the 5th subscribes and gets a
-  // `room_full` error frame. Accept either — both prove the room is bounded.
-  const overflow = connect("overflow", ridB)
-  const opened = await tryOpen(overflow, TIMEOUT_MS)
-  if (!opened.ok) {
-    console.log("  5th connection refused at upgrade (per-IP cap) ✓")
-  } else {
-    const ofRes = await subscribe(overflow, ridB, "mobile", "c-of")
-    assert(ofRes.kind === "error" && ofRes.code === "room_full", "5th subscriber is room_full")
-    console.log("  5th subscribe refused (room_full) ✓")
-  }
-  overflow.close()
-  for (const ws of cap) ws.close()
-
-  console.log("✓ signaling worker integration smoke passed")
+  console.log("worker signaling v2 integration: PASS")
 }
 
-main().then(
-  () => process.exit(0),
-  (err) => {
-    console.error("✗", err.message)
-    process.exit(1)
-  }
-)
+main().catch((error) => {
+  console.error(error)
+  process.exitCode = 1
+})

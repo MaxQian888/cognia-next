@@ -21,7 +21,9 @@ fn fixture() -> Value {
 #[test]
 fn code_length_matches_fixture() {
     assert_eq!(
-        fixture()["codeLength"].as_u64().expect("codeLength is a number"),
+        fixture()["codeLength"]
+            .as_u64()
+            .expect("codeLength is a number"),
         CODE_LENGTH as u64,
     );
 }
@@ -29,7 +31,9 @@ fn code_length_matches_fixture() {
 #[test]
 fn code_alphabet_matches_fixture() {
     let expected = fixture();
-    let expected = expected["codeAlphabet"].as_str().expect("codeAlphabet is a string");
+    let expected = expected["codeAlphabet"]
+        .as_str()
+        .expect("codeAlphabet is a string");
     let actual = std::str::from_utf8(CODE_ALPHABET).expect("alphabet is ASCII");
     assert_eq!(expected, actual);
 }

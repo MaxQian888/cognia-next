@@ -5,11 +5,11 @@ transport. Implements ADR-0021.
 
 ## What it does
 
-- Exposes `GET /v1/signaling` as a WebSocket endpoint.
+- Exposes `GET /v2/signaling` as a WebSocket endpoint.
 - Maintains an in-memory `HashMap<rendezvousId, Vec<PeerSocket>>` of
   subscribed peers per room.
-- Enforces room admission policy: default 4 peers per room and 1 desktop
-  peer per room, with environment overrides.
+- Enforces one active desktop role and one active mobile role per room. A
+  newer valid session atomically replaces the older socket for that role.
 - Applies opt-in WebSocket `Origin` allowlisting and a per-source-IP
   concurrent connection cap.
 - Forwards opaque base64 envelopes between peers in the same room. The
@@ -19,10 +19,9 @@ transport. Implements ADR-0021.
 
 It does **not** do:
 
-- Channel-level authentication or authorization. Rooms are identified by an
-  unguessable UUIDv4 and admitted by room policy. Application authenticity is
-  end-to-end between desktop and mobile via HMAC-SHA256 using a 32-byte secret
-  minted at pair time and shared out-of-band.
+- Decrypt SDP or ICE. Admission requires a challenge-bound ECDSA P-256 proof
+  from the descriptor's desktop/mobile role key. The payload itself remains
+  AES-256-GCM ciphertext derived from ephemeral P-256 ECDH + HKDF-SHA-256.
 - TLS termination. Deploy behind a platform that handles TLS (Fly.io,
   Railway, an nginx fronting box).
 - Persistence. A restart drops every room; peers reconnect and resubscribe.
@@ -52,7 +51,7 @@ flyctl deploy
 ```
 
 The container listens on `$PORT` (default 7892). Fly's edge serves TLS so
-clients connect with `wss://<app>.fly.dev/v1/signaling`.
+clients connect with `wss://<app>.fly.dev/v2/signaling`.
 
 ## Deploy from CI
 
@@ -76,23 +75,25 @@ limit. The reference deployment uses a `shared-cpu-1x` Fly machine with
 
 ```
 Client → Server
-  connect ws(s)://host/v1/signaling?rid=<rendezvousId>  # required by Worker, room-bound by axum when present
-  { kind: "subscribe", rendezvousId, role: "desktop"|"mobile", clientNonce }
+  connect ws(s)://host/v2/signaling?rid=<rendezvousId>  # required by Worker, room-bound by axum when present
+  { kind: "subscribe", descriptor: RoomDescriptorV2, proof: SubscribeProofV2 }
   { kind: "unsubscribe", rendezvousId }
   { kind: "relay", rendezvousId, payload: <base64url> }   # opaque
   { kind: "ping" }
 
 Server → Client
-  { kind: "subscribed", rendezvousId, peers: [{role, joinedAtMs}, ...] }
-  { kind: "peerJoined", rendezvousId, role }
-  { kind: "peerLeft",   rendezvousId, role }
-  { kind: "relay",      rendezvousId, fromRole, payload }
+  { kind: "challenge", challenge, issuedAt, expiresAt }
+  { kind: "subscribed", rendezvousId, peers: [{proof, joinedAtMs}, ...] }
+  { kind: "peerJoined", rendezvousId, peer: {proof, joinedAtMs} }
+  { kind: "peerLeft",   rendezvousId, role, sessionId }
+  { kind: "relay",      rendezvousId, fromRole, fromSessionId, payload }
   { kind: "pong" }
   { kind: "error", code, message }
 ```
 
-The opaque `payload` carries the HMAC-signed `Envelope` defined in
-`src/proto.rs` (mirrored on the TypeScript side at `lib/signaling/types.ts`).
+The opaque `payload` carries `SignalingEnvelopeV2`: signed metadata plus
+AES-256-GCM ciphertext. Canonical fields are length-prefixed, so signature
+verification does not depend on JSON property order.
 
 ## Operational notes
 
@@ -103,7 +104,7 @@ The opaque `payload` carries the HMAC-signed `Envelope` defined in
   `SIGNALING_TRUST_PROXY_HEADERS=1` only behind a trusted proxy that overwrites
   `Fly-Client-IP` / `X-Forwarded-For`; otherwise direct clients could spoof the
   rate-limit key.
-- Room admission caps: `SIGNALING_MAX_PEERS_PER_ROOM`, default `4`, and
+- Room admission caps: `SIGNALING_MAX_PEERS_PER_ROOM`, default `2`, and
   `SIGNALING_MAX_DESKTOPS`, default `1`. Rejections return stable
   `room_full` or `role_taken` error frames.
 - Origin allowlist: `SIGNALING_ALLOWED_ORIGINS` is a comma-separated list.
@@ -114,6 +115,9 @@ The opaque `payload` carries the HMAC-signed `Envelope` defined in
   a hard 64 KiB `max_message_size` on the upgrade as a memory bound.
   `tower_http`'s `RequestBodyLimitLayer` only caps the pre-upgrade handshake.
   SDP and ICE messages are typically well under 2 KiB.
+- Every connection has a 45-second activity lease and a 20-second heartbeat.
+  Peer outbound queues are bounded; a full queue evicts the slow peer from
+  the room instead of blocking relay traffic.
 - Malformed JSON/schema errors are redacted to a stable
   `error{code:"malformed_frame"}` response. Detailed parse errors stay in
   server logs only.

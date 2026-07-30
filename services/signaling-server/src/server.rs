@@ -42,7 +42,7 @@ pub struct AppState {
 }
 
 /// Read [`RoomLimits`] from the environment, falling back to the defaults
-/// (`max_peers = 4`, `max_desktops = 1`).
+/// (`max_peers = 2`, `max_desktops = 1`).
 pub fn room_limits_from_env() -> RoomLimits {
     let default = RoomLimits::default();
     let max_peers = std::env::var("SIGNALING_MAX_PEERS_PER_ROOM")
@@ -79,7 +79,7 @@ pub fn router(state: AppState) -> Router {
     Router::new()
         .route("/healthz", get(healthz))
         .route("/metrics", get(metrics_handler))
-        .route("/v1/signaling", any(ws_upgrade))
+        .route("/v2/signaling", any(ws_upgrade))
         .layer(RequestBodyLimitLayer::new(MAX_BODY_BYTES))
         .layer(CorsLayer::permissive())
         .layer(TraceLayer::new_for_http())
@@ -288,7 +288,7 @@ mod tests {
     fn build_state_uses_requested_cap() {
         let state = build_state(7, RoomLimits::default(), Vec::new(), false);
         assert_eq!(state.ip_limits.snapshot().max_per_ip, 7);
-        assert_eq!(state.room_limits.max_peers, 4);
+        assert_eq!(state.room_limits.max_peers, 2);
         assert!(state.allowed_origins.is_empty());
         assert!(!state.trust_proxy_headers);
     }

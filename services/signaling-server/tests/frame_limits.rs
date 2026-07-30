@@ -15,7 +15,7 @@ use tokio_tungstenite::{
 type WsClient = WebSocketStream<MaybeTlsStream<TcpStream>>;
 
 async fn connect(addr: std::net::SocketAddr) -> WsClient {
-    let url = format!("ws://{}/v1/signaling", addr);
+    let url = format!("ws://{}/v2/signaling", addr);
     let (ws, _) = tokio_tungstenite::connect_async(url)
         .await
         .expect("ws connect");
@@ -44,6 +44,10 @@ async fn recv(client: &mut WsClient) -> ServerFrame {
 async fn oversized_frame_is_rejected_but_connection_survives() {
     let (addr, _handle) = serve_for_test().await.expect("server spawn");
     let mut client = connect(addr).await;
+    assert!(matches!(
+        recv(&mut client).await,
+        ServerFrame::Challenge { .. }
+    ));
 
     // ~9 KiB sits above the 8 KiB soft cap but below the 64 KiB hard cap, so
     // the server replies with a graceful error instead of closing the socket.
@@ -63,6 +67,10 @@ async fn oversized_frame_is_rejected_but_connection_survives() {
 async fn rate_limit_burst_triggers_error() {
     let (addr, _handle) = serve_for_test().await.expect("server spawn");
     let mut client = connect(addr).await;
+    assert!(matches!(
+        recv(&mut client).await,
+        ServerFrame::Challenge { .. }
+    ));
 
     // Token bucket: capacity 20, refill 10/s. Fire 40 pings back-to-back so
     // the bucket is guaranteed to drain before it can refill meaningfully.

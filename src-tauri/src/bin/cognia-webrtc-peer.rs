@@ -54,6 +54,7 @@ use app_lib::companion_api::{
     redemption_lru::RedemptionLru, sync_bridge::SyncBridge, sync_registry::SyncTableRegistry,
     CompanionState, SharedState,
 };
+use cognia_signaling_core::proto::RoomDescriptorV2;
 use parking_lot::RwLock;
 use tokio::io::{AsyncBufReadExt, BufReader};
 
@@ -64,7 +65,8 @@ use tokio::io::{AsyncBufReadExt, BufReader};
 struct Args {
     signaling_url: String,
     rendezvous_id: String,
-    rendezvous_secret: String,
+    room_descriptor: RoomDescriptorV2,
+    signing_private_key: String,
     device_id: String,
 }
 
@@ -79,7 +81,8 @@ where
 {
     let mut signaling_url = None;
     let mut rendezvous_id = None;
-    let mut rendezvous_secret = None;
+    let mut room_descriptor = None;
+    let mut signing_private_key = None;
     let mut device_id = None;
 
     let mut argv = args.into_iter().map(Into::into);
@@ -91,7 +94,14 @@ where
         match flag.as_str() {
             "--signaling" => signaling_url = Some(take("--signaling")?),
             "--rid" => rendezvous_id = Some(take("--rid")?),
-            "--secret" => rendezvous_secret = Some(take("--secret")?),
+            "--room-descriptor" => {
+                let raw = take("--room-descriptor")?;
+                room_descriptor = Some(
+                    serde_json::from_str(&raw)
+                        .map_err(|error| format!("--room-descriptor is invalid: {error}"))?,
+                );
+            }
+            "--signing-private-key" => signing_private_key = Some(take("--signing-private-key")?),
             "--device-id" => device_id = Some(take("--device-id")?),
             other => return Err(format!("unknown flag: {other}")),
         }
@@ -100,7 +110,8 @@ where
     Ok(Args {
         signaling_url: signaling_url.ok_or("--signaling is required")?,
         rendezvous_id: rendezvous_id.ok_or("--rid is required")?,
-        rendezvous_secret: rendezvous_secret.ok_or("--secret is required")?,
+        room_descriptor: room_descriptor.ok_or("--room-descriptor is required")?,
+        signing_private_key: signing_private_key.ok_or("--signing-private-key is required")?,
         device_id: device_id.ok_or("--device-id is required")?,
     })
 }
@@ -171,11 +182,15 @@ async fn main() -> Result<(), String> {
     // sufficient and a public STUN round-trip would only add flake.
     hub.bind(Arc::clone(&state));
     hub.configure(true, args.signaling_url.clone(), Vec::new());
-    hub.sync_devices(vec![DeviceRegistration {
-        device_id: args.device_id.clone(),
-        rendezvous_id: args.rendezvous_id.clone(),
-        rendezvous_secret: args.rendezvous_secret.clone(),
-    }]);
+    hub.sync_harness_device(
+        DeviceRegistration {
+            device_id: args.device_id.clone(),
+            rendezvous_id: args.rendezvous_id.clone(),
+            room_descriptor: args.room_descriptor.clone(),
+            signaling_key_ref: "webrtc-harness".into(),
+        },
+        args.signing_private_key.clone(),
+    )?;
 
     emit(serde_json::json!({ "kind": "ready", "deviceId": args.device_id }));
 
@@ -237,24 +252,35 @@ async fn main() -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::{parse_args_from, Args};
+    use cognia_signaling_core::proto::RoomDescriptorV2;
 
     #[test]
     fn parses_every_required_harness_argument() {
         assert_eq!(
             parse_args_from([
                 "--signaling",
-                "ws://127.0.0.1:8787/v1/signaling",
+                "ws://127.0.0.1:8787/v2/signaling",
                 "--rid",
                 "room-1",
-                "--secret",
-                "secret-1",
+                "--room-descriptor",
+                r#"{"v":2,"roomId":"room-1","roomNonce":"nonce","desktopSigningKey":"desktop","mobileSigningKey":"mobile","notAfter":1900000000000}"#,
+                "--signing-private-key",
+                "private-key",
                 "--device-id",
                 "device-1",
             ]),
             Ok(Args {
-                signaling_url: "ws://127.0.0.1:8787/v1/signaling".to_string(),
+                signaling_url: "ws://127.0.0.1:8787/v2/signaling".to_string(),
                 rendezvous_id: "room-1".to_string(),
-                rendezvous_secret: "secret-1".to_string(),
+                room_descriptor: RoomDescriptorV2 {
+                    v: 2,
+                    room_id: "room-1".into(),
+                    room_nonce: "nonce".into(),
+                    desktop_signing_key: "desktop".into(),
+                    mobile_signing_key: "mobile".into(),
+                    not_after: 1_900_000_000_000,
+                },
+                signing_private_key: "private-key".to_string(),
                 device_id: "device-1".to_string(),
             })
         );
@@ -272,8 +298,10 @@ mod tests {
                 "ws://localhost",
                 "--rid",
                 "room-1",
-                "--secret",
-                "secret-1",
+                "--room-descriptor",
+                r#"{"v":2,"roomId":"room-1","roomNonce":"nonce","desktopSigningKey":"desktop","mobileSigningKey":"mobile","notAfter":1900000000000}"#,
+                "--signing-private-key",
+                "private-key",
             ]),
             Err("--device-id is required".to_string())
         );
