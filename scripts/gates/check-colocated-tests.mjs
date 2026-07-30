@@ -136,11 +136,32 @@ export function diffAgainstBaseline(current, baseline, knownFiles) {
   return { added, fixed, stale }
 }
 
+/**
+ * Drop tracked paths that no longer exist on disk. Pure — existence is injected.
+ *
+ * `git ls-files` still lists a file whose deletion has not been staged yet. Such
+ * a path can neither hold an in-file test module nor be matched by a co-located
+ * test file, so scanning it reports a violation against a file on its way out.
+ * The same filter is what makes a *deleted test* stop satisfying its source.
+ *
+ * @param {string[]} files
+ * @param {(file: string) => boolean} exists
+ * @returns {string[]}
+ */
+export function keepExisting(files, exists) {
+  return files.filter((file) => exists(file))
+}
+
 /** @returns {string[]} */
 function listTrackedFiles() {
-  return execFileSync("git", ["ls-files"], { cwd: REPO_ROOT, encoding: "utf8", maxBuffer: 64e6 })
+  const tracked = execFileSync("git", ["ls-files"], {
+    cwd: REPO_ROOT,
+    encoding: "utf8",
+    maxBuffer: 64e6,
+  })
     .split("\n")
     .filter(Boolean)
+  return keepExisting(tracked, (file) => existsSync(join(REPO_ROOT, file)))
 }
 
 /** @returns {{ version: number, files: string[] }} */

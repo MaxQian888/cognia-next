@@ -21,6 +21,7 @@ const cleanWindowKeys: Array<keyof Window> = [
   "__cogniaSetSettings",
   "__cogniaE2EWebRtc",
   "__cogniaE2EWebRtcEvents",
+  "__cogniaE2EWebRtcReady",
   "__cogniaTestGlobalsReady",
 ] as Array<keyof Window>
 
@@ -134,8 +135,8 @@ describe("ExposeTestGlobals", () => {
     })
     unmount()
     for (const k of cleanWindowKeys) {
-      if (k === "__cogniaTestGlobalsReady") {
-        expect(window.__cogniaTestGlobalsReady).toBe(false)
+      if (k === "__cogniaTestGlobalsReady" || k === "__cogniaE2EWebRtcReady") {
+        expect((window as unknown as Record<string, unknown>)[k]).toBe(false)
       } else {
         expect((window as unknown as Record<string, unknown>)[k as string]).toBeUndefined()
       }

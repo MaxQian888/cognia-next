@@ -27,6 +27,7 @@
  */
 
 import process from "node:process"
+import { randomBytes, webcrypto } from "node:crypto"
 import { execFile as execFileCb } from "node:child_process"
 import { promisify } from "node:util"
 import { setTimeout as delay } from "node:timers/promises"
@@ -136,7 +137,7 @@ async function shareRoundtrip() {
 }
 
 function signalingWs(label) {
-  const ws = new WebSocket(`${SIGNALING_URL.replace(/^http/, "ws")}/v1/signaling`)
+  const ws = new WebSocket(`${SIGNALING_URL.replace(/^http/, "ws")}/v2/signaling`)
   const inbox = []
   const waiters = []
   ws.addEventListener("message", (e) => {
@@ -159,19 +160,105 @@ function signalingWs(label) {
   }
 }
 
+function signalingFields(fields) {
+  const parts = []
+  for (const value of fields) {
+    const field = Buffer.from(String(value))
+    const length = Buffer.alloc(4)
+    length.writeUInt32BE(field.byteLength)
+    parts.push(length, field)
+  }
+  return Buffer.concat(parts)
+}
+
+async function signalingIdentity() {
+  const pair = await webcrypto.subtle.generateKey({ name: "ECDSA", namedCurve: "P-256" }, true, [
+    "sign",
+    "verify",
+  ])
+  return {
+    privateKey: pair.privateKey,
+    publicKey: Buffer.from(await webcrypto.subtle.exportKey("raw", pair.publicKey)).toString(
+      "base64url"
+    ),
+  }
+}
+
+async function signalingRoom() {
+  const [desktop, mobile] = await Promise.all([signalingIdentity(), signalingIdentity()])
+  const roomNonce = randomBytes(16).toString("base64url")
+  const notAfter = Date.now() + 60_000
+  const digest = await webcrypto.subtle.digest(
+    "SHA-256",
+    signalingFields([2, roomNonce, desktop.publicKey, mobile.publicKey, notAfter])
+  )
+  const roomId = Buffer.from(digest).toString("base64url")
+  return {
+    descriptor: {
+      v: 2,
+      roomId,
+      roomNonce,
+      desktopSigningKey: desktop.publicKey,
+      mobileSigningKey: mobile.publicKey,
+      notAfter,
+    },
+    desktop,
+    mobile,
+  }
+}
+
+async function signalingSubscribe(room, role, challenge) {
+  const ecdh = await webcrypto.subtle.generateKey({ name: "ECDH", namedCurve: "P-256" }, true, [
+    "deriveBits",
+  ])
+  const proof = {
+    v: 2,
+    roomId: room.descriptor.roomId,
+    role,
+    sessionId: randomBytes(16).toString("base64url"),
+    epoch: randomBytes(16).toString("base64url"),
+    issuedAt: Date.now(),
+    challenge,
+    ecdhPublicKey: Buffer.from(await webcrypto.subtle.exportKey("raw", ecdh.publicKey)).toString(
+      "base64url"
+    ),
+  }
+  const signature = await webcrypto.subtle.sign(
+    { name: "ECDSA", hash: "SHA-256" },
+    room[role].privateKey,
+    signalingFields([
+      proof.v,
+      proof.roomId,
+      proof.role,
+      proof.sessionId,
+      proof.epoch,
+      proof.issuedAt,
+      proof.challenge,
+      proof.ecdhPublicKey,
+    ])
+  )
+  return {
+    kind: "subscribe",
+    descriptor: room.descriptor,
+    proof: { ...proof, signature: Buffer.from(signature).toString("base64url") },
+  }
+}
+
 async function signalingRelay() {
   const a = signalingWs("A")
   const b = signalingWs("B")
   await a.open()
   await b.open()
-  const sub = (role) => ({ kind: "subscribe", rendezvousId: "smoke", role, clientNonce: role })
-  a.send(sub("desktop"))
+  const [aChallenge, bChallenge, room] = await Promise.all([a.next(), b.next(), signalingRoom()])
+  check(aChallenge?.kind === "challenge", "A received challenge")
+  check(bChallenge?.kind === "challenge", "B received challenge")
+  a.send(await signalingSubscribe(room, "desktop", aChallenge.challenge))
   const aSubbed = await a.next()
   check(aSubbed?.kind === "subscribed", "A subscribed")
-  b.send(sub("mobile"))
+  b.send(await signalingSubscribe(room, "mobile", bChallenge.challenge))
   await b.next()
-  const payload = Buffer.from(JSON.stringify({ hi: 1 })).toString("base64url")
-  b.send({ kind: "relay", rendezvousId: "smoke", payload })
+  const payload = JSON.stringify({ ciphertext: "opaque" })
+  b.send({ kind: "relay", rendezvousId: room.descriptor.roomId, payload })
   // A receives peerJoined then relay (order: drain until relay).
   let relayed = null
   for (let i = 0; i < 4 && !relayed; i++) {

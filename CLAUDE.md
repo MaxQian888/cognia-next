@@ -192,6 +192,7 @@ One line per subsystem — the **full detail lives in the ADR** under `docs/cont
 | 桌面选区感知               | `crates/cognia-automation/src/automation/selection_events.rs`（元数据总线）、`platform/ax/observer.rs`（AXObserver）、`platform/shared/{screen_capture,screenshot}.rs`（录屏权限探测 + 全局矩形→显示器像素）                                                                                  | 无（进程内总线）                           | 0095                   |
 | 会话锚点 / 跳转 / 永久链接 | `lib/chat/{message-anchor,message-permalink,cross-session-jump}.ts`, `hooks/chat/{use-jump-flash,use-jump-history,use-message-permalink}.ts`, `components/chat/{conversation-jump-pill,jump-flash,branch-lineage-chip}.tsx`, `components/chat/minimap/`, `stores/chat/chat-viewport-store.ts` | 无（viewport store，非持久化）             | 0094                   |
 | 原生本地视频处理           | `crates/cognia-media/`（FFmpeg/FFprobe 发现、探测、抽帧、分析、去重、裁剪）；渲染端 `lib/plugin/api/media-api.ts`；命令注册 `src-tauri/src/lib.rs`                                                                                                                                            | 无（磁盘 + 进程内 MediaSourceRegistry）    | —                      |
+| 统一模板平台               | `lib/templates/`（contracts/catalog/service/runtime）、`lib/db/template-platform.ts`、`components/templates/`、`app/templates/`、`hooks/use-template-catalog.ts`、插件面 `lib/plugin/api/templates-api.ts`、启动 `components/providers/initializers/template-platform-initializer.tsx`        | Dexie v132（5 张表，其中 2 张仅本机）      | 0100                   |
 
 ### Cross-cutting hooks (reuse, don't reinvent)
 

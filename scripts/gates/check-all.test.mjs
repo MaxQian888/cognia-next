@@ -44,6 +44,7 @@ test("registry covers the read-only gates and excludes the unsorted i18n:sort:ch
     "release:sync-keys:check",
     "i18n:build:check",
     "audit:command-parity",
+    "audit:companion-command-manifest",
     "audit:e2e-governance",
     "audit:pii-boundaries",
     "lint:static-export",

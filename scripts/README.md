@@ -15,7 +15,7 @@ scripts/
 ```
 
 > One-shot migration scripts (e.g. the historical `add-wave*-i18n`,
-> `merge-provider-i18n`, `compute-mac-vector` helpers) are **not** kept here.
+> `merge-provider-i18n` and similar one-off helpers) are **not** kept here.
 > Once a migration has run, delete its script — it is recoverable from git
 > history if ever needed again.
 

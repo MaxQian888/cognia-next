@@ -139,7 +139,8 @@ declare global {
       connect(opts: {
         signalingUrl: string
         rendezvousId: string
-        rendezvousSecret: string
+        signalingRoomDescriptor: import("@/lib/signaling/v2-crypto").RoomDescriptorV2
+        signalingPrivateKeyJwk: JsonWebKey
         deviceId: string
         /** Loopback harness → host candidates suffice; default no STUN. */
         iceServers?: RTCIceServer[]
@@ -157,6 +158,8 @@ declare global {
     }
     /** Per-channel event log populated by `__cogniaE2EWebRtc.subscribe`. */
     __cogniaE2EWebRtcEvents?: Record<string, Array<{ seq: number; payload: unknown; at: number }>>
+    /** WebRTC-only seam readiness, independent of the much larger Dexie fixture bridge. */
+    __cogniaE2EWebRtcReady?: boolean
     __cogniaTestGlobalsReady?: boolean
   }
 }
@@ -169,6 +172,61 @@ export function ExposeTestGlobals(): null {
     let cancelled = false
 
     void (async () => {
+      // Install the real-pair WebRTC seam before opening Dexie. The broader
+      // E2E fixture bridge below can legitimately wait on a plugin schema
+      // upgrade, but that unrelated database work must not block a transport-
+      // only smoke test from opening a DataChannel.
+      {
+        const { TransportRtc } = await import("@/lib/tauri/transport-rtc")
+        const { importV2SigningPrivateKey } = await import("@/lib/signaling/v2-crypto")
+        let rtc: InstanceType<typeof TransportRtc> | null = null
+        window.__cogniaE2EWebRtcEvents = {}
+        window.__cogniaE2EWebRtc = {
+          async connect(opts) {
+            rtc?.close()
+            const signalingPrivateKey = await importV2SigningPrivateKey(opts.signalingPrivateKeyJwk)
+            rtc = new TransportRtc({
+              signalingUrl: opts.signalingUrl,
+              rendezvousId: opts.rendezvousId,
+              signalingRoomDescriptor: opts.signalingRoomDescriptor,
+              signalingPrivateKey,
+              deviceId: opts.deviceId,
+              role: "mobile",
+              rtcConfiguration: { iceServers: opts.iceServers ?? [] },
+              peerWaitTimeoutMs: opts.peerWaitTimeoutMs,
+              negotiationTimeoutMs: opts.negotiationTimeoutMs,
+            })
+            await rtc.connect()
+          },
+          getState() {
+            return rtc?.getState() ?? "idle"
+          },
+          async getSelectedCandidateKind() {
+            return rtc ? rtc.getSelectedCandidateKind() : "unknown"
+          },
+          async call(method, params) {
+            if (!rtc) throw new Error("__cogniaE2EWebRtc: not connected")
+            return rtc.call(method, params)
+          },
+          subscribe(event) {
+            if (!rtc) throw new Error("__cogniaE2EWebRtc: not connected")
+            const log = (window.__cogniaE2EWebRtcEvents![event] ??= [])
+            rtc.subscribe(event, (payload) => {
+              const seq = rtc?.getSeqCursor()[event] ?? 0
+              log.push({ seq, payload, at: Date.now() })
+            })
+          },
+          reconnectNow() {
+            return rtc ? rtc.reconnectNow() : "no-instance"
+          },
+          close() {
+            rtc?.close()
+            rtc = null
+          },
+        }
+        window.__cogniaE2EWebRtcReady = true
+      }
+
       const [
         { __resetDbForTesting, getDb, whenSeeded, activateAccountDatabase },
         // Route through the transport module, NOT companionStorage() directly:
@@ -448,60 +506,6 @@ export function ExposeTestGlobals(): null {
         }
       }
 
-      // ADR-0021 — real-pair WebRTC harness seam. Holds ONE live TransportRtc
-      // per page; the driver (`scripts/smoke/webrtc-pair-smoke.mjs`) creates it
-      // with real factories so the whole SDP/ICE/DTLS/SCTP path runs for real.
-      {
-        const { TransportRtc } = await import("@/lib/tauri/transport-rtc")
-        let rtc: InstanceType<typeof TransportRtc> | null = null
-        window.__cogniaE2EWebRtcEvents = {}
-        window.__cogniaE2EWebRtc = {
-          async connect(opts) {
-            // A fresh instance per connect() — the harness drives one handshake
-            // at a time, and reusing a torn-down instance would leak state.
-            rtc?.close()
-            rtc = new TransportRtc({
-              signalingUrl: opts.signalingUrl,
-              rendezvousId: opts.rendezvousId,
-              rendezvousSecret: opts.rendezvousSecret,
-              deviceId: opts.deviceId,
-              role: "mobile",
-              rtcConfiguration: { iceServers: opts.iceServers ?? [] },
-              peerWaitTimeoutMs: opts.peerWaitTimeoutMs,
-              negotiationTimeoutMs: opts.negotiationTimeoutMs,
-            })
-            await rtc.connect()
-          },
-          getState() {
-            return rtc?.getState() ?? "idle"
-          },
-          async getSelectedCandidateKind() {
-            return rtc ? rtc.getSelectedCandidateKind() : "unknown"
-          },
-          async call(method, params) {
-            if (!rtc) throw new Error("__cogniaE2EWebRtc: not connected")
-            return rtc.call(method, params)
-          },
-          subscribe(event) {
-            if (!rtc) throw new Error("__cogniaE2EWebRtc: not connected")
-            const log = (window.__cogniaE2EWebRtcEvents![event] ??= [])
-            rtc.subscribe(event, (payload) => {
-              // `getSeqCursor()` reflects the seq the transport just recorded
-              // for this channel, so the driver can assert monotonicity.
-              const seq = rtc?.getSeqCursor()[event] ?? 0
-              log.push({ seq, payload, at: Date.now() })
-            })
-          },
-          reconnectNow() {
-            return rtc ? rtc.reconnectNow() : "no-instance"
-          },
-          close() {
-            rtc?.close()
-            rtc = null
-          },
-        }
-      }
-
       // Rehydrate any previously-set mock base URLs so a navigation that
       // re-mounts the bridge doesn't drop the configuration.
       try {
@@ -542,6 +546,7 @@ export function ExposeTestGlobals(): null {
       window.__cogniaE2EWebRtc?.close()
       delete window.__cogniaE2EWebRtc
       delete window.__cogniaE2EWebRtcEvents
+      window.__cogniaE2EWebRtcReady = false
       window.__cogniaTestGlobalsReady = false
     }
   }, [])

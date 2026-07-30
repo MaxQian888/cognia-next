@@ -101,6 +101,11 @@ const REGISTRY = [
   { script: "build:packages", group: "artifacts", resource: "package-build" },
   { script: "skills:check", group: "artifacts" },
   { script: "plugin-node:check", group: "artifacts" },
+  // The mobile settings contract: one classification table generates the Rust
+  // write-allowlist and the OpenAPI patch enum. Before it existed those two
+  // were hand-maintained and had drifted (dead keys, fields writable up but
+  // never mirrored down, transport config classified backwards).
+  { script: "settings-sync:check", group: "artifacts" },
   { script: "plugin-convert:check", group: "artifacts" },
   { script: "plugin:contract:check", group: "artifacts" },
   { script: "ide:check", group: "artifacts" },
@@ -121,6 +126,7 @@ const REGISTRY = [
   { script: "audit:silent-flags", group: "audit" },
   { script: "audit:pii-boundaries", group: "audit" },
   { script: "audit:command-parity", group: "audit" },
+  { script: "audit:companion-command-manifest", group: "audit" },
   { script: "audit:e2e-governance", group: "audit" },
   { script: "audit:docs-links", group: "audit" },
   { script: "audit:colocated-tests", group: "audit" },
@@ -145,6 +151,10 @@ const REGISTRY = [
   { script: "scripts:test:i18n", group: "gate-tests" },
   { script: "scripts:test:plugin", group: "gate-tests" },
   { script: "scripts:test:ci", group: "gate-tests" },
+  // `node --test` over mobile/scripts/ — the iOS project/plist configurators
+  // `mobile:sync:ios` runs. Jest ignores `scripts/**/*.test.mjs`, so these had
+  // no runner at all and their assertions never executed.
+  { script: "scripts:test:mobile", group: "gate-tests" },
   // `node --test` over web/scripts/ — the evidence pipeline and the two capture
   // scripts. Introduced by ADR-0092 but never registered, so it ran nowhere.
   { script: "web:test:scripts", group: "gate-tests" },

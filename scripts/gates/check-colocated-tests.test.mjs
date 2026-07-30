@@ -19,6 +19,7 @@ import {
   findViolations,
   isGatedRustSource,
   isGatedTsSource,
+  keepExisting,
   main,
   readBaseline,
   rustHasInlineTests,
@@ -85,6 +86,25 @@ test("expectedTestPaths offers every accepted co-located name", () => {
 test("rustHasInlineTests detects the in-file test module", () => {
   assert.ok(rustHasInlineTests("fn a() {}\n#[cfg(test)]\nmod tests { }"))
   assert.ok(!rustHasInlineTests("fn a() {}"))
+})
+
+test("keepExisting drops a tracked path whose working-tree copy is already gone", () => {
+  // An unstaged deletion is still listed by `git ls-files`, and a file that is
+  // not on disk can never gain the test the gate would demand of it.
+  const onDisk = new Set(["lib/a.ts", "lib/a.test.ts"])
+  assert.deepEqual(
+    keepExisting(["lib/a.ts", "lib/a.test.ts", "src-tauri/src/gone.rs"], (f) => onDisk.has(f)),
+    ["lib/a.ts", "lib/a.test.ts"]
+  )
+})
+
+test("keepExisting makes a deleted test stop satisfying its source", () => {
+  // The other half of the same filter: dropping the test path means the source
+  // it used to cover is reported, rather than passing on a file that is gone.
+  const files = keepExisting(["lib/a.ts", "lib/a.test.ts"], (f) => f === "lib/a.ts")
+  assert.deepEqual(findViolations(files, { has: (p) => files.includes(p), readRust: () => "" }), [
+    "lib/a.ts",
+  ])
 })
 
 test("findViolations reports sources whose co-located test is absent", () => {
