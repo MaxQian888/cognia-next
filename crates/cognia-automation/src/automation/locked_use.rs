@@ -14,6 +14,7 @@ use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
+use tokio::sync::mpsc::{self, UnboundedSender};
 
 use super::input_monitor::{InputMonitor, SafetyInputSubscription};
 
@@ -111,6 +112,12 @@ pub enum LockedUseError {
     ConfirmationMismatch,
 }
 
+#[derive(Debug, Clone, Error, PartialEq, Eq)]
+pub enum LockedUseSafetyError {
+    #[error("Locked Use safety monitor is no longer running")]
+    MonitorStopped,
+}
+
 #[derive(Debug, Clone)]
 struct ActiveLease {
     claims: UnlockLeaseClaims,
@@ -131,12 +138,25 @@ pub struct LockedUseSafetyMonitor {
     task: tokio::task::JoinHandle<()>,
 }
 
+#[derive(Clone)]
+pub struct LockedUseSafetyHandle {
+    relock_sender: UnboundedSender<RelockCause>,
+}
+
+impl LockedUseSafetyHandle {
+    pub fn relock_now(&self, cause: RelockCause) -> Result<(), LockedUseSafetyError> {
+        self.relock_sender
+            .send(cause)
+            .map_err(|_| LockedUseSafetyError::MonitorStopped)
+    }
+}
+
 impl LockedUseSafetyMonitor {
     pub fn start(
         input_monitor: InputMonitor,
         controller: Arc<Mutex<LockedUseController>>,
         on_relock: Arc<dyn Fn(RelockCause) + Send + Sync>,
-    ) -> Result<Self, String> {
+    ) -> Result<(Self, LockedUseSafetyHandle), String> {
         let subscription = input_monitor.subscribe_safety()?;
         Ok(Self::from_subscription(
             input_monitor,
@@ -151,8 +171,9 @@ impl LockedUseSafetyMonitor {
         mut subscription: SafetyInputSubscription,
         controller: Arc<Mutex<LockedUseController>>,
         on_relock: Arc<dyn Fn(RelockCause) + Send + Sync>,
-    ) -> Self {
+    ) -> (Self, LockedUseSafetyHandle) {
         let mut receiver = subscription.take_receiver();
+        let (relock_sender, mut relock_receiver) = mpsc::unbounded_channel();
         let task = tokio::spawn(async move {
             loop {
                 let wait = {
@@ -178,6 +199,9 @@ impl LockedUseSafetyMonitor {
                         } else {
                             RelockCause::DisplayProtectionFailure
                         })
+                    }
+                    requested = relock_receiver.recv() => {
+                        Some(requested.unwrap_or(RelockCause::ServiceCrash))
                     }
                     _ = tokio::time::sleep(wait) => {
                         let expired = controller
@@ -206,11 +230,14 @@ impl LockedUseSafetyMonitor {
                 }
             }
         });
-        Self {
-            input_monitor,
-            subscription: Some(subscription),
-            task,
-        }
+        (
+            Self {
+                input_monitor,
+                subscription: Some(subscription),
+                task,
+            },
+            LockedUseSafetyHandle { relock_sender },
+        )
     }
 }
 
@@ -581,7 +608,7 @@ mod tests {
         let subscription = input_monitor.subscribe_safety_for_test();
         let callback_fired = Arc::new(tokio::sync::Notify::new());
         let callback_signal = callback_fired.clone();
-        let _guard = LockedUseSafetyMonitor::from_subscription(
+        let (_guard, _safety) = LockedUseSafetyMonitor::from_subscription(
             input_monitor.clone(),
             subscription,
             controller.clone(),
@@ -621,7 +648,7 @@ mod tests {
         let subscription = input_monitor.subscribe_safety_for_test();
         let callback_fired = Arc::new(tokio::sync::Notify::new());
         let callback_signal = callback_fired.clone();
-        let _guard = LockedUseSafetyMonitor::from_subscription(
+        let (_guard, _safety) = LockedUseSafetyMonitor::from_subscription(
             input_monitor,
             subscription,
             controller.clone(),
@@ -638,5 +665,59 @@ mod tests {
             controller.lock().state(),
             LockedUseState::LatchedUntilManualUnlock
         );
+    }
+
+    #[tokio::test]
+    async fn native_safety_failures_relock_immediately_and_stop_pending_actions() {
+        for expected in [
+            RelockCause::RemoteDisconnect,
+            RelockCause::GuardianCrash,
+            RelockCause::ServiceCrash,
+            RelockCause::DisplayProtectionFailure,
+            RelockCause::TaskCancelled,
+        ] {
+            let (mut unlocked, signing, sender, turn) = fixture();
+            let now = unix_time_ms();
+            unlocked
+                .begin_unlock(&sender, signed_lease(&signing, now), &turn, now)
+                .unwrap();
+
+            let controller = Arc::new(Mutex::new(unlocked));
+            let input_monitor = InputMonitor::default();
+            let subscription = input_monitor.subscribe_safety_for_test();
+            let (cause_sender, cause_receiver) = tokio::sync::oneshot::channel();
+            let cause_sender = Arc::new(Mutex::new(Some(cause_sender)));
+            let callback_sender = cause_sender.clone();
+            let (_guard, safety) = LockedUseSafetyMonitor::from_subscription(
+                input_monitor,
+                subscription,
+                controller.clone(),
+                Arc::new(move |cause| {
+                    if let Some(sender) = callback_sender.lock().take() {
+                        let _ = sender.send(cause);
+                    }
+                }),
+            );
+
+            safety.relock_now(expected).unwrap();
+            let actual = tokio::time::timeout(Duration::from_secs(1), cause_receiver)
+                .await
+                .expect("native safety relock callback timed out")
+                .expect("native safety relock callback was dropped");
+            assert_eq!(actual, expected);
+            assert_eq!(
+                controller.lock().state(),
+                LockedUseState::LatchedUntilManualUnlock
+            );
+            assert_eq!(
+                controller.lock().authorize_action(
+                    "com.apple.Notes",
+                    "digest",
+                    Some("digest"),
+                    now
+                ),
+                Err(LockedUseError::NotReady)
+            );
+        }
     }
 }
