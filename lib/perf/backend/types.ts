@@ -80,6 +80,7 @@ export type ManagedSubsystem =
   | "codeServer"
   | "pluginHost"
   | "tunnel"
+  | "backgroundJob"
 
 /** Normalized lifecycle state of a managed process (matches Rust `ManagedStatus`). */
 export type ManagedStatus = "starting" | "running" | "stopping" | "stopped" | "error"

@@ -54,18 +54,24 @@ test("coreFiles suite is included on the ai-sdk path when enabled + tracked", ()
     "TaskList",
     "TaskUpdate",
     "list_shells",
+    "Monitor",
+    "monitor_cancel",
+    "monitor_list",
     "exit_plan_mode",
   ])
 })
 
-test("coreFiles suite is OFF on the anthropic path unless the escape hatch is set", () => {
+test("Anthropic keeps native file tools but still receives the host-backed monitor tools", () => {
   const defaultDefs = collectCogniaToolDefs({
     enabled: { coreFiles: true },
     readTracker: fakeTracker,
     cwd: ".",
     dispatchPath: "anthropic",
   })
-  assert.equal(defaultDefs.length, 0)
+  assert.deepEqual(
+    defaultDefs.map((definition) => definition.name),
+    ["Monitor", "monitor_cancel", "monitor_list"]
+  )
 
   const hatchDefs = collectCogniaToolDefs({
     enabled: { coreFiles: true, coreFilesOnAnthropic: true },
@@ -82,10 +88,10 @@ test("coreFiles suite requires a readTracker", () => {
     cwd: ".",
     dispatchPath: "ai-sdk",
   })
-  // Without a readTracker the core file suite is withheld; only the ai-sdk
-  // exit_plan_mode signal remains.
+  // Without a readTracker the file suite is withheld. Host-backed monitor
+  // tools do not read files and remain available alongside exit_plan_mode.
   assert.deepEqual(
     defs.map((d) => d.name),
-    ["exit_plan_mode"]
+    ["Monitor", "monitor_cancel", "monitor_list", "exit_plan_mode"]
   )
 })

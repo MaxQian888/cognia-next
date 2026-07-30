@@ -451,6 +451,12 @@ async fn run_serve(
     let data_dir = store_data_dir();
     app_lib::task_workspace::install(data_dir.clone())
         .map_err(|error| format!("task workspace: {error}"))?;
+    // The headless host serves the same sidecar `host_rpc` protocol as the
+    // desktop. Install the shared Rust supervisor before the sidecar can
+    // accept its first request, so background commands and durable monitors
+    // have identical ownership, persistence, and boot-reconcile semantics.
+    app_lib::jobs::install(data_dir.join("cognia"))
+        .map_err(|error| format!("background-job supervisor: {error}"))?;
     push_creds::install(FilePushCredStore::new(&data_dir));
     if let Err(err) = push_creds::reinstall_persisted_dispatchers() {
         eprintln!("[cognia-server] push-creds reinstall: {err}");
@@ -653,6 +659,11 @@ async fn run_serve(
         services.code_server.stop_all().await;
         let _ = services.gateway.stop();
         kill_sidecar(services.sidecar.clone()).await;
+    }
+    if let Some(supervisor) = app_lib::jobs::supervisor() {
+        if let Err(error) = supervisor.shutdown().await {
+            log::warn!("jobs: headless shutdown failed: {error}");
+        }
     }
     let _ = handle.shutdown.send(());
     // Brief grace period so axum-server's graceful_shutdown(Some(10s)) has

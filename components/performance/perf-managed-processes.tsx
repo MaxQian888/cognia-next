@@ -59,13 +59,14 @@ import type {
 const SUBSYSTEM_RANK: Record<ManagedSubsystem, number> = {
   externalAgent: 0,
   chatSidecar: 1,
-  mcpServer: 2,
-  codeServer: 3,
-  pluginHost: 4,
-  acpTerminal: 5,
-  integratedTerminal: 6,
-  headlessTerminal: 7,
-  tunnel: 8,
+  backgroundJob: 2,
+  mcpServer: 3,
+  codeServer: 4,
+  pluginHost: 5,
+  acpTerminal: 6,
+  integratedTerminal: 7,
+  headlessTerminal: 8,
+  tunnel: 9,
 }
 
 const SUBSYSTEM_ORDER = (Object.keys(SUBSYSTEM_RANK) as ManagedSubsystem[]).sort(

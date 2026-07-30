@@ -3,6 +3,14 @@
 // Approval gates live with the parent (canUseTool), not here. Spawned PIDs are
 // recorded in the shared `trackedPids` registry so terminate_process can refuse
 // to kill processes the agent didn't start (unless allowUntracked=true).
+//
+// When a background-job supervisor is available (`ctx.bgShells`), `detached`
+// starts route through it instead of `spawn({detached:true, stdio:"ignore"})`
+// + `unref()`. That old shape produced a genuine orphan daemon: no output was
+// captured, nothing tracked it across a sidecar restart, and it outlived the
+// app itself. Routing through the supervisor keeps the documented contract
+// ("return immediately") while making the child reapable, observable, and
+// bounded by the app's lifetime.
 
 import { z } from "zod"
 import { tool } from "@anthropic-ai/claude-agent-sdk"
@@ -39,12 +47,34 @@ const startProcessShape = {
     .describe("Timeout in seconds (only relevant when detached=false)."),
 }
 
-async function execStartProcess(args) {
+async function execStartProcess(args, ctx = {}) {
+  const { bgShells } = ctx
   try {
     if (!isProgramAllowed(args.program)) {
       return toolError(`program not on allowlist: ${args.program}`)
     }
     if (args.detached) {
+      // Preferred path: a supervised background job. `detached` here means
+      // "return immediately" (the tool's documented contract), NOT "outlive
+      // the session" — so the job stays session-owned.
+      if (bgShells) {
+        const entry = await bgShells.spawnBackground({
+          command: [args.program, ...args.args].join(" "),
+          shell: args.program,
+          shellArgs: args.args,
+          cwd: args.cwd,
+          label: args.program,
+        })
+        return toolText({
+          pid: entry.pid ?? null,
+          jobId: entry.id,
+          detached: true,
+          program: args.program,
+          note: `Output is captured — read it with bash_output({ shellId: "${entry.id}" }) and stop it with kill_shell or terminate_process.`,
+        })
+      }
+      // Fallback (no supervisor, e.g. the standalone tool bridge): the legacy
+      // fire-and-forget spawn. Output is lost and the child is unsupervised.
       const { spawn } = await import("node:child_process")
       const child = spawn(args.program, args.args, {
         cwd: args.cwd,
@@ -92,12 +122,16 @@ async function execStartProcess(args) {
   }
 }
 
-export const startProcessTool = tool(
-  "start_process",
-  "Start a process. Program must be on the allowlist. HIGH-RISK — requires user approval.",
-  startProcessShape,
-  execStartProcess
-)
+/** Supervisor-less defaults, kept so the static category and tests still work. */
+export const startProcessTool = createStartProcessTool()
+export function createStartProcessTool(ctx = {}) {
+  return tool(
+    "start_process",
+    "Start a process. Program must be on the allowlist. HIGH-RISK — requires user approval.",
+    startProcessShape,
+    (args) => execStartProcess(args, ctx)
+  )
+}
 
 // ---- terminate_process ----------------------------------------------------
 
@@ -112,8 +146,27 @@ const terminateProcessShape = {
     ),
 }
 
-async function execTerminateProcess(args) {
+async function execTerminateProcess(args, ctx = {}) {
+  const { bgShells } = ctx
   try {
+    // A supervised job is killed through the supervisor so the WHOLE process
+    // group goes, not just the pid the model happens to hold. Signalling the
+    // pid directly would leave its children alive — the exact defect this
+    // subsystem exists to fix.
+    if (bgShells?.killByPid) {
+      const outcome = await bgShells.killByPid(args.pid)
+      if (outcome.matched) {
+        return outcome.ok
+          ? toolText({
+              pid: args.pid,
+              jobId: outcome.jobId,
+              terminated: true,
+              processGroup: true,
+            })
+          : toolError(outcome.reason ?? `could not terminate job for pid ${args.pid}`)
+      }
+      // Not a supervised job — fall through to the raw-signal path below.
+    }
     if (!trackedPids.has(args.pid) && !args.allowUntracked) {
       return toolError(
         `pid ${args.pid} was not started by this session — pass allowUntracked=true to override`
@@ -128,11 +181,14 @@ async function execTerminateProcess(args) {
   }
 }
 
-export const terminateProcessTool = tool(
-  "terminate_process",
-  "Terminate a process by PID. HIGH-RISK — requires user approval. Refuses untracked PIDs unless allowUntracked=true.",
-  terminateProcessShape,
-  execTerminateProcess
-)
+export const terminateProcessTool = createTerminateProcessTool()
+export function createTerminateProcessTool(ctx = {}) {
+  return tool(
+    "terminate_process",
+    "Terminate a process by PID. HIGH-RISK — requires user approval. Refuses untracked PIDs unless allowUntracked=true.",
+    terminateProcessShape,
+    (args) => execTerminateProcess(args, ctx)
+  )
+}
 
 export { execStartProcess, execTerminateProcess }

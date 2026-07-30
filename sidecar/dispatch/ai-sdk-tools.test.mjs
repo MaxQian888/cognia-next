@@ -752,9 +752,37 @@ test("coreFiles tools are registered on the ai-sdk path when enabled + tracked",
     "TaskList",
     "TaskUpdate",
     "list_shells",
+    "Monitor",
+    "monitor_cancel",
+    "monitor_list",
   ]) {
     assert.ok(tools[name], `${name} registered`)
   }
+})
+
+test("AI-SDK monitor tools reach host_rpc with the active session owner", async () => {
+  const calls = []
+  const tools = buildAiSdkTools({
+    sendOptions: { builtinTools: { coreFiles: true }, cwd: "." },
+    emit: () => {},
+    sessionId: "session-monitor",
+    hostRpc: {
+      async call(method, params) {
+        calls.push({ method, params })
+        return { monitors: [{ id: "monitor-1", status: "waiting" }] }
+      },
+    },
+  })
+
+  const result = JSON.parse(await tools.monitor_list.execute({}))
+
+  assert.deepEqual(result.monitors, [{ id: "monitor-1", status: "waiting" }])
+  assert.deepEqual(calls, [
+    {
+      method: "monitors.list",
+      params: { owner: { kind: "session", sessionId: "session-monitor" } },
+    },
+  ])
 })
 
 test("structured tasks persist when the ai-sdk tool map is rebuilt between turns", async () => {

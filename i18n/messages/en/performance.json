@@ -49,6 +49,7 @@
     },
     "subsystems": {
       "acpTerminal": "Agent terminals",
+      "backgroundJob": "Background jobs",
       "chatSidecar": "Chat sidecar",
       "codeServer": "Pro IDE (code-server)",
       "externalAgent": "External agents",

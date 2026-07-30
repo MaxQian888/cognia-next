@@ -57,6 +57,10 @@ members = [
   "crates/cognia-mcp-server",
   "crates/cognia-external-agent",
   "crates/cognia-task-workspace",
+  # Background-job supervisor: process-group-safe spawn/kill for the built-in
+  # agent's `bash(run_in_background)` and for scheduled tasks. Linked by both
+  # src-tauri and the headless `cognia-server` binary.
+  "crates/cognia-jobs",
 ]
 exclude = [
   "services/signaling-server",

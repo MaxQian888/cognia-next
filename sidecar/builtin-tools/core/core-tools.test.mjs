@@ -5,6 +5,7 @@ import { createCoreTools, CORE_TOOL_NAMES, CORE_MUTATING_TOOL_NAMES } from "./co
 import { createReadTracker } from "./read-tracker.mjs"
 import { todoWriteShape, TODO_WRITE_NAME, createTodoWriteTool } from "./todo.mjs"
 import { SESSION_TASK_TOOL_NAMES, createSessionTaskStore } from "./tasks.mjs"
+import { MONITOR_TOOL_NAMES } from "./monitor.mjs"
 import { z } from "zod"
 
 test("createCoreTools emits tools in the fixed CORE_TOOL_NAMES order", () => {
@@ -26,20 +27,21 @@ test("every core tool def is well-shaped (name/description/inputSchema/handler)"
   }
 })
 
-test("mutating subset is exactly edit/multi_edit/write/bash/NotebookEdit/apply_patch", () => {
+test("mutating subset includes the shell-capable Monitor tool", () => {
   assert.deepEqual(
     [...CORE_MUTATING_TOOL_NAMES],
-    ["edit", "multi_edit", "write", "bash", "NotebookEdit", "apply_patch"]
+    ["edit", "multi_edit", "write", "bash", "NotebookEdit", "apply_patch", "Monitor"]
   )
   for (const n of CORE_MUTATING_TOOL_NAMES) assert.ok(CORE_TOOL_NAMES.includes(n))
 })
 
-test("new session task tools are appended after apply_patch (prompt-cache stability)", () => {
+test("new session task and monitor tools are appended after apply_patch (prompt-cache stability)", () => {
   const patchIndex = CORE_TOOL_NAMES.indexOf("apply_patch")
   assert.ok(patchIndex >= 0)
   assert.deepEqual(CORE_TOOL_NAMES.slice(patchIndex + 1), [
     ...SESSION_TASK_TOOL_NAMES,
     "list_shells",
+    ...MONITOR_TOOL_NAMES,
   ])
 })
 

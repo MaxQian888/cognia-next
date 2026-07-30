@@ -13183,6 +13183,7 @@
       },
       "subsystems": {
         "acpTerminal": "Agent 终端",
+        "backgroundJob": "后台作业",
         "chatSidecar": "聊天 sidecar",
         "codeServer": "Pro IDE（code-server）",
         "externalAgent": "外部 Agent",
@@ -28047,6 +28048,9 @@
       "coreKillShell": "终止由 bash(run_in_background) 启动的后台 shell。",
       "coreListShells": "列出后台 shell 的状态、工作目录、运行时间和退出信息。",
       "coreLs": "列出目录条目（目录在前）。",
+      "coreMonitor": "等待后台作业、输出匹配、Shell 条件或上游任务；长时间等待会转为可持久化的后台监视。",
+      "coreMonitorCancel": "取消由当前会话创建的持久化后台监视。",
+      "coreMonitorList": "列出当前会话中等待中及已结束的后台监视。",
       "coreMultiEdit": "对同一文件原子地应用多处字符串替换。",
       "coreNotebookEdit": "按单元格 id 或编号编辑 Jupyter notebook 单元格（替换 / 插入 / 删除）。",
       "coreRead": "带行号读取文本文件；大文件分页；可列目录。",

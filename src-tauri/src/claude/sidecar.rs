@@ -516,6 +516,22 @@ pub async fn spawn(host: Arc<dyn SidecarHost>, state: SidecarState) -> Result<()
                                     });
                                     continue;
                                 }
+                                // `host_rpc` is answered HERE, in Rust, and never
+                                // forwarded to the renderer. That is the whole
+                                // point of the frame: background-job calls have
+                                // to work on a headless host (no renderer at
+                                // all) and must not pay an extra network hop
+                                // when a remote client is driving the desktop.
+                                // Spawned so the reader keeps draining — a
+                                // long-polling `jobs.wait` would otherwise block
+                                // every other event behind it.
+                                if value.get("type").and_then(|t| t.as_str()) == Some("host_rpc") {
+                                    let state = state.clone();
+                                    tokio::spawn(async move {
+                                        answer_host_rpc(state, value).await;
+                                    });
+                                    continue;
+                                }
                                 // A2UI bridge dispatches go on a dedicated channel so the
                                 // a2ui store can listen without filtering every sidecar event.
                                 if value.get("type").and_then(|t| t.as_str())
@@ -636,6 +652,49 @@ pub async fn spawn(host: Arc<dyn SidecarHost>, state: SidecarState) -> Result<()
     }
 
     Ok(())
+}
+
+/// Answer one `host_rpc` frame and write the result back down the sidecar's
+/// stdin.
+///
+/// Deliberately terminal: unlike `plugin_tool_exec`, this frame is never
+/// emitted onward to the renderer. Background jobs are owned by Rust, so the
+/// renderer has nothing to contribute and a headless host has no renderer to
+/// ask.
+///
+/// A failed dispatch still writes a frame — an unanswered `rpcId` would leave
+/// the sidecar's caller hanging until its own timeout, turning a clean error
+/// into a stall.
+async fn answer_host_rpc(state: SidecarState, value: Value) {
+    let Some(rpc_id) = value.get("rpcId").and_then(|v| v.as_str()) else {
+        log::warn!("host_rpc frame without an rpcId; dropping");
+        return;
+    };
+    let method = value.get("method").and_then(|v| v.as_str()).unwrap_or("");
+    let params = value.get("params").cloned().unwrap_or(Value::Null);
+
+    let reply = match crate::jobs::dispatch_host_rpc(method, &params).await {
+        Ok(result) => serde_json::json!({
+            "type": "host_rpc_result",
+            "rpcId": rpc_id,
+            "ok": true,
+            "result": result,
+        }),
+        Err(error) => {
+            log::warn!("host_rpc {method} failed: {error}");
+            serde_json::json!({
+                "type": "host_rpc_result",
+                "rpcId": rpc_id,
+                "ok": false,
+                "error": error,
+            })
+        }
+    };
+    if let Err(e) = state.write_command(&reply).await {
+        // The sidecar is gone; its pending calls are rejected on its own side
+        // when stdin closes, so there is nothing further to do here.
+        log::warn!("could not deliver host_rpc_result for {method}: {e}");
+    }
 }
 
 /// Handle a `permission_request` event from the sidecar. PreToolUse hooks

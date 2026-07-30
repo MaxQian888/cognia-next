@@ -15,7 +15,7 @@ import data from "../../lib/settings/builtin-tools-data.json" with { type: "json
 
 import { fileExtrasTools } from "./file-ops/index.mjs"
 import { gitTools } from "./git/index.mjs"
-import { processTools } from "./process/index.mjs"
+import { processTools, createProcessTools } from "./process/index.mjs"
 import { environmentTools } from "./environment.mjs"
 import { shellAdvancedTools } from "./shell-advanced.mjs"
 import { terminalReplTools } from "./terminal-repl-tool.mjs"
@@ -25,6 +25,7 @@ import { webcloneTools } from "./webclone/index.mjs"
 import { createLspTools } from "./lsp.mjs"
 import { createCodeGraphTools } from "./code/tools.mjs"
 import { createCoreTools } from "./core/core-tools.mjs"
+import { createMonitorTools } from "./core/monitor.mjs"
 import { createExitPlanTool } from "./exit-plan.mjs"
 import {
   DEFAULT_BUILTIN_TOOL_TIMEOUT_MS,
@@ -36,6 +37,14 @@ import { wrapDefsWithResultCap } from "./result-cap.mjs"
 const TOOLS_BY_CATEGORY = {
   fileExtras: fileExtrasTools,
   git: gitTools,
+  /**
+   * Supervisor-bound at collect time: `start_process` / `terminate_process`
+   * route through the session's background-job supervisor when one exists, so
+   * a `detached` start becomes a reapable, output-capturing job instead of an
+   * orphan daemon. Listed here (rather than pushed after the loop) to hold its
+   * REGISTRATION POSITION — tool order is part of the cached prompt prefix.
+   * The static array is the no-supervisor fallback.
+   */
   process: processTools,
   environment: environmentTools,
   shellAdvanced: shellAdvancedTools,
@@ -141,15 +150,18 @@ export function collectCogniaToolDefs({
   cwd,
   dispatchPath,
   bgShells,
+  hostRpc,
+  sessionId,
   model,
   provider,
 } = {}) {
   if (!enabled || typeof enabled !== "object") return []
   const tools = []
   for (const [category, toolList] of Object.entries(TOOLS_BY_CATEGORY)) {
-    if (enabled[category]) {
-      tools.push(...toolList)
-    }
+    if (!enabled[category]) continue
+    // `process` is the one static category with a session-bound variant; swap
+    // it in HERE so it keeps its registration position (see the map entry).
+    tools.push(...(category === "process" ? createProcessTools({ bgShells }) : toolList))
   }
   // The `lsp` category is resolver-bound (per-session), so it is not part of
   // the static TOOLS_BY_CATEGORY map — build its tools on demand when the
@@ -180,10 +192,18 @@ export function collectCogniaToolDefs({
         lspResolver,
         bgShells,
         taskStore,
+        hostRpc,
+        sessionId,
         model,
         provider,
       })
     )
+  } else if (enabled.coreFiles) {
+    // Anthropic supplies native file/shell tools, and an AI-SDK session can
+    // withhold the file suite when no read tracker is available. Neither path
+    // has a native Monitor equivalent, so keep the three supervisor-backed
+    // monitor tools available under the same category toggle.
+    tools.push(...createMonitorTools({ hostRpc, sessionId }))
   }
   // The cross-provider plan-ready signal tool. The Anthropic path uses the
   // SDK-native `ExitPlanMode`, so register ours ONLY on the explicit ai-sdk
@@ -207,6 +227,8 @@ export function buildCogniaToolsServer({
   cwd,
   dispatchPath,
   bgShells,
+  hostRpc,
+  sessionId,
   model,
   provider,
   toolExecutionTimeoutMs,
@@ -222,6 +244,8 @@ export function buildCogniaToolsServer({
     cwd,
     dispatchPath,
     bgShells,
+    hostRpc,
+    sessionId,
     model,
     provider,
   })

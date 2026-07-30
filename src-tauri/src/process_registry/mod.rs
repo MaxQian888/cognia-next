@@ -64,6 +64,11 @@ pub enum ManagedSubsystem {
     /// The cloudflared tunnel. Not a cognia binary, but a child we spawn and
     /// the only one that exposes a public hostname, so it belongs on the list.
     Tunnel,
+    /// Background jobs — `bash(run_in_background)` and scheduled-task work,
+    /// owned by `cognia-jobs`. Previously invisible here: they were spawned
+    /// inside the sidecar, so they were the sidecar's grandchildren and no
+    /// subsystem registry knew they existed.
+    BackgroundJob,
 }
 
 /// Lifecycle state of a managed process, normalized across subsystems.
@@ -263,6 +268,29 @@ fn tunnel_row(info: &TunnelManagedInfo) -> ManagedProcess {
     }
 }
 
+/// Build a row for one running background job.
+///
+/// `detail` carries the owner so the panel can distinguish a chat-session job
+/// from one a scheduled task left running — the distinction that makes an
+/// unexpected long-lived process explicable rather than alarming.
+fn background_job_row(job: &cognia_jobs::JobRecord) -> ManagedProcess {
+    let detail = match &job.owner {
+        cognia_jobs::JobOwner::Session { session_id } => format!("session {session_id}"),
+        cognia_jobs::JobOwner::ScheduledTask { task_id } => format!("scheduled task {task_id}"),
+        cognia_jobs::JobOwner::App => "detached".to_string(),
+    };
+    ManagedProcess {
+        subsystem: ManagedSubsystem::BackgroundJob,
+        id: job.id.clone(),
+        name: job.label.clone().unwrap_or_else(|| job.command.clone()),
+        pid: job.pid,
+        status: ManagedStatus::Running,
+        can_kill: true,
+        can_restart: false,
+        detail: Some(detail),
+    }
+}
+
 fn sidecar_row(pid: Option<u32>, ready: bool) -> ManagedProcess {
     ManagedProcess {
         subsystem: ManagedSubsystem::ChatSidecar,
@@ -367,6 +395,17 @@ pub async fn collect(app: &AppHandle) -> Vec<ManagedProcess> {
         }
     }
 
+    // Background jobs. Read from the process-global supervisor rather than
+    // Tauri state, because the same registry has to work under the headless
+    // binary where there is no `AppHandle` to hang state off.
+    if let Some(sup) = crate::jobs::supervisor() {
+        if let Ok(jobs) = sup.list(None) {
+            for job in jobs.iter().filter(|j| !j.status.is_terminal()) {
+                out.push(background_job_row(job));
+            }
+        }
+    }
+
     out
 }
 
@@ -378,6 +417,17 @@ async fn kill_subsystem(
     id: &str,
 ) -> Result<(), String> {
     match subsystem {
+        // The panel is a user surface, so it may kill across owners — passing
+        // `None` as the requester deliberately bypasses the per-session scoping
+        // that constrains an agent.
+        ManagedSubsystem::BackgroundJob => {
+            let sup = crate::jobs::supervisor()
+                .ok_or_else(|| "background jobs are not available".to_string())?;
+            sup.kill(id, None)
+                .await
+                .map(|_| ())
+                .map_err(|e| e.to_string())
+        }
         ManagedSubsystem::AcpTerminal => {
             let st = app.state::<AcpTerminalState>();
             st.inner().0.kill(id).await?;
@@ -486,7 +536,7 @@ pub async fn list_managed_processes(app: AppHandle) -> Result<Vec<ManagedProcess
 /// This drift is not hypothetical — code-server was added to [`collect`] but
 /// not to the shutdown path, and leaked a Node server holding a port past every
 /// app exit until this list existed.
-pub const ALL_SUBSYSTEMS: [ManagedSubsystem; 9] = [
+pub const ALL_SUBSYSTEMS: [ManagedSubsystem; 10] = [
     ManagedSubsystem::ExternalAgent,
     ManagedSubsystem::AcpTerminal,
     ManagedSubsystem::IntegratedTerminal,
@@ -496,6 +546,7 @@ pub const ALL_SUBSYSTEMS: [ManagedSubsystem; 9] = [
     ManagedSubsystem::CodeServer,
     ManagedSubsystem::PluginHost,
     ManagedSubsystem::Tunnel,
+    ManagedSubsystem::BackgroundJob,
 ];
 
 /// Position of `subsystem` in [`ALL_SUBSYSTEMS`]. Exhaustive by construction.
@@ -514,6 +565,7 @@ const fn subsystem_index(subsystem: ManagedSubsystem) -> usize {
         ManagedSubsystem::CodeServer => 6,
         ManagedSubsystem::PluginHost => 7,
         ManagedSubsystem::Tunnel => 8,
+        ManagedSubsystem::BackgroundJob => 9,
     }
 }
 
@@ -568,6 +620,21 @@ async fn teardown_subsystem(app: &AppHandle, subsystem: ManagedSubsystem) {
         ManagedSubsystem::Tunnel => {
             if let Some(st) = app.try_state::<crate::companion_api::CompanionServerState>() {
                 st.inner().tunnel.stop();
+            }
+        }
+        // App exit reaps every background job, including `detach`ed ones.
+        // Detaching buys survival past the CHAT SESSION, never past the app —
+        // leaving orphan daemons behind is the failure mode this subsystem
+        // exists to end.
+        ManagedSubsystem::BackgroundJob => {
+            if let Some(sup) = crate::jobs::supervisor() {
+                match sup.shutdown().await {
+                    Ok(ids) if !ids.is_empty() => {
+                        log::info!("jobs: killed {} background job(s) on exit", ids.len());
+                    }
+                    Ok(_) => {}
+                    Err(e) => log::warn!("jobs: shutdown failed: {e}"),
+                }
             }
         }
     }
@@ -778,9 +845,64 @@ mod tests {
         assert_eq!(row.detail.as_deref(), Some("https://x.trycloudflare.com"));
     }
 
+    fn job(owner: cognia_jobs::JobOwner) -> cognia_jobs::JobRecord {
+        cognia_jobs::JobRecord {
+            id: "job-1".into(),
+            command: "pnpm dev".into(),
+            cwd: "/repo".into(),
+            owner,
+            status: cognia_jobs::JobStatus::Running,
+            exit_code: None,
+            pid: Some(4242),
+            started_at_ms: 1,
+            ended_at_ms: None,
+            total_output_bytes: 0,
+            dropped_output_bytes: 0,
+            label: None,
+        }
+    }
+
+    #[test]
+    fn background_job_row_is_kill_only_and_falls_back_to_the_command() {
+        let row = background_job_row(&job(cognia_jobs::JobOwner::Session {
+            session_id: "s1".into(),
+        }));
+        assert_eq!(row.subsystem, ManagedSubsystem::BackgroundJob);
+        assert_eq!(row.id, "job-1");
+        assert_eq!(row.name, "pnpm dev", "no label ⇒ show the command");
+        assert_eq!(row.pid, Some(4242));
+        assert!(row.can_kill && !row.can_restart);
+    }
+
+    #[test]
+    fn background_job_row_labels_the_owner_so_a_stray_process_is_explicable() {
+        // "Why is this still running?" is answered by the owner, which is the
+        // one thing the old sidecar-owned shells could never tell anyone.
+        let session = background_job_row(&job(cognia_jobs::JobOwner::Session {
+            session_id: "s1".into(),
+        }));
+        assert_eq!(session.detail.as_deref(), Some("session s1"));
+
+        let scheduled = background_job_row(&job(cognia_jobs::JobOwner::ScheduledTask {
+            task_id: "nightly".into(),
+        }));
+        assert_eq!(scheduled.detail.as_deref(), Some("scheduled task nightly"));
+
+        let detached = background_job_row(&job(cognia_jobs::JobOwner::App));
+        assert_eq!(detached.detail.as_deref(), Some("detached"));
+    }
+
+    #[test]
+    fn background_job_row_prefers_an_explicit_label_over_the_raw_command() {
+        let mut rec = job(cognia_jobs::JobOwner::App);
+        rec.label = Some("dev server".into());
+        assert_eq!(background_job_row(&rec).name, "dev server");
+    }
+
     #[test]
     fn new_subsystems_serialize_camel_case() {
         let s = |v: &ManagedSubsystem| serde_json::to_string(v).unwrap();
+        assert_eq!(s(&ManagedSubsystem::BackgroundJob), "\"backgroundJob\"");
         assert_eq!(s(&ManagedSubsystem::PluginHost), "\"pluginHost\"");
         assert_eq!(
             s(&ManagedSubsystem::HeadlessTerminal),
@@ -794,7 +916,7 @@ mod tests {
         // `teardown_subsystem` is exhaustive by `match`, but the list it is
         // driven from is not. Pin the two together so a new variant cannot be
         // collected without also being shut down (the code-server leak).
-        assert_eq!(ALL_SUBSYSTEMS.len(), 9);
+        assert_eq!(ALL_SUBSYSTEMS.len(), 10);
         for (i, subsystem) in ALL_SUBSYSTEMS.iter().enumerate() {
             assert_eq!(
                 subsystem_index(*subsystem),

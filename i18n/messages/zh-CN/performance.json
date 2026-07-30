@@ -49,6 +49,7 @@
     },
     "subsystems": {
       "acpTerminal": "Agent 终端",
+      "backgroundJob": "后台作业",
       "chatSidecar": "聊天 sidecar",
       "codeServer": "Pro IDE（code-server）",
       "externalAgent": "外部 Agent",

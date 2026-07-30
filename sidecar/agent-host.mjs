@@ -46,6 +46,7 @@ import { capabilityError, commandSupported } from "./dispatch/runtime-adapter.mj
 import { createEnvelopeEmitter } from "./dispatch/event-envelope.mjs"
 import { isControlMethod, controlArgs, buildControlResponse } from "./dispatch/control.mjs"
 import { createFeatureCallHandler } from "./dispatch/feature-call.mjs"
+import { createHostRpc } from "./host-rpc.mjs"
 
 // Resolve sidecar + SDK versions for the `ready` payload. createRequire is
 // used so we can read package.json without taking JSON-import dependency on
@@ -96,6 +97,11 @@ function log(level, message) {
 }
 
 const featureCalls = createFeatureCallHandler({ emit })
+
+// Direct request/response channel to the Rust host, answered in
+// `src-tauri/src/claude/sidecar.rs` without touching the renderer. Background
+// jobs ride this so they work identically on desktop, headless, and remote.
+const hostRpc = createHostRpc({ emit })
 
 // ---- Per-session state ----------------------------------------------------
 
@@ -210,6 +216,7 @@ function startSession(sessionId, firstPrompt, sendOptions = {}) {
     sendOptions,
     emit: wrappedEmit,
     log,
+    hostRpc,
   })
   if (!session) return null
   ownerRef.session = session
@@ -774,6 +781,10 @@ function startReadLoop() {
       case "plugin_tool_response":
         handlePluginToolResponse(msg)
         break
+      case "host_rpc_result":
+        // Answered by Rust directly (never by the renderer) — see host-rpc.mjs.
+        hostRpc.resolveResult(msg)
+        break
       case "tool_result_decision":
         handleToolResultDecision(msg)
         break
@@ -795,6 +806,9 @@ function startReadLoop() {
   })
   rl.on("close", () => {
     // Parent closed our stdin — shut down all sessions gracefully.
+    // Fail in-flight host RPCs first: their replies can never arrive now, and
+    // a tool awaiting one would otherwise hang until its own timeout.
+    hostRpc.rejectAll("sidecar stdin closed")
     for (const id of Array.from(sessions.keys())) {
       handleClose({ sessionId: id })
     }

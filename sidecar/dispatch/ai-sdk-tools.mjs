@@ -375,6 +375,9 @@ export function createToolPermissionGate({
       toolName,
       displayName: toolName,
       input,
+      ...(sendOptions.remoteExecutionContext
+        ? { remoteExecutionContext: sendOptions.remoteExecutionContext }
+        : {}),
     })
     const decision = await new Promise((resolve) => {
       let onAbort = null
@@ -579,7 +582,7 @@ function builtinDefToAiSdkTool(def, gate, timeoutMs, reviewToolOutput) {
  */
 function pluginToolToAiSdkTool(
   manifest,
-  { emit, sessionId, pendingPluginToolCalls, gate, reviewToolOutput }
+  { emit, sessionId, pendingPluginToolCalls, gate, reviewToolOutput, remoteExecutionContext }
 ) {
   const namespaced = `mcp__${PLUGIN_TOOLS_SERVER_NAME}__${manifest.name}`
   return tool({
@@ -597,6 +600,7 @@ function pluginToolToAiSdkTool(
         toolUseId,
         name: manifest.name,
         args: effective,
+        ...(remoteExecutionContext ? { remoteExecutionContext } : {}),
       })
       const response = await pending
       if (response && response.error) {
@@ -663,6 +667,7 @@ export function buildAiSdkTools({
   codeGraphResolver,
   readTracker,
   bgShells,
+  hostRpc,
   taskStore,
   doomGuard: providedDoomGuard,
   reviewToolOutput,
@@ -720,6 +725,8 @@ export function buildAiSdkTools({
     cwd: sendOptions.cwd,
     dispatchPath: "ai-sdk",
     bgShells,
+    hostRpc,
+    sessionId,
     taskStore,
     model: sendOptions.model,
     provider: sendOptions.provider,
@@ -762,6 +769,7 @@ export function buildAiSdkTools({
           pendingPluginToolCalls,
           gate,
           reviewToolOutput,
+          remoteExecutionContext: sendOptions.remoteExecutionContext,
         }),
         { serverName: PLUGIN_TOOLS_SERVER_NAME }
       )

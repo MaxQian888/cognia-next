@@ -41,6 +41,7 @@ import { makeLazyCodeGraphResolver } from "./codegraph-resolver-factory.mjs"
 import { createDoomLoopGuard } from "./doom-loop.mjs"
 import { createReadTracker } from "../builtin-tools/core/read-tracker.mjs"
 import { createBgShellRegistry } from "../builtin-tools/core/bash-sessions.mjs"
+import { createHostBgShellRegistry } from "../builtin-tools/core/bash-host-sessions.mjs"
 import { createSessionTaskStore } from "../builtin-tools/core/tasks.mjs"
 import { createStderrLogSink, buildMcpLogEvent } from "./mcp-log.mjs"
 import { createMcpAutoReconnector } from "./mcp-auto-reconnect.mjs"
@@ -128,7 +129,7 @@ export function drainPendingRoundTrips(
  *   log: (level: "info"|"warn"|"error", message: string) => void,
  * }} params
  */
-export function dispatchAnthropic({ sessionId, firstPrompt, sendOptions, emit, log }) {
+export function dispatchAnthropic({ sessionId, firstPrompt, sendOptions, emit, log, hostRpc }) {
   const inputStream = makeInputStream()
   // Verbose canUseTool tracing (shares the host's COGNIA_SIDECAR_VERBOSE gate).
   // Surfaces as frontend `log` events so a tool-call hang can be diagnosed
@@ -198,9 +199,12 @@ export function dispatchAnthropic({ sessionId, firstPrompt, sendOptions, emit, l
   // (the agent SDK ships native Grep/Read/Edit/Bash), but the tracker is
   // threaded unconditionally so the hatch works without extra plumbing.
   const readTracker = createReadTracker()
-  // Per-session background-shell registry (bash run_in_background). Killed at
-  // session teardown so no background process outlives the chat (no orphans).
-  const bgShells = createBgShellRegistry()
+  // Background shells (bash run_in_background). Host-backed when a `host_rpc`
+  // channel is available — see the note in `ai-sdk.mjs` — otherwise the
+  // in-process registry.
+  const bgShells = hostRpc
+    ? createHostBgShellRegistry({ hostRpc, sessionId })
+    : createBgShellRegistry()
   // Used only when the coreFiles-on-Anthropic escape hatch is enabled; native
   // Claude sessions otherwise keep using the Agent SDK's own structured tasks.
   const taskStore = createSessionTaskStore()
@@ -214,6 +218,8 @@ export function dispatchAnthropic({ sessionId, firstPrompt, sendOptions, emit, l
     cwd: sendOptions.cwd,
     dispatchPath: "anthropic",
     bgShells,
+    hostRpc,
+    sessionId,
     taskStore,
     model: sendOptions.model,
     provider: sendOptions.provider ?? "anthropic",
@@ -268,6 +274,7 @@ export function dispatchAnthropic({ sessionId, firstPrompt, sendOptions, emit, l
       pendingPluginToolCalls,
       alwaysLoad: serverAlwaysLoad(PLUGIN_TOOLS_SERVER_NAME),
       alwaysLoadToolNames,
+      remoteExecutionContext: sendOptions.remoteExecutionContext,
     })
     if (pluginToolsServer) {
       mergedMcpServers = Object.prototype.hasOwnProperty.call(withA2UI, PLUGIN_TOOLS_SERVER_NAME)
@@ -503,6 +510,9 @@ export function dispatchAnthropic({ sessionId, firstPrompt, sendOptions, emit, l
         blockedPath: ctx.blockedPath,
         decisionReason: ctx.decisionReason,
         suggestions: ctx.suggestions,
+        ...(sendOptions.remoteExecutionContext
+          ? { remoteExecutionContext: sendOptions.remoteExecutionContext }
+          : {}),
       })
       if (CANUSETOOL_DEBUG) {
         log(
@@ -686,7 +696,7 @@ export function dispatchAnthropic({ sessionId, firstPrompt, sendOptions, emit, l
       // Close the code-graph store + file watcher.
       codeGraph.dispose()
       // Kill any background shells the agent left running this session.
-      bgShells.killAll()
+      void bgShells.killAll()
     }
   })()
 

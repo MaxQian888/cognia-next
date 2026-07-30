@@ -19,6 +19,7 @@ import { makeLazyLspResolver } from "./lsp-resolver-factory.mjs"
 import { makeLazyCodeGraphResolver } from "./codegraph-resolver-factory.mjs"
 import { createReadTracker } from "../builtin-tools/core/read-tracker.mjs"
 import { createBgShellRegistry } from "../builtin-tools/core/bash-sessions.mjs"
+import { createHostBgShellRegistry } from "../builtin-tools/core/bash-host-sessions.mjs"
 import { createSessionTaskStore } from "../builtin-tools/core/tasks.mjs"
 import { resolveAdapter } from "./protocol-adapters/registry.mjs"
 import { buildModel } from "./protocol-adapters/ai-sdk-adapter.mjs"
@@ -320,6 +321,7 @@ export function dispatchAiSdk({
   sendOptions,
   emit,
   log,
+  hostRpc,
   streamText: streamTextOverride,
   buildMcpTools: buildMcpToolsOverride,
 }) {
@@ -389,8 +391,17 @@ export function dispatchAiSdk({
     emit,
     sessionId,
     pendingProtocolExecs,
+    remoteExecutionContext: sendOptions.remoteExecutionContext,
     onCancel: (execId, reason) => {
-      emit({ type: "protocol_adapter_cancel", sessionId, execId, reason })
+      emit({
+        type: "protocol_adapter_cancel",
+        sessionId,
+        execId,
+        reason,
+        ...(sendOptions.remoteExecutionContext
+          ? { remoteExecutionContext: sendOptions.remoteExecutionContext }
+          : {}),
+      })
     },
   })
   if (!protocolAdapter) {
@@ -530,9 +541,15 @@ export function dispatchAiSdk({
   // also fixes the previous omission where lsp_* tools never reached the
   // ai-sdk bridge).
   const readTracker = createReadTracker()
-  // Per-session background-shell registry (bash run_in_background); killed at
-  // teardown so no background process outlives the session.
-  const bgShells = createBgShellRegistry()
+  // Background shells (bash run_in_background). Prefer the Rust supervisor:
+  // it kills whole process groups, survives a sidecar restart, and is visible
+  // to the Job Center, a remote client, and a headless host. Fall back to the
+  // in-process registry only when no host channel exists (e.g. the standalone
+  // tool bridge), where session-scoped, in-memory shells are all that is
+  // possible anyway.
+  const bgShells = hostRpc
+    ? createHostBgShellRegistry({ hostRpc, sessionId })
+    : createBgShellRegistry()
   // Per-session structured task graph (TaskCreate/Get/List/Update). Unlike the
   // legacy TodoWrite payload, ids and dependency edges persist across turns.
   const taskStore = createSessionTaskStore()
@@ -605,6 +622,9 @@ export function dispatchAiSdk({
         toolName: toolName ?? "",
         result: current,
         isError: isError === true,
+        ...(sendOptions.remoteExecutionContext
+          ? { remoteExecutionContext: sendOptions.remoteExecutionContext }
+          : {}),
       })
     })
   }
@@ -1024,6 +1044,7 @@ export function dispatchAiSdk({
           codeGraphResolver: codeGraph.codeGraphResolver,
           readTracker,
           bgShells,
+          hostRpc,
           taskStore,
           doomGuard: toolDoomGuard,
           // PostToolUse rewrite at the execute layer (opt-in) — see
@@ -1442,7 +1463,7 @@ export function dispatchAiSdk({
     .finally(() => {
       // Session loop ended (input closed or fatal error) — kill any background
       // shells the agent left running so none outlive the session.
-      bgShells.killAll()
+      void bgShells.killAll()
       // Signal the host to retire this multi-turn session entry. Per-turn
       // `session_ended` events keep the session alive (so context accumulates);
       // this fires exactly once, when the loop genuinely ends.

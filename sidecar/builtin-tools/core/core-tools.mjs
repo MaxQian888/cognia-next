@@ -26,6 +26,7 @@ import { createTodoWriteTool, TODO_WRITE_NAME } from "./todo.mjs"
 import { createSessionTaskTools, SESSION_TASK_TOOL_NAMES } from "./tasks.mjs"
 import { createNotebookEditTool, NOTEBOOK_EDIT_NAME } from "./notebook-edit.mjs"
 import { createApplyPatchTool } from "./apply-patch.mjs"
+import { createMonitorTools, MONITOR_TOOL_NAMES } from "./monitor.mjs"
 
 /**
  * Fixed registration order — do not reorder (prompt-cache stability). New
@@ -47,6 +48,7 @@ export const CORE_TOOL_NAMES = Object.freeze([
   "apply_patch",
   ...SESSION_TASK_TOOL_NAMES,
   "list_shells",
+  ...MONITOR_TOOL_NAMES,
 ])
 
 /** Core tools that mutate state (restricted mode / IM channels deny these). */
@@ -57,11 +59,13 @@ export const CORE_MUTATING_TOOL_NAMES = Object.freeze([
   "bash",
   NOTEBOOK_EDIT_NAME,
   "apply_patch",
+  "Monitor",
 ])
 
 /**
  * @param {{ cwd?: string, readTracker?: unknown, lspResolver?: unknown,
  *           bgShells?: unknown, taskStore?: unknown,
+ *           hostRpc?: unknown, sessionId?: string,
  *           model?: string, provider?: string }} ctx
  *   `bgShells` is the per-session background-shell registry (Module: async
  *   bash); `model`/`provider` let `read` decide whether to inline images.
@@ -73,10 +77,12 @@ export function createCoreTools({
   lspResolver,
   bgShells,
   taskStore,
+  hostRpc,
+  sessionId,
   model,
   provider,
 } = {}) {
-  const ctx = { cwd, readTracker, lspResolver, bgShells, model, provider }
+  const ctx = { cwd, readTracker, lspResolver, bgShells, hostRpc, sessionId, model, provider }
   const tools = [
     createGrepTool(ctx),
     createGlobTool(ctx),
@@ -93,6 +99,7 @@ export function createCoreTools({
     createApplyPatchTool(ctx),
     ...createSessionTaskTools(taskStore),
     createListShellsTool(ctx),
+    ...createMonitorTools(ctx),
   ]
   // Defensive: the emitted order must match the public constant.
   for (let i = 0; i < tools.length; i++) {

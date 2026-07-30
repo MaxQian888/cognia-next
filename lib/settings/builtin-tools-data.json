@@ -237,6 +237,27 @@
           "riskLevel": "low",
           "requiresApproval": false,
           "alwaysLoad": true
+        },
+        {
+          "name": "Monitor",
+          "descriptionKey": "tools.coreMonitor",
+          "riskLevel": "high",
+          "requiresApproval": true,
+          "alwaysLoad": true
+        },
+        {
+          "name": "monitor_cancel",
+          "descriptionKey": "tools.coreMonitorCancel",
+          "riskLevel": "low",
+          "requiresApproval": false,
+          "alwaysLoad": true
+        },
+        {
+          "name": "monitor_list",
+          "descriptionKey": "tools.coreMonitorList",
+          "riskLevel": "low",
+          "requiresApproval": false,
+          "alwaysLoad": true
         }
       ]
     },

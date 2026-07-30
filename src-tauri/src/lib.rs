@@ -49,6 +49,9 @@ pub use cognia_git as git;
 mod github;
 pub mod headless;
 mod hooks;
+// Background-job supervisor wiring (process-global, so the headless binary
+// shares it). Thin: the substrate itself lives in `crates/cognia-jobs`.
+pub mod jobs;
 mod keyring_secrets;
 mod logging;
 // Native local-video pipeline lives in its own subsystem crate; the app crate
@@ -563,6 +566,7 @@ pub fn run() {
             claude::commands::claude_interrupt,
             claude::commands::claude_compact,
             claude::commands::claude_restore,
+            claude::commands::claude_set_mode,
             claude::commands::claude_approve,
             claude::commands::claude_plugin_tool_response,
             claude::commands::claude_tool_result_decision,
@@ -708,6 +712,8 @@ pub fn run() {
             fleet::island_window::island_set_tucked,
             fleet::island_window::island_list_monitors,
             fleet::island_window::island_set_monitor,
+            fleet::island_window::island_get_hide_on_fullscreen,
+            fleet::island_window::island_set_hide_on_fullscreen,
             fleet::island_window::island_debug_geometry,
             fleet::island_window::island_restore,
             tray::commands::tray_set_menu,
@@ -964,6 +970,8 @@ pub fn run() {
             companion_api::commands::companion_unrevoke_device,
             companion_api::commands::companion_set_remote_control,
             companion_api::commands::companion_seed_remote_control,
+            companion_api::commands::companion_set_agent_control,
+            companion_api::commands::companion_seed_agent_control,
             companion_api::commands::companion_sync_pull_response,
             companion_api::commands::companion_message_response,
             companion_api::commands::companion_desktop_write_response,
@@ -1738,6 +1746,17 @@ pub fn run() {
                         }
                     }
                 });
+            }
+
+            // Background-job supervisor. Installed synchronously and BEFORE
+            // the sidecar can serve its first `host_rpc`, because installation
+            // is also boot reconcile: rows left `running` by a previous
+            // lifetime must become `interrupted` before any spawn, or the
+            // concurrency caps count ghosts and reject real work.
+            if let Ok(dir) = app.path().app_data_dir() {
+                if let Err(e) = jobs::install(dir.join("cognia")) {
+                    log::warn!("background-job supervisor unavailable: {e}");
+                }
             }
 
             // Inbound LLM gateway auto-start (ADR-0043 M3). Mirrors the

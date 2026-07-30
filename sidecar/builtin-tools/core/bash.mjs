@@ -62,6 +62,12 @@ export const bashShape = {
     .describe(
       "Run the command in the background and return a shellId immediately instead of waiting. Poll its output with bash_output and stop it with kill_shell. Use for dev servers, watchers, and long builds."
     ),
+  detach: z
+    .boolean()
+    .optional()
+    .describe(
+      "Keep the background command running after this chat session ends (it still stops when the app exits). Requires run_in_background. Use only when the work genuinely must outlive the conversation, such as a long build you will check back on later."
+    ),
 }
 
 export const bashOutputShape = {
@@ -72,7 +78,17 @@ export const bashOutputShape = {
   filter: z
     .string()
     .optional()
-    .describe("Optional regular expression; only output lines matching it are returned."),
+    .describe(
+      "Optional regular expression; only output lines matching it are returned. Combined with wait_ms this waits UNTIL a line matches (or the shell exits), which is the way to block on a readiness line such as 'server listening'."
+    ),
+  from_offset: z
+    .number()
+    .int()
+    .min(0)
+    .optional()
+    .describe(
+      "Absolute byte offset to read from, for looking back at earlier output. Omit to continue from where the last read left off. Reads never consume, so an earlier range can always be re-read."
+    ),
   wait_ms: z
     .number()
     .int()
@@ -181,16 +197,23 @@ export function createBashTool({ cwd, bgShells, shell }) {
             "background execution is not available in this session (no background-shell registry)"
           )
         }
-        const entry = bgShells.spawnBackground({
+        // Host-backed registries answer over `host_rpc`, so this is async; the
+        // in-process fallback returns synchronously and awaits harmlessly.
+        const entry = await bgShells.spawnBackground({
           command: args.command,
           shell,
           shellArgs,
           cwd: workdir,
           isWin,
           env,
+          detach: args.detach === true,
+          label: args.description,
         })
+        const scope = args.detach
+          ? " It will keep running after this session ends, until the app exits."
+          : ""
         return toolText(
-          `background shell started: ${entry.id} (status: running). Poll output with bash_output({ shellId: "${entry.id}" }) and stop it with kill_shell.`
+          `background shell started: ${entry.id} (status: running).${scope} Poll output with bash_output({ shellId: "${entry.id}" }) and stop it with kill_shell.`
         )
       }
 
@@ -332,18 +355,27 @@ export function createBashOutputTool({ bgShells }) {
       filter: args.filter,
       maxChars: args.max_chars,
       waitMs: args.wait_ms,
+      fromOffset: args.from_offset,
     }
+    // A long-poll only makes sense from the live cursor; an explicit look-back
+    // offset is a history read and returns immediately.
     const r =
-      args.wait_ms && typeof bgShells.waitForOutput === "function"
+      args.wait_ms && args.from_offset === undefined && typeof bgShells.waitForOutput === "function"
         ? await bgShells.waitForOutput(args.shellId, readOptions)
-        : bgShells.read(args.shellId, readOptions)
-    if (!r.ok) return toolError(`no background shell with id ${args.shellId}`)
+        : await bgShells.read(args.shellId, readOptions)
+    if (!r.ok) return toolError(r.reason ?? `no background shell with id ${args.shellId}`)
     const status =
-      r.status === "exited"
-        ? `(status: exited${r.exitCode != null ? `, exit code ${r.exitCode}` : ""})`
+      r.status === "exited" || (r.status && r.status !== "running")
+        ? `(status: ${r.status}${r.exitCode != null ? `, exit code ${r.exitCode}` : ""})`
         : "(status: running)"
     const body = r.data && r.data.length > 0 ? r.data.trimEnd() : "(no new output)"
-    return toolText(`${body}\n${status}`)
+    // Surfacing the offset lets the model page back deliberately instead of
+    // guessing, now that reads are non-destructive.
+    const cursor =
+      r.nextOffset != null
+        ? `\n(next offset: ${r.nextOffset}${r.hasMore ? ", more available" : ""})`
+        : ""
+    return toolText(`${body}\n${status}${cursor}`)
   }
 
   return tool(
@@ -360,7 +392,7 @@ export function createListShellsTool({ bgShells }) {
     if (!bgShells) {
       return toolError("background shells are not available in this session")
     }
-    return toolText(JSON.stringify({ shells: bgShells.list() }, null, 2))
+    return toolText(JSON.stringify({ shells: await bgShells.list() }, null, 2))
   }
 
   return tool(
@@ -383,8 +415,8 @@ export function createKillShellTool({ bgShells }) {
     if (!bgShells) {
       return toolError("background shells are not available in this session")
     }
-    const r = bgShells.kill(args.shellId)
-    if (!r.ok) return toolError(`no background shell with id ${args.shellId}`)
+    const r = await bgShells.kill(args.shellId)
+    if (!r.ok) return toolError(r.reason ?? `no background shell with id ${args.shellId}`)
     return toolText(
       `killed background shell ${args.shellId}${r.exitCode != null ? ` (exit code ${r.exitCode})` : ""}`
     )

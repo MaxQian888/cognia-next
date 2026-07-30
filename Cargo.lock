@@ -2045,6 +2045,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "cognia-jobs"
+version = "0.1.0"
+dependencies = [
+ "bytes",
+ "libc",
+ "log",
+ "parking_lot",
+ "regex",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.19",
+ "tokio",
+ "uuid",
+]
+
+[[package]]
 name = "cognia-mcp-server"
 version = "0.1.0"
 dependencies = [
@@ -2052,12 +2070,14 @@ dependencies = [
  "chrono",
  "cognia-automation",
  "futures-util",
+ "hex",
  "log",
  "parking_lot",
  "rand 0.8.7",
  "reqwest 0.12.28",
  "serde",
  "serde_json",
+ "sha2 0.10.9",
  "subtle",
  "tauri",
  "thiserror 2.0.19",
@@ -2125,6 +2145,7 @@ dependencies = [
  "cognia-gateway",
  "cognia-git",
  "cognia-instrument",
+ "cognia-jobs",
  "cognia-mcp-server",
  "cognia-media",
  "cognia-net",
@@ -2158,6 +2179,7 @@ dependencies = [
  "git2",
  "gray_matter",
  "hex",
+ "hkdf 0.12.4",
  "hmac 0.13.0",
  "ignore",
  "jsonwebtoken",
@@ -2181,6 +2203,7 @@ dependencies = [
  "opentelemetry-otlp",
  "opentelemetry_sdk",
  "oslog",
+ "p256 0.13.2",
  "parking_lot",
  "pbkdf2 0.13.0",
  "portable-pty",
@@ -2197,6 +2220,7 @@ dependencies = [
  "serde_json",
  "serde_urlencoded",
  "sha1 0.11.0",
+ "sha2 0.10.9",
  "sha2 0.11.0",
  "subtle",
  "sysinfo",
@@ -2411,22 +2435,31 @@ dependencies = [
 name = "cognia-signaling-core"
 version = "0.1.0"
 dependencies = [
+ "base64 0.22.1",
+ "p256 0.13.2",
  "serde",
  "serde_json",
+ "sha2 0.10.9",
 ]
 
 [[package]]
 name = "cognia-skills"
 version = "0.1.0"
 dependencies = [
+ "base64 0.22.1",
  "dirs 6.0.0",
+ "hex",
+ "parking_lot",
  "regex",
  "reqwest 0.12.28",
  "serde",
  "serde_json",
+ "sha2 0.10.9",
  "tauri",
  "tempfile",
  "tokio",
+ "unicode-normalization",
+ "uuid",
 ]
 
 [[package]]
