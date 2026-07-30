@@ -1,4 +1,5 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
+import { StrictMode } from "react"
 
 const settingsGet = jest.fn()
 let mockReducedMotion = false
@@ -55,9 +56,12 @@ jest.mock("motion/react", () => {
 })
 
 import {
+  COMPUTER_USE_PIP_LAYOUT_STORAGE_KEY,
   clearComputerUsePipState,
+  getComputerUsePipSnapshot,
   publishComputerUseActivity,
   setComputerUsePipRunEnded,
+  suppressComputerUsePipForCapture,
 } from "@/lib/automation/computer-use-pip"
 import { makeSessionSlice, useChatStore } from "@/stores/chat"
 import { ComputerUsePictureInPicture, resizeGrowth } from "./computer-use-picture-in-picture"
@@ -82,6 +86,7 @@ function seedStatus(
 }
 
 beforeEach(() => {
+  window.localStorage.removeItem(COMPUTER_USE_PIP_LAYOUT_STORAGE_KEY)
   mockReducedMotion = false
   settingsGet.mockReset().mockResolvedValue({ alwaysHidePictureInPicture: false })
   useChatStore.setState({ sessions: {} })
@@ -164,7 +169,7 @@ describe("ComputerUsePictureInPicture", () => {
     )
 
     expect(await screen.findByText(/waiting for the first screenshot/i)).toBeInTheDocument()
-    expect(screen.getByText(/left_click/i)).toBeInTheDocument()
+    expect(screen.getByText(/left-click/i)).toBeInTheDocument()
 
     act(() => {
       publishComputerUseActivity(SID, "left_click", { ok: false, error: "permission denied" })
@@ -185,10 +190,10 @@ describe("ComputerUsePictureInPicture", () => {
       </div>
     )
     const region = await screen.findByRole("region", { name: /computer use/i })
-    await waitFor(() => expect(region).toHaveStyle({ left: "726px", top: "526px" }))
+    await waitFor(() => expect(region).toHaveStyle({ left: "726px", top: "490px" }))
 
     fireEvent.click(screen.getByRole("button", { name: /move picture in picture/i }))
-    await waitFor(() => expect(region).toHaveStyle({ left: "24px", top: "526px" }))
+    await waitFor(() => expect(region).toHaveStyle({ left: "24px", top: "490px" }))
   })
 
   it("moves clear of obstacles inside the chat viewport", async () => {
@@ -216,10 +221,10 @@ describe("ComputerUsePictureInPicture", () => {
     )
 
     const region = await screen.findByRole("region", { name: /computer use/i })
-    await waitFor(() => expect(region).toHaveStyle({ left: "726px", top: "338px" }))
+    await waitFor(() => expect(region).toHaveStyle({ left: "726px", top: "302px" }))
   })
 
-  it("sizes the surface to the frame's real aspect ratio", async () => {
+  it("sizes chrome outside the frame ratio and adapts when the display changes", async () => {
     publishComputerUseActivity(SID, "screenshot", {
       ok: true,
       output: "L",
@@ -235,29 +240,33 @@ describe("ComputerUsePictureInPicture", () => {
     await waitFor(() =>
       expect(landscape).toHaveStyle({
         width: "250px",
-        height: "125px",
+        height: "161px",
         left: "726px",
-        top: "651px",
+        top: "615px",
       })
     )
-    unmount()
 
-    clearComputerUsePipState()
-    publishComputerUseActivity(SID, "screenshot", {
-      ok: true,
-      output: "P",
-      display_width_px: 600,
-      display_height_px: 1200,
+    act(() => {
+      publishComputerUseActivity(SID, "screenshot", {
+        ok: true,
+        output: "P",
+        display_width_px: 600,
+        display_height_px: 1200,
+      })
     })
-    render(
-      <div data-computer-use-pip-host>
-        <ComputerUsePictureInPicture sessionId={SID} />
-      </div>
-    )
-    const portrait = await screen.findByRole("region", { name: /computer use/i })
     await waitFor(() =>
-      expect(portrait).toHaveStyle({ width: "125px", height: "250px", left: "851px", top: "526px" })
+      expect(landscape).toHaveStyle({
+        width: "220px",
+        height: "476px",
+        left: "756px",
+        top: "300px",
+      })
     )
+    expect(screen.getByRole("img", { name: /computer use screen/i })).toHaveAttribute(
+      "src",
+      "data:image/png;base64,P"
+    )
+    unmount()
   })
 
   it("reaches a done terminal on turn end and auto-collapses to the pill", async () => {
@@ -272,11 +281,11 @@ describe("ComputerUsePictureInPicture", () => {
     await act(async () => {
       await Promise.resolve()
     })
-    expect(screen.getByText(/left_click/i)).toBeInTheDocument()
+    expect(screen.getByText(/left-click/i)).toBeInTheDocument()
 
     act(() => seedStatus(SID, "idle"))
     expect(screen.getByText("Done")).toBeInTheDocument()
-    expect(screen.queryByText(/left_click/i)).not.toBeInTheDocument()
+    expect(screen.queryByText(/left-click/i)).not.toBeInTheDocument()
 
     act(() => {
       jest.advanceTimersByTime(2500)
@@ -284,7 +293,28 @@ describe("ComputerUsePictureInPicture", () => {
     expect(screen.getByRole("button", { name: /show picture in picture/i })).toBeInTheDocument()
   })
 
-  it("surfaces an error terminal when the turn ends in error", async () => {
+  it("recognizes a completed background run when its chat pane mounts later", async () => {
+    seedStatus(SID, "idle")
+    publishComputerUseActivity(SID, "screenshot", {
+      ok: true,
+      output: "BACKGROUND",
+      display_width_px: 100,
+      display_height_px: 50,
+    })
+    render(
+      <div data-computer-use-pip-host>
+        <ComputerUsePictureInPicture sessionId={SID} />
+      </div>
+    )
+
+    expect(await screen.findByText("Done")).toBeInTheDocument()
+    expect(screen.getByRole("img", { name: /computer use screen/i })).toHaveAttribute(
+      "src",
+      "data:image/png;base64,BACKGROUND"
+    )
+  })
+
+  it("keeps an error terminal expanded until the user handles it", async () => {
     jest.useFakeTimers()
     seedStatus(SID, "streaming")
     publishComputerUseActivity(SID, "left_click")
@@ -301,8 +331,32 @@ describe("ComputerUsePictureInPicture", () => {
     expect(screen.getByText(/computer use action failed/i)).toBeInTheDocument()
 
     act(() => {
-      jest.advanceTimersByTime(2500)
+      jest.advanceTimersByTime(10_000)
     })
+    expect(screen.getByRole("region", { name: /computer use/i })).toBeInTheDocument()
+    expect(
+      screen.queryByRole("button", { name: /show picture in picture/i })
+    ).not.toBeInTheDocument()
+  })
+
+  it("pauses successful auto-collapse while hovered, then resumes after pointer leave", async () => {
+    jest.useFakeTimers()
+    seedStatus(SID, "streaming")
+    publishComputerUseActivity(SID, "left_click")
+    render(
+      <div data-computer-use-pip-host>
+        <ComputerUsePictureInPicture sessionId={SID} />
+      </div>
+    )
+    await act(async () => Promise.resolve())
+    const region = screen.getByRole("region", { name: /computer use/i })
+    fireEvent.pointerEnter(region)
+    act(() => seedStatus(SID, "idle"))
+    act(() => jest.advanceTimersByTime(10_000))
+    expect(region).toBeInTheDocument()
+
+    fireEvent.pointerLeave(region)
+    act(() => jest.advanceTimersByTime(2_500))
     expect(screen.getByRole("button", { name: /show picture in picture/i })).toBeInTheDocument()
   })
 
@@ -352,17 +406,80 @@ describe("ComputerUsePictureInPicture", () => {
     expect(screen.getByText(/8s ago/i)).toBeInTheDocument()
   })
 
-  it("clears its session snapshot on unmount", () => {
+  it("clears the previous session snapshot when the rendered chat switches", () => {
     publishComputerUseActivity(SID, "screenshot")
-    const { unmount } = render(
+    const { rerender } = render(
       <div data-computer-use-pip-host>
         <ComputerUsePictureInPicture sessionId={SID} />
       </div>
     )
-    unmount()
+    rerender(
+      <div data-computer-use-pip-host>
+        <ComputerUsePictureInPicture sessionId="session-2" />
+      </div>
+    )
     // eslint-disable-next-line @typescript-eslint/no-require-imports -- read the live singleton
     const { getComputerUsePipSnapshot } = require("@/lib/automation/computer-use-pip")
     expect(getComputerUsePipSnapshot(SID).action).toBeNull()
+  })
+
+  it("does not erase pre-mount activity during React Strict Mode effect replay", async () => {
+    publishComputerUseActivity(SID, "screenshot", {
+      ok: true,
+      output: "FRAME",
+      display_width_px: 100,
+      display_height_px: 50,
+    })
+    render(
+      <StrictMode>
+        <div data-computer-use-pip-host>
+          <ComputerUsePictureInPicture sessionId={SID} />
+        </div>
+      </StrictMode>
+    )
+
+    expect(await screen.findByRole("img", { name: /computer use screen/i })).toHaveAttribute(
+      "src",
+      "data:image/png;base64,FRAME"
+    )
+  })
+
+  it("clears stale activity after a real pane unmount", async () => {
+    publishComputerUseActivity(SID, "screenshot")
+    const view = render(
+      <div data-computer-use-pip-host>
+        <ComputerUsePictureInPicture sessionId={SID} />
+      </div>
+    )
+    await screen.findByRole("region", { name: /computer use/i })
+
+    view.unmount()
+
+    await waitFor(() => expect(getComputerUsePipSnapshot(SID).action).toBeNull())
+  })
+
+  it("removes the surface during capture and restores it after release", async () => {
+    publishComputerUseActivity(SID, "screenshot", {
+      ok: true,
+      output: "FRAME",
+      display_width_px: 100,
+      display_height_px: 50,
+    })
+    render(
+      <div data-computer-use-pip-host>
+        <ComputerUsePictureInPicture sessionId={SID} />
+      </div>
+    )
+    await screen.findByRole("region", { name: /computer use/i })
+
+    let release = () => {}
+    await act(async () => {
+      release = await suppressComputerUsePipForCapture(SID)
+    })
+    expect(screen.queryByRole("region", { name: /computer use/i })).not.toBeInTheDocument()
+
+    act(() => release())
+    expect(await screen.findByRole("region", { name: /computer use/i })).toBeInTheDocument()
   })
 
   it("drags to reposition and snaps to the nearest corner on release", async () => {
@@ -373,16 +490,40 @@ describe("ComputerUsePictureInPicture", () => {
       </div>
     )
     const region = await screen.findByRole("region", { name: /computer use/i })
-    await waitFor(() => expect(region).toHaveStyle({ left: "726px", top: "526px" }))
+    await waitFor(() => expect(region).toHaveStyle({ left: "726px", top: "490px" }))
 
     // Grab the header (title area, not a control) and drag toward the top-left.
     dispatchPointer(screen.getByText("Computer Use"), "pointerdown", 800, 600)
     dispatchPointer(window, "pointermove", 300, 200)
-    await waitFor(() => expect(region).toHaveStyle({ left: "226px", top: "126px" }))
+    await waitFor(() => expect(region).toHaveStyle({ left: "226px", top: "90px" }))
 
     dispatchPointer(window, "pointerup", 300, 200)
     // Center lands in the top-left quadrant → snaps to the topLeft anchor.
     await waitFor(() => expect(region).toHaveStyle({ left: "24px", top: "24px" }))
+  })
+
+  it("cancels an interrupted drag instead of staying stuck to later pointer moves", async () => {
+    publishComputerUseActivity(SID, "screenshot", {
+      ok: true,
+      output: "FRAME",
+      display_width_px: 100,
+      display_height_px: 100,
+    })
+    render(
+      <div data-computer-use-pip-host>
+        <ComputerUsePictureInPicture sessionId={SID} />
+      </div>
+    )
+    const region = await screen.findByRole("region", { name: /computer use/i })
+    await waitFor(() => expect(region).toHaveStyle({ left: "726px", top: "490px" }))
+
+    dispatchPointer(screen.getByText("Computer Use"), "pointerdown", 800, 600)
+    dispatchPointer(window, "pointermove", 700, 500)
+    await waitFor(() => expect(region).toHaveStyle({ left: "626px", top: "390px" }))
+
+    dispatchPointer(window, "pointercancel", 700, 500)
+    dispatchPointer(window, "pointermove", 300, 200)
+    await waitFor(() => expect(region).toHaveStyle({ left: "726px", top: "490px" }))
   })
 
   it("resizes from the corner grip", async () => {
@@ -393,21 +534,80 @@ describe("ComputerUsePictureInPicture", () => {
       </div>
     )
     const region = await screen.findByRole("region", { name: /computer use/i })
-    await waitFor(() => expect(region).toHaveStyle({ width: "250px", height: "250px" }))
+    await waitFor(() => expect(region).toHaveStyle({ width: "250px", height: "286px" }))
 
     const handle = region.querySelector("[data-pip-resize-handle]") as HTMLElement
     dispatchPointer(handle, "pointerdown", 100, 100)
     dispatchPointer(window, "pointermove", 50, 50)
-    await waitFor(() => expect(region).toHaveStyle({ width: "300px", height: "300px" }))
+    await waitFor(() => expect(region).toHaveStyle({ width: "300px", height: "336px" }))
 
     dispatchPointer(window, "pointerup", 50, 50)
-    expect(region).toHaveStyle({ width: "300px", height: "300px" })
+    expect(region).toHaveStyle({ width: "300px", height: "336px" })
 
     // A second gesture starts from the already-resized box (userBox non-null).
     dispatchPointer(handle, "pointerdown", 100, 100)
     dispatchPointer(window, "pointermove", 60, 60)
     dispatchPointer(window, "pointerup", 60, 60)
-    await waitFor(() => expect(region).toHaveStyle({ width: "340px", height: "340px" }))
+    await waitFor(() => expect(region).toHaveStyle({ width: "340px", height: "376px" }))
+  })
+
+  it("lets keyboard users resize the surface", async () => {
+    publishComputerUseActivity(SID, "screenshot", {
+      ok: true,
+      output: "FRAME",
+      display_width_px: 100,
+      display_height_px: 100,
+    })
+    render(
+      <div data-computer-use-pip-host>
+        <ComputerUsePictureInPicture sessionId={SID} />
+      </div>
+    )
+    const region = await screen.findByRole("region", { name: /computer use/i })
+    const resize = await screen.findByRole("button", { name: /resize picture in picture/i })
+
+    act(() => resize.focus())
+    fireEvent.keyDown(resize, { key: "ArrowUp" })
+    await waitFor(() => expect(region).toHaveStyle({ width: "270px", height: "306px" }))
+    expect(resize).toHaveFocus()
+  })
+
+  it("restores the device-level corner and size after remount", async () => {
+    publishComputerUseActivity(SID, "screenshot", {
+      ok: true,
+      output: "FRAME",
+      display_width_px: 100,
+      display_height_px: 100,
+    })
+    const first = render(
+      <div data-computer-use-pip-host>
+        <ComputerUsePictureInPicture sessionId={SID} />
+      </div>
+    )
+    const region = await screen.findByRole("region", { name: /computer use/i })
+    fireEvent.click(screen.getByRole("button", { name: /move picture in picture/i }))
+    const handle = region.querySelector("[data-pip-resize-handle]") as HTMLElement
+    dispatchPointer(handle, "pointerdown", 100, 100)
+    dispatchPointer(window, "pointermove", 150, 50)
+    dispatchPointer(window, "pointerup", 150, 50)
+    await waitFor(() => expect(region).toHaveStyle({ width: "300px", height: "336px" }))
+    first.unmount()
+
+    publishComputerUseActivity(SID, "screenshot", {
+      ok: true,
+      output: "NEXT",
+      display_width_px: 100,
+      display_height_px: 100,
+    })
+    render(
+      <div data-computer-use-pip-host>
+        <ComputerUsePictureInPicture sessionId={SID} />
+      </div>
+    )
+    const restored = await screen.findByRole("region", { name: /computer use/i })
+    await waitFor(() =>
+      expect(restored).toHaveStyle({ width: "300px", height: "336px", left: "24px", top: "440px" })
+    )
   })
 
   it("ignores drags that start on a header control", async () => {
@@ -418,7 +618,7 @@ describe("ComputerUsePictureInPicture", () => {
       </div>
     )
     const region = await screen.findByRole("region", { name: /computer use/i })
-    await waitFor(() => expect(region).toHaveStyle({ left: "726px", top: "526px" }))
+    await waitFor(() => expect(region).toHaveStyle({ left: "726px", top: "490px" }))
 
     // Pressing a header button must not begin a drag — position stays put.
     dispatchPointer(
@@ -429,7 +629,7 @@ describe("ComputerUsePictureInPicture", () => {
     )
     dispatchPointer(window, "pointermove", 300, 200)
     dispatchPointer(window, "pointerup", 300, 200)
-    expect(region).toHaveStyle({ left: "726px", top: "526px" })
+    expect(region).toHaveStyle({ left: "726px", top: "490px" })
   })
 
   it("renders without motion when reduced motion is preferred", async () => {
@@ -470,6 +670,34 @@ describe("ComputerUsePictureInPicture", () => {
     expect(within(dialog).getByRole("img", { name: /computer use screen/i })).toBeInTheDocument()
   })
 
+  it("pauses successful auto-collapse while the larger view is open", async () => {
+    jest.useFakeTimers()
+    seedStatus(SID, "streaming")
+    publishComputerUseActivity(SID, "screenshot", {
+      ok: true,
+      output: "FRAME",
+      display_width_px: 100,
+      display_height_px: 50,
+    })
+    render(
+      <div data-computer-use-pip-host>
+        <ComputerUsePictureInPicture sessionId={SID} />
+      </div>
+    )
+    await act(async () => {
+      await Promise.resolve()
+    })
+    fireEvent.click(screen.getByRole("button", { name: /view larger/i }))
+    expect(await screen.findByRole("dialog")).toBeInTheDocument()
+
+    act(() => seedStatus(SID, "idle"))
+    act(() => {
+      jest.advanceTimersByTime(10_000)
+    })
+    expect(screen.getByRole("dialog")).toBeInTheDocument()
+    expect(screen.getByRole("region", { name: /computer use/i })).toBeInTheDocument()
+  })
+
   it("announces activity through a polite live region", async () => {
     publishComputerUseActivity(SID, "left_click")
     render(
@@ -478,7 +706,7 @@ describe("ComputerUsePictureInPicture", () => {
       </div>
     )
     const status = await screen.findByRole("status")
-    expect(status).toHaveTextContent(/left_click/i)
+    expect(status).toHaveTextContent(/left-click/i)
     expect(status).toHaveAttribute("aria-live", "polite")
   })
 
@@ -494,7 +722,40 @@ describe("ComputerUsePictureInPicture", () => {
     fireEvent.click(screen.getByRole("button", { name: /hide picture in picture/i }))
 
     const pill = screen.getByRole("button", { name: /show picture in picture/i })
-    expect(pill.closest(".absolute")).toHaveClass("left-6", "bottom-6")
+    expect(pill.closest(".absolute")).toHaveStyle({ left: "24px", top: "740px" })
+  })
+
+  it("keeps the collapsed pill clear of chat obstacles", async () => {
+    ;(HTMLElement.prototype.getBoundingClientRect as jest.Mock).mockImplementation(function (
+      this: HTMLElement
+    ) {
+      const rect = this.hasAttribute("data-computer-use-pip-obstacle")
+        ? { x: 0, y: 600, width: 350, height: 200 }
+        : { x: 0, y: 0, width: 1000, height: 800 }
+      return {
+        ...rect,
+        top: rect.y,
+        right: rect.x + rect.width,
+        bottom: rect.y + rect.height,
+        left: rect.x,
+        toJSON: () => ({}),
+      }
+    })
+    publishComputerUseActivity(SID, "screenshot")
+    render(
+      <div data-computer-use-pip-host>
+        <div data-computer-use-pip-obstacle />
+        <ComputerUsePictureInPicture sessionId={SID} />
+      </div>
+    )
+    await screen.findByRole("region", { name: /computer use/i })
+    fireEvent.click(screen.getByRole("button", { name: /move picture in picture/i }))
+    fireEvent.click(screen.getByRole("button", { name: /hide picture in picture/i }))
+
+    const pill = screen.getByRole("button", { name: /show picture in picture/i })
+    await waitFor(() =>
+      expect(pill.closest(".absolute")).toHaveStyle({ left: "24px", top: "552px" })
+    )
   })
 
   it("dismisses entirely for the current run via close", async () => {

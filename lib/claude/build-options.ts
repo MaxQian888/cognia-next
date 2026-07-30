@@ -2344,10 +2344,19 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
   // (anthropic.mjs forwards it to `query()`). Only applies when the provider is
   // Anthropic — other providers have no native web tools, so they always get
   // the custom ones.
+  // ...and only on the path that actually has natives. `allowedTools` is
+  // forwarded to `query()` by anthropic.mjs, i.e. the Agent SDK. A standalone
+  // (BYOK) turn runs in the renderer against the provider API through the AI
+  // SDK, which reads no such field — so opting into the natives there does not
+  // swap the web tools, it removes them, and the phone loses the search/fetch
+  // loop `buildStandaloneTools` exists to give it. Standalone always takes the
+  // host-routed custom tools.
+  const { isStandaloneChatMode } = await import("@/lib/runtime/standalone-mode")
   const useNativeWebTools =
     webCapabilityOn &&
     appSettings?.webTools?.nativeOnAnthropic === true &&
-    providerId === "anthropic"
+    providerId === "anthropic" &&
+    !isStandaloneChatMode()
   if (webCapabilityOn && !useNativeWebTools) {
     try {
       const { buildWebBuiltinManifestEntries } = await import("@/lib/claude/web-builtin-tools")
@@ -3261,7 +3270,21 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
   // only sees content up to the branch point. The hook clears the seed right
   // after the first send (`clearBranchSeed`) so later turns don't re-inject it.
   // Tail direct branches use SDK fork instead and never set a seed.
-  if (session?.branchSeed?.content && !session.sdkSessionId) {
+  //
+  // The seed and an SDK fork are two ways of re-establishing the SAME
+  // pre-branch context, and `buildChildRow` sets exactly one. Applying both
+  // would send it twice — once as a system prompt and once as the forked
+  // conversation — inflating every first turn and letting the model see the
+  // branch point described two different ways. Unreachable today, but the two
+  // fields are set in one function and read in two places, so pin the
+  // invariant here rather than rediscovering it from a token bill.
+  if (session?.branchSeed?.content && session.forkedFromSdkSessionId) {
+    loggers.chat.warn("branch-seed-and-fork-both-set", {
+      sessionId: session.id,
+      branchKind: session.branchSeed.kind,
+    })
+  }
+  if (session?.branchSeed?.content && !session.sdkSessionId && !session.forkedFromSdkSessionId) {
     const label =
       session.branchSeed.kind === "summary"
         ? "Summary of the conversation this thread was branched from:"

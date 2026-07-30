@@ -1,4 +1,67 @@
-import { computePictureInPictureAnchors } from "./picture-in-picture-layout"
+import {
+  computePictureInPictureAnchors,
+  computePictureInPictureSize,
+} from "./picture-in-picture-layout"
+
+describe("computePictureInPictureSize", () => {
+  it("adds chrome outside the media ratio instead of distorting the frame", () => {
+    expect(
+      computePictureInPictureSize({
+        aspectRatio: 2,
+        preferredLongEdge: 250,
+        hostWidth: 1000,
+        hostHeight: 800,
+      })
+    ).toEqual({
+      width: 250,
+      height: 161,
+      mediaWidth: 250,
+      mediaHeight: 125,
+    })
+  })
+
+  it("grows portrait media enough for the toolbar while preserving its ratio", () => {
+    const size = computePictureInPictureSize({
+      aspectRatio: 0.5,
+      preferredLongEdge: 250,
+      hostWidth: 1000,
+      hostHeight: 800,
+    })
+
+    expect(size).toEqual({
+      width: 220,
+      height: 476,
+      mediaWidth: 220,
+      mediaHeight: 440,
+    })
+    expect(size.mediaWidth / size.mediaHeight).toBe(0.5)
+  })
+
+  it("clamps extreme ratios and small hosts without overflowing", () => {
+    const size = computePictureInPictureSize({
+      aspectRatio: Number.POSITIVE_INFINITY,
+      preferredLongEdge: 1000,
+      hostWidth: 320,
+      hostHeight: 220,
+    })
+
+    expect(size.width).toBeLessThanOrEqual(272)
+    expect(size.height).toBeLessThanOrEqual(172)
+    expect(size.mediaWidth).toBeGreaterThan(0)
+    expect(size.mediaHeight).toBeGreaterThan(0)
+  })
+
+  it("falls back from an invalid preferred size", () => {
+    expect(
+      computePictureInPictureSize({
+        aspectRatio: 1,
+        preferredLongEdge: 0,
+        hostWidth: 1000,
+        hostHeight: 800,
+      })
+    ).toMatchObject({ width: 250, height: 286 })
+  })
+})
 
 describe("computePictureInPictureAnchors", () => {
   it("places a 250px surface at all four 24px-inset corners", () => {

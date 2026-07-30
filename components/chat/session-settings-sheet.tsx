@@ -74,7 +74,8 @@ import { ClearConversationTrigger } from "@/components/chat/dialogs/clear-conver
 import { isTauri } from "@/lib/tauri"
 import { cn } from "@/lib/utils"
 import { closeSession } from "@/lib/claude/ipc"
-import { forkSessionFromParent } from "@/lib/db/sessions"
+import { branchSessionAtMessage } from "@/lib/chat/branch-session"
+import { selectVisibleMessages } from "@/stores/chat/chat-store"
 import { useChatStore } from "@/stores/chat"
 import { useProjectStore } from "@/stores/project/project-store"
 import { useSettingsStore } from "@/stores/settings"
@@ -242,20 +243,51 @@ export function SessionSettingsSheet({
     })
   }
 
-  const handleFork = async () => {
+  /**
+   * Branch the whole conversation — the session-level entry to the same
+   * operation the per-message branch button performs, with the last visible
+   * message as the cut-off.
+   *
+   * This used to call `forkSessionFromParent`, a strictly weaker duplicate:
+   * `branchSessionAtMessage` already reuses the cheap SDK fork when the cut-off
+   * is the tail and the parent has an `sdkSessionId` (see `branch-session.ts`),
+   * so the only differences were the things the old path lacked — it copied no
+   * messages (leaving a blank conversation whose model nonetheless remembered
+   * everything), recorded no `parentSessionId` (so no lineage chip), dropped
+   * nine per-session settings, and threw an untranslated Error straight into a
+   * toast on any provider without an SDK session id.
+   */
+  const handleBranch = async () => {
     try {
-      const fork = await forkSessionFromParent(session.id)
-      useChatStore.getState().setActiveSession(fork.id)
-      toast.success(t("forkSuccess"))
-      loggers.chat.info("session.forked", {
+      const state = useChatStore.getState()
+      const slice = state.sessions[session.id]
+      const visible = slice
+        ? selectVisibleMessages(slice.messages, slice.activeBranchByGroup)
+        : session.id === state.activeSessionId
+          ? selectVisibleMessages(state.messages, state.activeBranchByGroup)
+          : []
+      const cutoff = visible.at(-1)
+      if (!cutoff) {
+        toast.error(t("branchEmpty"))
+        return
+      }
+      const child = await branchSessionAtMessage({
+        sourceId: session.id,
+        visibleMessages: visible,
+        messageId: cutoff.id,
+        mode: "direct",
+      })
+      useChatStore.getState().setActiveSession(child.id)
+      toast.success(t("branchSuccess"))
+      loggers.chat.info("session.branched", {
         parentSessionId: session.id,
         parentSdkSessionId: session.sdkSessionId,
-        forkId: fork.id,
+        branchId: child.id,
       })
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
-      toast.error(msg)
-      loggers.chat.warn("session.fork failed", { sessionId: session.id, err: msg })
+      toast.error(t("branchError"))
+      loggers.chat.warn("session.branch failed", { sessionId: session.id, err: msg })
     }
   }
 
@@ -663,18 +695,21 @@ export function SessionSettingsSheet({
               </Button>
               <SingleExportTrigger session={session} variant="labeled" />
               <ClearConversationTrigger />
-              {session.sdkSessionId && (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => void handleFork()}
-                  aria-label={t("forkAria")}
-                  className="gap-1.5"
-                >
-                  <GitBranchIcon className="size-4" />
-                  {t("forkTooltip")}
-                </Button>
-              )}
+              {/* No longer gated on `sdkSessionId`: that gate existed because the
+                  old SDK-level fork had nothing to fork from without one, which
+                  hid this action entirely on every provider that never issues an
+                  SDK session id. Branching re-establishes context from the
+                  transcript when no fork is available, so it works everywhere. */}
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => void handleBranch()}
+                aria-label={t("branchAria")}
+                className="gap-1.5"
+              >
+                <GitBranchIcon className="size-4" />
+                {t("branchTooltip")}
+              </Button>
             </div>
           </Section>
         </div>

@@ -28,6 +28,7 @@ import {
   readClaudeUserConfig,
   readTextFile,
   restartSidecar,
+  restoreSession,
   scanClaudeSkills,
   sendPluginToolResponse,
   sendPrompt,
@@ -35,8 +36,14 @@ import {
   steerSession,
   subscribePluginToolExec,
   setApiKey,
+  skillsBundleUploadAbort,
+  skillsBundleUploadCommit,
+  skillsBundleUploadOpen,
+  skillsBundleUploadWrite,
+  skillsCatalogGet,
   skillsFetchRemoteJson,
   skillsFetchRemoteMd,
+  skillsInstallAtomic,
   skillsInstallNative,
   skillsLoadRegistry,
   skillsScanDir,
@@ -44,6 +51,7 @@ import {
   skillsScanResources,
   skillsScanSecurity,
   skillsUninstallNative,
+  skillsUninstall,
   testMcpServer,
   updateMessage,
   writeAgentConfig,
@@ -111,6 +119,32 @@ describe("sendPluginToolResponse", () => {
       result: "ok",
       error: undefined,
     })
+  })
+
+  it("forwards the server-issued remote execution context unchanged", async () => {
+    const context = {
+      hostId: "host-a",
+      originDeviceId: "device-a",
+      sessionId: "s1",
+      generation: 1,
+      requestId: "request-a",
+      issuedAt: 1,
+      expiresAt: 2,
+    }
+    callSpy.mockResolvedValue(undefined)
+    await sendPluginToolResponse(
+      {
+        type: "plugin_tool_response",
+        sessionId: "s1",
+        toolUseId: "t1",
+        result: "ok",
+      },
+      context
+    )
+    expect(callSpy).toHaveBeenCalledWith(
+      "claude_plugin_tool_response",
+      expect.objectContaining({ remoteExecutionContext: context })
+    )
   })
 })
 
@@ -222,6 +256,23 @@ describe("Claude session commands", () => {
     })
   })
 
+  it("gates restored conversation snapshots before transport", async () => {
+    callSpy.mockResolvedValue(undefined)
+    const messages = [{ role: "user", content: "safe context" }]
+    await restoreSession("sess-3", messages)
+    expect(mockHasNoLeakingPiiDeep).toHaveBeenCalledWith(messages)
+    expect(callSpy).toHaveBeenCalledWith("claude_restore", {
+      sessionId: "sess-3",
+      messages,
+    })
+
+    mockHasNoLeakingPiiDeep.mockReturnValue(false)
+    await expect(
+      restoreSession("sess-3", [{ role: "user", content: "user@example.com" }])
+    ).rejects.toThrow(/renderer PII gate/)
+    expect(callSpy).toHaveBeenCalledTimes(1)
+  })
+
   it("approveTool packs the decision payload", async () => {
     callSpy.mockResolvedValueOnce(undefined)
     await approveTool("sess-3", "req-1", "deny", "no thanks", { foo: 1 })
@@ -293,11 +344,43 @@ describe("onClaudeMessage", () => {
     const handler = jest.fn()
     const unlisten = await onClaudeMessage(handler)
 
-    expect(subscribeSpy).toHaveBeenCalledWith("claude://message", handler)
+    expect(subscribeSpy).toHaveBeenCalledWith("claude://message", expect.any(Function))
     expect(captured).toBeDefined()
     captured?.({ type: "ready" })
     expect(handler).toHaveBeenCalledWith({ type: "ready" })
     expect(unlisten).toBe(unlistenSpy)
+  })
+
+  it("binds an approval response to the context carried by its request event", async () => {
+    let captured: ((event: never) => void) | undefined
+    jest.spyOn(transport, "subscribe").mockImplementation((_channel, handler) => {
+      captured = handler
+      return () => undefined
+    })
+    const context = {
+      hostId: "host-a",
+      originDeviceId: "device-a",
+      sessionId: "session-a",
+      generation: 1,
+      requestId: "turn-a",
+      issuedAt: 1,
+      expiresAt: 2,
+    }
+    await onClaudeMessage(jest.fn())
+    captured?.({
+      type: "permission_request",
+      sessionId: "session-a",
+      requestId: "approval-a",
+      remoteExecutionContext: context,
+    } as never)
+    callSpy.mockResolvedValue(undefined)
+
+    await approveTool("session-a", "approval-a", "allow")
+
+    expect(callSpy).toHaveBeenCalledWith(
+      "claude_approve",
+      expect.objectContaining({ remoteExecutionContext: context })
+    )
   })
 })
 
@@ -398,6 +481,58 @@ describe("multi-agent MCP IO", () => {
 })
 
 describe("skills commands", () => {
+  it("uses the host Skills catalog contract", async () => {
+    callSpy.mockResolvedValueOnce({ cognia: [], claude: [], codex: [] })
+    await expect(skillsCatalogGet()).resolves.toEqual({ cognia: [], claude: [], codex: [] })
+    expect(callSpy).toHaveBeenCalledWith("skills_catalog_get")
+  })
+
+  it("forwards every phase of a transactional bundle upload", async () => {
+    callSpy
+      .mockResolvedValueOnce({ handleId: "upload-1", chunkBytes: 32768 })
+      .mockResolvedValueOnce(4)
+      .mockResolvedValueOnce(undefined)
+      .mockResolvedValueOnce({ targets: [], trashedFrom: null })
+      .mockResolvedValueOnce(undefined)
+
+    await skillsBundleUploadOpen(4, "a".repeat(64))
+    await skillsBundleUploadWrite({
+      handleId: "upload-1",
+      offset: 0,
+      dataBase64: "e30=",
+      chunkHash: "b".repeat(64),
+    })
+    await skillsBundleUploadCommit("upload-1")
+    await skillsInstallAtomic("upload-1", "lease-1")
+    await skillsBundleUploadAbort("upload-2")
+
+    expect(callSpy.mock.calls).toEqual([
+      ["skills_bundle_upload_open", { request: { expectedSize: 4, expectedHash: "a".repeat(64) } }],
+      [
+        "skills_bundle_upload_write",
+        {
+          handleId: "upload-1",
+          offset: 0,
+          dataBase64: "e30=",
+          chunkHash: "b".repeat(64),
+        },
+      ],
+      ["skills_bundle_upload_commit", { handleId: "upload-1" }],
+      ["skills_install_atomic", { handleId: "upload-1", adminLease: "lease-1" }],
+      ["skills_bundle_upload_abort", { handleId: "upload-2" }],
+    ])
+  })
+
+  it("uninstalls only from the explicitly selected host target", async () => {
+    callSpy.mockResolvedValueOnce({ removed: true, directory: "/host/skills/x" })
+    await skillsUninstall("codex", "x", "lease-1")
+    expect(callSpy).toHaveBeenCalledWith("skills_uninstall", {
+      target: "codex",
+      dirName: "x",
+      adminLease: "lease-1",
+    })
+  })
+
   it("skillsScanNative just forwards the response", async () => {
     callSpy.mockResolvedValueOnce([{ dirName: "x", filePath: "/x", content: "", resources: [] }])
     await expect(skillsScanNative()).resolves.toHaveLength(1)

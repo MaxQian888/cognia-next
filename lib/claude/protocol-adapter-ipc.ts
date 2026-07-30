@@ -11,7 +11,9 @@
  */
 
 import { getCodeAdapterExecutor } from "@cognia/provider-core/providers/protocol-adapter-registry"
+import { hasNoLeakingPiiDeep } from "@cognia/redact"
 import type { CodeAdapterChunk, CodeAdapterRequest } from "@/types/plugin/plugin-protocol-adapter"
+import type { RemoteExecutionContext } from "./remote-execution"
 
 export interface ProtocolAdapterExecEvent {
   sessionId: string
@@ -19,6 +21,7 @@ export interface ProtocolAdapterExecEvent {
   pluginId: string
   adapterId: string
   request: CodeAdapterRequest
+  remoteExecutionContext?: RemoteExecutionContext
 }
 
 /** Writes a command line back to the sidecar (claude-host stdin). */
@@ -77,6 +80,24 @@ async function runProtocolAdapterExec(
       sessionId,
       execId,
       error: `no code adapter registered for "${event.adapterId}"`,
+    })
+    return
+  }
+
+  const providerVisibleRequest = {
+    model: event.request.model,
+    messages: event.request.messages,
+    modelParams: event.request.modelParams,
+    reasoning: event.request.reasoning,
+    maxSteps: event.request.maxSteps,
+  }
+  if (!hasNoLeakingPiiDeep(providerVisibleRequest)) {
+    if (isCancelled()) return
+    await deps.writeCommand({
+      type: "protocol_adapter_error",
+      sessionId,
+      execId,
+      error: "protocol adapter request rejected by the renderer PII gate",
     })
     return
   }

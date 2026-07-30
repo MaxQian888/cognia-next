@@ -1,7 +1,7 @@
 // Model-behavior settings (Settings → Automation → Overview card).
 //
 // Surfaces the three "model view" knobs the Rust side honors:
-//   - screenshot down-scaling (off by default; 1280×800 WXGA when enabled)
+//   - screenshot down-scaling (on by default; 1280×800 WXGA)
 //   - screenshot dedup ("screen unchanged" text instead of duplicate frames)
 //   - clipboard-paste threshold for long `type` actions (0 disables)
 //
@@ -11,7 +11,7 @@
 
 "use client"
 
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 
 import { Images, MonitorPlay, Sparkles } from "lucide-react"
 import { useTranslations } from "next-intl"
@@ -32,6 +32,9 @@ export function BehaviorCard() {
   const t = useTranslations("automation.behavior")
   const [settings, setSettings] = useState<AutomationSettings | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const saveQueueRef = useRef<Promise<void>>(Promise.resolve())
+  const saveRevisionRef = useRef(0)
+  const persistedSettingsRef = useRef<AutomationSettings | null>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -39,6 +42,7 @@ export function BehaviorCard() {
       .settingsGet()
       .then((s) => {
         if (!cancelled) {
+          persistedSettingsRef.current = s
           setSettings(s)
           setComputerUsePipAlwaysHidden(s.alwaysHidePictureInPicture)
         }
@@ -52,13 +56,25 @@ export function BehaviorCard() {
   }, [])
 
   async function save(next: AutomationSettings) {
+    if (!settings) return
     setSettings(next)
     setComputerUsePipAlwaysHidden(next.alwaysHidePictureInPicture)
     setError(null)
+    const revision = ++saveRevisionRef.current
+    const operation = saveQueueRef.current.then(() => desktop.settingsSet(next))
+    saveQueueRef.current = operation.catch(() => {})
     try {
-      await desktop.settingsSet(next)
+      await operation
+      persistedSettingsRef.current = next
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e))
+      if (revision === saveRevisionRef.current) {
+        const persisted = persistedSettingsRef.current
+        if (persisted) {
+          setSettings(persisted)
+          setComputerUsePipAlwaysHidden(persisted.alwaysHidePictureInPicture)
+        }
+        setError(e instanceof Error ? e.message : String(e))
+      }
     }
   }
 

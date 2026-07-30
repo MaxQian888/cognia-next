@@ -20,7 +20,10 @@
  */
 
 import { desktop, type CallContext } from "@/lib/automation/client"
-import { publishComputerUseActivity } from "@/lib/automation/computer-use-pip"
+import {
+  publishComputerUseActivity,
+  suppressComputerUsePipForCapture,
+} from "@/lib/automation/computer-use-pip"
 import {
   modelToScreen,
   recordScreenshotDims,
@@ -202,10 +205,18 @@ export async function dispatchAnthropicAction(
   action: ComputerAction,
   ctx: CallContext
 ): Promise<ComputerActionResult> {
-  publishComputerUseActivity(ctx.sessionKey, action.action)
-  const result = await dispatchAnthropicActionInternal(action, ctx)
-  publishComputerUseActivity(ctx.sessionKey, action.action, result)
-  return result
+  const activityId = publishComputerUseActivity(ctx.sessionKey, action.action)
+  const releaseCaptureSuppression =
+    action.action === "screenshot"
+      ? await suppressComputerUsePipForCapture(ctx.sessionKey)
+      : () => {}
+  try {
+    const result = await dispatchAnthropicActionInternal(action, ctx)
+    publishComputerUseActivity(ctx.sessionKey, action.action, result, activityId)
+    return result
+  } finally {
+    releaseCaptureSuppression()
+  }
 }
 
 async function dispatchAnthropicActionInternal(

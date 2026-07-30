@@ -7,6 +7,10 @@ import {
   getActiveComputerUseSettings,
   __resetForTesting as resetActiveComputerUseSettings,
 } from "./computer-use-active-settings"
+import {
+  recordSessionGrant,
+  __resetForTesting as resetSessionGrants,
+} from "./computer-use-session-grants"
 import type { Character, SendOptions } from "@cognia/agent-config-types"
 
 jest.mock("@/lib/plugin/registries/native-anthropic-tool-registry", () => {
@@ -137,11 +141,36 @@ describe("applyComputerUseTools — auto chatConsentMode (audit fix)", () => {
         "computer_use",
         "bash",
         "text_editor",
+        "find_text",
+        "click_text",
         "mcp__cognia-plugin-tools__computer_use",
         "mcp__cognia-plugin-tools__bash",
         "mcp__cognia-plugin-tools__text_editor",
+        "mcp__cognia-plugin-tools__find_text",
+        "mcp__cognia-plugin-tools__click_text",
       ])
     )
+  })
+
+  it("session grants suppress OCR visual tools by bare and bridged names", () => {
+    resetSessionGrants()
+    recordSessionGrant("sess-grant", "find_text")
+    recordSessionGrant("sess-grant", "mcp__cognia-plugin-tools__click_text")
+    const char = {
+      ...baseChar,
+      computerUseSettings: { chatConsentMode: "session-grant" as const },
+    } as Character
+
+    const result = applyComputerUseTools({
+      character: char,
+      opts: emptyOpts(),
+      sessionId: "sess-grant",
+    })
+
+    expect(result.opts.suppressApprovalForTools).toEqual([
+      "find_text",
+      "mcp__cognia-plugin-tools__click_text",
+    ])
   })
 
   it("auto + computerUseGateTier=whitelist leaves the chat modal in charge", () => {

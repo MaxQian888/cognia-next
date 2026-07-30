@@ -1,4 +1,5 @@
 import type { ClaudeEvent, SendOptions } from "@cognia/agent-config-types"
+import { loggers } from "@cognia/logging"
 
 import { streamText } from "ai"
 
@@ -19,6 +20,14 @@ jest.mock("@/lib/ai/agent/agent-executor", () => ({
 jest.mock("ai", () => ({
   convertToModelMessages: (m: unknown) => m,
   streamText: jest.fn(),
+  // `standalone-tools` builds real tool defs off these; identity wrappers keep
+  // the assertions readable while still proving what gets handed to streamText.
+  tool: (def: unknown) => def,
+  jsonSchema: (schema: unknown) => schema,
+  stepCountIs: (n: number) => ({ __stopAfterSteps: n }),
+}))
+jest.mock("@/lib/claude/plugin-tool-ipc", () => ({
+  handlePluginToolExec: jest.fn(async () => ({ result: "ok" })),
 }))
 jest.mock("@/stores/settings/settings-store", () => ({
   useSettingsStore: { getState: () => ({ settings: {} }) },
@@ -219,6 +228,84 @@ describe("runStandaloneTurn", () => {
     })) as never
     const { events, promise } = run({ streamTextImpl: stream })
     await promise
+    expect(events.at(-1)).toEqual({ type: "session_ended", sessionId: "s1" })
+  })
+
+  // === Tool loop (BYOK parity) ============================================
+  //
+  // Standalone mode used to be a plain completion: no tools, no steps. These
+  // pin that a turn carrying a renderer-executable manifest now actually runs
+  // an agent loop, and that a turn without one stays single-shot.
+
+  const manifest = [
+    {
+      name: "web_search",
+      description: "Search the web",
+      jsonSchema: { type: "object", properties: { query: { type: "string" } } },
+      pluginId: "cognia-web-builtin",
+    },
+  ]
+
+  it("hands the renderer tool manifest and a step ceiling to streamText", async () => {
+    const impl = jest.fn(fakeStream([{ type: "text-delta", text: "hi" }]) as never)
+    const { promise } = run({
+      sendOptions: { systemPrompt: "be nice", pluginTools: manifest } as SendOptions,
+      streamTextImpl: impl as never,
+    })
+    await promise
+
+    const args = (impl as unknown as jest.Mock).mock.calls[0][0]
+    expect(Object.keys(args.tools)).toEqual(["web_search"])
+    expect(args.tools.web_search.description).toBe("Search the web")
+    expect(args.stopWhen).toEqual({ __stopAfterSteps: 8 })
+  })
+
+  it("stays single-shot when the turn carries no tools", async () => {
+    const impl = jest.fn(fakeStream([{ type: "text-delta", text: "hi" }]) as never)
+    const { promise } = run({ streamTextImpl: impl as never })
+    await promise
+
+    const args = (impl as unknown as jest.Mock).mock.calls[0][0]
+    expect(args).not.toHaveProperty("tools")
+    expect(args).not.toHaveProperty("stopWhen")
+  })
+
+  it("warns about and skips tools a provider would reject", async () => {
+    const warn = jest.spyOn(loggers.chat, "warn").mockImplementation(() => {})
+    const impl = jest.fn(fakeStream([{ type: "text-delta", text: "hi" }]) as never)
+    const { promise } = run({
+      sendOptions: {
+        pluginTools: [...manifest, { ...manifest[0], name: "not a valid name" }],
+      } as SendOptions,
+      streamTextImpl: impl as never,
+    })
+    await promise
+
+    const args = (impl as unknown as jest.Mock).mock.calls[0][0]
+    expect(Object.keys(args.tools)).toEqual(["web_search"])
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining("dropped tools"), {
+      names: "not a valid name",
+    })
+    warn.mockRestore()
+  })
+
+  it("maps a tool call and its result into renderer envelopes", async () => {
+    const { events, promise } = run({
+      sendOptions: { pluginTools: manifest } as SendOptions,
+      streamTextImpl: fakeStream([
+        { type: "start-step" },
+        { type: "tool-call", toolCallId: "c1", toolName: "web_search", input: { query: "x" } },
+        { type: "tool-result", toolCallId: "c1", output: { hits: 2 } },
+        { type: "finish-step" },
+        { type: "text-delta", text: "found it" },
+      ]),
+    })
+    await promise
+
+    const serialized = JSON.stringify(events)
+    expect(serialized).toContain("tool_use")
+    expect(serialized).toContain("web_search")
+    expect(serialized).toContain("tool_result")
     expect(events.at(-1)).toEqual({ type: "session_ended", sessionId: "s1" })
   })
 })

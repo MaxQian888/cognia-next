@@ -60,6 +60,12 @@ jest.mock("sonner", () => ({
   },
 }))
 
+const warnMock = jest.fn()
+jest.mock("@cognia/logging", () => ({
+  loggers: { chat: { warn: (...args: unknown[]) => warnMock(...args) } },
+}))
+
+import { toast } from "sonner"
 import { forkSessionFromParent, deleteSession, updateSession } from "@/lib/db/sessions"
 const mockedFork = forkSessionFromParent as unknown as jest.Mock
 const mockedDelete = deleteSession as unknown as jest.Mock
@@ -161,6 +167,32 @@ describe("SessionsTab — row actions", () => {
     await user.click(screen.getByTestId("fork-s1"))
     await waitFor(() => expect(mockedFork).toHaveBeenCalledWith("s1"))
     expect(setActiveSession).toHaveBeenCalledWith("s2")
+  })
+
+  it("Fork failure shows a translated toast, not the raw Error text", async () => {
+    // `forkSessionFromParent` throws a bare English Error when the parent has
+    // no `sdkSessionId` — always the case for providers that never issue one.
+    // Surfacing `err.message` put untranslated internals in front of the user.
+    mockedFork.mockRejectedValue(new Error("session s1 has no sdkSessionId"))
+    const user = userEvent.setup()
+    render(<SessionsTab />)
+    await user.click(screen.getByTestId("fork-s1"))
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith("forkFailedToast"))
+    expect(toast.error).not.toHaveBeenCalledWith(expect.stringContaining("sdkSessionId"))
+    expect(setActiveSession).not.toHaveBeenCalled()
+  })
+
+  it("Fork failure still records the real reason for diagnosis", async () => {
+    mockedFork.mockRejectedValue(new Error("session s1 has no sdkSessionId"))
+    const user = userEvent.setup()
+    render(<SessionsTab />)
+    await user.click(screen.getByTestId("fork-s1"))
+    await waitFor(() =>
+      expect(warnMock).toHaveBeenCalledWith(
+        "sdk-session-fork-failed",
+        expect.objectContaining({ sessionId: "s1" })
+      )
+    )
   })
 
   it("Rename opens dialog, saves on confirm", async () => {

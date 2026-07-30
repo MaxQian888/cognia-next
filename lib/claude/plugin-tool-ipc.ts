@@ -44,6 +44,7 @@ import {
 } from "./editor-builtin-tools"
 import { isTeamBuiltinTool, runTeamBuiltinTool } from "./team-builtin-tools"
 import { getTeamDispatchContext } from "./agents/dispatch-context-registry"
+import type { RemoteExecutionContext } from "./remote-execution"
 
 const PLUGIN_TOOL_RESULT_PII_ERROR = "Plugin tool result blocked by the PII redaction gate"
 
@@ -60,6 +61,7 @@ export interface PluginToolExecRequest {
   toolUseId: string
   name: string
   args: Record<string, unknown>
+  remoteExecutionContext?: RemoteExecutionContext
 }
 
 export interface PluginToolExecResponse {

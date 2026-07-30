@@ -19,36 +19,59 @@ import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { desktop } from "@/lib/automation/client"
 import {
+  beginComputerUsePipRun,
   clearComputerUsePipSession,
+  getComputerUsePipLayoutPreference,
   setComputerUsePipAlwaysHidden,
   setComputerUsePipDismissed,
   setComputerUsePipHidden,
+  setComputerUsePipLayoutPreference,
   setComputerUsePipRunEnded,
   useComputerUsePip,
   useComputerUsePipAlwaysHidden,
 } from "@/lib/automation/computer-use-pip"
 import {
   computePictureInPictureAnchors,
+  computePictureInPictureSize,
+  PICTURE_IN_PICTURE_CHROME_HEIGHT,
   type PictureInPictureAlignment,
+  type PictureInPictureMediaSize,
   type PictureInPicturePoint,
   type PictureInPictureRect,
 } from "@/lib/automation/picture-in-picture-layout"
 import { cn } from "@/lib/utils"
-import { useSessionStatus } from "@/stores/chat"
+import { useSessionRunId, useSessionStatus } from "@/stores/chat"
 
 const ALIGNMENTS: PictureInPictureAlignment[] = ["bottomRight", "bottomLeft", "topLeft", "topRight"]
-const MIN_SIZE = 160
+const MIN_SIZE = 220
 const DEFAULT_BOX = 250
 const EDGE = 24
 const FRESHNESS_THRESHOLD_S = 5
 const TERMINAL_COLLAPSE_MS = 2500
+const PILL_SIZE = { width: 190, height: 36 }
+const mountedSessionCounts = new Map<string, number>()
+const pendingSessionCleanup = new Map<string, ReturnType<typeof setTimeout>>()
+const ACTION_TRANSLATION_KEYS = {
+  screenshot: "screenshot",
+  left_click: "leftClick",
+  right_click: "rightClick",
+  middle_click: "middleClick",
+  double_click: "doubleClick",
+  triple_click: "tripleClick",
+  mouse_move: "mouseMove",
+  left_click_drag: "drag",
+  left_mouse_down: "mouseDown",
+  left_mouse_up: "mouseUp",
+  scroll: "scroll",
+  type: "type",
+  key: "key",
+  hold_key: "holdKey",
+  wait: "wait",
+  cursor_position: "cursorPosition",
+  find_text: "findText",
+  click_text: "clickText",
+} as const
 
-const PILL_CORNER: Record<PictureInPictureAlignment, string> = {
-  bottomRight: "bottom-6 right-6",
-  bottomLeft: "bottom-6 left-6",
-  topLeft: "top-6 left-6",
-  topRight: "top-6 right-6",
-}
 // The resize grip sits at the corner opposite the pinned anchor.
 const HANDLE_CORNER: Record<PictureInPictureAlignment, string> = {
   bottomRight: "left-0 top-0",
@@ -68,6 +91,7 @@ interface DragSession {
   startHeight: number
   startBox: number
   alignment: PictureInPictureAlignment
+  pointerId: number | null
 }
 
 function rectOf(element: Element): PictureInPictureRect {
@@ -97,24 +121,40 @@ export function ComputerUsePictureInPicture({ sessionId }: { sessionId: string }
   const t = useTranslations("automation.pictureInPicture")
   const snapshot = useComputerUsePip(sessionId)
   const hasActivity = snapshot.action != null
+  const frameWidth = snapshot.frame?.width
+  const frameHeight = snapshot.frame?.height
   const alwaysHidden = useComputerUsePipAlwaysHidden()
   const status = useSessionStatus(sessionId)
+  const runId = useSessionRunId(sessionId)
   const busy = status === "streaming" || status === "awaiting_approval"
+  const terminalErrored = snapshot.phase === "error" || (snapshot.ended && status === "error")
   const reduce = useReducedMotion()
   const rootRef = useRef<HTMLDivElement>(null)
   const hostRef = useRef<Element | null>(null)
   const dragRef = useRef<DragSession | null>(null)
-  const [alignment, setAlignment] = useState<PictureInPictureAlignment>("bottomRight")
+  const previousSessionIdRef = useRef(sessionId)
+  const [alignment, setAlignment] = useState<PictureInPictureAlignment>(
+    () => getComputerUsePipLayoutPreference().alignment
+  )
   const [point, setPoint] = useState<PictureInPicturePoint | null>(null)
+  const [pillPoint, setPillPoint] = useState<PictureInPicturePoint | null>(null)
   const [freePoint, setFreePoint] = useState<PictureInPicturePoint | null>(null)
-  const [dims, setDims] = useState({ width: DEFAULT_BOX, height: DEFAULT_BOX })
-  const [userBox, setUserBox] = useState<number | null>(null)
-  const [lockedRatio, setLockedRatio] = useState<number | null>(null)
+  const [dims, setDims] = useState<PictureInPictureMediaSize>({
+    width: DEFAULT_BOX,
+    height: DEFAULT_BOX + PICTURE_IN_PICTURE_CHROME_HEIGHT,
+    mediaWidth: DEFAULT_BOX,
+    mediaHeight: DEFAULT_BOX,
+  })
+  const [userBox, setUserBox] = useState(
+    () => getComputerUsePipLayoutPreference().preferredLongEdge
+  )
   const [preferenceLoaded, setPreferenceLoaded] = useState(false)
   const [dragging, setDragging] = useState(false)
+  const [interacting, setInteracting] = useState(false)
   const [zoomOpen, setZoomOpen] = useState(false)
   const [now, setNow] = useState(() => Date.now())
   const prevBusyRef = useRef(busy)
+  const busySessionIdRef = useRef(sessionId)
   const latestRef = useRef({ point, dims, freePoint, userBox, alignment })
 
   // Start a move/resize gesture. Reads the current geometry from `latestRef`
@@ -130,23 +170,46 @@ export function ComputerUsePictureInPicture({ sessionId }: { sessionId: string }
       startPoint: s.freePoint ?? s.point ?? { x: 0, y: 0 },
       startWidth: s.dims.width,
       startHeight: s.dims.height,
-      startBox: s.userBox ?? Math.max(s.dims.width, s.dims.height),
+      startBox: s.userBox,
       alignment: s.alignment,
+      pointerId: Number.isFinite(e.pointerId) ? e.pointerId : null,
     }
+    if (Number.isFinite(e.pointerId)) e.currentTarget.setPointerCapture?.(e.pointerId)
     setDragging(true)
   }, [])
-
-  // Lock the aspect ratio on the first captured frame so later screenshots don't
-  // re-flow the surface. Adjusted during render (React's "store info from prior
-  // renders" pattern) — it converges after one frame and re-runs the layout effect.
-  if (lockedRatio == null && snapshot.frame) {
-    setLockedRatio(snapshot.frame.width / snapshot.frame.height)
-  }
 
   // Mirror the geometry the pointer handlers need into a ref (read off-render).
   useEffect(() => {
     latestRef.current = { point, dims, freePoint, userBox, alignment }
   })
+
+  useLayoutEffect(() => {
+    beginComputerUsePipRun(sessionId, runId)
+  }, [runId, sessionId])
+
+  // Keep snapshots across React Strict Mode's synthetic unmount/remount, but
+  // release them after a real pane unmount so stale frames cannot reappear.
+  useEffect(() => {
+    const pending = pendingSessionCleanup.get(sessionId)
+    if (pending) {
+      clearTimeout(pending)
+      pendingSessionCleanup.delete(sessionId)
+    }
+    mountedSessionCounts.set(sessionId, (mountedSessionCounts.get(sessionId) ?? 0) + 1)
+    return () => {
+      const remaining = Math.max(0, (mountedSessionCounts.get(sessionId) ?? 1) - 1)
+      if (remaining > 0) {
+        mountedSessionCounts.set(sessionId, remaining)
+        return
+      }
+      mountedSessionCounts.delete(sessionId)
+      const timer = setTimeout(() => {
+        pendingSessionCleanup.delete(sessionId)
+        if (!mountedSessionCounts.has(sessionId)) clearComputerUsePipSession(sessionId)
+      }, 0)
+      pendingSessionCleanup.set(sessionId, timer)
+    }
+  }, [sessionId])
 
   // Load the global "always hide" preference lazily, on first activity.
   useEffect(() => {
@@ -171,17 +234,25 @@ export function ComputerUsePictureInPicture({ sessionId }: { sessionId: string }
   // Turn-end detection: when the owning session leaves the running state with a
   // surface still up, flag the terminal state (external store, not React state).
   useEffect(() => {
+    if (busySessionIdRef.current !== sessionId) {
+      busySessionIdRef.current = sessionId
+      prevBusyRef.current = busy
+      return
+    }
     const wasBusy = prevBusyRef.current
     prevBusyRef.current = busy
-    if (wasBusy && !busy && hasActivity) setComputerUsePipRunEnded(sessionId)
-  }, [busy, hasActivity, sessionId])
+    const completedWhileUnmounted = !wasBusy && !busy && hasActivity && snapshot.phase !== "running"
+    if (!snapshot.ended && hasActivity && ((wasBusy && !busy) || completedWhileUnmounted)) {
+      setComputerUsePipRunEnded(sessionId)
+    }
+  }, [busy, hasActivity, sessionId, snapshot.ended, snapshot.phase])
 
   // Terminal → auto-collapse to the pill after a short beat.
   useEffect(() => {
-    if (!snapshot.ended) return
+    if (!snapshot.ended || terminalErrored || interacting || zoomOpen) return
     const id = setTimeout(() => setComputerUsePipHidden(sessionId, true), TERMINAL_COLLAPSE_MS)
     return () => clearTimeout(id)
-  }, [snapshot.ended, sessionId])
+  }, [snapshot.ended, terminalErrored, interacting, sessionId, zoomOpen])
 
   // Freshness ticker — the interval mounts only while the run is live, so an idle
   // surface never ticks. Mirrors the run-panel elapsed-time pattern.
@@ -191,9 +262,20 @@ export function ComputerUsePictureInPicture({ sessionId }: { sessionId: string }
     return () => clearInterval(id)
   }, [busy])
 
-  // Drop this session's snapshot when the surface unmounts / the session switches.
+  // Drop the previous session on an actual prop switch. Avoid an unmount cleanup:
+  // React Strict Mode replays effects in development and would otherwise erase
+  // activity that arrived just before the surface mounted.
   useEffect(() => {
-    return () => clearComputerUsePipSession(sessionId)
+    const previousSessionId = previousSessionIdRef.current
+    previousSessionIdRef.current = sessionId
+    if (previousSessionId !== sessionId) {
+      clearComputerUsePipSession(previousSessionId)
+      dragRef.current = null
+      setFreePoint(null)
+      setDragging(false)
+      setInteracting(false)
+      setZoomOpen(false)
+    }
   }, [sessionId])
 
   // Pointer drag/resize — registered once; the handlers no-op unless a drag is
@@ -204,6 +286,7 @@ export function ComputerUsePictureInPicture({ sessionId }: { sessionId: string }
       const drag = dragRef.current
       const host = hostRef.current
       if (!drag || !host) return
+      if (drag.pointerId != null && e.pointerId !== drag.pointerId) return
       const rect = rectOf(host)
       const dx = e.clientX - drag.pointerX
       const dy = e.clientY - drag.pointerY
@@ -213,32 +296,59 @@ export function ComputerUsePictureInPicture({ sessionId }: { sessionId: string }
           y: clampN(drag.startPoint.y + dy, EDGE, rect.height - drag.startHeight - EDGE),
         })
       } else {
-        const hostMax = Math.max(MIN_SIZE, Math.min(rect.width - 2 * EDGE, rect.height - 2 * EDGE))
+        const hostMax = Math.max(
+          MIN_SIZE,
+          Math.max(rect.width - 2 * EDGE, rect.height - 2 * EDGE - PICTURE_IN_PICTURE_CHROME_HEIGHT)
+        )
         setUserBox(clampN(drag.startBox + resizeGrowth(drag.alignment, dx, dy), MIN_SIZE, hostMax))
       }
     }
-    const onUp = () => {
+    const finishDrag = (snap: boolean, e?: PointerEvent) => {
       const drag = dragRef.current
       const host = hostRef.current
       if (!drag) return
-      if (drag.mode === "move" && host) {
+      if (e && drag.pointerId != null && e.pointerId !== drag.pointerId) return
+      if (snap && drag.mode === "move" && host) {
         const rect = rectOf(host)
         const fp = latestRef.current.freePoint ?? drag.startPoint
         const cx = fp.x + drag.startWidth / 2
         const cy = fp.y + drag.startHeight / 2
         const horiz = cx < rect.width / 2 ? "Left" : "Right"
         const vert = cy < rect.height / 2 ? "top" : "bottom"
-        setAlignment(`${vert}${horiz}` as PictureInPictureAlignment)
+        const nextAlignment = `${vert}${horiz}` as PictureInPictureAlignment
+        setAlignment(nextAlignment)
+        setComputerUsePipLayoutPreference({
+          alignment: nextAlignment,
+          preferredLongEdge: latestRef.current.userBox,
+        })
+      } else if (snap && drag.mode === "resize") {
+        setComputerUsePipLayoutPreference({
+          alignment: latestRef.current.alignment,
+          preferredLongEdge: latestRef.current.userBox,
+        })
       }
       dragRef.current = null
       setFreePoint(null)
       setDragging(false)
+      setInteracting(false)
+    }
+    const onUp = (e: PointerEvent) => finishDrag(true, e)
+    const onCancel = (e: PointerEvent) => finishDrag(false, e)
+    const onBlur = () => finishDrag(false)
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") finishDrag(false)
     }
     window.addEventListener("pointermove", onMove)
     window.addEventListener("pointerup", onUp)
+    window.addEventListener("pointercancel", onCancel)
+    window.addEventListener("blur", onBlur)
+    window.addEventListener("keydown", onKeyDown)
     return () => {
       window.removeEventListener("pointermove", onMove)
       window.removeEventListener("pointerup", onUp)
+      window.removeEventListener("pointercancel", onCancel)
+      window.removeEventListener("blur", onBlur)
+      window.removeEventListener("keydown", onKeyDown)
     }
   }, [])
 
@@ -252,22 +362,21 @@ export function ComputerUsePictureInPicture({ sessionId }: { sessionId: string }
     const update = () => {
       const hostRect = rectOf(host)
       if (hostRect.width <= 0 || hostRect.height <= 0) return
-      const hostMax = Math.max(
-        MIN_SIZE,
-        Math.min(hostRect.width - 2 * EDGE, hostRect.height - 2 * EDGE)
-      )
-      const box = clampN(userBox ?? DEFAULT_BOX, MIN_SIZE, hostMax)
-      const ratio = lockedRatio ?? 1
-      const nextDims =
-        ratio >= 1
-          ? { width: box, height: Math.round(box / ratio) }
-          : { width: Math.round(box * ratio), height: box }
+      const ratio = frameWidth && frameHeight ? frameWidth / frameHeight : 1
+      const nextDims = computePictureInPictureSize({
+        aspectRatio: ratio,
+        preferredLongEdge: userBox,
+        hostWidth: hostRect.width,
+        hostHeight: hostRect.height,
+      })
       const obstacleElements = Array.from(host.querySelectorAll("[data-computer-use-pip-obstacle]"))
       for (const obstacle of obstacleElements) resizeObserver?.observe(obstacle)
       const obstacles = obstacleElements.map(rectOf)
       const anchor = computePictureInPictureAnchors(hostRect, obstacles, nextDims)[alignment]
+      const pillAnchor = computePictureInPictureAnchors(hostRect, obstacles, PILL_SIZE)[alignment]
       setDims(nextDims)
       setPoint({ x: anchor.x - hostRect.x, y: anchor.y - hostRect.y })
+      setPillPoint({ x: pillAnchor.x - hostRect.x, y: pillAnchor.y - hostRect.y })
     }
 
     resizeObserver = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(update)
@@ -298,14 +407,24 @@ export function ComputerUsePictureInPicture({ sessionId }: { sessionId: string }
     }
     // `snapshot.action` / `snapshot.hidden` intentionally excluded — per-action
     // updates must not tear down and rebuild the observers.
-  }, [alignment, alwaysHidden, preferenceLoaded, lockedRatio, userBox])
+  }, [alignment, alwaysHidden, preferenceLoaded, frameWidth, frameHeight, userBox])
 
-  if (!preferenceLoaded || alwaysHidden || snapshot.action == null || snapshot.dismissed)
+  if (
+    !preferenceLoaded ||
+    alwaysHidden ||
+    snapshot.action == null ||
+    snapshot.dismissed ||
+    snapshot.captureSuppressed
+  )
     return null
 
   if (snapshot.hidden) {
     return (
-      <div ref={rootRef} className={cn("absolute z-30", PILL_CORNER[alignment])}>
+      <div
+        ref={rootRef}
+        className="absolute z-30"
+        style={pillPoint ? { left: pillPoint.x, top: pillPoint.y } : { right: EDGE, bottom: EDGE }}
+      >
         <motion.div
           initial={reduce ? false : { opacity: 0, scale: 0.9 }}
           animate={{ opacity: 1, scale: 1 }}
@@ -326,7 +445,7 @@ export function ComputerUsePictureInPicture({ sessionId }: { sessionId: string }
     )
   }
 
-  const errored = snapshot.phase === "error" || (snapshot.ended && status === "error")
+  const errored = terminalErrored
   const freshness =
     !snapshot.ended && busy && snapshot.frame
       ? (() => {
@@ -334,6 +453,12 @@ export function ComputerUsePictureInPicture({ sessionId }: { sessionId: string }
           return ageS < FRESHNESS_THRESHOLD_S ? t("justNow") : t("secondsAgo", { seconds: ageS })
         })()
       : null
+  const actionTranslationKey =
+    snapshot.action &&
+    ACTION_TRANSLATION_KEYS[snapshot.action as keyof typeof ACTION_TRANSLATION_KEYS]
+  const actionLabel = actionTranslationKey
+    ? t(`actions.${actionTranslationKey}` as Parameters<typeof t>[0])
+    : snapshot.action
 
   const activePoint = freePoint ?? point
   const style = activePoint
@@ -354,6 +479,16 @@ export function ComputerUsePictureInPicture({ sessionId }: { sessionId: string }
         style={style}
         initial={reduce ? false : { opacity: 0, scale: 0.96 }}
         animate={{ opacity: 1, scale: 1 }}
+        onPointerEnter={() => setInteracting(true)}
+        onPointerLeave={() => {
+          if (!dragging) setInteracting(false)
+        }}
+        onFocusCapture={() => setInteracting(true)}
+        onBlurCapture={(event) => {
+          if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+            setInteracting(false)
+          }
+        }}
       >
         <TooltipProvider>
           <div className="flex min-w-0 flex-1 flex-col">
@@ -375,7 +510,12 @@ export function ComputerUsePictureInPicture({ sessionId }: { sessionId: string }
                     aria-label={t("move")}
                     onClick={() => {
                       const index = ALIGNMENTS.indexOf(alignment)
-                      setAlignment(ALIGNMENTS[(index + 1) % ALIGNMENTS.length])
+                      const nextAlignment = ALIGNMENTS[(index + 1) % ALIGNMENTS.length]
+                      setAlignment(nextAlignment)
+                      setComputerUsePipLayoutPreference({
+                        alignment: nextAlignment,
+                        preferredLongEdge: userBox,
+                      })
                     }}
                   >
                     <PictureInPicture2 className="size-3.5" aria-hidden />
@@ -459,7 +599,7 @@ export function ComputerUsePictureInPicture({ sessionId }: { sessionId: string }
                       {t("done")}
                     </>
                   ) : (
-                    t("activity", { action: snapshot.action })
+                    t("activity", { action: actionLabel })
                   )}
                 </span>
                 {freshness && (
@@ -470,12 +610,29 @@ export function ComputerUsePictureInPicture({ sessionId }: { sessionId: string }
               </div>
             </div>
           </div>
-          <div
-            aria-hidden
+          <button
+            type="button"
+            aria-label={t("resize")}
             data-pip-resize-handle
             onPointerDown={(e) => startDrag("resize", e)}
+            onKeyDown={(event) => {
+              const delta =
+                event.key === "ArrowUp" || event.key === "ArrowRight"
+                  ? 20
+                  : event.key === "ArrowDown" || event.key === "ArrowLeft"
+                    ? -20
+                    : 0
+              if (delta === 0) return
+              event.preventDefault()
+              const next = clampN(userBox + delta, MIN_SIZE, 2000)
+              setUserBox(next)
+              setComputerUsePipLayoutPreference({
+                alignment,
+                preferredLongEdge: next,
+              })
+            }}
             className={cn(
-              "absolute z-10 flex size-4 items-center justify-center text-white/60",
+              "absolute z-10 flex size-5 items-center justify-center rounded-sm text-white/60 outline-none focus-visible:ring-2 focus-visible:ring-primary",
               HANDLE_CORNER[alignment],
               alignment === "bottomRight" || alignment === "topLeft"
                 ? "cursor-nwse-resize"
@@ -483,7 +640,7 @@ export function ComputerUsePictureInPicture({ sessionId }: { sessionId: string }
             )}
           >
             <Scaling className="size-3" aria-hidden />
-          </div>
+          </button>
         </TooltipProvider>
       </motion.div>
 

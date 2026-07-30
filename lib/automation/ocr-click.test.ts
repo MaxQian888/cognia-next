@@ -17,6 +17,7 @@ import {
 import { desktop } from "./client"
 import { extract } from "@/lib/ocr"
 import { OcrError } from "@/lib/ocr/errors"
+import { clearComputerUsePipState, getComputerUsePipSnapshot } from "./computer-use-pip"
 import type { Screenshot } from "./types"
 import type { OcrResult } from "@/types/ocr"
 
@@ -165,10 +166,37 @@ describe("production entries (findScreenText / clickScreenText)", () => {
       )
   })
 
+  afterEach(() => {
+    clearComputerUsePipState()
+  })
+
   it("findScreenText wires the gated screenshot + OCR pipeline", async () => {
     const res = await findScreenText({ query: "login" })
     expect(mockedScreenshot).toHaveBeenCalled()
     expect(res.matches[0].center).toEqual({ x: 40, y: 20 })
+  })
+
+  it("publishes capture-safe find_text activity and its frame to the chat PiP", async () => {
+    mockedScreenshot.mockImplementationOnce(async () => {
+      expect(getComputerUsePipSnapshot("session-1").captureSuppressed).toBe(true)
+      return shot({ bytes: "OCR_FRAME", width: 1280, height: 800 })
+    })
+
+    await findScreenText({
+      query: "login",
+      ctx: { surface: "computerUse", sessionKey: "session-1" },
+    })
+
+    expect(getComputerUsePipSnapshot("session-1")).toMatchObject({
+      action: "find_text",
+      phase: "complete",
+      captureSuppressed: false,
+      frame: {
+        src: "data:image/png;base64,OCR_FRAME",
+        width: 1280,
+        height: 800,
+      },
+    })
   })
 
   it("clickScreenText clicks the matched center via the gated desktop.click", async () => {
@@ -179,4 +207,41 @@ describe("production entries (findScreenText / clickScreenText)", () => {
       expect.objectContaining({ clickX: 40, clickY: 20 })
     )
   })
+
+  it("publishes click_text completion for a session-aware OCR click", async () => {
+    await clickScreenText({
+      query: "login",
+      button: "left",
+      ctx: { surface: "computerUse", sessionKey: "session-1" },
+    })
+
+    expect(getComputerUsePipSnapshot("session-1")).toMatchObject({
+      action: "click_text",
+      phase: "complete",
+      captureSuppressed: false,
+      frame: { src: "data:image/png;base64,AAAA" },
+    })
+  })
+
+  it.each([
+    ["find_text", () => findScreenText({ query: "login", ctx: sessionContext() })],
+    [
+      "click_text",
+      () => clickScreenText({ query: "login", button: "left", ctx: sessionContext() }),
+    ],
+  ] as const)("releases suppression and surfaces %s capture failures", async (action, invoke) => {
+    mockedScreenshot.mockRejectedValueOnce(new Error("capture denied"))
+
+    await expect(invoke()).rejects.toThrow("capture denied")
+    expect(getComputerUsePipSnapshot("session-1")).toMatchObject({
+      action,
+      phase: "error",
+      error: "capture denied",
+      captureSuppressed: false,
+    })
+  })
 })
+
+function sessionContext() {
+  return { surface: "computerUse" as const, sessionKey: "session-1" }
+}

@@ -83,6 +83,11 @@ fn now_ms() -> i64 {
 ///
 /// Split out as a pure function so the mapping is unit-testable without a live
 /// accessibility server.
+// The arms match `accessibility_sys` constants, whose Cocoa-style names we do
+// not control. They are `const`, so these are value comparisons and not
+// catch-all bindings — `maps_only_the_two_notifications_it_registers_for` pins
+// that by asserting the `None` arm still fires.
+#[allow(non_upper_case_globals)]
 pub(crate) fn signal_kind_for(notification: &str) -> Option<SelectionSignalKind> {
     match notification {
         kAXSelectedTextChangedNotification => Some(SelectionSignalKind::SelectionChanged),

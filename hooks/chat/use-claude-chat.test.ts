@@ -473,8 +473,14 @@ jest.mock("@cognia/vector/store", () => ({
 }))
 
 import { useClaudeChat } from "./use-claude-chat"
+import {
+  hasSessionGrant,
+  recordSessionGrant,
+  __resetForTesting as resetComputerUseSessionGrants,
+} from "@/lib/claude/computer-use-session-grants"
 
 beforeEach(() => {
+  resetComputerUseSessionGrants()
   isTauriMock.mockReset().mockReturnValue(true)
   flushProjectEditorEdits.mockReset().mockResolvedValue([])
   toastWarning.mockReset()
@@ -1010,6 +1016,19 @@ describe("useClaudeChat — actions", () => {
     expect(closeSessionIpcMock).toHaveBeenCalledWith("sess-1")
   })
 
+  it("close() clears Computer Use session grants even when sidecar close fails", async () => {
+    recordSessionGrant("sess-1", "click_text")
+    closeSessionIpcMock.mockRejectedValueOnce(new Error("sidecar unavailable"))
+    const { result } = renderHook(() => useClaudeChat())
+    await flush()
+
+    await act(async () => {
+      await result.current.close("sess-1")
+    })
+
+    expect(hasSessionGrant("sess-1", "click_text")).toBe(false)
+  })
+
   it("respondToApproval (allow): forwards to approveTool", async () => {
     const { result } = renderHook(() => useClaudeChat())
     await flush()
@@ -1025,6 +1044,23 @@ describe("useClaudeChat — actions", () => {
     })
     expect(approveToolMock).toHaveBeenCalledWith("sess-1", "r-1", "allow")
     expect(chatState.clearApproval).toHaveBeenCalledWith("r-1", "sess-1")
+  })
+
+  it("respondToApproval records a session grant for OCR visual tools", async () => {
+    const { result } = renderHook(() => useClaudeChat())
+    await flush()
+    await act(async () => {
+      await result.current.respondToApproval(
+        {
+          sessionId: "sess-1",
+          requestId: "r-ocr",
+          toolName: "mcp__cognia-plugin-tools__click_text",
+        } as never,
+        "allow"
+      )
+    })
+
+    expect(hasSessionGrant("sess-1", "mcp__cognia-plugin-tools__click_text")).toBe(true)
   })
 
   it("respondToApproval resolves builtin-skill: approvals locally, never via approveTool", async () => {
@@ -1108,14 +1144,47 @@ describe("useClaudeChat — actions", () => {
     expect(approveToolMock).toHaveBeenCalledWith("sess-1", "r-1", "deny")
   })
 
-  it("editAndResend truncates and re-sends", async () => {
+  it("editAndResend keeps the original as a sibling instead of deleting its tail", async () => {
+    // This used to `truncateAfter(..., { inclusive: true })`: rewording a
+    // question halfway up a thread permanently destroyed everything after it,
+    // with no undo. Regenerate had kept its alternatives as branches since it
+    // was written; editing now behaves the same way.
+    chatState.messages = [
+      { id: "u-1", role: "user", parts: [{ type: "text", text: "original" }] },
+      { id: "a-1", role: "assistant", parts: [{ type: "text", text: "reply" }] },
+    ]
     const { result } = renderHook(() => useClaudeChat())
     await flush()
     await act(async () => {
-      await result.current.editAndResend("m-1", "edited")
+      await result.current.editAndResend("u-1", "edited")
     })
-    expect(truncateAfterMock).toHaveBeenCalledWith("sess-1", "m-1", { inclusive: true })
+
+    expect(truncateAfterMock).not.toHaveBeenCalled()
+    const persisted = persistMessagesMock.mock.calls.at(-1)?.[1] as Array<{
+      id: string
+      metadata?: Record<string, unknown>
+    }>
+    // The original joins a sibling group…
+    expect(persisted.find((m) => m.id === "u-1")?.metadata).toMatchObject({
+      branchGroupId: "edit::u-1",
+      branchIndex: 0,
+    })
+    // …and the reply that followed it now hangs off it, so it hides while the
+    // new variant is selected and comes back when you flip to the original.
+    expect(persisted.find((m) => m.id === "a-1")?.metadata).toMatchObject({
+      branchOwnerId: "u-1",
+    })
     expect(sendPromptMock).toHaveBeenCalled()
+  })
+
+  it("editAndResend is a no-op when the message is not in the thread", async () => {
+    chatState.messages = []
+    const { result } = renderHook(() => useClaudeChat())
+    await flush()
+    await act(async () => {
+      await result.current.editAndResend("gone", "edited")
+    })
+    expect(sendPromptMock).not.toHaveBeenCalled()
   })
 
   it("regenerate is a no-op when there is no user message", async () => {

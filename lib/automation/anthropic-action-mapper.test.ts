@@ -107,6 +107,37 @@ describe("dispatchAnthropicAction", () => {
     })
   })
 
+  it("suppresses the PiP while capturing so it cannot photograph itself", async () => {
+    mockedDesktop.screenshot.mockImplementationOnce(async () => {
+      expect(getComputerUsePipSnapshot("session-1").captureSuppressed).toBe(true)
+      return shot("FRAME", 1280, 800)
+    })
+
+    await dispatchAnthropicAction(
+      { action: "screenshot" },
+      { surface: "computerUse", sessionKey: "session-1" }
+    )
+
+    expect(getComputerUsePipSnapshot("session-1").captureSuppressed).toBe(false)
+  })
+
+  it("releases capture suppression and surfaces an error when screenshot capture fails", async () => {
+    mockedDesktop.screenshot.mockRejectedValueOnce(new Error("capture denied"))
+
+    const result = await dispatchAnthropicAction(
+      { action: "screenshot" },
+      { surface: "computerUse", sessionKey: "session-1" }
+    )
+
+    expect(result).toEqual({ ok: false, error: "capture denied" })
+    expect(getComputerUsePipSnapshot("session-1")).toMatchObject({
+      action: "screenshot",
+      phase: "error",
+      error: "capture denied",
+      captureSuppressed: false,
+    })
+  })
+
   it("screen-off mode arms the virtual display before dispatching", async () => {
     mockedDesktop.virtualDisplayArm.mockResolvedValueOnce({
       status: "acquired",

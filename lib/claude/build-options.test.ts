@@ -1,6 +1,13 @@
 // Mock every database / store / agent-mode dependency so build-options can be
 // exercised as a pure function. We never want to touch Dexie or Zustand here.
 
+// Paired by default — the standalone (BYOK) branch is opted into per-test.
+jest.mock("@/lib/runtime/standalone-mode", () => ({
+  isStandaloneChatMode: jest.fn(() => false),
+  getMobileRuntimeMode: jest.fn(() => undefined),
+  setMobileRuntimeMode: jest.fn(),
+}))
+
 jest.mock("@/lib/db/characters", () => ({
   // ADR-0030: build-options switched to resolveCharacterById so plugin-
   // overlay characters resolve through the same path as Dexie rows.
@@ -150,6 +157,7 @@ import { selectSurfaceSkills } from "@/lib/skills/surface-activation"
 import { BUILT_IN_SKILL_CATALOG } from "@/lib/skills/built-in-catalog"
 import { buildPluginToolsManifest } from "@/lib/plugin/bridge/sidecar-tools-bridge"
 import { loggers } from "@cognia/logging"
+import * as standaloneMode from "@/lib/runtime/standalone-mode"
 import { ProviderRoutingEngine, RoutingNoCandidatesError } from "@cognia/provider-routing"
 import { useSubagentRuntimeStore } from "@/stores/agent/subagent-runtime-store"
 import { useAgentRuntimeStore } from "@/stores/agent"
@@ -2081,6 +2089,42 @@ describe("resolveSendOptions — system prompt assembly", () => {
     expect(opts.appendSystemPrompt ?? "").not.toContain("User: hi")
   })
 
+  it("does NOT inject a branchSeed when the session was forked at the SDK level", async () => {
+    // The seed and an SDK fork re-establish the SAME pre-branch context.
+    // Applying both would send it twice — once as a system prompt, once as the
+    // forked conversation — inflating every first turn.
+    const opts = await resolveSendOptions({
+      session: makeSession({
+        id: "s1",
+        forkedFromSdkSessionId: "sdk-parent",
+        branchSeed: { kind: "transcript", content: "User: hi" },
+      }),
+    })
+    expect(opts.appendSystemPrompt ?? "").not.toContain("User: hi")
+  })
+
+  it("warns when a session carries both a seed and a fork", async () => {
+    // `buildChildRow` sets exactly one, so this is unreachable today — but the
+    // two fields are written in one function and read in two places, which is
+    // how the invariant gets lost.
+    const warn = jest.spyOn(loggers.chat, "warn").mockImplementation(() => {})
+    try {
+      await resolveSendOptions({
+        session: makeSession({
+          id: "s1",
+          forkedFromSdkSessionId: "sdk-parent",
+          branchSeed: { kind: "summary", content: "We discussed X." },
+        }),
+      })
+      expect(warn).toHaveBeenCalledWith(
+        "branch-seed-and-fork-both-set",
+        expect.objectContaining({ sessionId: "s1", branchKind: "summary" })
+      )
+    } finally {
+      warn.mockRestore()
+    }
+  })
+
   it("omits systemPrompt when nothing produces a non-empty string", async () => {
     const opts = await resolveSendOptions({})
     expect(opts.systemPrompt).toBeUndefined()
@@ -4000,6 +4044,28 @@ describe("native Anthropic web tools (Tier C opt-in)", () => {
     })
     expect(opts.disallowedTools ?? []).not.toContain("WebSearch")
     expect(opts.disallowedTools ?? []).toContain("Bash")
+  })
+
+  it("keeps the custom tools in standalone mode even on Anthropic", async () => {
+    // `allowedTools` is forwarded to `query()` by the Agent SDK path only. A
+    // standalone (BYOK) turn goes straight to the provider API through the AI
+    // SDK, which reads no such field — so taking the native branch there does
+    // not swap the web tools, it deletes them, and the phone loses the
+    // search/fetch loop entirely.
+    const standalone = standaloneMode.isStandaloneChatMode as jest.MockedFunction<
+      typeof standaloneMode.isStandaloneChatMode
+    >
+    standalone.mockReturnValue(true)
+    try {
+      const opts = await resolveSendOptions({
+        character: makeChar({ id: "c1" }),
+        appSettings: { webTools: { enabled: true, nativeOnAnthropic: true } } as AppSettings,
+      })
+      expect(webNames(opts)).toEqual(expect.arrayContaining(["web_search", "web_fetch"]))
+      expect(opts.allowedTools ?? []).not.toContain("WebSearch")
+    } finally {
+      standalone.mockReturnValue(false)
+    }
   })
 })
 

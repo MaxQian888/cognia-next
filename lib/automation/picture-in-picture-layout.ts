@@ -1,5 +1,8 @@
 export const PICTURE_IN_PICTURE_EDGE_MARGIN = 24
 export const PICTURE_IN_PICTURE_OBSTACLE_GAP = 12
+export const PICTURE_IN_PICTURE_CHROME_HEIGHT = 36
+export const PICTURE_IN_PICTURE_MIN_WIDTH = 220
+export const PICTURE_IN_PICTURE_MIN_MEDIA_HEIGHT = 96
 export const DEFAULT_PICTURE_IN_PICTURE_SIZE = { width: 250, height: 250 } as const
 
 export type PictureInPictureAlignment = "topLeft" | "topRight" | "bottomLeft" | "bottomRight"
@@ -15,6 +18,62 @@ export interface PictureInPictureRect extends PictureInPicturePoint {
 }
 
 export type PictureInPictureAnchors = Record<PictureInPictureAlignment, PictureInPicturePoint>
+
+export interface PictureInPictureSizeInput {
+  aspectRatio: number
+  preferredLongEdge: number
+  hostWidth: number
+  hostHeight: number
+}
+
+export interface PictureInPictureMediaSize {
+  width: number
+  height: number
+  mediaWidth: number
+  mediaHeight: number
+}
+
+/**
+ * Size the screenshot viewport first, then add toolbar chrome outside it.
+ * This keeps the media box at the source ratio while ensuring portrait and
+ * ultrawide frames still leave usable room for the header controls.
+ */
+export function computePictureInPictureSize({
+  aspectRatio,
+  preferredLongEdge,
+  hostWidth,
+  hostHeight,
+}: PictureInPictureSizeInput): PictureInPictureMediaSize {
+  const ratio = Number.isFinite(aspectRatio) && aspectRatio > 0 ? aspectRatio : 1
+  const longEdge =
+    Number.isFinite(preferredLongEdge) && preferredLongEdge > 0 ? preferredLongEdge : 250
+  let mediaWidth = ratio >= 1 ? longEdge : longEdge * ratio
+  let mediaHeight = ratio >= 1 ? longEdge / ratio : longEdge
+
+  const grow = Math.max(
+    1,
+    PICTURE_IN_PICTURE_MIN_WIDTH / mediaWidth,
+    PICTURE_IN_PICTURE_MIN_MEDIA_HEIGHT / mediaHeight
+  )
+  mediaWidth *= grow
+  mediaHeight *= grow
+
+  const availableWidth = Math.max(1, hostWidth - PICTURE_IN_PICTURE_EDGE_MARGIN * 2)
+  const availableMediaHeight = Math.max(
+    1,
+    hostHeight - PICTURE_IN_PICTURE_EDGE_MARGIN * 2 - PICTURE_IN_PICTURE_CHROME_HEIGHT
+  )
+  const shrink = Math.min(1, availableWidth / mediaWidth, availableMediaHeight / mediaHeight)
+  mediaWidth = Math.max(1, Math.floor(mediaWidth * shrink))
+  mediaHeight = Math.max(1, Math.floor(mediaHeight * shrink))
+
+  return {
+    width: mediaWidth,
+    height: mediaHeight + PICTURE_IN_PICTURE_CHROME_HEIGHT,
+    mediaWidth,
+    mediaHeight,
+  }
+}
 
 function overlapArea(a: PictureInPictureRect, b: PictureInPictureRect): number {
   const width = Math.max(0, Math.min(a.x + a.width, b.x + b.width) - Math.max(a.x, b.x))

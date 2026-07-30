@@ -36,13 +36,17 @@ import type { Character, SendOptions } from "@cognia/agent-config-types"
  * sharing awkward (a third lib file just for one constant would be
  * worse than the duplication, and the names rarely change).
  */
-const COMPUTER_USE_PLUGIN_TOOL_NAMES = [
+export const COMPUTER_USE_PLUGIN_TOOL_NAMES = [
   "computer_use",
   "bash",
   "text_editor",
+  "find_text",
+  "click_text",
   "mcp__cognia-plugin-tools__computer_use",
   "mcp__cognia-plugin-tools__bash",
   "mcp__cognia-plugin-tools__text_editor",
+  "mcp__cognia-plugin-tools__find_text",
+  "mcp__cognia-plugin-tools__click_text",
 ] as const
 
 export interface ApplyComputerUseInput {

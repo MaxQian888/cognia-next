@@ -1,17 +1,26 @@
+/** @jest-environment jsdom */
+
 import {
+  COMPUTER_USE_PIP_LAYOUT_STORAGE_KEY,
   clearComputerUsePipSession,
   clearComputerUsePipState,
+  beginComputerUsePipRun,
   getComputerUsePipAlwaysHidden,
+  getComputerUsePipLayoutPreference,
   getComputerUsePipSnapshot,
   publishComputerUseActivity,
+  publishComputerUsePipFrame,
   setComputerUsePipAlwaysHidden,
   setComputerUsePipDismissed,
   setComputerUsePipHidden,
+  setComputerUsePipLayoutPreference,
   setComputerUsePipRunEnded,
   subscribeComputerUsePip,
+  suppressComputerUsePipForCapture,
 } from "./computer-use-pip"
 
 afterEach(() => {
+  window.localStorage.removeItem(COMPUTER_USE_PIP_LAYOUT_STORAGE_KEY)
   clearComputerUsePipState()
   jest.restoreAllMocks()
 })
@@ -34,6 +43,59 @@ describe("computer-use PiP state", () => {
         width: 1280,
         height: 800,
       },
+    })
+  })
+
+  it("keeps a newer action current when an older result arrives late", () => {
+    beginComputerUsePipRun("session-1", 1)
+    const screenshotActivity = publishComputerUseActivity("session-1", "screenshot")
+    const clickActivity = publishComputerUseActivity("session-1", "left_click")
+
+    publishComputerUseActivity(
+      "session-1",
+      "screenshot",
+      {
+        ok: true,
+        output: "FRAME",
+        display_width_px: 1280,
+        display_height_px: 800,
+      },
+      screenshotActivity
+    )
+
+    expect(getComputerUsePipSnapshot("session-1")).toMatchObject({
+      action: "left_click",
+      phase: "running",
+      frame: { src: "data:image/png;base64,FRAME" },
+    })
+
+    publishComputerUseActivity("session-1", "left_click", { ok: true }, clickActivity)
+    expect(getComputerUsePipSnapshot("session-1")).toMatchObject({
+      action: "left_click",
+      phase: "complete",
+    })
+  })
+
+  it("rebuilds completed activity when its pane unmounted during the action", () => {
+    const activityId = publishComputerUseActivity("session-1", "screenshot")
+    clearComputerUsePipSession("session-1")
+
+    publishComputerUseActivity(
+      "session-1",
+      "screenshot",
+      {
+        ok: true,
+        output: "LATE_FRAME",
+        display_width_px: 1280,
+        display_height_px: 800,
+      },
+      activityId
+    )
+
+    expect(getComputerUsePipSnapshot("session-1")).toMatchObject({
+      action: "screenshot",
+      phase: "complete",
+      frame: { src: "data:image/png;base64,LATE_FRAME" },
     })
   })
 
@@ -72,6 +134,14 @@ describe("computer-use PiP state", () => {
     })
 
     publishComputerUseActivity("session-1", "screenshot", { ok: true, output: "INCOMPLETE" })
+    expect(getComputerUsePipSnapshot("session-1").frame?.src).toContain("FRAME")
+
+    publishComputerUseActivity("session-1", "screenshot", {
+      ok: true,
+      output: "INVALID",
+      display_width_px: 0,
+      display_height_px: Number.NaN,
+    })
     expect(getComputerUsePipSnapshot("session-1").frame?.src).toContain("FRAME")
 
     publishComputerUseActivity("session-1", "scroll", { ok: false })
@@ -125,6 +195,50 @@ describe("computer-use PiP state", () => {
     expect(getComputerUsePipSnapshot("session-1")).toMatchObject({ hidden: false, ended: false })
   })
 
+  it("uses the explicit run id to reset stale frame and visibility exactly once", () => {
+    beginComputerUsePipRun("session-1", 7)
+    publishComputerUseActivity("session-1", "screenshot", {
+      ok: true,
+      output: "FRAME",
+      display_width_px: 100,
+      display_height_px: 50,
+    })
+    setComputerUsePipHidden("session-1", true)
+
+    beginComputerUsePipRun("session-1", 7)
+    expect(getComputerUsePipSnapshot("session-1")).toMatchObject({
+      runId: 7,
+      hidden: true,
+      frame: { src: "data:image/png;base64,FRAME" },
+    })
+
+    beginComputerUsePipRun("session-1", 8)
+    expect(getComputerUsePipSnapshot("session-1")).toMatchObject({
+      runId: 8,
+      hidden: false,
+      dismissed: false,
+      ended: false,
+      action: null,
+      frame: null,
+    })
+  })
+
+  it("adopts the current run id without dropping activity that arrived before mount", () => {
+    publishComputerUseActivity("session-1", "screenshot", {
+      ok: true,
+      output: "EARLY",
+      display_width_px: 100,
+      display_height_px: 50,
+    })
+
+    beginComputerUsePipRun("session-1", 3)
+    expect(getComputerUsePipSnapshot("session-1")).toMatchObject({
+      runId: 3,
+      action: "screenshot",
+      frame: { src: "data:image/png;base64,EARLY" },
+    })
+  })
+
   it("dismisses for the current run and re-shows on the next run", () => {
     publishComputerUseActivity("session-1", "left_click")
     setComputerUsePipDismissed("session-1", true)
@@ -143,5 +257,66 @@ describe("computer-use PiP state", () => {
     clearComputerUsePipSession("session-1")
     expect(getComputerUsePipSnapshot("session-1").action).toBeNull()
     expect(getComputerUsePipSnapshot("session-2").action).toBe("scroll")
+  })
+
+  it("keeps overlapping captures suppressed until every idempotent release finishes", async () => {
+    publishComputerUseActivity("session-1", "screenshot")
+    const releaseFirst = await suppressComputerUsePipForCapture("session-1")
+    const releaseSecond = await suppressComputerUsePipForCapture("session-1")
+
+    expect(getComputerUsePipSnapshot("session-1").captureSuppressed).toBe(true)
+    releaseFirst()
+    releaseFirst()
+    expect(getComputerUsePipSnapshot("session-1").captureSuppressed).toBe(true)
+    releaseSecond()
+    expect(getComputerUsePipSnapshot("session-1").captureSuppressed).toBe(false)
+  })
+
+  it("updates only valid visual frames without replacing the current action", () => {
+    publishComputerUseActivity("session-1", "click_text")
+    publishComputerUsePipFrame("session-1", {
+      output: "OCR_FRAME",
+      width: 800,
+      height: 600,
+      capturedAt: 123,
+    })
+    publishComputerUsePipFrame("session-1", {
+      output: "",
+      width: 0,
+      height: Number.NaN,
+    })
+
+    expect(getComputerUsePipSnapshot("session-1")).toMatchObject({
+      action: "click_text",
+      phase: "running",
+      frame: {
+        src: "data:image/png;base64,OCR_FRAME",
+        width: 800,
+        height: 600,
+        capturedAt: 123,
+      },
+    })
+  })
+
+  it("normalizes malformed stored layout and survives blocked persistence", () => {
+    window.localStorage.setItem(
+      COMPUTER_USE_PIP_LAYOUT_STORAGE_KEY,
+      JSON.stringify({ alignment: "elsewhere", preferredLongEdge: -1 })
+    )
+    expect(getComputerUsePipLayoutPreference()).toEqual({
+      alignment: "bottomRight",
+      preferredLongEdge: 250,
+    })
+
+    jest.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+      throw new Error("blocked")
+    })
+    expect(() =>
+      setComputerUsePipLayoutPreference({ alignment: "topLeft", preferredLongEdge: 10 })
+    ).not.toThrow()
+    expect(getComputerUsePipLayoutPreference()).toEqual({
+      alignment: "topLeft",
+      preferredLongEdge: 220,
+    })
   })
 })

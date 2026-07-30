@@ -1,3 +1,8 @@
+const mockHasNoLeakingPiiDeep = jest.fn((_value?: unknown) => true)
+jest.mock("@cognia/redact", () => ({
+  hasNoLeakingPiiDeep: (value: unknown) => mockHasNoLeakingPiiDeep(value),
+}))
+
 import { dispatchProtocolAdapterExec } from "./protocol-adapter-ipc"
 import type { CodeProtocolAdapterFactory } from "@/types/plugin/plugin-protocol-adapter"
 
@@ -32,6 +37,10 @@ async function waitFor(predicate: () => boolean): Promise<void> {
 }
 
 describe("dispatchProtocolAdapterExec", () => {
+  beforeEach(() => {
+    mockHasNoLeakingPiiDeep.mockReset().mockReturnValue(true)
+  })
+
   it("streams chunks then done with harvested usage", async () => {
     const factory: CodeProtocolAdapterFactory = () => ({
       stream: async function* () {
@@ -81,6 +90,26 @@ describe("dispatchProtocolAdapterExec", () => {
         type: "protocol_adapter_error",
         execId: "ex1",
         error: expect.stringContaining("no code adapter registered"),
+      }),
+    ])
+  })
+
+  it("rejects model-visible adapter input that fails the renderer PII gate", async () => {
+    mockHasNoLeakingPiiDeep.mockReturnValue(false)
+    const stream = jest.fn()
+    const factory: CodeProtocolAdapterFactory = () => ({ stream })
+    const { calls, writeCommand } = writer()
+
+    await runExec(event, { writeCommand, resolveExecutor: () => factory })
+
+    expect(mockHasNoLeakingPiiDeep).toHaveBeenCalledWith(
+      expect.objectContaining({ messages: event.request.messages })
+    )
+    expect(stream).not.toHaveBeenCalled()
+    expect(calls).toEqual([
+      expect.objectContaining({
+        type: "protocol_adapter_error",
+        error: expect.stringContaining("renderer PII gate"),
       }),
     ])
   })

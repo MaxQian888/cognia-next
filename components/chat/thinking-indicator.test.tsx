@@ -53,6 +53,7 @@ describe("ChatThinkingIndicator", () => {
     const { getByTestId, queryByTestId } = render(<ChatThinkingIndicator />)
     const root = getByTestId("chat-thinking-indicator")
     expect(root.textContent).toContain("Thinking now")
+    expect(root.querySelector(".shimmer")).toBeInTheDocument()
     // No skeleton or tip yet.
     expect(queryByTestId("thinking-skeleton")).toBeNull()
   })

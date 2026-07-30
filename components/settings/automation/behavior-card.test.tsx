@@ -4,7 +4,7 @@
  * resolves real English strings so queries use accessible names.
  */
 
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 
 const settingsGet = jest.fn()
 const settingsSet = jest.fn()
@@ -29,29 +29,29 @@ beforeEach(() => {
 })
 
 describe("BehaviorCard", () => {
-  it("renders defaults: scaling off, dedup on, threshold 200", async () => {
+  it("renders defaults: scaling on, dedup on, threshold 200", async () => {
     render(<BehaviorCard />)
     const scaling = await screen.findByRole("switch", { name: /downscale screenshots/i })
-    expect(scaling).not.toBeChecked()
+    expect(scaling).toBeChecked()
     expect(screen.getByRole("switch", { name: /skip unchanged screenshots/i })).toBeChecked()
     expect(screen.getByLabelText(/paste threshold/i)).toHaveValue(200)
-    // Dimension inputs only appear once scaling is enabled.
-    expect(screen.queryByLabelText(/max width/i)).not.toBeInTheDocument()
+    expect(screen.getByLabelText(/max width/i)).toHaveValue(1280)
+    expect(screen.getByLabelText(/max height/i)).toHaveValue(800)
   })
 
-  it("enabling scaling persists the full settings blob and reveals dimensions", async () => {
+  it("disabling scaling persists the full settings blob and hides dimensions", async () => {
     render(<BehaviorCard />)
     const scaling = await screen.findByRole("switch", { name: /downscale screenshots/i })
     fireEvent.click(scaling)
     await waitFor(() =>
       expect(settingsSet).toHaveBeenCalledWith(
         expect.objectContaining({
-          screenshotScaling: { enabled: true, maxWidth: 1280, maxHeight: 800 },
+          screenshotScaling: { enabled: false, maxWidth: 1280, maxHeight: 800 },
         })
       )
     )
-    expect(await screen.findByLabelText(/max width/i)).toHaveValue(1280)
-    expect(screen.getByLabelText(/max height/i)).toHaveValue(800)
+    await waitFor(() => expect(screen.queryByLabelText(/max width/i)).not.toBeInTheDocument())
+    expect(screen.queryByLabelText(/max height/i)).not.toBeInTheDocument()
   })
 
   it("dimension inputs clamp to their ranges and persist", async () => {
@@ -180,5 +180,48 @@ describe("BehaviorCard", () => {
     const dedup = await screen.findByRole("switch", { name: /skip unchanged screenshots/i })
     fireEvent.click(dedup)
     expect(await screen.findByText(/KILL_SWITCH_ACTIVE/)).toBeInTheDocument()
+  })
+
+  it("rolls back the PiP preference when persistence fails", async () => {
+    settingsSet.mockRejectedValueOnce(new Error("WRITE_FAILED"))
+    render(<BehaviorCard />)
+    const toggle = await screen.findByRole("switch", {
+      name: /always hide picture in picture/i,
+    })
+
+    fireEvent.click(toggle)
+    expect(await screen.findByText(/WRITE_FAILED/)).toBeInTheDocument()
+    await waitFor(() => expect(toggle).not.toBeChecked())
+  })
+
+  it("serializes rapid saves and rolls consecutive failures back to the last persisted state", async () => {
+    const first = Promise.withResolvers<void>()
+    const second = Promise.withResolvers<void>()
+    settingsSet
+      .mockImplementationOnce(() => first.promise)
+      .mockImplementationOnce(() => second.promise)
+    render(<BehaviorCard />)
+    const pip = await screen.findByRole("switch", {
+      name: /always hide picture in picture/i,
+    })
+    const dedup = screen.getByRole("switch", { name: /skip unchanged screenshots/i })
+
+    fireEvent.click(pip)
+    fireEvent.click(dedup)
+    expect(pip).toBeChecked()
+    expect(dedup).not.toBeChecked()
+    await waitFor(() => expect(settingsSet).toHaveBeenCalledTimes(1))
+
+    await act(async () => first.reject(new Error("FIRST_FAILED")))
+    await waitFor(() => expect(settingsSet).toHaveBeenCalledTimes(2))
+    expect(pip).toBeChecked()
+    expect(dedup).not.toBeChecked()
+
+    await act(async () => second.reject(new Error("SECOND_FAILED")))
+    expect(await screen.findByText(/SECOND_FAILED/)).toBeInTheDocument()
+    await waitFor(() => {
+      expect(pip).not.toBeChecked()
+      expect(dedup).toBeChecked()
+    })
   })
 })

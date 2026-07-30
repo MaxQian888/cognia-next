@@ -29,10 +29,16 @@ import type { PluginToolExecResponse } from "./plugin-tool-ipc"
 import type { ProtocolAdapterExecEvent } from "./protocol-adapter-ipc"
 import type { ProtocolAdapterCancelEvent } from "@cognia/agent-config-types"
 import { hasNoLeakingPiiDeep } from "@cognia/redact"
+import { isRemoteExecutionContext, type RemoteExecutionContext } from "./remote-execution"
 
 const SIDECAR_EVENT = "claude://message"
 /** Canonical agent-event channel (ADR-0090 Phase 3). */
 const AGENT_EVENT = "agent://message"
+const remoteApprovalContexts = new Map<string, RemoteExecutionContext>()
+
+function remoteApprovalKey(sessionId: string, requestId: string): string {
+  return `${sessionId}:${requestId}`
+}
 
 export async function sendPrompt(
   sessionId: string,
@@ -85,6 +91,9 @@ export async function compactSession(sessionId: string, focus?: string): Promise
  * generic (AI-SDK) path while the session is still live and idle.
  */
 export async function restoreSession(sessionId: string, messages: unknown[]): Promise<void> {
+  if (!hasNoLeakingPiiDeep(messages)) {
+    throw new Error("session restore rejected by the renderer PII gate")
+  }
   await transport.call("claude_restore", { sessionId, messages })
 }
 
@@ -387,15 +396,23 @@ export async function approveTool(
   requestId: string,
   decision: ApprovalDecision,
   message?: string,
-  updatedInput?: unknown
+  updatedInput?: unknown,
+  remoteExecutionContext?: RemoteExecutionContext
 ): Promise<void> {
-  await transport.call("claude_approve", {
-    sessionId,
-    requestId,
-    decision,
-    message,
-    updatedInput,
-  })
+  const key = remoteApprovalKey(sessionId, requestId)
+  const context = remoteExecutionContext ?? remoteApprovalContexts.get(key)
+  try {
+    await transport.call("claude_approve", {
+      sessionId,
+      requestId,
+      decision,
+      message,
+      updatedInput,
+      ...(context ? { remoteExecutionContext: context } : {}),
+    })
+  } finally {
+    remoteApprovalContexts.delete(key)
+  }
 }
 
 /**
@@ -407,12 +424,14 @@ export async function approveTool(
 export async function toolResultDecision(
   sessionId: string,
   reviewId: string,
-  updatedToolOutput?: unknown
+  updatedToolOutput?: unknown,
+  remoteExecutionContext?: RemoteExecutionContext
 ): Promise<void> {
   await transport.call("claude_tool_result_decision", {
     sessionId,
     reviewId,
     updatedToolOutput,
+    remoteExecutionContext,
   })
 }
 
@@ -477,7 +496,23 @@ export async function restartSidecar(): Promise<void> {
 }
 
 export async function onClaudeMessage(handler: (evt: ClaudeEvent) => void): Promise<UnlistenFn> {
-  return transport.subscribe<ClaudeEvent>(SIDECAR_EVENT, handler)
+  return transport.subscribe<ClaudeEvent>(SIDECAR_EVENT, (event) => {
+    const routed = event as ClaudeEvent & { remoteExecutionContext?: unknown }
+    if (
+      (routed as { type?: string }).type === "permission_request" &&
+      "sessionId" in routed &&
+      "requestId" in routed &&
+      typeof routed.sessionId === "string" &&
+      typeof routed.requestId === "string" &&
+      isRemoteExecutionContext(routed.remoteExecutionContext)
+    ) {
+      remoteApprovalContexts.set(
+        remoteApprovalKey(routed.sessionId, routed.requestId),
+        routed.remoteExecutionContext
+      )
+    }
+    handler(event)
+  })
 }
 
 /**
@@ -487,7 +522,7 @@ export async function onClaudeMessage(handler: (evt: ClaudeEvent) => void): Prom
  * `onClaudeMessage` subscription + the `ClaudeEvent` type guard. No-op in web.
  */
 export async function subscribePluginToolExec(
-  handler: (req: PluginToolExecEvent) => void
+  handler: (req: PluginToolExecEvent & { remoteExecutionContext?: RemoteExecutionContext }) => void
 ): Promise<UnlistenFn> {
   return onClaudeMessage((evt) => {
     if (isPluginToolExecEvent(evt)) handler(evt)
@@ -498,12 +533,16 @@ export async function subscribePluginToolExec(
  * Write a `plugin_tool_response` back onto the sidecar stdin so the pending
  * `pendingPluginToolCalls` entry resolves. Mirrors `approveTool`/`claude_approve`.
  */
-export async function sendPluginToolResponse(resp: PluginToolExecResponse): Promise<void> {
+export async function sendPluginToolResponse(
+  resp: PluginToolExecResponse,
+  remoteExecutionContext?: RemoteExecutionContext
+): Promise<void> {
   await transport.call("claude_plugin_tool_response", {
     sessionId: resp.sessionId,
     toolUseId: resp.toolUseId,
     result: resp.result,
     error: resp.error,
+    ...(remoteExecutionContext ? { remoteExecutionContext } : {}),
   })
 }
 
@@ -531,8 +570,19 @@ export async function subscribeProtocolAdapterCancel(
 }
 
 /** Write a `protocol_adapter_{chunk,done,error}` line onto the sidecar stdin. */
-export async function sendProtocolAdapterMessage(message: Record<string, unknown>): Promise<void> {
-  await transport.call("claude_protocol_adapter_message", { message })
+export async function sendProtocolAdapterMessage(
+  message: Record<string, unknown>,
+  remoteExecutionContext?: RemoteExecutionContext
+): Promise<void> {
+  const routedMessage = {
+    ...message,
+    messageId: crypto.randomUUID(),
+  }
+  await transport.call("claude_protocol_adapter_message", {
+    message: routedMessage,
+    ...(typeof message.sessionId === "string" ? { sessionId: message.sessionId } : {}),
+    ...(remoteExecutionContext ? { remoteExecutionContext } : {}),
+  })
 }
 
 // ---- File-system commands (Skills + MCP import/export) -------------------
@@ -702,6 +752,17 @@ export interface InstallSkillMirroredResponse {
   trashedFrom?: string | null
 }
 
+export interface HostSkillsCatalog {
+  cognia: NativeSkill[]
+  claude: NativeSkill[]
+  codex: NativeSkill[]
+}
+
+export interface SkillBundleUploadHandle {
+  handleId: string
+  chunkBytes: number
+}
+
 export interface SkillScanIssue {
   severity: "low" | "medium" | "high"
   kind: string
@@ -711,6 +772,58 @@ export interface SkillScanIssue {
 
 export async function skillsScanNative(): Promise<NativeSkill[]> {
   return transport.call<NativeSkill[]>("skills_scan_native")
+}
+
+export async function skillsCatalogGet(): Promise<HostSkillsCatalog> {
+  return transport.call<HostSkillsCatalog>("skills_catalog_get")
+}
+
+export async function skillsBundleUploadOpen(
+  expectedSize: number,
+  expectedHash: string
+): Promise<SkillBundleUploadHandle> {
+  return transport.call<SkillBundleUploadHandle>("skills_bundle_upload_open", {
+    request: { expectedSize, expectedHash },
+  })
+}
+
+export async function skillsBundleUploadWrite(args: {
+  handleId: string
+  offset: number
+  dataBase64: string
+  chunkHash: string
+}): Promise<number> {
+  return transport.call<number>("skills_bundle_upload_write", args)
+}
+
+export async function skillsBundleUploadCommit(handleId: string): Promise<void> {
+  return transport.call<void>("skills_bundle_upload_commit", { handleId })
+}
+
+export async function skillsBundleUploadAbort(handleId: string): Promise<void> {
+  return transport.call<void>("skills_bundle_upload_abort", { handleId })
+}
+
+export async function skillsInstallAtomic(
+  handleId: string,
+  adminLease: string
+): Promise<InstallSkillMirroredResponse> {
+  return transport.call<InstallSkillMirroredResponse>("skills_install_atomic", {
+    handleId,
+    adminLease,
+  })
+}
+
+export async function skillsUninstall(
+  target: SkillsTarget,
+  dirName: string,
+  adminLease: string
+): Promise<{ removed: boolean; directory: string }> {
+  return transport.call<{ removed: boolean; directory: string }>("skills_uninstall", {
+    target,
+    dirName,
+    adminLease,
+  })
 }
 
 export async function skillsScanDir(path: string): Promise<NativeSkill[]> {

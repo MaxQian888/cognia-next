@@ -32,12 +32,15 @@ jest.mock("@/components/chat/dialogs/single-export-trigger", () => ({
   SingleExportTrigger: () => null,
 }))
 
-// Fork + active-session + toast are exercised by the fork action test.
-jest.mock("@/lib/db/sessions", () => ({
-  forkSessionFromParent: jest.fn(async () => ({ id: "fork_1" })),
+// Branch + active-session + toast are exercised by the branch action tests.
+jest.mock("@/lib/chat/branch-session", () => ({
+  branchSessionAtMessage: jest.fn(async () => ({ id: "branch_1" })),
 }))
 
 const setActiveSessionMock = jest.fn()
+// The sheet branches from the target session's OWN slice, so the store mock has
+// to expose one rather than only the top-level active projection.
+let mockSessionSlices: Record<string, { messages: unknown[]; activeBranchByGroup: object }> = {}
 // Mutable so a test can stage ad-hoc (ephemeral) skill attachments; reset in
 // beforeEach. Read lazily inside the selector, so no factory-eval TDZ.
 let mockEphemeralSkillIds: string[] = []
@@ -46,7 +49,13 @@ jest.mock("@/stores/chat", () => {
     const state = { ephemeralSkillIds: mockEphemeralSkillIds }
     return selector ? selector(state) : state
   }
-  useChatStore.getState = () => ({ setActiveSession: setActiveSessionMock })
+  useChatStore.getState = () => ({
+    setActiveSession: setActiveSessionMock,
+    sessions: mockSessionSlices,
+    activeSessionId: null,
+    messages: [],
+    activeBranchByGroup: {},
+  })
   return { useChatStore }
 })
 
@@ -73,12 +82,12 @@ import userEvent from "@testing-library/user-event"
 import { open as openDialog } from "@tauri-apps/plugin-dialog"
 import { isTauri } from "@/lib/tauri"
 import { closeSession } from "@/lib/claude/ipc"
-import { forkSessionFromParent } from "@/lib/db/sessions"
+import { branchSessionAtMessage } from "@/lib/chat/branch-session"
 
 const mockOpenDialog = openDialog as unknown as jest.Mock
 const mockIsTauri = isTauri as unknown as jest.Mock
 const mockCloseSession = closeSession as unknown as jest.Mock
-const mockFork = forkSessionFromParent as unknown as jest.Mock
+const mockBranch = branchSessionAtMessage as unknown as jest.Mock
 import type { ReactNode } from "react"
 import { SessionSettingsSheet } from "./session-settings-sheet"
 import { useCredentialStatus } from "@/hooks/chat/use-credential-status"
@@ -142,7 +151,8 @@ describe("SessionSettingsSheet", () => {
     mockIsTauri.mockReturnValue(false)
     mockOpenDialog.mockResolvedValue(null)
     mockCloseSession.mockResolvedValue(undefined)
-    mockFork.mockResolvedValue({ id: "fork_1" })
+    mockBranch.mockResolvedValue({ id: "branch_1" })
+    mockSessionSlices = {}
     setActiveSessionMock.mockClear()
     mockEphemeralSkillIds = []
     useProjectStore.setState({ projects: [], activeProjectId: null, loaded: false })
@@ -293,14 +303,18 @@ describe("SessionSettingsSheet", () => {
     expect(screen.getByText(/Max plan/i)).toBeInTheDocument()
   })
 
-  it("renders the fork action only when the session has an sdk session id", () => {
+  it("offers the branch action with or without an sdk session id", () => {
+    // This used to be gated on `sdkSessionId` because the old SDK-level fork had
+    // nothing to fork from without one — which hid the action entirely on every
+    // provider that never issues an SDK session id. Branching re-establishes
+    // context from the transcript instead, so it is always available.
     const adapter = makeAdapter()
     const { rerender } = render(
       <DataAdapterProvider adapter={adapter}>
         <SessionSettingsSheet session={mkSession()} open onOpenChange={jest.fn()} />
       </DataAdapterProvider>
     )
-    expect(screen.queryByRole("button", { name: /fork session/i })).not.toBeInTheDocument()
+    expect(screen.getByRole("button", { name: /branch conversation/i })).toBeInTheDocument()
     rerender(
       <DataAdapterProvider adapter={adapter}>
         <SessionSettingsSheet
@@ -310,7 +324,7 @@ describe("SessionSettingsSheet", () => {
         />
       </DataAdapterProvider>
     )
-    expect(screen.getByRole("button", { name: /fork session/i })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: /branch conversation/i })).toBeInTheDocument()
   })
 
   it("renders the skills badge when the character has resolved skills", () => {
@@ -435,22 +449,57 @@ describe("SessionSettingsSheet", () => {
     await waitFor(() => expect(mockCloseSession).toHaveBeenCalledWith("ses_cwd"))
   })
 
-  it("forks the session and switches to the new branch", async () => {
+  it("branches at the last visible message and switches to the new conversation", async () => {
+    mockSessionSlices = {
+      ses_branch: {
+        messages: [
+          { id: "m1", role: "user", parts: [] },
+          { id: "m2", role: "assistant", parts: [] },
+        ],
+        activeBranchByGroup: {},
+      },
+    }
     const adapter = makeAdapter()
     render(
       <DataAdapterProvider adapter={adapter}>
         <SessionSettingsSheet
-          session={mkSession({ id: "ses_fork", sdkSessionId: "sdk_1" })}
+          session={mkSession({ id: "ses_branch", sdkSessionId: "sdk_1" })}
           open
           onOpenChange={jest.fn()}
         />
       </DataAdapterProvider>
     )
     await act(async () => {
-      fireEvent.click(screen.getByRole("button", { name: /fork session/i }))
+      fireEvent.click(screen.getByRole("button", { name: /branch conversation/i }))
     })
-    await waitFor(() => expect(mockFork).toHaveBeenCalledWith("ses_fork"))
-    await waitFor(() => expect(setActiveSessionMock).toHaveBeenCalledWith("fork_1"))
+    // Tail cut-off + direct mode — `branchSessionAtMessage` reuses the cheap SDK
+    // fork internally when the parent has an sdkSessionId, so this is a superset
+    // of the old fork path rather than a different operation.
+    await waitFor(() =>
+      expect(mockBranch).toHaveBeenCalledWith(
+        expect.objectContaining({ sourceId: "ses_branch", messageId: "m2", mode: "direct" })
+      )
+    )
+    await waitFor(() => expect(setActiveSessionMock).toHaveBeenCalledWith("branch_1"))
+  })
+
+  it("refuses to branch a conversation that has no messages yet", async () => {
+    const { toast } = jest.requireMock("sonner") as { toast: { error: jest.Mock } }
+    const adapter = makeAdapter()
+    render(
+      <DataAdapterProvider adapter={adapter}>
+        <SessionSettingsSheet
+          session={mkSession({ id: "ses_empty" })}
+          open
+          onOpenChange={jest.fn()}
+        />
+      </DataAdapterProvider>
+    )
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /branch conversation/i }))
+    })
+    expect(mockBranch).not.toHaveBeenCalled()
+    await waitFor(() => expect(toast.error).toHaveBeenCalled())
   })
 
   it("applies a non-conflicting preset into the form (fill-empty)", async () => {
@@ -609,23 +658,30 @@ describe("SessionSettingsSheet", () => {
     await waitFor(() => expect(input.value).toBe(""))
   })
 
-  it("surfaces a toast when forking fails", async () => {
+  it("surfaces a translated toast when branching fails, never the raw Error text", async () => {
+    // The old fork path piped `err.message` straight into the toast, putting
+    // untranslated internals ("Cannot fork: the session hasn't started a SDK
+    // conversation yet") in front of the user.
     const { toast } = jest.requireMock("sonner") as { toast: { error: jest.Mock } }
-    mockFork.mockRejectedValueOnce(new Error("boom"))
+    mockSessionSlices = {
+      ses_fail: { messages: [{ id: "m1", role: "user", parts: [] }], activeBranchByGroup: {} },
+    }
+    mockBranch.mockRejectedValueOnce(new Error("boom"))
     const adapter = makeAdapter()
     render(
       <DataAdapterProvider adapter={adapter}>
         <SessionSettingsSheet
-          session={mkSession({ sdkSessionId: "sdk_1" })}
+          session={mkSession({ id: "ses_fail", sdkSessionId: "sdk_1" })}
           open
           onOpenChange={jest.fn()}
         />
       </DataAdapterProvider>
     )
     await act(async () => {
-      fireEvent.click(screen.getByRole("button", { name: /fork session/i }))
+      fireEvent.click(screen.getByRole("button", { name: /branch conversation/i }))
     })
-    await waitFor(() => expect(toast.error).toHaveBeenCalledWith("boom"))
+    await waitFor(() => expect(toast.error).toHaveBeenCalled())
+    expect(toast.error).not.toHaveBeenCalledWith("boom")
   })
 
   it("shows the active workspace root as the cwd fallback hint (above the character default)", async () => {

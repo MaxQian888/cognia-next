@@ -61,8 +61,7 @@ import {
   registerBackgroundReplaySend,
 } from "./background-result-runtime"
 import { getSubagentApprovalRoute } from "@/lib/claude/agents/subagent-approval-routes"
-import { tagBranchSiblings } from "@/lib/chat/branch-regen"
-import { mirrorTruncateToDesktop } from "@/lib/chat/mirror-truncate"
+import { tagBranchSiblings, tagEditSibling } from "@/lib/chat/branch-regen"
 import {
   approveTool,
   closeSession,
@@ -71,28 +70,18 @@ import {
   sendPrompt,
   toolResultDecision,
 } from "@/lib/claude/ipc"
-import { detectPlatform } from "@/hooks/use-platform"
 import { isEmbeddedSession } from "@/lib/chat/session-exposure"
 import { gateWorkbenchProviderPayload } from "@/lib/context-workbench/provider-payload"
+import type { RemoteExecutionContext } from "@/lib/claude/remote-execution"
+import { COMPUTER_USE_PLUGIN_TOOL_NAMES } from "@/lib/claude/computer-use-tools"
+import { clearSessionGrants } from "@/lib/claude/computer-use-session-grants"
 
-// ADR-0020 W3 — the chat-modal session grant only ever applies to the
-// three plugin MCP tools that the `cognia-computer-use` plugin
-// contributes. Hard-coded as a tight const so a typo in a future tool
-// rename won't silently flip permissions on the wrong tool.
-const COMPUTER_USE_PLUGIN_TOOL_NAMES = new Set([
-  "computer_use",
-  "bash",
-  "text_editor",
-  // The sidecar surfaces them through the cognia-plugin-tools MCP, so
-  // the prefixed form lands on the chat side. Match both bare and
-  // prefixed in case the upstream renames the bridge.
-  "mcp__cognia-plugin-tools__computer_use",
-  "mcp__cognia-plugin-tools__bash",
-  "mcp__cognia-plugin-tools__text_editor",
-])
+// ADR-0020 W3 — keep grant recording and send-side suppression on the
+// same visual/execution tool-name contract.
+const COMPUTER_USE_PLUGIN_TOOL_NAME_SET = new Set<string>(COMPUTER_USE_PLUGIN_TOOL_NAMES)
 
 function isComputerUsePluginToolName(name: string): boolean {
-  return COMPUTER_USE_PLUGIN_TOOL_NAMES.has(name)
+  return COMPUTER_USE_PLUGIN_TOOL_NAME_SET.has(name)
 }
 import {
   armApprovalBackstop,
@@ -104,7 +93,6 @@ import {
   listMessages,
   persistMessages,
   persistStreamingMessages,
-  truncateAfter,
   updateMessageMetadata,
 } from "@/lib/db/messages"
 import { SessionCoalescingRegistry } from "@/hooks/chat/stream-coalescing"
@@ -858,6 +846,15 @@ export function useClaudeChat() {
          *  `buildSendContent`. Lets the optimistic user message render file
          *  cards (with filenames) instead of raw extracted text. */
         attachmentManifest?: readonly AttachmentManifestEntry[]
+        /** Stamp the optimistic USER message into a branch group.
+         *
+         *  Set by `editAndResend`, which keeps the original question as a
+         *  sibling instead of deleting it. Passed explicitly rather than via a
+         *  pending-tag ref (the shape `regenerate` uses) because the message
+         *  being tagged is created right here — a ref would have to survive
+         *  until an SDK event arrives, which is only necessary when the target
+         *  is an assistant message that does not exist yet. */
+        branchTag?: { groupId: string; index: number }
       }
     ) => {
       const sessionId = callOptions?.sessionId ?? useChatStore.getState().activeSessionId
@@ -1200,6 +1197,19 @@ export function useClaudeChat() {
             mentions: mentionRefs,
           }
         }
+      }
+      // Edit-as-branch: the replacement joins the original's sibling group, and
+      // is selected right away so the user sees their edit rather than watching
+      // it disappear behind a previously-pinned sibling.
+      if (callOptions?.branchTag) {
+        ;(userMsg as { metadata?: Record<string, unknown> }).metadata = {
+          ...((userMsg as { metadata?: Record<string, unknown> }).metadata ?? {}),
+          branchGroupId: callOptions.branchTag.groupId,
+          branchIndex: callOptions.branchTag.index,
+        }
+        store
+          .getState()
+          .setSessionActiveBranch(sessionId, callOptions.branchTag.groupId, userMsg.id)
       }
       // Both flags mean "the user turn is already in the transcript": a
       // regenerate re-issues an existing one, a steer drain replays entries that
@@ -1864,6 +1874,7 @@ export function useClaudeChat() {
         registry.release(sessionId)
         messagesMirrorRef.current.delete(sessionId)
         useChatStore.getState().closeSession(sessionId)
+        clearSessionGrants(sessionId)
         // Drop this session's nested-dispatch state (budget guard + resolved
         // permission ceiling) so neither leaks for the renderer's lifetime. Both
         // are keyed by session id and kept alive across a turn's multiple
@@ -1877,13 +1888,21 @@ export function useClaudeChat() {
   )
 
   /**
-   * Truncate the message log starting from `messageId` (inclusive) and resend
-   * the supplied content. Used for "edit and resend" on a user message.
+   * Resend a user message with edited content, keeping the original as a
+   * sibling branch.
    *
-   * On mobile (Capacitor), the truncate also fans out to the desktop's
-   * Dexie via the companion RPC bridge so the authoritative store stays
-   * in lockstep with the phone. On desktop / web the local `truncateAfter`
-   * is the only mutation.
+   * This used to `truncateAfter(..., { inclusive: true })` — the original
+   * question and every reply beneath it were deleted from Dexie outright, so
+   * rewording a question halfway up a long thread silently destroyed the rest
+   * of it with no undo. Regenerate had kept its alternatives as branches since
+   * it was written; editing is the same shape of operation and now behaves the
+   * same way. `tagEditSibling` stamps the original into a branch group and
+   * re-parents its tail, and `selectVisibleMessages` hides that tail while the
+   * new variant is selected. Nothing is deleted; flipping the navigator back
+   * brings the original question and its whole subtree with it.
+   *
+   * Users who genuinely want the old behaviour have the explicit "delete this
+   * message and everything after it" action, which still truncates.
    */
   const editAndResend = useCallback(
     async (
@@ -1894,22 +1913,26 @@ export function useClaudeChat() {
     ) => {
       const sessionId = targetSessionId ?? useChatStore.getState().activeSessionId
       if (!sessionId) return
-      // Truncating the history invalidates any in-flight streaming mirror for
-      // this session; drop it (and pending work) so the rebuilt base wins.
+      // Rebuilding the branch base invalidates this session's streaming mirror;
+      // drop it (and pending coalescing work) so the rebuilt base wins.
       registry.release(sessionId)
       messagesMirrorRef.current.delete(sessionId)
-      if (detectPlatform() === "mobile") {
-        await mirrorTruncateToDesktop(sessionId, messageId)
-      }
-      // Drop everything from this message onward, including the message itself.
-      await truncateAfter(sessionId, messageId, { inclusive: true })
-      // Re-hydrate this session's slice from Dexie so the optimistic append in
-      // send() is applied to the correct base.
-      const remaining = await listMessages(sessionId)
-      store.getState().replaceSessionMessages(sessionId, remaining)
+
+      const messages = store.getState().sessions[sessionId]?.messages ?? []
+      const editedIdx = messages.findIndex((m) => m.id === messageId)
+      if (editedIdx < 0) return
+
+      const { merged, groupId, nextIndex } = tagEditSibling(messages, editedIdx)
+      store.getState().replaceSessionMessages(sessionId, merged)
+      await persistMessages(sessionId, merged)
+
       await send(newContent, undefined, {
         sessionId,
         resourceContext: resourceContext ?? lastResourceContextRef.current.get(sessionId),
+        // The replacement is a *user* message, created inside `send` itself,
+        // so it is tagged there rather than through the assistant-event path
+        // `regenerate` uses.
+        branchTag: { groupId, index: nextIndex },
       })
     },
     [send, store, registry]
@@ -1989,17 +2012,6 @@ export function useClaudeChat() {
   }
 }
 
-/**
- * Mobile-only: mirror a `truncateAfter(sessionId, anchorId, { inclusive: true })`
- * to the desktop's Dexie by calling `message_delete` for the anchor + every
- * subsequent message. Reads from the local Dexie to compute the set, which
- * is fine because mobile sync keeps the local store in lockstep before
- * any edit operation.
- *
- * Errors from individual deletes are logged but never thrown — the local
- * truncate (and subsequent send) is the load-bearing path; a desktop write
- * failure surfaces later through sync rather than blocking the user.
- */
 async function buildSendOptions(
   session: ChatSession | null | undefined,
   userMessage?: string
@@ -2648,7 +2660,13 @@ async function handleEvent(
         updatedToolOutput = undefined
       }
       try {
-        await toolResultDecision(evt.sessionId, evt.reviewId, updatedToolOutput)
+        await toolResultDecision(
+          evt.sessionId,
+          evt.reviewId,
+          updatedToolOutput,
+          (evt as typeof evt & { remoteExecutionContext?: RemoteExecutionContext })
+            .remoteExecutionContext
+        )
       } catch (err) {
         console.error("tool result decision failed", err)
       }

@@ -46,6 +46,7 @@ import type { ChatMiddlewareRequest } from "@/types/plugin/plugin-chat-middlewar
 import type { PluginMessage } from "@/types/plugin/plugin"
 import { runWithExecutionLease, combineAbortSignals } from "@/lib/execution/admit"
 import type { ExecutionLeaseInfo } from "@/lib/execution/types"
+import type { RemoteExecutionContext } from "./remote-execution"
 
 /**
  * Envelope-backed capture subscription (ADR-0090 Phase 3, flag-gated).
@@ -661,7 +662,13 @@ async function captureAssistantReplyCore(
           }
         }
         try {
-          await toolResultDecision(sessionId, req.reviewId, updatedToolOutput)
+          await toolResultDecision(
+            sessionId,
+            req.reviewId,
+            updatedToolOutput,
+            (req as typeof req & { remoteExecutionContext?: RemoteExecutionContext })
+              .remoteExecutionContext
+          )
         } catch {
           /* best-effort — the sidecar may have already moved on */
         }

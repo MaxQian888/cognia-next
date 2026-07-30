@@ -25,6 +25,11 @@ import { buildOcrDeps } from "@/lib/ocr/deps"
 import { OcrError } from "@/lib/ocr/errors"
 import type { Point, Screenshot, ScreenshotOpts } from "./types"
 import type { OcrInput, OcrResult } from "@/types/ocr"
+import {
+  publishComputerUseActivity,
+  publishComputerUsePipFrame,
+  suppressComputerUsePipForCapture,
+} from "./computer-use-pip"
 
 /** One OCR block resolved to physical screen coordinates. */
 export interface ScreenTextMatch {
@@ -205,25 +210,86 @@ const productionDeps = (): OcrClickDeps => ({
   ocrDeps: buildOcrDeps(),
 })
 
-/** Production entry: real gated screenshot + keyring-backed OCR + gated click. */
-export function findScreenText(args: FindScreenTextArgs = {}): Promise<FindScreenTextResult> {
-  return findScreenTextWith(productionDeps(), args)
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error)
 }
 
-export function clickScreenText(
+function pipAwareProductionDeps(
+  action: "find_text" | "click_text",
+  ctx: CallContext,
+  click?: OcrClickDeps["click"]
+): { deps: OcrClickDeps; activityId: number | null } {
+  const activityId = publishComputerUseActivity(ctx.sessionKey, action)
+  const base = productionDeps()
+  return {
+    activityId,
+    deps: {
+      ...base,
+      screenshot: async (opts, callCtx) => {
+        const release = await suppressComputerUsePipForCapture(callCtx.sessionKey)
+        try {
+          const captured = await desktop.screenshot(opts, callCtx)
+          publishComputerUsePipFrame(callCtx.sessionKey, {
+            output: captured.bytes,
+            width: captured.width,
+            height: captured.height,
+            capturedAt: captured.capturedAt,
+          })
+          return captured
+        } finally {
+          release()
+        }
+      },
+      ...(click ? { click } : {}),
+    },
+  }
+}
+
+/** Production entry: real gated screenshot + keyring-backed OCR + gated click. */
+export async function findScreenText(args: FindScreenTextArgs = {}): Promise<FindScreenTextResult> {
+  const ctx = args.ctx ?? { surface: "computerUse" as const }
+  const { deps, activityId } = pipAwareProductionDeps("find_text", ctx)
+  try {
+    const result = await findScreenTextWith(deps, { ...args, ctx })
+    publishComputerUseActivity(ctx.sessionKey, "find_text", { ok: true }, activityId)
+    return result
+  } catch (error) {
+    publishComputerUseActivity(
+      ctx.sessionKey,
+      "find_text",
+      { ok: false, error: errorMessage(error) },
+      activityId
+    )
+    throw error
+  }
+}
+
+export async function clickScreenText(
   args: ClickScreenTextArgs
 ): Promise<{ ok: true; clicked: ScreenTextMatch }> {
-  return clickScreenTextWith(
-    {
-      ...productionDeps(),
-      // Honor per-call button/double via desktop.click opts.
-      click: (point, ctx) =>
-        desktop.click(
-          { kind: "point", x: point.x, y: point.y },
-          { button: args.button, double: args.doubleClick },
-          ctx
-        ),
-    },
-    args
+  const ctx = args.ctx ?? { surface: "computerUse" as const }
+  const { deps, activityId } = pipAwareProductionDeps(
+    "click_text",
+    ctx,
+    // Honor per-call button/double via desktop.click opts.
+    (point, callCtx) =>
+      desktop.click(
+        { kind: "point", x: point.x, y: point.y },
+        { button: args.button, double: args.doubleClick },
+        callCtx
+      )
   )
+  try {
+    const result = await clickScreenTextWith(deps, { ...args, ctx })
+    publishComputerUseActivity(ctx.sessionKey, "click_text", { ok: true }, activityId)
+    return result
+  } catch (error) {
+    publishComputerUseActivity(
+      ctx.sessionKey,
+      "click_text",
+      { ok: false, error: errorMessage(error) },
+      activityId
+    )
+    throw error
+  }
 }

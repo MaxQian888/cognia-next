@@ -98,6 +98,9 @@ export function makeCodeAdapter(spec, bridge) {
           ...(req.reasoning ? { reasoning: req.reasoning } : {}),
           ...(typeof req.maxSteps === "number" ? { maxSteps: req.maxSteps } : {}),
         },
+        ...(bridge.remoteExecutionContext
+          ? { remoteExecutionContext: bridge.remoteExecutionContext }
+          : {}),
       })
       return { fullStream: channel.fullStream, usage: channel.usage, response: null }
     },

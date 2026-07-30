@@ -15,16 +15,18 @@
 // emits assistant snapshots as they stream, a trailing `result` envelope with
 // usage, then a single `session_ended` so the existing settle/seal logic runs.
 
-import { convertToModelMessages, streamText, type UIMessage } from "ai"
+import { convertToModelMessages, stepCountIs, streamText, type UIMessage } from "ai"
 
 import { composeSystem } from "@/lib/ai/agent/agent-executor"
 import { createFeatureProviderModel } from "@/lib/ai/provider-consumption"
 import { browserDirectHeaders, getStreamingFetch } from "@/lib/runtime/streaming-fetch"
 import type { ClaudeEvent, SendOptions } from "@cognia/agent-config-types"
+import { loggers } from "@cognia/logging"
 import { useSettingsStore } from "@/stores/settings/settings-store"
 
 import { resolveStandaloneProvider } from "./resolve-standalone-provider"
 import { createSdkEventMapper } from "./sdk-event-mapper"
+import { buildStandaloneTools, STANDALONE_MAX_STEPS } from "./standalone-tools"
 
 export interface StandaloneTurnParams {
   sessionId: string
@@ -70,11 +72,27 @@ export async function runStandaloneTurn(params: StandaloneTurnParams): Promise<v
     })
     mapper.reset()
 
+    // Tools: standalone mode reuses the renderer-executable catalog the paired
+    // path already builds (see `standalone-tools.ts`). Without this the turn is
+    // a plain completion — a phone with no desktop could not search, fetch,
+    // load a skill, or call a plugin tool at all.
+    const resolvedTools = buildStandaloneTools(sendOptions, sessionId)
+    if (resolvedTools?.rejected.length) {
+      loggers.chat.warn("standalone: dropped tools with provider-invalid names", {
+        names: resolvedTools.rejected.join(", "),
+      })
+    }
+
     const result = stream({
       model,
       ...(system ? { system } : {}),
       messages: modelMessages,
       abortSignal: signal,
+      // `stopWhen` only matters once tools exist; omitting both keeps the
+      // no-tools turn on exactly the single-shot path it had before.
+      ...(resolvedTools
+        ? { tools: resolvedTools.tools, stopWhen: stepCountIs(STANDALONE_MAX_STEPS) }
+        : {}),
     })
 
     for await (const part of result.fullStream) {
