@@ -37,12 +37,16 @@ import type { Character, SendOptions } from "@cognia/agent-config-types"
  * worse than the duplication, and the names rarely change).
  */
 const COMPUTER_USE_PLUGIN_TOOL_NAMES = [
-  "computer_use",
-  "bash",
-  "text_editor",
-  "mcp__cognia-plugin-tools__computer_use",
-  "mcp__cognia-plugin-tools__bash",
-  "mcp__cognia-plugin-tools__text_editor",
+  "list_apps",
+  "get_app_state",
+  "query_elements",
+  "expand_element",
+  "perform_action",
+  "mcp__cognia-plugin-tools__list_apps",
+  "mcp__cognia-plugin-tools__get_app_state",
+  "mcp__cognia-plugin-tools__query_elements",
+  "mcp__cognia-plugin-tools__expand_element",
+  "mcp__cognia-plugin-tools__perform_action",
 ] as const
 
 export interface ApplyComputerUseInput {

@@ -43,6 +43,7 @@
 
 mod observer;
 mod raw;
+mod screen_capture;
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -51,13 +52,16 @@ use std::time::{Duration, Instant};
 
 use accessibility::{AXUIElement, AXUIElementAttributes};
 use enigo::{Direction, Enigo, Keyboard, Mouse, Settings};
+use objc2::rc::autoreleasepool;
+use objc2_app_kit::NSWorkspace;
 use once_cell::sync::Lazy;
 
-use crate::automation::backend::{AutomationBackend, SelectionPreflight};
+use crate::automation::backend::{ApplicationScreenshot, AutomationBackend, SelectionPreflight};
 use crate::automation::platform::shared::keymap::{parse_chord, KeyToken, Modifier, NamedKey};
 use crate::automation::platform::shared::screenshot;
 use crate::automation::platform::shared::tree_shape::{self, TreeBudget};
 use crate::automation::selection::{build_text_selection, TextSelectionSnapshot};
+use crate::automation::session::{AppLocator, ResolvedApplication};
 use crate::automation::types::*;
 
 #[derive(Default)]
@@ -67,12 +71,57 @@ pub struct AxBackend {
     /// `&self`; nothing here awaits, so no guard ever crosses a suspend point.
     events: Mutex<Option<observer::AxObserverHandle>>,
     subscriptions: Mutex<HashMap<u64, EventFilter>>,
+    elements: Mutex<HashMap<String, AXUIElement>>,
     next_subscription: AtomicU64,
 }
 
 impl AxBackend {
     pub fn new() -> std::result::Result<Self, String> {
         Ok(Self::default())
+    }
+
+    fn read_tree_for_application(
+        &self,
+        pid: u32,
+        process_name: Option<&str>,
+        budget: TreeBudget,
+    ) -> Result<Vec<ElementInfo>> {
+        let app = AXUIElement::application(pid as i32);
+        raw::set_messaging_timeout(&app, 0.25);
+        raw::activate_web_a11y(&app);
+        let deadline = Instant::now() + Duration::from_secs(1);
+        while !raw::has_visible_windows(&app) && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(25));
+        }
+        let root = raw::resolve_window_root(&app);
+        self.elements.lock().map_err(poisoned)?.clear();
+        let to_info = |element: &AXUIElement| {
+            let key = format!(
+                "macos|pid={pid}|element={:x}",
+                raw::element_identity(element)
+            );
+            if let Ok(mut elements) = self.elements.lock() {
+                elements.insert(key.clone(), element.clone());
+            }
+            let mut info = ax_element_to_info(element, Some(pid), process_name);
+            info.element_ref = ElementRef(key);
+            info
+        };
+        let children = |element: &AXUIElement, limit: usize| -> Vec<AXUIElement> {
+            raw::read_children_page(element, 0, limit)
+        };
+        Ok(vec![tree_shape::walk_tree(
+            &root, budget, &to_info, &children,
+        )])
+    }
+
+    fn resolve_element(&self, element_ref: &ElementRef) -> Result<AXUIElement> {
+        self.elements
+            .lock()
+            .map_err(poisoned)?
+            .get(&element_ref.0)
+            .cloned()
+            .ok_or(AutomationError::StaleElement)
     }
 }
 
@@ -103,6 +152,63 @@ impl AutomationBackend for AxBackend {
         Ok(focused_to_element_info(&snap))
     }
 
+    fn list_applications(&self) -> Result<Vec<ResolvedApplication>> {
+        Ok(running_applications())
+    }
+
+    fn resolve_application(
+        &self,
+        locator: &AppLocator,
+        allow_launch: bool,
+    ) -> Result<ResolvedApplication> {
+        if let Some(app) = find_running_application(locator) {
+            return Ok(app);
+        }
+        if !allow_launch {
+            return Err(AutomationError::ElementNotFound);
+        }
+        let mut command = std::process::Command::new("/usr/bin/open");
+        match locator {
+            AppLocator::BundleId { bundle_id } => {
+                command.args(["-b", bundle_id]);
+            }
+            AppLocator::Path { path } => {
+                if !std::path::Path::new(path).is_absolute() {
+                    return Err(AutomationError::BackendError {
+                        message: "application path must be absolute".into(),
+                    });
+                }
+                command.arg(path);
+            }
+            AppLocator::DisplayName { display_name } => {
+                command.args(["-a", display_name]);
+            }
+        }
+        let output = command
+            .output()
+            .map_err(|error| AutomationError::BackendError {
+                message: format!("launch application: {error}"),
+            })?;
+        if !output.status.success() {
+            return Err(AutomationError::BackendError {
+                message: format!(
+                    "launch application failed: {}",
+                    String::from_utf8_lossy(&output.stderr).trim()
+                ),
+            });
+        }
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while Instant::now() < deadline {
+            if let Some(app) = find_running_application(locator) {
+                return Ok(app);
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        Err(AutomationError::BackendError {
+            message: "application launched but did not become observable within 5 seconds".into(),
+        })
+    }
+
     fn read_tree(&self, _root: Option<ElementRef>, opts: TreeOpts) -> Result<Vec<ElementInfo>> {
         // Reading another process's AX tree requires this process to be trusted
         // for the Accessibility API. Untrusted, every attribute read returns
@@ -127,31 +233,38 @@ impl AutomationBackend for AxBackend {
                 message: "no frontmost application pid".into(),
             });
         };
-        let budget = TreeBudget::from_opts(opts.max_depth);
-        let app = AXUIElement::application(pid as i32);
-        // Chromium / WebKit / Electron apps (Cognia's own WKWebView included)
-        // don't publish their web-content tree until an AT client activates it.
-        // Activate, and if the app had no windows beforehand give the web process
-        // a brief moment to build the tree before we read it.
-        let had_windows = raw::has_visible_windows(&app);
-        raw::activate_web_a11y(&app);
-        if !had_windows {
-            std::thread::sleep(Duration::from_millis(150));
+        self.read_tree_for_application(
+            pid,
+            snap.process_name.as_deref(),
+            TreeBudget::from_opts(opts.max_depth),
+        )
+    }
+
+    fn read_application_tree(
+        &self,
+        app: &ResolvedApplication,
+        opts: TreeOpts,
+    ) -> Result<Vec<ElementInfo>> {
+        if !raw::is_trusted() {
+            raw::prompt_trust();
+            return Err(AutomationError::PermissionDenied {
+                reason: "macOS Accessibility permission not granted".into(),
+            });
         }
-        // Root at the focused / main window (falling back to the first non-empty
-        // window, then the app element). `AXWindows[0]` is frequently an empty
-        // helper window, so the naive "first window" pre-fix surfaced just a bare
-        // window node — the "only window name" symptom.
-        let root = raw::resolve_window_root(&app);
-        let proc_name = snap.process_name.as_deref();
-        let to_info = |el: &AXUIElement| ax_element_to_info(el, Some(pid), proc_name);
-        let children = |el: &AXUIElement| -> Vec<AXUIElement> {
-            el.children()
-                .map(|arr| arr.iter().map(|c| (*c).clone()).collect())
-                .unwrap_or_default()
-        };
-        let tree = tree_shape::walk_tree(&root, budget, &to_info, &children);
-        Ok(vec![tree])
+        self.read_tree_for_application(
+            app.process_id,
+            Some(app.display_name.as_str()),
+            TreeBudget::from_opts(opts.max_depth),
+        )
+    }
+
+    fn screenshot_application(
+        &self,
+        app: &ResolvedApplication,
+        window_hint: Option<&ElementInfo>,
+        opts: ScreenshotOpts,
+    ) -> Result<ApplicationScreenshot> {
+        screen_capture::capture_application_window(app.process_id, window_hint, &opts)
     }
 
     fn find(&self, locator: &Locator) -> Result<Option<ElementRef>> {
@@ -169,12 +282,19 @@ impl AutomationBackend for AxBackend {
     }
 
     fn screenshot(&self, opts: ScreenshotOpts) -> Result<Screenshot> {
-        screenshot::capture_primary(&opts)
+        screen_capture::capture_display(&opts)
     }
 
     fn click(&self, target: ClickTarget, opts: ClickOpts) -> Result<()> {
         match target {
-            ClickTarget::Element { .. } => Err(AutomationError::UnsupportedPlatform),
+            ClickTarget::Element { element_ref } => {
+                let element = self.resolve_element(&element_ref)?;
+                raw::perform_action(&element, "AXPress").map_err(|error| {
+                    AutomationError::BackendError {
+                        message: format!("AXPress failed with AXError {error}"),
+                    }
+                })
+            }
             ClickTarget::Point { x, y } => {
                 let mut e = enigo_new()?;
                 e.move_mouse(x, y, enigo::Coordinate::Abs)
@@ -187,9 +307,6 @@ impl AutomationBackend for AxBackend {
                     e.button(button, Direction::Click)
                         .map_err(input_err("click"))?;
                     if i + 1 < count {
-                        // Spacing to fall inside the typical macOS
-                        // double-click threshold (500ms). 50ms is far
-                        // enough below it to register as a multi-click.
                         std::thread::sleep(Duration::from_millis(50));
                     }
                 }
@@ -198,7 +315,11 @@ impl AutomationBackend for AxBackend {
         }
     }
 
-    fn type_text(&self, text: &str, _opts: TypeOpts) -> Result<()> {
+    fn type_text(&self, text: &str, opts: TypeOpts) -> Result<()> {
+        if let Some(target) = opts.target {
+            let element = self.resolve_element(&target)?;
+            raw::perform_action(&element, "AXRaise").ok();
+        }
         let mut e = enigo_new()?;
         e.text(text).map_err(input_err("type_text"))
     }
@@ -213,11 +334,49 @@ impl AutomationBackend for AxBackend {
 
     fn invoke_pattern(
         &self,
-        _t: ElementRef,
-        _p: PatternKind,
-        _a: serde_json::Value,
+        target: ElementRef,
+        pattern: PatternKind,
+        args: serde_json::Value,
     ) -> Result<serde_json::Value> {
-        Err(AutomationError::UnsupportedPlatform)
+        let element = self.resolve_element(&target)?;
+        match pattern {
+            PatternKind::Invoke | PatternKind::Toggle | PatternKind::SelectionItem => {
+                raw::perform_action(&element, "AXPress")
+            }
+            PatternKind::Value => {
+                let value = args
+                    .get("value")
+                    .and_then(|value| value.as_str())
+                    .ok_or_else(|| AutomationError::BackendError {
+                        message: "AX value action requires a string `value`".into(),
+                    })?;
+                raw::set_string_value(&element, "AXValue", value)
+            }
+            PatternKind::Text => {
+                let start = args
+                    .get("start")
+                    .and_then(|value| value.as_u64())
+                    .ok_or_else(|| AutomationError::BackendError {
+                        message: "AX text selection requires `start`".into(),
+                    })? as usize;
+                let end = args
+                    .get("end")
+                    .and_then(|value| value.as_u64())
+                    .ok_or_else(|| AutomationError::BackendError {
+                        message: "AX text selection requires `end`".into(),
+                    })? as usize;
+                raw::set_selected_text_range(&element, start, end)
+            }
+            PatternKind::ExpandCollapse => raw::perform_action(&element, "AXPress"),
+            PatternKind::ScrollItem => raw::perform_action(&element, "AXScrollToVisible"),
+            PatternKind::RangeValue | PatternKind::Window | PatternKind::Transform => {
+                return Err(AutomationError::UnsupportedPlatform);
+            }
+        }
+        .map_err(|error| AutomationError::BackendError {
+            message: format!("AX semantic action failed with AXError {error}"),
+        })?;
+        Ok(serde_json::Value::Null)
     }
 
     fn window_op(&self, _t: ElementRef, _op: WindowOp) -> Result<()> {
@@ -573,6 +732,58 @@ fn function_key_to_enigo(n: u8) -> enigo::Key {
 // Focused-window metadata via `osascript`. Cached for 250ms.
 // ─────────────────────────────────────────────────────────────────────────────
 
+fn running_applications() -> Vec<ResolvedApplication> {
+    autoreleasepool(|_| {
+        let workspace = NSWorkspace::sharedWorkspace();
+        let mut applications = workspace
+            .runningApplications()
+            .iter()
+            .filter_map(|application| {
+                let process_id = application.processIdentifier();
+                if process_id <= 0 {
+                    return None;
+                }
+                let display_name = application.localizedName()?.to_string();
+                let bundle_id = application
+                    .bundleIdentifier()
+                    .map(|identifier| identifier.to_string());
+                let path = application
+                    .bundleURL()
+                    .and_then(|url| url.path())
+                    .map(|path| path.to_string());
+                Some(ResolvedApplication {
+                    bundle_id,
+                    path,
+                    display_name,
+                    process_id: process_id as u32,
+                })
+            })
+            .collect::<Vec<_>>();
+        applications.sort_by(|left, right| {
+            left.display_name
+                .to_ascii_lowercase()
+                .cmp(&right.display_name.to_ascii_lowercase())
+                .then(left.process_id.cmp(&right.process_id))
+        });
+        applications
+    })
+}
+
+fn find_running_application(locator: &AppLocator) -> Option<ResolvedApplication> {
+    running_applications()
+        .into_iter()
+        .find(|application| match locator {
+            AppLocator::BundleId { bundle_id } => application
+                .bundle_id
+                .as_deref()
+                .is_some_and(|candidate| candidate.eq_ignore_ascii_case(bundle_id)),
+            AppLocator::Path { path } => application.path.as_deref() == Some(path.as_str()),
+            AppLocator::DisplayName { display_name } => {
+                application.display_name.eq_ignore_ascii_case(display_name)
+            }
+        })
+}
+
 #[derive(Debug, Clone)]
 struct FocusedSnapshot {
     process_name: Option<String>,
@@ -702,14 +913,22 @@ fn poisoned<T>(error: std::sync::PoisonError<T>) -> AutomationError {
 fn ax_element_to_info(el: &AXUIElement, pid: Option<u32>, proc_name: Option<&str>) -> ElementInfo {
     let role = str_attr(el.role());
     let subrole = str_attr(el.subrole());
-    let title = str_attr(el.title());
-    let description = str_attr(el.description());
-    let role_description = str_attr(el.role_description());
+    let secure_field = subrole.as_deref() == Some("AXSecureTextField");
+    let title = (!secure_field).then(|| str_attr(el.title())).flatten();
+    let description = (!secure_field)
+        .then(|| str_attr(el.description()))
+        .flatten();
+    let role_description = (!secure_field)
+        .then(|| str_attr(el.role_description()))
+        .flatten();
     let identifier = str_attr(el.identifier());
-    let name = pick_name(
+    let name = project_ax_name(
+        secure_field,
         title.clone(),
         description,
-        raw::read_value_string(el),
+        (!secure_field)
+            .then(|| raw::read_value_string(el))
+            .flatten(),
         role_description,
     );
     let element_ref = ElementRef(format!(
@@ -744,6 +963,18 @@ fn pick_name(
     role_description: Option<String>,
 ) -> Option<String> {
     title.or(description).or(value).or(role_description)
+}
+
+fn project_ax_name(
+    secure_field: bool,
+    title: Option<String>,
+    description: Option<String>,
+    value: Option<String>,
+    role_description: Option<String>,
+) -> Option<String> {
+    secure_field
+        .then(|| "[REDACTED]".into())
+        .or_else(|| pick_name(title, description, value, role_description))
 }
 
 /// Read a CFString-typed AX accessor result into a trimmed, non-empty `String`.
@@ -796,6 +1027,21 @@ mod tests {
         let r = snap_to_element_ref(&snap);
         assert!(r.0.starts_with("macos|"));
         assert!(r.0.contains("pid=42"));
+    }
+
+    #[test]
+    fn secure_field_projection_never_exposes_name_candidates() {
+        assert_eq!(
+            project_ax_name(
+                true,
+                Some("title-secret".into()),
+                Some("description-secret".into()),
+                Some("value-secret".into()),
+                Some("role-secret".into()),
+            )
+            .as_deref(),
+            Some("[REDACTED]")
+        );
     }
 
     #[test]

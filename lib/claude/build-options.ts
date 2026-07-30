@@ -2134,8 +2134,8 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
 
   // --- Compute the effective Computer Use authorization once -------------
   // Two gates need this verdict: the plugin-tools manifest (so the chat
-  // path doesn't surface `mcp__cognia-plugin-tools__{computer_use,bash,
-  // text_editor}` to the model when the character — or an IM-session
+  // path doesn't surface the Computer Use app-session tools to the model
+  // when the character — or an IM-session
   // safeguard — disallows it) AND the legacy anthropic-tools path below.
   //
   // G6 — IM-driven sessions default-deny Computer Use so an inbound
@@ -2180,7 +2180,7 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
   // `claude_plugin_tool_response` Tauri command.
   //
   // Per-character Computer Use gating: the `cognia-computer-use` plugin
-  // contributes three tools (computer_use / bash / text_editor). Filter
+  // contributes the app-session state/query/action tools. Filter
   // them out when the character doesn't enable Computer Use, or when the
   // IM-session safeguard denies access. Other plugins flow through
   // unchanged.

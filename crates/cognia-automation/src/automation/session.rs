@@ -7,17 +7,22 @@
 
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
+use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use uuid::Uuid;
 
 use crate::automation::platform::shared::tree_shape;
-use crate::automation::types::{ElementInfo, Locator, Rect, Screenshot};
+use crate::automation::types::{
+    DragOpts, ElementInfo, KeyChord, Locator, MouseButton, Point, Rect, Screenshot, ScrollOpts,
+};
 
 pub const MODEL_TREE_MAX_NODES: usize = 1_000;
+pub const MODEL_TREE_MAX_BYTES: usize = 256 * 1024;
 pub const INSPECTOR_TREE_MAX_NODES: usize = 25_000;
 pub const EXPANSION_PAGE_MAX_NODES: usize = 250;
+pub const TURN_TOKEN_TTL: Duration = Duration::from_secs(30);
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "kind", rename_all = "camelCase")]
@@ -60,6 +65,7 @@ pub struct UiSurface {
 #[serde(rename_all = "camelCase")]
 pub struct CapturedUiState {
     pub session_id: String,
+    pub turn_binding: String,
     pub app: ResolvedApplication,
     pub surface: UiSurface,
     pub screenshot: Option<Screenshot>,
@@ -72,7 +78,6 @@ pub struct CapturedUiState {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct GetAppStateOptions {
-    pub include_screenshot: bool,
     pub disable_diff: bool,
     pub allow_launch: bool,
     pub max_nodes: usize,
@@ -82,7 +87,6 @@ pub struct GetAppStateOptions {
 impl Default for GetAppStateOptions {
     fn default() -> Self {
         Self {
-            include_screenshot: true,
             disable_diff: false,
             allow_launch: false,
             max_nodes: MODEL_TREE_MAX_NODES,
@@ -162,6 +166,120 @@ pub struct UiStateRevision {
     pub captured_at: i64,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum ActionStrategy {
+    Semantic,
+    Pixel,
+    Auto,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct PixelTarget {
+    pub session_id: String,
+    pub lineage_id: String,
+    pub revision: u64,
+    pub point: Point,
+    pub screenshot_width: u32,
+    pub screenshot_height: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum ActionTarget {
+    Element { handle: ElementHandle },
+    Pixel { target: PixelTarget },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum UiAction {
+    Click {
+        #[serde(default)]
+        button: Option<MouseButton>,
+        #[serde(default)]
+        count: Option<u32>,
+    },
+    Drag {
+        to: Point,
+        #[serde(default)]
+        opts: DragOpts,
+    },
+    Scroll {
+        #[serde(default)]
+        opts: ScrollOpts,
+    },
+    PressKey {
+        chord: KeyChord,
+    },
+    TypeText {
+        text: String,
+    },
+    SetValue {
+        value: String,
+    },
+    SelectText {
+        start: usize,
+        end: usize,
+    },
+    SecondaryAction {
+        name: String,
+    },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ActionRequest {
+    pub turn_token: String,
+    pub target: ActionTarget,
+    pub action: UiAction,
+    pub strategy: ActionStrategy,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum ActionStatus {
+    Delivered,
+    NotDelivered,
+    Refused,
+    Unknown,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum ActionMethod {
+    Ax,
+    Synthetic,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ActionEvidence {
+    pub kind: String,
+    pub message: String,
+    pub revision: Option<u64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ActionPolicyDecision {
+    pub allowed: bool,
+    pub reason: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ActionResult {
+    pub status: ActionStatus,
+    pub method: Option<ActionMethod>,
+    pub before_revision: u64,
+    pub after_revision: Option<u64>,
+    pub evidence: Vec<ActionEvidence>,
+    pub policy_decision: ActionPolicyDecision,
+    pub duration_ms: u64,
+}
+
 #[derive(Debug, Clone, Error, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "code", rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum SessionError {
@@ -169,14 +287,26 @@ pub enum SessionError {
     TurnTokenUnknown,
     #[error("turn token was already consumed")]
     TurnTokenConsumed,
+    #[error("turn token has expired")]
+    TurnTokenExpired,
+    #[error("turn token belongs to another authenticated model turn")]
+    TurnBindingMismatch,
     #[error("element handle belongs to another session")]
     CrossSessionHandle,
     #[error("element handle belongs to a stale revision")]
     StaleRevision,
+    #[error("stale element fingerprint no longer matches the current revision")]
+    StaleElementNotFound,
+    #[error("stale element fingerprint matches multiple elements in the current revision")]
+    StaleElementAmbiguous,
     #[error("element handle is invalid")]
     InvalidHandle,
     #[error("continuation token is unknown, expired, or belongs to another element")]
     ContinuationTokenInvalid,
+    #[error("pixel target dimensions do not match the revision screenshot")]
+    PixelSurfaceMismatch,
+    #[error("the revision has no screenshot for a pixel action")]
+    PixelSurfaceMissing,
 }
 
 #[derive(Debug, Clone)]
@@ -185,6 +315,8 @@ struct TokenRecord {
     lineage_id: String,
     revision: u64,
     consumed: bool,
+    issued_at: Instant,
+    turn_binding: String,
 }
 
 #[derive(Debug, Clone)]
@@ -207,6 +339,16 @@ pub struct UiSessionManager {
     sessions: HashMap<String, SessionRecord>,
     tokens: HashMap<String, TokenRecord>,
     expansion_tokens: HashMap<String, ExpansionRecord>,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct PreparedAction {
+    pub state: UiStateRevision,
+    pub element: Option<ElementInfo>,
+    pub point: Option<Point>,
+    pub refetched_from_revision: Option<u64>,
+    pub pixel_surface: bool,
+    pub turn_binding: String,
 }
 
 impl UiSessionManager {
@@ -235,12 +377,11 @@ impl UiSessionManager {
 
         let max_nodes = capture.max_nodes.clamp(1, MODEL_TREE_MAX_NODES);
         let (canonical, total_nodes) = flatten_roots(&capture.roots, INSPECTOR_TREE_MAX_NODES);
-        let nodes = canonical
-            .iter()
-            .take(max_nodes)
-            .cloned()
-            .enumerate()
-            .map(|(index, node)| UiTreeNode {
+        let mut nodes = Vec::new();
+        let mut projected_bytes = 0usize;
+        let mut byte_truncated = false;
+        for (index, node) in canonical.iter().take(max_nodes).cloned().enumerate() {
+            let projected = UiTreeNode {
                 handle: ElementHandle {
                     session_id: capture.session_id.clone(),
                     lineage_id: lineage_id.clone(),
@@ -250,12 +391,27 @@ impl UiSessionManager {
                 },
                 parent_index: node.parent_index,
                 element: node.element,
-            })
-            .collect::<Vec<_>>();
+            };
+            let node_bytes = serde_json::to_vec(&projected)
+                .map(|encoded| encoded.len())
+                .unwrap_or(MODEL_TREE_MAX_BYTES);
+            if !nodes.is_empty()
+                && projected_bytes.saturating_add(node_bytes) > MODEL_TREE_MAX_BYTES
+            {
+                byte_truncated = true;
+                break;
+            }
+            projected_bytes = projected_bytes.saturating_add(node_bytes);
+            nodes.push(projected);
+        }
         let omitted_nodes = total_nodes.saturating_sub(nodes.len());
         let truncation = (omitted_nodes > 0)
             .then(|| TruncationDescriptor {
-                reason: "nodeBudget".into(),
+                reason: if byte_truncated {
+                    "byteBudget".into()
+                } else {
+                    "nodeBudget".into()
+                },
                 materialized_nodes: nodes.len(),
                 omitted_nodes,
             })
@@ -283,6 +439,10 @@ impl UiSessionManager {
             truncation,
             captured_at: capture.captured_at,
         };
+        self.tokens
+            .retain(|_, record| record.session_id != capture.session_id);
+        self.expansion_tokens
+            .retain(|_, record| record.handle.session_id != capture.session_id);
         self.tokens.insert(
             turn_token,
             TokenRecord {
@@ -290,6 +450,8 @@ impl UiSessionManager {
                 lineage_id: lineage_id.clone(),
                 revision,
                 consumed: false,
+                issued_at: Instant::now(),
+                turn_binding: capture.turn_binding,
             },
         );
         self.sessions.insert(
@@ -305,42 +467,115 @@ impl UiSessionManager {
         Ok(state)
     }
 
-    pub fn consume_turn(
+    pub(crate) fn prepare_action(
         &mut self,
-        turn_token: &str,
-        handle: &ElementHandle,
-    ) -> Result<(), SessionError> {
+        request: &ActionRequest,
+        turn_binding: &str,
+    ) -> Result<PreparedAction, SessionError> {
+        let (session_id, lineage_id) = match &request.target {
+            ActionTarget::Element { handle } => {
+                (handle.session_id.as_str(), handle.lineage_id.as_str())
+            }
+            ActionTarget::Pixel { target } => {
+                (target.session_id.as_str(), target.lineage_id.as_str())
+            }
+        };
         let token = self
             .tokens
-            .get_mut(turn_token)
+            .get(&request.turn_token)
             .ok_or(SessionError::TurnTokenUnknown)?;
         if token.consumed {
             return Err(SessionError::TurnTokenConsumed);
         }
-        if token.session_id != handle.session_id || token.lineage_id != handle.lineage_id {
-            return Err(SessionError::CrossSessionHandle);
+        if token.issued_at.elapsed() > TURN_TOKEN_TTL {
+            return Err(SessionError::TurnTokenExpired);
         }
-        if token.revision != handle.revision {
-            return Err(SessionError::StaleRevision);
+        if token.turn_binding != turn_binding {
+            return Err(SessionError::TurnBindingMismatch);
+        }
+        if token.session_id != session_id || token.lineage_id != lineage_id {
+            return Err(SessionError::CrossSessionHandle);
         }
         let session = self
             .sessions
-            .get(&handle.session_id)
+            .get(session_id)
             .ok_or(SessionError::CrossSessionHandle)?;
-        if session.lineage_id != handle.lineage_id || session.revision != handle.revision {
+        if session.lineage_id != lineage_id {
+            return Err(SessionError::CrossSessionHandle);
+        }
+        if token.revision != session.revision {
             return Err(SessionError::StaleRevision);
         }
-        let node = session
-            .current
-            .tree
-            .nodes
-            .get(handle.index)
-            .ok_or(SessionError::InvalidHandle)?;
-        if node.handle.fingerprint != handle.fingerprint {
-            return Err(SessionError::InvalidHandle);
-        }
-        token.consumed = true;
-        Ok(())
+
+        let (element, point, refetched_from_revision) = match &request.target {
+            ActionTarget::Element { handle } => {
+                let current = session.canonical.get(handle.index).filter(|node| {
+                    handle.revision == session.revision
+                        && element_fingerprint(&node.element, node.parent_index)
+                            == handle.fingerprint
+                });
+                let (element, refetched_from_revision) = if let Some(node) = current {
+                    (node.element.clone(), None)
+                } else {
+                    let mut matches = session
+                        .canonical
+                        .iter()
+                        .filter(|node| {
+                            element_fingerprint(&node.element, node.parent_index)
+                                == handle.fingerprint
+                        })
+                        .map(|node| node.element.clone());
+                    let element = matches.next().ok_or(SessionError::StaleElementNotFound)?;
+                    if matches.next().is_some() {
+                        return Err(SessionError::StaleElementAmbiguous);
+                    }
+                    (element, Some(handle.revision))
+                };
+                (Some(element), None, refetched_from_revision)
+            }
+            ActionTarget::Pixel { target } => {
+                if session.revision != target.revision || token.revision != target.revision {
+                    return Err(SessionError::StaleRevision);
+                }
+                let screenshot = session
+                    .current
+                    .screenshot
+                    .as_ref()
+                    .ok_or(SessionError::PixelSurfaceMissing)?;
+                if screenshot.width != target.screenshot_width
+                    || screenshot.height != target.screenshot_height
+                    || session.current.surface.pixel_width != target.screenshot_width
+                    || session.current.surface.pixel_height != target.screenshot_height
+                {
+                    return Err(SessionError::PixelSurfaceMismatch);
+                }
+                (
+                    None,
+                    Some(pixel_to_global_point(
+                        &session.current.surface,
+                        target.point,
+                    )?),
+                    None,
+                )
+            }
+        };
+        self.tokens
+            .get_mut(&request.turn_token)
+            .ok_or(SessionError::TurnTokenUnknown)?
+            .consumed = true;
+        let state = self
+            .sessions
+            .get(session_id)
+            .map(|session| session.current.clone())
+            .ok_or(SessionError::CrossSessionHandle)?;
+        Ok(PreparedAction {
+            state,
+            element,
+            point,
+            refetched_from_revision,
+            pixel_surface: matches!(&request.target, ActionTarget::Pixel { .. }),
+            turn_binding: turn_binding.to_string(),
+        })
     }
 
     pub fn expand_element(
@@ -510,12 +745,40 @@ fn element_fingerprint(element: &ElementInfo, parent_index: Option<usize>) -> St
     element.control_type.hash(&mut hasher);
     element.class_name.hash(&mut hasher);
     element.name.hash(&mut hasher);
-    element
-        .bounding_rect
-        .map(|rect| (rect.x, rect.y, rect.width, rect.height))
-        .hash(&mut hasher);
-    parent_index.hash(&mut hasher);
+    element.process_id.hash(&mut hasher);
+    element.window_title.hash(&mut hasher);
+    // Parent indices and geometry are deliberately excluded: insertion of an
+    // unrelated sibling or a window move must not invalidate a structural
+    // handle. A duplicate stable shape is rejected as ambiguous at refetch.
+    let _ = parent_index;
     format!("{:016x}", hasher.finish())
+}
+
+pub(crate) fn pixel_to_global_point(
+    surface: &UiSurface,
+    point: Point,
+) -> Result<Point, SessionError> {
+    if surface.pixel_width == 0
+        || surface.pixel_height == 0
+        || surface.logical_bounds.width <= 0
+        || surface.logical_bounds.height <= 0
+        || point.x < 0
+        || point.y < 0
+        || u32::try_from(point.x).map_or(true, |x| x >= surface.pixel_width)
+        || u32::try_from(point.y).map_or(true, |y| y >= surface.pixel_height)
+    {
+        return Err(SessionError::PixelSurfaceMismatch);
+    }
+    let x = f64::from(surface.logical_bounds.x)
+        + f64::from(point.x) * f64::from(surface.logical_bounds.width)
+            / f64::from(surface.pixel_width);
+    let y = f64::from(surface.logical_bounds.y)
+        + f64::from(point.y) * f64::from(surface.logical_bounds.height)
+            / f64::from(surface.pixel_height);
+    Ok(Point {
+        x: x.round() as i32,
+        y: y.round() as i32,
+    })
 }
 
 fn diff_trees(
@@ -620,6 +883,7 @@ mod tests {
         fn fixture(root: ElementInfo) -> Self {
             Self {
                 session_id: "session:test".into(),
+                turn_binding: "turn:test".into(),
                 app: ResolvedApplication {
                     bundle_id: Some("com.apple.Notes".into()),
                     path: Some("/System/Applications/Notes.app".into()),
@@ -649,7 +913,7 @@ mod tests {
     }
 
     #[test]
-    fn recording_state_issues_a_revision_bound_single_use_turn_token() {
+    fn recording_state_issues_a_revision_and_model_turn_bound_single_use_token() {
         let mut sessions = UiSessionManager::default();
         let state = sessions
             .record_state(CapturedUiState::fixture(root("Notes")))
@@ -660,13 +924,28 @@ mod tests {
         assert!(!state.turn_token.is_empty());
 
         let handle = state.tree.nodes[0].handle.clone();
+        let request = ActionRequest {
+            turn_token: state.turn_token.clone(),
+            target: ActionTarget::Element {
+                handle: handle.clone(),
+            },
+            action: UiAction::Click {
+                button: None,
+                count: None,
+            },
+            strategy: ActionStrategy::Semantic,
+        };
+        assert!(matches!(
+            sessions.prepare_action(&request, "another-turn"),
+            Err(SessionError::TurnBindingMismatch)
+        ));
         sessions
-            .consume_turn(&state.turn_token, &handle)
+            .prepare_action(&request, "turn:test")
             .expect("fresh token");
-        assert_eq!(
-            sessions.consume_turn(&state.turn_token, &handle),
+        assert!(matches!(
+            sessions.prepare_action(&request, "turn:test"),
             Err(SessionError::TurnTokenConsumed)
-        );
+        ));
     }
 
     #[test]
@@ -774,5 +1053,154 @@ mod tests {
         assert_eq!(matches.len(), 1);
         assert_eq!(matches[0].handle.index, 20);
         assert_eq!(matches[0].handle.revision, state.revision);
+    }
+
+    #[test]
+    fn stale_handle_refetches_only_on_one_structural_match() {
+        let mut first_root = root("Notes");
+        let mut save = root("Save");
+        save.automation_id = Some("save".into());
+        save.control_type = Some("button".into());
+        first_root.children = Some(vec![save.clone()]);
+        let mut sessions = UiSessionManager::default();
+        let first = sessions
+            .record_state(CapturedUiState::fixture(first_root))
+            .unwrap();
+        let stale_handle = first.tree.nodes[1].handle.clone();
+
+        save.bounding_rect = Some(crate::automation::types::Rect {
+            x: 300,
+            y: 200,
+            width: 80,
+            height: 30,
+        });
+        let mut second_root = root("Notes");
+        second_root.children = Some(vec![save]);
+        let second = sessions
+            .record_state(CapturedUiState::fixture(second_root))
+            .unwrap();
+        let prepared = sessions
+            .prepare_action(
+                &ActionRequest {
+                    turn_token: second.turn_token,
+                    target: ActionTarget::Element {
+                        handle: stale_handle,
+                    },
+                    action: UiAction::Click {
+                        button: None,
+                        count: None,
+                    },
+                    strategy: ActionStrategy::Semantic,
+                },
+                "turn:test",
+            )
+            .unwrap();
+
+        assert_eq!(prepared.refetched_from_revision, Some(1));
+        assert_eq!(
+            prepared.element.unwrap().automation_id.as_deref(),
+            Some("save")
+        );
+    }
+
+    #[test]
+    fn stale_handle_refetch_rejects_ambiguous_fingerprints() {
+        let mut first_root = root("Notes");
+        let mut save = root("Save");
+        save.automation_id = Some("save".into());
+        save.control_type = Some("button".into());
+        first_root.children = Some(vec![save.clone()]);
+        let mut sessions = UiSessionManager::default();
+        let first = sessions
+            .record_state(CapturedUiState::fixture(first_root))
+            .unwrap();
+        let stale_handle = first.tree.nodes[1].handle.clone();
+
+        let mut second_root = root("Notes");
+        second_root.children = Some(vec![save.clone(), save]);
+        let second = sessions
+            .record_state(CapturedUiState::fixture(second_root))
+            .unwrap();
+        let error = sessions
+            .prepare_action(
+                &ActionRequest {
+                    turn_token: second.turn_token,
+                    target: ActionTarget::Element {
+                        handle: stale_handle,
+                    },
+                    action: UiAction::Click {
+                        button: None,
+                        count: None,
+                    },
+                    strategy: ActionStrategy::Semantic,
+                },
+                "turn:test",
+            )
+            .unwrap_err();
+
+        assert_eq!(error, SessionError::StaleElementAmbiguous);
+    }
+
+    #[test]
+    fn stale_handle_refetch_rejects_missing_fingerprint() {
+        let mut first_root = root("Notes");
+        let mut save = root("Save");
+        save.automation_id = Some("save".into());
+        save.control_type = Some("button".into());
+        first_root.children = Some(vec![save]);
+        let mut sessions = UiSessionManager::default();
+        let first = sessions
+            .record_state(CapturedUiState::fixture(first_root))
+            .unwrap();
+        let stale_handle = first.tree.nodes[1].handle.clone();
+
+        let second = sessions
+            .record_state(CapturedUiState::fixture(root("Notes")))
+            .unwrap();
+        let error = sessions
+            .prepare_action(
+                &ActionRequest {
+                    turn_token: second.turn_token,
+                    target: ActionTarget::Element {
+                        handle: stale_handle,
+                    },
+                    action: UiAction::Click {
+                        button: None,
+                        count: None,
+                    },
+                    strategy: ActionStrategy::Semantic,
+                },
+                "turn:test",
+            )
+            .unwrap_err();
+
+        assert_eq!(error, SessionError::StaleElementNotFound);
+    }
+
+    #[test]
+    fn pixel_surface_maps_retina_and_negative_display_origins() {
+        let surface = UiSurface {
+            window_id: Some(77),
+            display_id: Some("2".into()),
+            logical_bounds: crate::automation::types::Rect {
+                x: -1512,
+                y: 100,
+                width: 1512,
+                height: 982,
+            },
+            pixel_width: 3024,
+            pixel_height: 1964,
+            scale_factor: 2.0,
+            coordinate_space: CoordinateSpace::ScreenshotPixels,
+        };
+
+        assert_eq!(
+            pixel_to_global_point(&surface, Point { x: 1512, y: 982 }).unwrap(),
+            Point { x: -756, y: 591 }
+        );
+        assert_eq!(
+            pixel_to_global_point(&surface, Point { x: 3024, y: 0 }),
+            Err(SessionError::PixelSurfaceMismatch)
+        );
     }
 }

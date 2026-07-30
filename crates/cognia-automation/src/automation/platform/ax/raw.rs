@@ -31,12 +31,14 @@ use accessibility::{AXUIElement, AXUIElementAttributes};
 use accessibility_sys::{
     kAXErrorSuccess, kAXTrustedCheckOptionPrompt, kAXValueTypeCFRange, kAXValueTypeCGPoint,
     kAXValueTypeCGRect, kAXValueTypeCGSize, AXIsProcessTrusted, AXIsProcessTrustedWithOptions,
-    AXUIElementCopyAttributeValue, AXUIElementCopyElementAtPosition,
-    AXUIElementCopyParameterizedAttributeValue, AXUIElementCreateSystemWide, AXUIElementGetPid,
+    AXUIElementCopyAttributeValue, AXUIElementCopyAttributeValues,
+    AXUIElementCopyElementAtPosition, AXUIElementCopyParameterizedAttributeValue,
+    AXUIElementCreateSystemWide, AXUIElementGetAttributeValueCount, AXUIElementGetPid,
     AXUIElementRef, AXUIElementSetAttributeValue, AXUIElementSetMessagingTimeout, AXValueCreate,
     AXValueGetValue, AXValueRef,
 };
 use core_foundation_0_9 as cf_ax;
+use core_foundation_sys::array::CFArrayRef;
 use core_foundation_sys::base::{CFRange, CFRelease, CFTypeRef};
 use core_foundation_sys::dictionary::CFDictionaryRef;
 use core_foundation_sys::number::{kCFBooleanTrue, CFBooleanGetValue, CFBooleanRef};
@@ -49,6 +51,101 @@ use crate::automation::types::Rect;
 
 fn el_ref(el: &AXUIElement) -> AXUIElementRef {
     el.as_concrete_TypeRef() as AXUIElementRef
+}
+
+pub fn element_identity(el: &AXUIElement) -> usize {
+    el_ref(el) as usize
+}
+
+/// Read only the requested AXChildren slice. Calling the high-level
+/// `children()` accessor copies the entire collection before the traversal can
+/// apply its node budget, which is unsafe for 10k+ node WebView/Electron trees.
+pub fn read_children_page(el: &AXUIElement, offset: usize, limit: usize) -> Vec<AXUIElement> {
+    if limit == 0 {
+        return Vec::new();
+    }
+    let attribute = cfstr("AXChildren");
+    let mut count = 0;
+    let count_error = unsafe {
+        AXUIElementGetAttributeValueCount(el_ref(el), attribute.as_concrete_TypeRef(), &mut count)
+    };
+    if count_error != kAXErrorSuccess || count <= 0 || offset >= count as usize {
+        return Vec::new();
+    }
+    let page_size = limit.min(count as usize - offset);
+    let mut values: CFArrayRef = std::ptr::null();
+    let copy_error = unsafe {
+        AXUIElementCopyAttributeValues(
+            el_ref(el),
+            attribute.as_concrete_TypeRef(),
+            offset as isize,
+            page_size as isize,
+            &mut values,
+        )
+    };
+    if copy_error != kAXErrorSuccess || values.is_null() {
+        return Vec::new();
+    }
+    let values = unsafe { cf_ax::array::CFArray::<AXUIElement>::wrap_under_create_rule(values) };
+    values.iter().map(|child| (*child).clone()).collect()
+}
+
+pub fn perform_action(el: &AXUIElement, action: &str) -> Result<(), i32> {
+    let action = cfstr(action);
+    let error = unsafe {
+        accessibility_sys::AXUIElementPerformAction(el_ref(el), action.as_concrete_TypeRef())
+    };
+    if error == kAXErrorSuccess {
+        Ok(())
+    } else {
+        Err(error)
+    }
+}
+
+pub fn set_string_value(el: &AXUIElement, attribute: &str, value: &str) -> Result<(), i32> {
+    let attribute = cfstr(attribute);
+    let value = cfstr(value);
+    let error = unsafe {
+        AXUIElementSetAttributeValue(
+            el_ref(el),
+            attribute.as_concrete_TypeRef(),
+            value.as_CFTypeRef(),
+        )
+    };
+    if error == kAXErrorSuccess {
+        Ok(())
+    } else {
+        Err(error)
+    }
+}
+
+pub fn set_selected_text_range(el: &AXUIElement, start: usize, end: usize) -> Result<(), i32> {
+    let range = CFRange::init(start as isize, end.saturating_sub(start) as isize);
+    let value = unsafe {
+        AXValueCreate(
+            kAXValueTypeCFRange,
+            (&range as *const CFRange).cast::<c_void>(),
+        )
+    };
+    if value.is_null() {
+        return Err(accessibility_sys::kAXErrorFailure);
+    }
+    let attribute = cfstr("AXSelectedTextRange");
+    let error = unsafe {
+        AXUIElementSetAttributeValue(
+            el_ref(el),
+            attribute.as_concrete_TypeRef(),
+            value as CFTypeRef,
+        )
+    };
+    unsafe {
+        CFRelease(value as CFTypeRef);
+    }
+    if error == kAXErrorSuccess {
+        Ok(())
+    } else {
+        Err(error)
+    }
 }
 
 fn cfstr(name: &str) -> CFString {

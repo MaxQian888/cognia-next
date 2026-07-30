@@ -19,6 +19,9 @@ publish = false
 name = "cognia_automation"
 path = "src/lib.rs"
 
+[build-dependencies]
+cc = "1"
+
 [dependencies]
 cognia-instrument = { path = "../cognia-instrument" }
 cognia-core = { path = "../cognia-core" }
@@ -41,12 +44,13 @@ hex = "0.4"
 url = "2"
 bytes = "1"
 rand = "0.8"
+ed25519-dalek = "2"
 futures-util = { version = "0.3", default-features = false }
 async-trait = "0.1"
 tokio-tungstenite = { version = "0.24", default-features = false, features = ["rustls-tls-native-roots", "connect"] }
 
-# Cross-platform screenshot (Computer Use). xcap re-exports `image`, so the
-# cluster uses `xcap::image` rather than a direct `image` dep.
+# Cross-platform screenshot for non-macOS backends. macOS app-session capture
+# is implemented with ScreenCaptureKit in `native/macos/screen_capture.m`.
 xcap = "0.9.7"
 
 [dev-dependencies]
@@ -86,6 +90,9 @@ accessibility = "0.1"
 accessibility-sys = "0.1"
 core-foundation-sys = "0.8"
 core-foundation-0-9 = { package = "core-foundation", version = "0.9" }
+objc2-app-kit = { version = "0.3.2", features = ["libc", "NSRunningApplication", "NSWorkspace"] }
+objc2-foundation = { version = "0.3.2", features = ["NSArray", "NSString", "NSURL"] }
+objc2 = "0.6.4"
 
 [target."cfg(unix)".dependencies]
 # setrlimit for the sandbox CPU / address-space caps (sandbox/limits.rs).

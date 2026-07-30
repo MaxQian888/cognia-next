@@ -10,6 +10,15 @@ use super::selection::TextSelectionSnapshot;
 use super::session::{AppLocator, ResolvedApplication};
 use super::types::*;
 
+#[derive(Debug, Clone)]
+pub struct ApplicationScreenshot {
+    pub screenshot: Screenshot,
+    pub window_id: Option<u64>,
+    pub display_id: Option<String>,
+    pub logical_bounds: Rect,
+    pub scale_factor: f64,
+}
+
 pub trait AutomationBackend {
     fn capabilities(&self) -> Capabilities;
     fn get_focus(&self) -> Result<ElementInfo>;
@@ -23,8 +32,57 @@ pub trait AutomationBackend {
         }])
     }
     fn read_tree(&self, root: Option<ElementRef>, opts: TreeOpts) -> Result<Vec<ElementInfo>>;
+    fn read_application_tree(
+        &self,
+        app: &ResolvedApplication,
+        opts: TreeOpts,
+    ) -> Result<Vec<ElementInfo>> {
+        let focus = self.get_focus()?;
+        if focus.process_id != Some(app.process_id) {
+            return Err(AutomationError::BackendError {
+                message: format!(
+                    "application {} is not focused and this backend cannot read it in the background",
+                    app.display_name
+                ),
+            });
+        }
+        self.read_tree(None, opts)
+    }
     fn find(&self, locator: &Locator) -> Result<Option<ElementRef>>;
     fn screenshot(&self, opts: ScreenshotOpts) -> Result<Screenshot>;
+    fn screenshot_application(
+        &self,
+        app: &ResolvedApplication,
+        window_hint: Option<&ElementInfo>,
+        opts: ScreenshotOpts,
+    ) -> Result<ApplicationScreenshot> {
+        let focus = self.get_focus()?;
+        if focus.process_id != Some(app.process_id) {
+            return Err(AutomationError::BackendError {
+                message: format!(
+                    "application {} is not foreground for screenshot capture",
+                    app.display_name
+                ),
+            });
+        }
+        let screenshot = self.screenshot(opts)?;
+        let logical_bounds = window_hint
+            .and_then(|hint| hint.bounding_rect)
+            .or(focus.bounding_rect)
+            .unwrap_or(Rect {
+                x: 0,
+                y: 0,
+                width: i32::try_from(screenshot.width).unwrap_or(i32::MAX),
+                height: i32::try_from(screenshot.height).unwrap_or(i32::MAX),
+            });
+        Ok(ApplicationScreenshot {
+            screenshot,
+            window_id: None,
+            display_id: None,
+            logical_bounds,
+            scale_factor: 0.0,
+        })
+    }
 
     /// Resolve and, when explicitly allowed, prepare the application whose
     /// state will be captured. Platform backends override this when they can

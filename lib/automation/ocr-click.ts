@@ -14,8 +14,7 @@
  * Coordinate mapping: OCR returns `bbox` in the captured image's pixel space.
  * We map it back to physical screen coordinates by (a) the OCR provider's own
  * rasterization dims (`OcrPage.width/height`) and (b) the Rust screenshot
- * downscale factor (`Screenshot.sourceWidth/Height`, the same signal
- * `coordinate-scaler.ts` uses). The capture is the primary monitor — see the
+ * downscale factor (`Screenshot.sourceWidth/Height`). The capture is the primary monitor — see the
  * single/primary-monitor caveat shared with `browser_embed_capture`.
  */
 

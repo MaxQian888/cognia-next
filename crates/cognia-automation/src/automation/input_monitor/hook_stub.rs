@@ -3,14 +3,14 @@
 //! only and these platforms degrade gracefully — `install` returns an error
 //! that the command maps to `UnsupportedPlatform` + a `record:event` error.
 
-use tokio::sync::mpsc::Sender;
+use tokio::sync::mpsc::UnboundedSender;
 
 use super::InputEvent;
 
 pub(crate) struct HookGuard;
 
 impl HookGuard {
-    pub(crate) fn install(_tx: Sender<InputEvent>) -> Result<HookGuard, String> {
+    pub(crate) fn install(_tx: UnboundedSender<InputEvent>) -> Result<HookGuard, String> {
         Err("input recording is not supported on this platform yet".into())
     }
 }
@@ -21,7 +21,7 @@ mod tests {
 
     #[test]
     fn install_returns_unsupported() {
-        let (tx, _rx) = tokio::sync::mpsc::channel::<InputEvent>(1);
+        let (tx, _rx) = tokio::sync::mpsc::unbounded_channel::<InputEvent>();
         assert!(HookGuard::install(tx).is_err());
     }
 }

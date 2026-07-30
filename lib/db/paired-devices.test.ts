@@ -10,6 +10,7 @@ import {
   resumePairedDevice,
   revokePairedDevice,
   setServerFingerprint,
+  setLockedComputerUseAllowed,
   setPushToken,
   setRemoteControlAllowed,
   touchPairedDevice,
@@ -464,6 +465,23 @@ describe("setRemoteControlAllowed", () => {
 
   it("returns false for an unknown deviceId", async () => {
     expect(await setRemoteControlAllowed("does-not-exist", true)).toBe(false)
+  })
+})
+
+describe("setLockedComputerUseAllowed", () => {
+  it("is a separate deny-by-default capability", async () => {
+    await addPairedDevice({
+      deviceId: "dev-locked",
+      label: "x",
+      platform: "ios",
+      pubkey: "pk",
+      appVersion: "0.1.0",
+      nowMs: 1,
+    })
+    expect((await getPairedDevice("dev-locked"))?.allowLockedComputerUse).toBeUndefined()
+    expect(await setLockedComputerUseAllowed("dev-locked", true)).toBe(true)
+    expect((await getPairedDevice("dev-locked"))?.allowLockedComputerUse).toBe(true)
+    expect(await setLockedComputerUseAllowed("missing", true)).toBe(false)
   })
 })
 

@@ -76,19 +76,23 @@ import { isEmbeddedSession } from "@/lib/chat/session-exposure"
 import { gateWorkbenchProviderPayload } from "@/lib/context-workbench/provider-payload"
 
 // ADR-0020 W3 — the chat-modal session grant only ever applies to the
-// three plugin MCP tools that the `cognia-computer-use` plugin
+// app-session tools that the `cognia-computer-use` plugin
 // contributes. Hard-coded as a tight const so a typo in a future tool
 // rename won't silently flip permissions on the wrong tool.
 const COMPUTER_USE_PLUGIN_TOOL_NAMES = new Set([
-  "computer_use",
-  "bash",
-  "text_editor",
+  "list_apps",
+  "get_app_state",
+  "query_elements",
+  "expand_element",
+  "perform_action",
   // The sidecar surfaces them through the cognia-plugin-tools MCP, so
   // the prefixed form lands on the chat side. Match both bare and
   // prefixed in case the upstream renames the bridge.
-  "mcp__cognia-plugin-tools__computer_use",
-  "mcp__cognia-plugin-tools__bash",
-  "mcp__cognia-plugin-tools__text_editor",
+  "mcp__cognia-plugin-tools__list_apps",
+  "mcp__cognia-plugin-tools__get_app_state",
+  "mcp__cognia-plugin-tools__query_elements",
+  "mcp__cognia-plugin-tools__expand_element",
+  "mcp__cognia-plugin-tools__perform_action",
 ])
 
 function isComputerUsePluginToolName(name: string): boolean {

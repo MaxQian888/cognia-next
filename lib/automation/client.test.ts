@@ -100,14 +100,14 @@ describe("desktop client", () => {
     await desktop.getAppState(
       "session-1",
       { kind: "bundleId", bundleId: "com.apple.Notes" },
-      { includeScreenshot: true },
+      {},
       { surface: "computerUse" }
     )
     expect(mockCall).toHaveBeenLastCalledWith("desktop_get_app_state", {
       args: {
         sessionId: "session-1",
         locator: { kind: "bundleId", bundleId: "com.apple.Notes" },
-        options: { includeScreenshot: true },
+        options: {},
         ctx: { surface: "computerUse" },
       },
     })
@@ -144,6 +144,21 @@ describe("desktop client", () => {
         continuationToken: "opaque-token",
         limit: 50,
         ctx: {},
+      },
+    })
+
+    const request = {
+      turnToken: "turn-token",
+      target: { kind: "element" as const, handle },
+      action: { kind: "click" as const },
+      strategy: "auto" as const,
+    }
+    mockCall.mockResolvedValueOnce({ status: "delivered" })
+    await desktop.performAction(request, { surface: "computerUse" })
+    expect(mockCall).toHaveBeenLastCalledWith("desktop_perform_action", {
+      args: {
+        request,
+        ctx: { surface: "computerUse" },
       },
     })
   })

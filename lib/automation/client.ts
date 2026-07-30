@@ -16,6 +16,8 @@ import { transport } from "@/lib/tauri"
 import { DEFAULT_CONSENT_TIMEOUT_MS } from "./consent-durations"
 
 import type {
+  ActionRequest,
+  ActionResult,
   AppLocator,
   ButtonTransition,
   Capabilities,
@@ -138,16 +140,14 @@ export interface CallContext {
     networkHosts?: string[]
   }
   /**
-   * Renderer-only session tag for per-session action-mapper state
-   * (coordinate scaling, screenshot dedup, consecutive-failure counters —
-   * see `lib/automation/anthropic-action-mapper.ts`). Stamped by the
-   * computer-use plugin from the active chat session id.
-   *
-   * Also read by the Rust gate: it lands in `GateContext.session_key` and
+   * Originating chat session. The Rust gate stores it in
+   * `GateContext.session_key` and
    * from there in the consent prompt, so a time-boxed "don't ask again"
    * grant is scoped to one conversation instead of the whole app session.
    */
   sessionKey?: string
+  /** Authenticated model message or workflow-step id for revision tokens. */
+  turnKey?: string
 }
 
 /**
@@ -221,6 +221,12 @@ export const desktop = {
   ): Promise<ExpandedElements> {
     return transport.call<ExpandedElements>("desktop_expand_element", {
       args: { handle, continuationToken, limit, ctx },
+    })
+  },
+
+  performAction(request: ActionRequest, ctx: CallContext = {}): Promise<ActionResult> {
+    return transport.call<ActionResult>("desktop_perform_action", {
+      args: { request, ctx },
     })
   },
 
@@ -662,9 +668,8 @@ export function defaultAutomationSettings(): AutomationSettings {
     redactScreenshots: false,
     // On by default. An un-scaled Retina frame inlines as several MB of base64
     // into `messages.parts` and a session's worth costs gigabytes of renderer
-    // heap (`tests/e2e/mobile/chat-render-perf.baseline.json`). Click accuracy
-    // is unaffected: `coordinate-scaler.ts` maps model space back to physical
-    // pixels from the dims recorded on every screenshot. Must match
+    // heap (`tests/e2e/mobile/chat-render-perf.baseline.json`). The canonical
+    // Rust surface keeps model/source transforms together. Must match
     // `ScreenshotScalingSettings::default()` in the Rust crate — whichever side
     // answers first wins, so a mismatch reads as scaling that depends on boot
     // order.

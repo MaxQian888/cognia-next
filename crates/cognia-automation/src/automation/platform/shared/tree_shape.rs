@@ -11,6 +11,7 @@
 //! `keymap` / `shell_vars`.
 
 use crate::automation::types::{ElementInfo, ElementRef, Locator, Point, Rect};
+use std::time::{Duration, Instant};
 
 /// Bounds for a depth-capped tree walk. The native backends don't expose the
 /// full (potentially huge) accessibility tree — they walk the frontmost
@@ -21,12 +22,18 @@ pub struct TreeBudget {
     pub max_depth: u32,
     /// Maximum total nodes materialized across the whole walk.
     pub max_nodes: usize,
+    /// Maximum approximate serialized bytes read into the tree.
+    pub max_bytes: usize,
+    /// Hard wall-clock deadline for one traversal.
+    pub max_duration: Duration,
 }
 
 impl TreeBudget {
     pub const DEFAULT: TreeBudget = TreeBudget {
         max_depth: 64,
         max_nodes: 25_000,
+        max_bytes: 8 * 1024 * 1024,
+        max_duration: Duration::from_secs(10),
     };
 
     /// Resolve from a caller-supplied `max_depth` (e.g. `TreeOpts.max_depth`),
@@ -35,7 +42,7 @@ impl TreeBudget {
     pub fn from_opts(max_depth: Option<u32>) -> Self {
         TreeBudget {
             max_depth: max_depth.unwrap_or(Self::DEFAULT.max_depth).clamp(1, 64),
-            max_nodes: Self::DEFAULT.max_nodes,
+            ..Self::DEFAULT
         }
     }
 }
@@ -156,10 +163,14 @@ pub fn walk_tree<N>(
     root: &N,
     budget: TreeBudget,
     to_info: &impl Fn(&N) -> ElementInfo,
-    children: &impl Fn(&N) -> Vec<N>,
+    children: &impl Fn(&N, usize) -> Vec<N>,
 ) -> ElementInfo {
     let mut count = 0usize;
-    walk_inner(root, budget, 0, &mut count, to_info, children)
+    let mut bytes = 0usize;
+    let deadline = Instant::now() + budget.max_duration;
+    walk_inner(
+        root, budget, 0, &mut count, &mut bytes, deadline, to_info, children,
+    )
 }
 
 fn walk_inner<N>(
@@ -167,19 +178,31 @@ fn walk_inner<N>(
     budget: TreeBudget,
     depth: u32,
     count: &mut usize,
+    bytes: &mut usize,
+    deadline: Instant,
     to_info: &impl Fn(&N) -> ElementInfo,
-    children: &impl Fn(&N) -> Vec<N>,
+    children: &impl Fn(&N, usize) -> Vec<N>,
 ) -> ElementInfo {
     *count += 1;
     let mut info = to_info(node);
+    *bytes = bytes.saturating_add(
+        serde_json::to_vec(&info)
+            .map(|encoded| encoded.len())
+            .unwrap_or_default(),
+    );
     // At the depth/node ceiling: emit this node as a leaf (drop any children).
-    if depth + 1 >= budget.max_depth || *count >= budget.max_nodes {
+    if depth + 1 >= budget.max_depth
+        || *count >= budget.max_nodes
+        || *bytes >= budget.max_bytes
+        || Instant::now() >= deadline
+    {
         info.children = None;
         return info;
     }
     let mut out = Vec::new();
-    for child in children(node) {
-        if *count >= budget.max_nodes {
+    let remaining_nodes = budget.max_nodes.saturating_sub(*count);
+    for child in children(node, remaining_nodes) {
+        if *count >= budget.max_nodes || *bytes >= budget.max_bytes || Instant::now() >= deadline {
             break;
         }
         out.push(walk_inner(
@@ -187,6 +210,8 @@ fn walk_inner<N>(
             budget,
             depth + 1,
             count,
+            bytes,
+            deadline,
             to_info,
             children,
         ));
@@ -298,8 +323,8 @@ mod tests {
     fn node_info(n: &Node) -> ElementInfo {
         info(&n.name, "group")
     }
-    fn node_children(n: &Node) -> Vec<Node> {
-        n.kids.clone()
+    fn node_children(n: &Node, limit: usize) -> Vec<Node> {
+        n.kids.iter().take(limit).cloned().collect()
     }
 
     #[test]
@@ -309,6 +334,7 @@ mod tests {
         let budget = TreeBudget {
             max_depth: 2,
             max_nodes: 100,
+            ..TreeBudget::DEFAULT
         };
         let tree = walk_tree(&root, budget, &node_info, &node_children);
         let child = &tree.children.as_ref().unwrap()[0];
@@ -325,6 +351,7 @@ mod tests {
         let budget = TreeBudget {
             max_depth: 10,
             max_nodes: 2, // root + one child only
+            ..TreeBudget::DEFAULT
         };
         let tree = walk_tree(&root, budget, &node_info, &node_children);
         assert_eq!(tree.children.as_ref().unwrap().len(), 1);

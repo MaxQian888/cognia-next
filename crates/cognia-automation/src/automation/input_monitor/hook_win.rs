@@ -16,7 +16,7 @@ use std::cell::RefCell;
 use std::sync::mpsc::channel;
 use std::thread::{self, JoinHandle};
 
-use tokio::sync::mpsc::Sender;
+use tokio::sync::mpsc::UnboundedSender;
 use windows::Win32::Foundation::{LPARAM, LRESULT, WPARAM};
 use windows::Win32::System::Threading::GetCurrentThreadId;
 use windows::Win32::UI::WindowsAndMessaging::{
@@ -31,7 +31,7 @@ use super::{InputButton, InputEvent};
 thread_local! {
     /// The active sender for the pump thread. Set before the hooks are
     /// installed; cleared when the pump exits. The hook callbacks read it.
-    static SENDER: RefCell<Option<Sender<InputEvent>>> = const { RefCell::new(None) };
+    static SENDER: RefCell<Option<UnboundedSender<InputEvent>>> = const { RefCell::new(None) };
 }
 
 fn now_ms() -> i64 {
@@ -41,9 +41,7 @@ fn now_ms() -> i64 {
 fn send(sig: InputEvent) {
     SENDER.with(|cell| {
         if let Some(tx) = cell.borrow().as_ref() {
-            // Non-blocking: never stall the input chain. A full buffer drops the
-            // signal (it's coarse observational noise, not authoritative input).
-            let _ = tx.try_send(sig);
+            let _ = tx.send(sig);
         }
     });
 }
@@ -134,7 +132,7 @@ pub(crate) struct HookGuard {
 }
 
 impl HookGuard {
-    pub(crate) fn install(tx: Sender<InputEvent>) -> Result<HookGuard, String> {
+    pub(crate) fn install(tx: UnboundedSender<InputEvent>) -> Result<HookGuard, String> {
         let (ready_tx, ready_rx) = channel::<Result<u32, String>>();
         let join = thread::Builder::new()
             .name("skill-recorder-hook".into())
@@ -204,7 +202,7 @@ mod tests {
     fn install_and_drop_round_trip() {
         // Installing a real hook on the Windows CI/dev host should succeed; the
         // guard's Drop must cleanly tear down the pump thread without hanging.
-        let (tx, _rx) = tokio::sync::mpsc::channel::<InputEvent>(8);
+        let (tx, _rx) = tokio::sync::mpsc::unbounded_channel::<InputEvent>();
         let guard = HookGuard::install(tx).expect("install hook on windows");
         drop(guard); // joins the pump thread — must not hang
     }

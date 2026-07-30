@@ -587,7 +587,7 @@ fn raw_signal_from_input(event: InputEvent) -> Option<RawSignal> {
         }),
         InputEvent::Scroll { x, y, dy, ts_ms } => Some(RawSignal::Scroll { x, y, dy, ts_ms }),
         InputEvent::KeyDown { vk, ts_ms } => Some(RawSignal::Key { vk, ts_ms }),
-        InputEvent::MouseDown { .. } => None,
+        InputEvent::MouseDown { .. } | InputEvent::MouseMoved { .. } => None,
     }
 }
 

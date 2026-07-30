@@ -123,9 +123,8 @@ export interface Screenshot {
   /**
    * Pre-downscale dimensions — present only when the Rust side shrank the
    * frame (Settings → Automation → Behavior → screenshot scaling). Absent
-   * means `width`/`height` ARE the physical pixels. Consumed by
-   * `lib/automation/coordinate-scaler.ts` to map model coordinates back
-   * to physical pixels.
+   * means `width`/`height` ARE the physical pixels. The canonical Rust
+   * session surface uses these dimensions for model/source transforms.
    */
   sourceWidth?: number
   sourceHeight?: number
@@ -156,7 +155,6 @@ export interface UiSurface {
 }
 
 export interface GetAppStateOptions {
-  includeScreenshot?: boolean
   disableDiff?: boolean
   allowLaunch?: boolean
   maxNodes?: number
@@ -214,6 +212,61 @@ export interface UiStateRevision {
 export interface ExpandedElements {
   nodes: UiTreeNode[]
   continuationToken: string | null
+}
+
+export type ActionStrategy = "semantic" | "pixel" | "auto"
+
+export interface PixelTarget {
+  sessionId: string
+  lineageId: string
+  revision: number
+  point: Point
+  screenshotWidth: number
+  screenshotHeight: number
+}
+
+export type ActionTarget =
+  { kind: "element"; handle: ElementHandle } | { kind: "pixel"; target: PixelTarget }
+
+export type UiAction =
+  | { kind: "click"; button?: MouseButton; count?: number }
+  | { kind: "drag"; to: Point; opts?: DragOpts }
+  | { kind: "scroll"; opts?: ScrollOpts }
+  | { kind: "pressKey"; chord: KeyChord }
+  | { kind: "typeText"; text: string }
+  | { kind: "setValue"; value: string }
+  | { kind: "selectText"; start: number; end: number }
+  | { kind: "secondaryAction"; name: string }
+
+export interface ActionRequest {
+  turnToken: string
+  target: ActionTarget
+  action: UiAction
+  strategy: ActionStrategy
+}
+
+export type ActionStatus = "delivered" | "notDelivered" | "refused" | "unknown"
+export type ActionMethod = "ax" | "synthetic"
+
+export interface ActionEvidence {
+  kind: string
+  message: string
+  revision: number | null
+}
+
+export interface ActionPolicyDecision {
+  allowed: boolean
+  reason: string | null
+}
+
+export interface ActionResult {
+  status: ActionStatus
+  method: ActionMethod | null
+  beforeRevision: number
+  afterRevision: number | null
+  evidence: ActionEvidence[]
+  policyDecision: ActionPolicyDecision
+  durationMs: number
 }
 
 export type ClickTarget =

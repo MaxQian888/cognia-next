@@ -25,7 +25,8 @@ use super::input_monitor::InputMonitor;
 use super::permission::{PermissionGate, Surface, TargetMeta, Tier};
 use super::policy::{Policy, PolicyState};
 use super::session::{
-    AppLocator, ElementHandle, ExpandedElements, GetAppStateOptions, UiStateRevision, UiTreeNode,
+    ActionRequest, ActionResult, AppLocator, ElementHandle, ExpandedElements, GetAppStateOptions,
+    UiStateRevision, UiTreeNode,
 };
 use super::types::*;
 use super::virtual_display::{
@@ -215,6 +216,11 @@ pub struct CallContext {
     /// time-boxed consent grant is scoped to one conversation.
     #[serde(default)]
     pub session_key: Option<String>,
+    /// Authenticated model message / workflow-step identifier. Canonical
+    /// app-session tokens are bound to this value in addition to the chat
+    /// session and AX revision.
+    #[serde(default)]
+    pub turn_key: Option<String>,
 }
 
 impl CallContext {
@@ -420,6 +426,10 @@ pub async fn desktop_get_app_state(
     let session_id = args.session_id;
     let locator = args.locator;
     let options = args.options;
+    let turn_binding = ctx
+        .turn_key
+        .clone()
+        .unwrap_or_else(|| uuid::Uuid::now_v7().to_string());
     let redact_enabled = state.gate.settings().redact_screenshots;
     command_body!(
         app,
@@ -429,7 +439,12 @@ pub async fn desktop_get_app_state(
         async {
             let mut revision = state
                 .handle
-                .get_app_state(session_id.clone(), locator.clone(), options.clone())
+                .get_app_state(
+                    session_id.clone(),
+                    turn_binding.clone(),
+                    locator.clone(),
+                    options.clone(),
+                )
                 .await?;
             if redact_enabled
                 && super::platform::shared::credential_window::is_credential_window_focused()
@@ -527,6 +542,35 @@ pub async fn desktop_expand_element(
         state
             .handle
             .expand_element(handle.clone(), continuation_token.clone(), limit)
+            .await
+    )
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PerformActionArgs {
+    pub request: ActionRequest,
+    #[serde(default)]
+    pub ctx: CallContext,
+}
+
+#[tauri::command]
+pub async fn desktop_perform_action(
+    app: tauri::AppHandle,
+    state: State<'_, AutomationState>,
+    args: PerformActionArgs,
+) -> std::result::Result<ActionResult, String> {
+    let ctx = args.ctx;
+    let request = args.request;
+    let turn_binding = ctx.turn_key.clone().unwrap_or_default();
+    command_body!(
+        app,
+        state,
+        ctx,
+        "perform_action",
+        state
+            .handle
+            .perform_action(request.clone(), turn_binding.clone())
             .await
     )
 }
@@ -1226,8 +1270,7 @@ pub struct VirtualDisplayArmResult {
     pub error: String,
 }
 
-/// ENTER hook for the live chat path (`dispatchAnthropicAction`): ensure the
-/// virtual display is active + primary before a screen-off `computer` action.
+/// Ensure the virtual display is active and primary before screen-off capture.
 /// Idempotent — re-arms the idle timer when already active. Returns
 /// `status: "unavailable"` (with a reason) so the renderer fails strictly
 /// rather than capturing a black frame.
@@ -1806,6 +1849,7 @@ mod tests {
             sandbox_connection_id: None,
             sandbox_confine: None,
             session_key: None,
+            turn_key: None,
         };
         let facts = ctx.facts();
         assert_eq!(facts.process_name, Some("Chrome"));

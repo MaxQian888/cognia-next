@@ -318,6 +318,26 @@ pub async fn companion_seed_remote_control(device_ids: Vec<String>) -> Result<()
     Ok(())
 }
 
+#[tauri::command]
+pub async fn companion_set_locked_computer_use(
+    device_id: String,
+    allowed: bool,
+) -> Result<(), String> {
+    let acl = super::locked_use_allow_list::global();
+    if allowed {
+        acl.allow(device_id);
+    } else {
+        acl.disallow(&device_id);
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn companion_seed_locked_computer_use(device_ids: Vec<String>) -> Result<(), String> {
+    super::locked_use_allow_list::global().reseed(device_ids);
+    Ok(())
+}
+
 // ---------------------------------------------------------------------------
 // Event-channel registration (M2.6)
 // ---------------------------------------------------------------------------
