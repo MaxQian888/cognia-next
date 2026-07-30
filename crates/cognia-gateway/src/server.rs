@@ -117,12 +117,17 @@ fn stall_reason(idle_timeout: Option<Duration>) -> String {
 /// waits forever, restoring the pre-timeout park-forever behaviour — kept
 /// reachable because a deliberately slow self-hosted upstream is a legitimate,
 /// if unwise, configuration.
-async fn next_chunk_before_idle<S>(stream: &mut S, idle: Option<Duration>) -> Result<Option<S::Item>, ()>
+async fn next_chunk_before_idle<S>(
+    stream: &mut S,
+    idle: Option<Duration>,
+) -> Result<Option<S::Item>, ()>
 where
     S: futures_util::Stream + Unpin,
 {
     match idle {
-        Some(limit) => tokio::time::timeout(limit, stream.next()).await.map_err(|_| ()),
+        Some(limit) => tokio::time::timeout(limit, stream.next())
+            .await
+            .map_err(|_| ()),
         None => Ok(stream.next().await),
     }
 }

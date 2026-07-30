@@ -45,8 +45,8 @@ use std::time::Duration;
 use accessibility::{AXUIElement, AXUIElementAttributes};
 use accessibility_sys::{
     kAXErrorSuccess, kAXFocusedUIElementChangedNotification, kAXSelectedTextChangedNotification,
-    AXObserverAddNotification, AXObserverCreate, AXObserverGetRunLoopSource,
-    AXObserverRemoveNotification, AXObserverRef, AXUIElementCreateApplication, AXUIElementRef,
+    AXObserverAddNotification, AXObserverCreate, AXObserverGetRunLoopSource, AXObserverRef,
+    AXObserverRemoveNotification, AXUIElementCreateApplication, AXUIElementRef,
 };
 use core_foundation::base::TCFType as TCFType010;
 use core_foundation::runloop::{kCFRunLoopDefaultMode, CFRunLoop, CFRunLoopSource};
@@ -130,8 +130,9 @@ impl AppObserver {
             return None;
         }
 
-        let app =
-            unsafe { AXUIElement::wrap_under_create_rule(AXUIElementCreateApplication(pid as i32)) };
+        let app = unsafe {
+            AXUIElement::wrap_under_create_rule(AXUIElementCreateApplication(pid as i32))
+        };
         raw::set_messaging_timeout(&app, AX_MESSAGING_TIMEOUT_SECONDS);
         // Chromium / WebKit / Electron publish no web-content accessibility —
         // and therefore post no selection notifications — until an assistive
@@ -147,19 +148,12 @@ impl AppObserver {
         ] {
             let name = CFString::new(notification);
             let err = unsafe {
-                AXObserverAddNotification(
-                    observer,
-                    app_ref,
-                    name.as_concrete_TypeRef(),
-                    context,
-                )
+                AXObserverAddNotification(observer, app_ref, name.as_concrete_TypeRef(), context)
             };
             if err == kAXErrorSuccess {
                 added = true;
             } else {
-                log::debug!(
-                    "ax observer: {notification} not available for pid {pid} (err {err})"
-                );
+                log::debug!("ax observer: {notification} not available for pid {pid} (err {err})");
             }
         }
         if !added {
@@ -279,9 +273,11 @@ pub(crate) struct AxObserverHandle {
 impl AxObserverHandle {
     pub(crate) fn install(subscription_id: u64) -> Result<Self, String> {
         if !raw::is_trusted() {
-            return Err("macOS Accessibility permission not granted — enable Cognia in \
+            return Err(
+                "macOS Accessibility permission not granted — enable Cognia in \
                         System Settings › Privacy & Security › Accessibility, then retry"
-                .into());
+                    .into(),
+            );
         }
         let stop = Arc::new(AtomicBool::new(false));
         let thread_stop = stop.clone();
