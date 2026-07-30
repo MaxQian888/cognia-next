@@ -39,6 +39,7 @@ import { loggers } from "@cognia/logging"
 import { getPluginLifecycleHooks } from "@/lib/plugin"
 import { normalizeTaskTrigger } from "./trigger-normalizer"
 import { normalizeConversationalTaskPayload } from "./conversational-task-authoring"
+import { resolveCatchupDefaults } from "./catchup-policy"
 
 // Logger
 const log = loggers.scheduler
@@ -723,6 +724,15 @@ class TaskSchedulerImpl {
     const now = new Date()
     const normalizedTrigger = normalizeTaskTrigger(input.trigger, { now })
 
+    // Catch-up defaults sit BETWEEN the global defaults and the caller's config,
+    // so what a missed slot does follows from the task type unless the author
+    // said otherwise. Only reached here: existing rows keep their stored config.
+    const config: TaskExecutionConfig = {
+      ...DEFAULT_EXECUTION_CONFIG,
+      ...resolveCatchupDefaults(input.type),
+      ...input.config,
+    }
+
     const task: ScheduledTask = {
       id: nanoid(),
       name: input.name,
@@ -731,12 +741,8 @@ class TaskSchedulerImpl {
       trigger: normalizedTrigger,
       payload: normalizeConversationalTaskPayload(input.type, input.payload),
       config: {
-        ...DEFAULT_EXECUTION_CONFIG,
-        ...input.config,
-        maxMissedRuns: Math.max(
-          0,
-          input.config?.maxMissedRuns ?? DEFAULT_EXECUTION_CONFIG.maxMissedRuns ?? 1
-        ),
+        ...config,
+        maxMissedRuns: Math.max(0, config.maxMissedRuns ?? 1),
       },
       notification: { ...DEFAULT_NOTIFICATION_CONFIG, ...input.notification },
       status: "active",

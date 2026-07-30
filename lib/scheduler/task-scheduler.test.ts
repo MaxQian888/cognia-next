@@ -74,6 +74,7 @@ jest.mock("@cognia/logging", () => {
 
 import { schedulerDb } from "./scheduler-db"
 import { getNextCronTime, validateCronExpression } from "./cron-parser"
+import { CATCHUP_GRACE_WINDOW_MS, CATCHUP_MAX_REPLAYED_RUNS } from "./catchup-policy"
 
 const mockSchedulerDb = schedulerDb as jest.Mocked<typeof schedulerDb>
 
@@ -186,6 +187,57 @@ describe("TaskScheduler", () => {
 
         const task = await scheduler.createTask(input)
         expect(task.trigger.type).toBe("cron")
+      })
+
+      // The catch-up table is only consulted here, at creation. See
+      // `catchup-policy.ts` for why the tier follows from the task type.
+      it("applies the task type's catch-up tier to a fresh task", async () => {
+        const digest = await scheduler.createTask({
+          name: "Daily digest",
+          type: "connection:scheduled:digest",
+          trigger: { type: "interval", intervalMs: 86_400_000 },
+        })
+        expect(digest.config.runMissedOnStartup).toBe(true)
+        expect(digest.config.catchupWindowMs).toBe(CATCHUP_GRACE_WINDOW_MS)
+        expect(digest.config.maxMissedRuns).toBe(1)
+
+        const presence = await scheduler.createTask({
+          name: "Presence",
+          type: "connection:presence:refresh",
+          trigger: { type: "interval", intervalMs: 600_000 },
+        })
+        expect(presence.config.runMissedOnStartup).toBe(false)
+        expect(presence.config.catchupWindowMs).toBeUndefined()
+
+        const backup = await scheduler.createTask({
+          name: "Nightly backup",
+          type: "backup",
+          trigger: { type: "interval", intervalMs: 86_400_000 },
+        })
+        expect(backup.config.runMissedOnStartup).toBe(true)
+        expect(backup.config.maxMissedRuns).toBe(CATCHUP_MAX_REPLAYED_RUNS)
+      })
+
+      it("lets an explicit config override the task type's catch-up tier", async () => {
+        const task = await scheduler.createTask({
+          name: "Digest, my way",
+          type: "connection:scheduled:digest",
+          trigger: { type: "interval", intervalMs: 86_400_000 },
+          config: { runMissedOnStartup: false, catchupWindowMs: 1_000, maxMissedRuns: 5 },
+        })
+        expect(task.config.runMissedOnStartup).toBe(false)
+        expect(task.config.catchupWindowMs).toBe(1_000)
+        expect(task.config.maxMissedRuns).toBe(5)
+      })
+
+      it("leaves task types outside the table on the pre-existing behaviour", async () => {
+        const task = await scheduler.createTask({
+          name: "User script",
+          type: "script",
+          trigger: { type: "interval", intervalMs: 60_000 },
+        })
+        expect(task.config.runMissedOnStartup).toBe(false)
+        expect(task.config.catchupWindowMs).toBeUndefined()
       })
 
       it("should reject invalid cron trigger", async () => {

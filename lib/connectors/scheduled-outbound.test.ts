@@ -126,6 +126,22 @@ jest.mock("@/lib/db/settings", () => ({
   getSettings: () => getSettingsImpl(),
 }))
 
+// A durable-queue write CAN fail on a long-lived host (closed DB during shutdown,
+// quota, upgrade in flight) and both executors have to report that rather than
+// claim success. The real implementation stays in place for every other test —
+// only this flag diverts it — so the queue assertions elsewhere keep their teeth.
+let enqueueFailure: Error | null = null
+jest.mock("@/lib/db/outbound-jobs", () => {
+  const actual = jest.requireActual("@/lib/db/outbound-jobs")
+  return {
+    ...actual,
+    enqueueOutbound: (...args: unknown[]) =>
+      enqueueFailure
+        ? Promise.reject(enqueueFailure)
+        : (actual.enqueueOutbound as (...a: unknown[]) => unknown)(...args),
+  }
+})
+
 // ── helpers ──────────────────────────────────────────────────────────────────
 
 function makeTask(payload?: Record<string, unknown>) {
@@ -140,6 +156,15 @@ async function callExecutor(type: string, task: unknown, execution: unknown) {
   const fn = registeredExecutors.get(type)
   if (!fn) throw new Error(`Executor not registered: ${type}`)
   return fn(task, execution, new AbortController().signal)
+}
+
+/** Drive an executor with an already-aborted signal (host shutting down). */
+async function callExecutorAborted(type: string, task: unknown, execution: unknown) {
+  const fn = registeredExecutors.get(type)
+  if (!fn) throw new Error(`Executor not registered: ${type}`)
+  const controller = new AbortController()
+  controller.abort()
+  return fn(task, execution, controller.signal)
 }
 
 // ── lifecycle ────────────────────────────────────────────────────────────────
@@ -166,6 +191,7 @@ beforeEach(async () => {
   getSettingsImpl = jest.fn(async () => ({ activeProjectId: "proj_test" }))
   tryBuildTwinDepsImpl = jest.fn(async () => undefined)
   tryBuildMemoryDepsImpl = jest.fn(async () => undefined)
+  enqueueFailure = null
   __setDigestSendPromptForTesting(null)
 })
 
@@ -221,6 +247,205 @@ describe("connection:outbound:send executor", () => {
       .toArray()
     expect(jobs).toHaveLength(1)
     expect(jobs[0].request.conversationRef.platform).toBe("discord")
+  })
+
+  // The host aborts in-flight executions on shutdown / cancel-previous. Sending
+  // anyway would post a message the operator already cancelled.
+  it("does not enqueue when the run was already aborted", async () => {
+    const result = await callExecutorAborted(
+      "connection:outbound:send",
+      makeTask(),
+      makeExecution({
+        adapterId: "adp_d",
+        conversationKey: "discord:adp_d:chat_abort",
+        segments: [{ type: "text", text: "should not send" }],
+      })
+    )
+    expect(result).toEqual({ success: false, error: "Outbound send aborted" })
+    expect(await getDb().outboundQueue.count()).toBe(0)
+  })
+
+  // A scheduled send has no inbound event to resolve a target from, so a missing
+  // persisted target must fail loud rather than guess a destination.
+  it("fails when the conversation has no persisted delivery target", async () => {
+    const result = await callExecutor(
+      "connection:outbound:send",
+      makeTask(),
+      makeExecution({
+        adapterId: "adp_d",
+        conversationKey: "discord:adp_d:chat_unknown",
+        segments: [{ type: "text", text: "nowhere to go" }],
+      })
+    )
+    expect(result.success).toBe(false)
+    expect(result.error).toContain("No persisted delivery target")
+    expect(await getDb().outboundQueue.count()).toBe(0)
+  })
+
+  it("fails when the persisted target belongs to a different adapter", async () => {
+    const conversationKey = "discord:adp_other:chat_2"
+    await getDb().connectorConversationStates.put({
+      conversationKey,
+      adapterId: "adp_other",
+      activationStatus: "inactive",
+      deliveryReadiness: "unknown",
+      deliveryTarget: {
+        address: {
+          conversationKey,
+          platform: "discord",
+          adapterId: "adp_other",
+          scopeKind: "channel",
+          containerId: "chat_2",
+        },
+        conversationRef: { platform: "discord", adapterId: "adp_other", channelId: "chat_2" },
+        refreshedAt: 1,
+      },
+      createdAt: 1,
+      updatedAt: 1,
+    })
+
+    const result = await callExecutor(
+      "connection:outbound:send",
+      makeTask(),
+      makeExecution({
+        adapterId: "adp_d",
+        conversationKey,
+        segments: [{ type: "text", text: "wrong adapter" }],
+      })
+    )
+    expect(result.success).toBe(false)
+    expect(result.error).toContain("No persisted delivery target")
+  })
+
+  // `execution.input` is the per-run snapshot; `task.payload` is the persisted
+  // configuration. A run created without an input snapshot (a manual "run now",
+  // a rehydrated row) must still send, using the task's own payload.
+  it("falls back to task.payload when the execution carries no input", async () => {
+    const conversationKey = "discord:adp_d:chat_from_task"
+    await getDb().connectorConversationStates.put({
+      conversationKey,
+      adapterId: "adp_d",
+      activationStatus: "inactive",
+      deliveryReadiness: "unknown",
+      deliveryTarget: {
+        address: {
+          conversationKey,
+          platform: "discord",
+          adapterId: "adp_d",
+          scopeKind: "channel",
+          containerId: "chat_from_task",
+        },
+        conversationRef: { platform: "discord", adapterId: "adp_d", channelId: "chat_from_task" },
+        refreshedAt: 1,
+      },
+      createdAt: 1,
+      updatedAt: 1,
+    })
+
+    const result = await callExecutor(
+      "connection:outbound:send",
+      makeTask({
+        adapterId: "adp_d",
+        conversationKey,
+        segments: [{ type: "text", text: "from the task row" }],
+      }),
+      makeExecution()
+    )
+    expect(result.success).toBe(true)
+    const [job] = await getDb()
+      .outboundQueue.filter((j) => j.conversationKey === conversationKey)
+      .toArray()
+    // No idempotencyKey in the payload → one is generated so a retry cannot
+    // double-post.
+    expect(job.idempotencyKey).toMatch(/[0-9a-f-]{36}/)
+  })
+
+  it.each([
+    ["not an object", "nope"],
+    ["null", null],
+    ["missing adapterId", { conversationKey: "k", segments: [] }],
+    ["missing conversationKey", { adapterId: "a", segments: [] }],
+    ["segments not an array", { adapterId: "a", conversationKey: "k", segments: "x" }],
+  ])("rejects a malformed send payload (%s)", async (_label, payload) => {
+    const result = await callExecutor(
+      "connection:outbound:send",
+      makeTask(),
+      makeExecution(payload as never)
+    )
+    expect(result.success).toBe(false)
+    expect(result.error).toContain("Invalid connection:outbound:send payload")
+  })
+
+  // Dexie and platform SDKs can reject with a non-Error value; the executor must
+  // still produce a readable reason instead of "[object Object]" or undefined.
+  it("stringifies a non-Error rejection from the queue write", async () => {
+    const conversationKey = "discord:adp_d:chat_weird"
+    await getDb().connectorConversationStates.put({
+      conversationKey,
+      adapterId: "adp_d",
+      activationStatus: "inactive",
+      deliveryReadiness: "unknown",
+      deliveryTarget: {
+        address: {
+          conversationKey,
+          platform: "discord",
+          adapterId: "adp_d",
+          scopeKind: "channel",
+          containerId: "chat_weird",
+        },
+        conversationRef: { platform: "discord", adapterId: "adp_d", channelId: "chat_weird" },
+        refreshedAt: 1,
+      },
+      createdAt: 1,
+      updatedAt: 1,
+    })
+    enqueueFailure = "plain string failure" as unknown as Error
+
+    const result = await callExecutor(
+      "connection:outbound:send",
+      makeTask(),
+      makeExecution({
+        adapterId: "adp_d",
+        conversationKey,
+        segments: [{ type: "text", text: "x" }],
+      })
+    )
+    expect(result).toEqual({ success: false, error: "plain string failure" })
+  })
+
+  it("reports a queue-write failure instead of claiming the send succeeded", async () => {
+    const conversationKey = "discord:adp_d:chat_fail"
+    await getDb().connectorConversationStates.put({
+      conversationKey,
+      adapterId: "adp_d",
+      activationStatus: "inactive",
+      deliveryReadiness: "unknown",
+      deliveryTarget: {
+        address: {
+          conversationKey,
+          platform: "discord",
+          adapterId: "adp_d",
+          scopeKind: "channel",
+          containerId: "chat_fail",
+        },
+        conversationRef: { platform: "discord", adapterId: "adp_d", channelId: "chat_fail" },
+        refreshedAt: 1,
+      },
+      createdAt: 1,
+      updatedAt: 1,
+    })
+    enqueueFailure = new Error("database is closed")
+
+    const result = await callExecutor(
+      "connection:outbound:send",
+      makeTask(),
+      makeExecution({
+        adapterId: "adp_d",
+        conversationKey,
+        segments: [{ type: "text", text: "never queued" }],
+      })
+    )
+    expect(result).toEqual({ success: false, error: "database is closed" })
   })
 
   it("derives platform from the conversationKey (not hardcoded telegram)", async () => {
@@ -305,6 +530,276 @@ describe("connection:scheduled:digest executor — full AI loop", () => {
     expect(jobs).toHaveLength(1)
     expect(jobs[0].request.segments).toEqual([{ type: "markdown", md: "Hello from the model." }])
     expect(jobs[0].idempotencyKey).toBe("airun:msg-001")
+  })
+
+  it("does not run the AI turn when the execution was already aborted", async () => {
+    const digestSender = jest.fn()
+    __setDigestSendPromptForTesting(digestSender as never)
+    const result = await callExecutorAborted(
+      "connection:scheduled:digest",
+      makeTask(),
+      makeExecution({
+        adapterId: "adp_discord",
+        conversationKey: "discord:adp_discord:ch_test",
+        characterId: "char_001",
+        prompt: "Give me the daily summary",
+      })
+    )
+    expect(result).toEqual({ success: false, error: "Scheduled digest aborted" })
+    expect(digestSender).not.toHaveBeenCalled()
+  })
+
+  // The turn already cost tokens by this point, so a target mismatch here is worth
+  // reporting distinctly from the pre-turn checks.
+  it("fails after the turn when the session has no usable delivery target", async () => {
+    sessionLookup = jest.fn(async () => ({
+      ...mockSession,
+      platformBinding: { ...mockSession.platformBinding, deliveryTarget: undefined },
+    }))
+    __setDigestSendPromptForTesting(
+      jest.fn(async () => ({
+        text: "text",
+        messageId: "msg-no-target",
+        a2uiSurfaces: {},
+        a2uiSurfaceOrder: [],
+      })) as never
+    )
+
+    const result = await callExecutor(
+      "connection:scheduled:digest",
+      makeTask(),
+      makeExecution({
+        adapterId: "adp_discord",
+        conversationKey: "discord:adp_discord:ch_test",
+        characterId: "char_001",
+        prompt: "Give me the daily summary",
+      })
+    )
+    expect(result.success).toBe(false)
+    expect(result.error).toContain("no persisted delivery target")
+    expect(await getDb().outboundQueue.count()).toBe(0)
+  })
+
+  it("falls back to task.payload when the execution carries no input", async () => {
+    __setDigestSendPromptForTesting(
+      jest.fn(async () => ({
+        text: "from the task row",
+        messageId: "msg-task-payload",
+        a2uiSurfaces: {},
+        a2uiSurfaceOrder: [],
+      })) as never
+    )
+    const result = await callExecutor(
+      "connection:scheduled:digest",
+      makeTask({
+        adapterId: "adp_discord",
+        conversationKey: "discord:adp_discord:ch_test",
+        characterId: "char_001",
+        prompt: "Give me the daily summary",
+      }),
+      makeExecution()
+    )
+    expect(result.success).toBe(true)
+    expect(result.output?.assistantMessageId).toBe("msg-task-payload")
+  })
+
+  it.each([
+    ["not an object", "nope"],
+    ["null", null],
+    ["missing characterId", { adapterId: "a", conversationKey: "k", prompt: "p" }],
+    ["missing prompt", { adapterId: "a", conversationKey: "k", characterId: "c" }],
+    ["missing conversationKey", { adapterId: "a", characterId: "c", prompt: "p" }],
+    ["missing adapterId", { conversationKey: "k", characterId: "c", prompt: "p" }],
+  ])("rejects a malformed digest payload (%s)", async (_label, payload) => {
+    const result = await callExecutor(
+      "connection:scheduled:digest",
+      makeTask(),
+      makeExecution(payload as never)
+    )
+    expect(result.success).toBe(false)
+    expect(result.error).toContain("Invalid connection:scheduled:digest payload")
+  })
+
+  it("stringifies a non-Error rejection from the AI turn", async () => {
+    __setDigestSendPromptForTesting(
+      jest.fn(async () => {
+        throw "sidecar vanished"
+      }) as never
+    )
+    const result = await callExecutor(
+      "connection:scheduled:digest",
+      makeTask(),
+      makeExecution({
+        adapterId: "adp_discord",
+        conversationKey: "discord:adp_discord:ch_test",
+        characterId: "char_001",
+        prompt: "Give me the daily summary",
+      })
+    )
+    expect(result).toEqual({ success: false, error: "sidecar vanished" })
+  })
+
+  it("reports a queue-write failure after a successful turn", async () => {
+    __setDigestSendPromptForTesting(
+      jest.fn(async () => ({
+        text: "text the operator will never see",
+        messageId: "msg-queue-fail",
+        a2uiSurfaces: {},
+        a2uiSurfaceOrder: [],
+      })) as never
+    )
+    enqueueFailure = new Error("quota exceeded")
+
+    const result = await callExecutor(
+      "connection:scheduled:digest",
+      makeTask(),
+      makeExecution({
+        adapterId: "adp_discord",
+        conversationKey: "discord:adp_discord:ch_test",
+        characterId: "char_001",
+        prompt: "Give me the daily summary",
+      })
+    )
+    expect(result).toEqual({ success: false, error: "quota exceeded" })
+  })
+
+  it.each([
+    ["muted", "inbound.deferred_muted"],
+    ["manual_mode", "inbound.deferred_manual_mode"],
+  ])("audits %s suppression with its own kind", async (reason, expectedKind) => {
+    resolveSendOptionsImpl = jest.fn(async () => ({
+      systemPrompt: "",
+      allowedTools: [],
+      mcpServers: [],
+      anthropicTools: [],
+      containerSkillIds: [],
+      suppressedReason: reason,
+    }))
+    const digestSender = jest.fn()
+    __setDigestSendPromptForTesting(digestSender as never)
+
+    const result = await callExecutor(
+      "connection:scheduled:digest",
+      makeTask(),
+      makeExecution({
+        adapterId: "adp_discord",
+        conversationKey: "discord:adp_discord:ch_test",
+        characterId: "char_001",
+        prompt: "Give me the daily summary",
+      })
+    )
+    // Suppression is a success: policy was honoured, nothing was sent.
+    expect(result).toEqual({ success: true, output: { suppressed: reason } })
+    expect(digestSender).not.toHaveBeenCalled()
+    const audits = await getDb().connectorAudit.toArray()
+    expect(audits.map((a) => a.kind)).toContain(expectedKind)
+  })
+
+  // An empty prompt cannot ground anything, so the twin/memory builders are
+  // skipped rather than paying for a recall that has no query.
+  it("skips the twin and memory handshakes for a blank prompt", async () => {
+    getCharacterImpl = jest.fn(async () => ({ id: "char_001", twinId: "twin_1" }))
+    __setDigestSendPromptForTesting(
+      jest.fn(async () => ({
+        text: "ok",
+        messageId: "msg-blank",
+        a2uiSurfaces: {},
+        a2uiSurfaceOrder: [],
+      })) as never
+    )
+
+    await callExecutor(
+      "connection:scheduled:digest",
+      makeTask(),
+      makeExecution({
+        adapterId: "adp_discord",
+        conversationKey: "discord:adp_discord:ch_test",
+        characterId: "char_001",
+        prompt: "   ",
+      })
+    )
+    expect(tryBuildTwinDepsImpl).not.toHaveBeenCalled()
+    expect(tryBuildMemoryDepsImpl).not.toHaveBeenCalled()
+  })
+
+  // A digest that fired from a missed slot must say so: landing at 09:12 without
+  // a note reads as the 09:12 state. See `lib/scheduler/catchup-policy.ts`.
+  describe("late (catch-up) delivery", () => {
+    const payload = {
+      adapterId: "adp_discord",
+      conversationKey: "discord:adp_discord:ch_test",
+      characterId: "char_001",
+      prompt: "Give me the daily summary",
+    }
+
+    beforeEach(() => {
+      __setDigestSendPromptForTesting(
+        jest.fn(async () => ({
+          text: "Hello from the model.",
+          messageId: "msg-late",
+          a2uiSurfaces: {},
+          a2uiSurfaceOrder: [],
+        })) as never
+      )
+    })
+
+    it("prefixes a delayed note naming the slot it was scheduled for", async () => {
+      const result = await callExecutor("connection:scheduled:digest", makeTask(), {
+        ...makeExecution(payload),
+        triggerSource: "catch-up",
+        scheduledFor: new Date("2026-07-30T09:00:00.000Z"),
+      })
+      expect(result.success).toBe(true)
+
+      const [job] = await getDb().outboundQueue.toArray()
+      const md = (job.request.segments[0] as { md: string }).md
+      expect(md).toContain("Delayed")
+      expect(md).toMatch(/7\/30\/26/)
+      // The model's own text is preserved, not replaced.
+      expect(md).toContain("Hello from the model.")
+    })
+
+    it("labels a backfilled run the same way", async () => {
+      await callExecutor("connection:scheduled:digest", makeTask(), {
+        ...makeExecution(payload),
+        triggerSource: "backfill",
+        scheduledFor: new Date("2026-07-30T09:00:00.000Z"),
+      })
+      const [job] = await getDb().outboundQueue.toArray()
+      expect((job.request.segments[0] as { md: string }).md).toContain("Delayed")
+    })
+
+    it("leaves an on-time run unlabelled", async () => {
+      await callExecutor("connection:scheduled:digest", makeTask(), {
+        ...makeExecution(payload),
+        triggerSource: "schedule",
+        scheduledFor: new Date("2026-07-30T09:00:00.000Z"),
+      })
+      const [job] = await getDb().outboundQueue.toArray()
+      expect((job.request.segments[0] as { md: string }).md).toBe("Hello from the model.")
+    })
+
+    // Without a slot there is nothing honest to claim, so no note is added even
+    // though the trigger source says the run was late.
+    it("skips the note when the execution carries no scheduled slot", async () => {
+      await callExecutor("connection:scheduled:digest", makeTask(), {
+        ...makeExecution(payload),
+        triggerSource: "catch-up",
+      })
+      const [job] = await getDb().outboundQueue.toArray()
+      expect((job.request.segments[0] as { md: string }).md).toBe("Hello from the model.")
+    })
+
+    it("localises the note from AppSettings", async () => {
+      getSettingsImpl = jest.fn(async () => ({ activeProjectId: "proj_test", language: "zh-CN" }))
+      await callExecutor("connection:scheduled:digest", makeTask(), {
+        ...makeExecution(payload),
+        triggerSource: "catch-up",
+        scheduledFor: new Date("2026-07-30T09:00:00.000Z"),
+      })
+      const [job] = await getDb().outboundQueue.toArray()
+      expect((job.request.segments[0] as { md: string }).md).toContain("延迟送达")
+    })
   })
 
   it("projects A2UI surfaces alongside text", async () => {
