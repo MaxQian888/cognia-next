@@ -131,6 +131,91 @@ export interface Screenshot {
   sourceHeight?: number
 }
 
+export type AppLocator =
+  | { kind: "bundleId"; bundleId: string }
+  | { kind: "path"; path: string }
+  | { kind: "displayName"; displayName: string }
+
+export interface ResolvedApplication {
+  bundleId: string | null
+  path: string | null
+  displayName: string
+  processId: number
+}
+
+export type CoordinateSpace = "globalLogicalPoints" | "screenshotPixels" | "modelPixels"
+
+export interface UiSurface {
+  windowId: number | null
+  displayId: string | null
+  logicalBounds: Rect
+  pixelWidth: number
+  pixelHeight: number
+  scaleFactor: number
+  coordinateSpace: CoordinateSpace
+}
+
+export interface GetAppStateOptions {
+  includeScreenshot?: boolean
+  disableDiff?: boolean
+  allowLaunch?: boolean
+  maxNodes?: number
+  maxDepth?: number
+}
+
+export interface ElementHandle {
+  sessionId: string
+  lineageId: string
+  revision: number
+  index: number
+  fingerprint: string
+}
+
+export interface UiTreeNode {
+  handle: ElementHandle
+  parentIndex: number | null
+  element: ElementInfo
+}
+
+export interface UiTreeProjection {
+  nodes: UiTreeNode[]
+  totalNodes: number
+  truncated: boolean
+}
+
+export interface UiTreeDiff {
+  fromRevision: number
+  toRevision: number
+  added: ElementInfo[]
+  removed: string[]
+  updated: ElementInfo[]
+}
+
+export interface TruncationDescriptor {
+  reason: string
+  materializedNodes: number
+  omittedNodes: number
+}
+
+export interface UiStateRevision {
+  sessionId: string
+  lineageId: string
+  revision: number
+  turnToken: string
+  app: ResolvedApplication
+  surface: UiSurface
+  screenshot: Screenshot | null
+  tree: UiTreeProjection
+  diff: UiTreeDiff | null
+  truncation: TruncationDescriptor[]
+  capturedAt: number
+}
+
+export interface ExpandedElements {
+  nodes: UiTreeNode[]
+  continuationToken: string | null
+}
+
 export type ClickTarget =
   { kind: "element"; elementRef: ElementRef } | { kind: "point"; x: number; y: number }
 

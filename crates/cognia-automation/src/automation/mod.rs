@@ -30,6 +30,7 @@ pub mod policy;
 pub mod record;
 pub mod selection;
 pub mod selection_events;
+pub mod session;
 pub mod tool_exec;
 pub mod types;
 pub mod virtual_display;

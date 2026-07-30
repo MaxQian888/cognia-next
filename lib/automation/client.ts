@@ -16,25 +16,32 @@ import { transport } from "@/lib/tauri"
 import { DEFAULT_CONSENT_TIMEOUT_MS } from "./consent-durations"
 
 import type {
+  AppLocator,
   ButtonTransition,
   Capabilities,
   ClickOpts,
   ClickTarget,
   DragOpts,
   ElementInfo,
+  ElementHandle,
   ElementRef,
+  ExpandedElements,
   EventFilter,
+  GetAppStateOptions,
   KeyChord,
   Locator,
   MouseButton,
   PatternKind,
   Point,
+  ResolvedApplication,
   Screenshot,
   ScreenshotOpts,
   ScrollOpts,
   ScrollTarget,
   TreeOpts,
   TypeOpts,
+  UiStateRevision,
+  UiTreeNode,
   WindowOp,
 } from "./types"
 
@@ -178,6 +185,43 @@ export const desktop = {
 
   getFocus(ctx?: CallContext): Promise<ElementInfo> {
     return transport.call<ElementInfo>("desktop_get_focus", { ctx })
+  },
+
+  listApps(ctx: CallContext = {}): Promise<ResolvedApplication[]> {
+    return transport.call<ResolvedApplication[]>("desktop_list_apps", { ctx })
+  },
+
+  getAppState(
+    sessionId: string,
+    locator: AppLocator,
+    options: GetAppStateOptions = {},
+    ctx: CallContext = {}
+  ): Promise<UiStateRevision> {
+    return transport.call<UiStateRevision>("desktop_get_app_state", {
+      args: { sessionId, locator, options, ctx },
+    })
+  },
+
+  queryElements(
+    state: Pick<UiStateRevision, "sessionId" | "lineageId" | "revision">,
+    locator: Locator,
+    limit = 100,
+    ctx: CallContext = {}
+  ): Promise<UiTreeNode[]> {
+    return transport.call<UiTreeNode[]>("desktop_query_elements", {
+      args: { ...state, locator, limit, ctx },
+    })
+  },
+
+  expandElement(
+    handle: ElementHandle,
+    continuationToken: string | null = null,
+    limit = 250,
+    ctx: CallContext = {}
+  ): Promise<ExpandedElements> {
+    return transport.call<ExpandedElements>("desktop_expand_element", {
+      args: { handle, continuationToken, limit, ctx },
+    })
   },
 
   readTree(

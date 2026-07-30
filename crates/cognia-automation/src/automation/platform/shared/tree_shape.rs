@@ -25,8 +25,8 @@ pub struct TreeBudget {
 
 impl TreeBudget {
     pub const DEFAULT: TreeBudget = TreeBudget {
-        max_depth: 12,
-        max_nodes: 600,
+        max_depth: 64,
+        max_nodes: 25_000,
     };
 
     /// Resolve from a caller-supplied `max_depth` (e.g. `TreeOpts.max_depth`),
@@ -284,6 +284,7 @@ mod tests {
     }
 
     // A toy native node for exercising walk_tree without an OS accessibility API.
+    #[derive(Clone)]
     struct Node {
         name: String,
         kids: Vec<Node>,
@@ -298,20 +299,7 @@ mod tests {
         info(&n.name, "group")
     }
     fn node_children(n: &Node) -> Vec<Node> {
-        n.kids
-            .iter()
-            .map(|k| Node {
-                name: k.name.clone(),
-                kids: k
-                    .kids
-                    .iter()
-                    .map(|g| Node {
-                        name: g.name.clone(),
-                        kids: vec![],
-                    })
-                    .collect(),
-            })
-            .collect()
+        n.kids.clone()
     }
 
     #[test]
@@ -340,6 +328,24 @@ mod tests {
         };
         let tree = walk_tree(&root, budget, &node_info, &node_children);
         assert_eq!(tree.children.as_ref().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn default_budget_reaches_beyond_the_legacy_depth_ten_ceiling() {
+        let mut deep = node("level-15", vec![]);
+        for depth in (0..15).rev() {
+            deep = node(&format!("level-{depth}"), vec![deep]);
+        }
+
+        let tree = walk_tree(&deep, TreeBudget::DEFAULT, &node_info, &node_children);
+        let mut cursor = &tree;
+        for expected_depth in 1..=15 {
+            cursor = &cursor.children.as_ref().expect("next level")[0];
+            assert_eq!(
+                cursor.name.as_deref(),
+                Some(format!("level-{expected_depth}").as_str())
+            );
+        }
     }
 
     #[test]

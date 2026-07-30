@@ -89,6 +89,65 @@ describe("desktop client", () => {
     })
   })
 
+  it("desktop app-session methods preserve revision and opaque continuation tokens", async () => {
+    mockCall.mockResolvedValueOnce([])
+    await desktop.listApps({ surface: "computerUse" })
+    expect(mockCall).toHaveBeenLastCalledWith("desktop_list_apps", {
+      ctx: { surface: "computerUse" },
+    })
+
+    mockCall.mockResolvedValueOnce({})
+    await desktop.getAppState(
+      "session-1",
+      { kind: "bundleId", bundleId: "com.apple.Notes" },
+      { includeScreenshot: true },
+      { surface: "computerUse" }
+    )
+    expect(mockCall).toHaveBeenLastCalledWith("desktop_get_app_state", {
+      args: {
+        sessionId: "session-1",
+        locator: { kind: "bundleId", bundleId: "com.apple.Notes" },
+        options: { includeScreenshot: true },
+        ctx: { surface: "computerUse" },
+      },
+    })
+
+    mockCall.mockResolvedValueOnce([])
+    await desktop.queryElements(
+      { sessionId: "session-1", lineageId: "lineage-1", revision: 3 },
+      { controlType: "button" },
+      20
+    )
+    expect(mockCall).toHaveBeenLastCalledWith("desktop_query_elements", {
+      args: {
+        sessionId: "session-1",
+        lineageId: "lineage-1",
+        revision: 3,
+        locator: { controlType: "button" },
+        limit: 20,
+        ctx: {},
+      },
+    })
+
+    const handle = {
+      sessionId: "session-1",
+      lineageId: "lineage-1",
+      revision: 3,
+      index: 4,
+      fingerprint: "fingerprint",
+    }
+    mockCall.mockResolvedValueOnce({ nodes: [], continuationToken: null })
+    await desktop.expandElement(handle, "opaque-token", 50)
+    expect(mockCall).toHaveBeenLastCalledWith("desktop_expand_element", {
+      args: {
+        handle,
+        continuationToken: "opaque-token",
+        limit: 50,
+        ctx: {},
+      },
+    })
+  })
+
   it("desktop.readTree marshals root + opts + ctx", async () => {
     mockCall.mockResolvedValueOnce([])
     const r = elementRef("abc")

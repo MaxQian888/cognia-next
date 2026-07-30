@@ -24,6 +24,9 @@ use super::dispatcher;
 use super::input_monitor::InputMonitor;
 use super::permission::{PermissionGate, Surface, TargetMeta, Tier};
 use super::policy::{Policy, PolicyState};
+use super::session::{
+    AppLocator, ElementHandle, ExpandedElements, GetAppStateOptions, UiStateRevision, UiTreeNode,
+};
 use super::types::*;
 use super::virtual_display::{
     self, ArmOutcome, ReleaseReason, VirtualDisplayController, VirtualDisplayHealth,
@@ -384,6 +387,148 @@ pub struct ReadTreeArgs {
     pub opts: TreeOpts,
     #[serde(default)]
     pub ctx: CallContext,
+}
+
+#[tauri::command]
+pub async fn desktop_list_apps(
+    app: tauri::AppHandle,
+    state: State<'_, AutomationState>,
+    ctx: Option<CallContext>,
+) -> std::result::Result<Vec<super::session::ResolvedApplication>, String> {
+    let ctx = ctx.unwrap_or_default();
+    command_body!(app, state, ctx, "list_apps", state.handle.list_apps().await)
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GetAppStateArgs {
+    pub session_id: String,
+    pub locator: AppLocator,
+    #[serde(default)]
+    pub options: GetAppStateOptions,
+    #[serde(default)]
+    pub ctx: CallContext,
+}
+
+#[tauri::command]
+pub async fn desktop_get_app_state(
+    app: tauri::AppHandle,
+    state: State<'_, AutomationState>,
+    args: GetAppStateArgs,
+) -> std::result::Result<UiStateRevision, String> {
+    let ctx = args.ctx;
+    let session_id = args.session_id;
+    let locator = args.locator;
+    let options = args.options;
+    let redact_enabled = state.gate.settings().redact_screenshots;
+    command_body!(
+        app,
+        state,
+        ctx,
+        "get_app_state",
+        async {
+            let mut revision = state
+                .handle
+                .get_app_state(session_id.clone(), locator.clone(), options.clone())
+                .await?;
+            if redact_enabled
+                && super::platform::shared::credential_window::is_credential_window_focused()
+            {
+                revision.screenshot = revision
+                    .screenshot
+                    .map(super::platform::shared::screenshot::redact_screenshot)
+                    .transpose()?;
+            }
+            Ok(revision)
+        }
+        .await
+    )
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct QueryElementsArgs {
+    pub session_id: String,
+    pub lineage_id: String,
+    pub revision: u64,
+    #[serde(default)]
+    pub locator: Locator,
+    #[serde(default = "default_query_limit")]
+    pub limit: usize,
+    #[serde(default)]
+    pub ctx: CallContext,
+}
+
+fn default_query_limit() -> usize {
+    100
+}
+
+#[tauri::command]
+pub async fn desktop_query_elements(
+    app: tauri::AppHandle,
+    state: State<'_, AutomationState>,
+    args: QueryElementsArgs,
+) -> std::result::Result<Vec<UiTreeNode>, String> {
+    let ctx = args.ctx;
+    let session_id = args.session_id;
+    let lineage_id = args.lineage_id;
+    let revision = args.revision;
+    let locator = args.locator;
+    let limit = args.limit;
+    command_body!(
+        app,
+        state,
+        ctx,
+        "query_elements",
+        state
+            .handle
+            .query_elements(
+                session_id.clone(),
+                lineage_id.clone(),
+                revision,
+                locator.clone(),
+                limit,
+            )
+            .await
+    )
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExpandElementArgs {
+    pub handle: ElementHandle,
+    #[serde(default)]
+    pub continuation_token: Option<String>,
+    #[serde(default = "default_expand_limit")]
+    pub limit: usize,
+    #[serde(default)]
+    pub ctx: CallContext,
+}
+
+fn default_expand_limit() -> usize {
+    super::session::EXPANSION_PAGE_MAX_NODES
+}
+
+#[tauri::command]
+pub async fn desktop_expand_element(
+    app: tauri::AppHandle,
+    state: State<'_, AutomationState>,
+    args: ExpandElementArgs,
+) -> std::result::Result<ExpandedElements, String> {
+    let ctx = args.ctx;
+    let handle = args.handle;
+    let continuation_token = args.continuation_token;
+    let limit = args.limit;
+    command_body!(
+        app,
+        state,
+        ctx,
+        "expand_element",
+        state
+            .handle
+            .expand_element(handle.clone(), continuation_token.clone(), limit)
+            .await
+    )
 }
 
 #[tauri::command]

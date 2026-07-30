@@ -7,14 +7,67 @@
 //! Windows, owns the COM apartment).
 
 use super::selection::TextSelectionSnapshot;
+use super::session::{AppLocator, ResolvedApplication};
 use super::types::*;
 
 pub trait AutomationBackend {
     fn capabilities(&self) -> Capabilities;
     fn get_focus(&self) -> Result<ElementInfo>;
+    fn list_applications(&self) -> Result<Vec<ResolvedApplication>> {
+        let focus = self.get_focus()?;
+        Ok(vec![ResolvedApplication {
+            bundle_id: None,
+            path: None,
+            display_name: focus.process_name.unwrap_or_else(|| "Unknown".into()),
+            process_id: focus.process_id.unwrap_or_default(),
+        }])
+    }
     fn read_tree(&self, root: Option<ElementRef>, opts: TreeOpts) -> Result<Vec<ElementInfo>>;
     fn find(&self, locator: &Locator) -> Result<Option<ElementRef>>;
     fn screenshot(&self, opts: ScreenshotOpts) -> Result<Screenshot>;
+
+    /// Resolve and, when explicitly allowed, prepare the application whose
+    /// state will be captured. Platform backends override this when they can
+    /// resolve bundle IDs and paths; the default supports the already-focused
+    /// application by display name without launching anything.
+    fn resolve_application(
+        &self,
+        locator: &AppLocator,
+        allow_launch: bool,
+    ) -> Result<ResolvedApplication> {
+        if allow_launch {
+            return Err(AutomationError::UnsupportedPlatform);
+        }
+        let focus = self.get_focus()?;
+        let display_name =
+            focus
+                .process_name
+                .clone()
+                .ok_or_else(|| AutomationError::BackendError {
+                    message: "focused application did not expose a process name".into(),
+                })?;
+        match locator {
+            AppLocator::DisplayName {
+                display_name: requested,
+            } if requested.eq_ignore_ascii_case(&display_name) => Ok(ResolvedApplication {
+                bundle_id: None,
+                path: None,
+                display_name,
+                process_id: focus.process_id.unwrap_or_default(),
+            }),
+            AppLocator::DisplayName {
+                display_name: requested,
+            } => Err(AutomationError::BackendError {
+                message: format!(
+                    "requested application {requested:?} is not focused (focused: {display_name:?})"
+                ),
+            }),
+            AppLocator::BundleId { .. } | AppLocator::Path { .. } => {
+                Err(AutomationError::UnsupportedPlatform)
+            }
+        }
+    }
+
     fn click(&self, target: ClickTarget, opts: ClickOpts) -> Result<()>;
     fn type_text(&self, text: &str, opts: TypeOpts) -> Result<()>;
     fn send_keys(&self, chord: &KeyChord) -> Result<()>;

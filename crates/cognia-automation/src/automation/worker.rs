@@ -30,7 +30,12 @@ use tauri::{AppHandle, Emitter};
 use tokio::sync::oneshot;
 
 use super::backend::AutomationBackend;
+use super::policy::{self, Decision, HardTargetFacts};
 use super::selection::TextSelectionSnapshot;
+use super::session::{
+    AppLocator, CapturedUiState, CoordinateSpace, ElementHandle, ExpandedElements,
+    GetAppStateOptions, SessionError, UiSessionManager, UiStateRevision, UiSurface, UiTreeNode,
+};
 use super::types::*;
 
 /// Max panic restarts allowed inside `RESTART_WINDOW`. Hitting the cap
@@ -52,6 +57,9 @@ enum Request {
     },
     GetFocus {
         reply: oneshot::Sender<Result<ElementInfo>>,
+    },
+    ListApps {
+        reply: oneshot::Sender<Result<Vec<super::session::ResolvedApplication>>>,
     },
     ReadTree {
         root: Option<ElementRef>,
@@ -137,6 +145,26 @@ enum Request {
     SelectionPreflight {
         reply: oneshot::Sender<Result<crate::automation::backend::SelectionPreflight>>,
     },
+    GetAppState {
+        session_id: String,
+        locator: AppLocator,
+        options: GetAppStateOptions,
+        reply: oneshot::Sender<Result<UiStateRevision>>,
+    },
+    QueryElements {
+        session_id: String,
+        lineage_id: String,
+        revision: u64,
+        locator: Locator,
+        limit: usize,
+        reply: oneshot::Sender<Result<Vec<UiTreeNode>>>,
+    },
+    ExpandElement {
+        handle: ElementHandle,
+        continuation_token: Option<String>,
+        limit: usize,
+        reply: oneshot::Sender<Result<ExpandedElements>>,
+    },
     Shutdown,
 }
 
@@ -191,13 +219,15 @@ impl Worker {
             .name("automation-worker".into())
             .spawn(move || {
                 let mut backend = builder();
+                let mut sessions = UiSessionManager::default();
                 let mut restart_count: u32 = 0;
                 let mut window_start = Instant::now();
                 // Drain the channel synchronously. We're not in async land here;
                 // `blocking_recv` is exactly what we want.
                 while let Some(req) = rx.blocking_recv() {
-                    let result =
-                        std::panic::catch_unwind(AssertUnwindSafe(|| dispatch(&*backend, req)));
+                    let result = std::panic::catch_unwind(AssertUnwindSafe(|| {
+                        dispatch(&*backend, &mut sessions, req)
+                    }));
                     match result {
                         Ok(DispatchControl::Continue) => continue,
                         Ok(DispatchControl::Stop) => break,
@@ -231,6 +261,7 @@ impl Worker {
                             // The panicked backend's state may be corrupt;
                             // drop + rebuild via the builder closure.
                             backend = builder();
+                            sessions = UiSessionManager::default();
                         }
                     }
                 }
@@ -269,13 +300,20 @@ fn panic_payload_to_string(payload: &Box<dyn std::any::Any + Send>) -> String {
 /// Dispatch one request against the active backend. Extracted out of
 /// `Worker::spawn_with_app` so `catch_unwind` can target one closure
 /// boundary instead of wrapping every match arm individually.
-fn dispatch(backend: &dyn AutomationBackend, req: Request) -> DispatchControl {
+fn dispatch(
+    backend: &dyn AutomationBackend,
+    sessions: &mut UiSessionManager,
+    req: Request,
+) -> DispatchControl {
     match req {
         Request::Capabilities { reply } => {
             let _ = reply.send(backend.capabilities());
         }
         Request::GetFocus { reply } => {
             let _ = reply.send(backend.get_focus());
+        }
+        Request::ListApps { reply } => {
+            let _ = reply.send(backend.list_applications());
         }
         Request::ReadTree { root, opts, reply } => {
             let _ = reply.send(backend.read_tree(root, opts));
@@ -360,9 +398,177 @@ fn dispatch(backend: &dyn AutomationBackend, req: Request) -> DispatchControl {
         Request::SelectionPreflight { reply } => {
             let _ = reply.send(backend.selection_preflight());
         }
+        Request::GetAppState {
+            session_id,
+            locator,
+            options,
+            reply,
+        } => {
+            let _ = reply.send(capture_app_state(
+                backend, sessions, session_id, locator, options,
+            ));
+        }
+        Request::QueryElements {
+            session_id,
+            lineage_id,
+            revision,
+            locator,
+            limit,
+            reply,
+        } => {
+            let result = sessions
+                .query_elements(&session_id, &lineage_id, revision, &locator, limit)
+                .map_err(map_session_error);
+            let _ = reply.send(result);
+        }
+        Request::ExpandElement {
+            handle,
+            continuation_token,
+            limit,
+            reply,
+        } => {
+            let result = sessions
+                .expand_element(&handle, continuation_token.as_deref(), limit)
+                .map_err(map_session_error);
+            let _ = reply.send(result);
+        }
         Request::Shutdown => return DispatchControl::Stop,
     }
     DispatchControl::Continue
+}
+
+fn capture_app_state(
+    backend: &dyn AutomationBackend,
+    sessions: &mut UiSessionManager,
+    session_id: String,
+    locator: AppLocator,
+    options: GetAppStateOptions,
+) -> Result<UiStateRevision> {
+    let app = backend.resolve_application(&locator, options.allow_launch)?;
+    let focus = backend.get_focus()?;
+    let preflight = backend.selection_preflight().ok();
+    let target_url = preflight
+        .as_ref()
+        .and_then(|candidate| candidate.source_url.as_deref());
+    match policy::evaluate_hard_target(HardTargetFacts {
+        bundle_id: app.bundle_id.as_deref(),
+        process_name: Some(app.display_name.as_str()),
+        window_title: focus.window_title.as_deref(),
+        target_url,
+    }) {
+        Decision::Allow => {}
+        Decision::Deny { reason } => {
+            return Err(AutomationError::PermissionDenied { reason });
+        }
+    }
+
+    let roots = backend.read_tree(
+        None,
+        TreeOpts {
+            max_depth: Some(options.max_depth),
+            cache_props: None,
+        },
+    )?;
+    let screenshot = options
+        .include_screenshot
+        .then(|| backend.screenshot(ScreenshotOpts::default()))
+        .transpose()?;
+    let capabilities = backend.capabilities();
+    let monitor = capabilities
+        .monitors
+        .iter()
+        .find(|candidate| candidate.is_primary)
+        .or_else(|| capabilities.monitors.first());
+    let scale_factor = monitor
+        .map(|candidate| f64::from(candidate.scale_factor))
+        .filter(|scale| *scale > 0.0)
+        .unwrap_or(1.0);
+    let pixel_width = screenshot
+        .as_ref()
+        .map(|shot| shot.width)
+        .or_else(|| monitor.map(|candidate| candidate.width))
+        .unwrap_or_default();
+    let pixel_height = screenshot
+        .as_ref()
+        .map(|shot| shot.height)
+        .or_else(|| monitor.map(|candidate| candidate.height))
+        .unwrap_or_default();
+    let logical_bounds = monitor.map_or_else(
+        || {
+            focus.bounding_rect.unwrap_or(Rect {
+                x: 0,
+                y: 0,
+                width: i32::try_from(pixel_width).unwrap_or(i32::MAX),
+                height: i32::try_from(pixel_height).unwrap_or(i32::MAX),
+            })
+        },
+        |candidate| Rect {
+            x: logical_coordinate(candidate.x, scale_factor),
+            y: logical_coordinate(candidate.y, scale_factor),
+            width: logical_dimension(candidate.width, scale_factor),
+            height: logical_dimension(candidate.height, scale_factor),
+        },
+    );
+    let captured_at = screenshot
+        .as_ref()
+        .map(|shot| shot.captured_at)
+        .unwrap_or_else(unix_time_millis);
+    let mut state = sessions
+        .record_state(CapturedUiState {
+            session_id,
+            app,
+            surface: UiSurface {
+                window_id: None,
+                display_id: monitor.map(|candidate| candidate.id.clone()),
+                logical_bounds,
+                pixel_width,
+                pixel_height,
+                scale_factor,
+                coordinate_space: CoordinateSpace::ScreenshotPixels,
+            },
+            screenshot,
+            roots,
+            captured_at,
+            max_nodes: options.max_nodes,
+        })
+        .map_err(map_session_error)?;
+    if options.disable_diff {
+        state.diff = None;
+    }
+    Ok(state)
+}
+
+fn logical_coordinate(value: i32, scale_factor: f64) -> i32 {
+    (f64::from(value) / scale_factor).round() as i32
+}
+
+fn logical_dimension(value: u32, scale_factor: f64) -> i32 {
+    (f64::from(value) / scale_factor)
+        .round()
+        .clamp(0.0, f64::from(i32::MAX)) as i32
+}
+
+fn unix_time_millis() -> i64 {
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| i64::try_from(duration.as_millis()).unwrap_or(i64::MAX))
+        .unwrap_or_default()
+}
+
+fn map_session_error(error: SessionError) -> AutomationError {
+    match error {
+        SessionError::TurnTokenUnknown | SessionError::TurnTokenConsumed => {
+            AutomationError::PermissionDenied {
+                reason: error.to_string(),
+            }
+        }
+        SessionError::CrossSessionHandle
+        | SessionError::StaleRevision
+        | SessionError::InvalidHandle
+        | SessionError::ContinuationTokenInvalid => AutomationError::StaleElement,
+    }
 }
 
 /// Helper: send a request and await the reply, mapping channel errors.
@@ -396,6 +602,10 @@ impl AutomationHandle {
 
     pub async fn get_focus(&self) -> Result<ElementInfo> {
         round_trip(&self.tx, |reply| Request::GetFocus { reply }).await
+    }
+
+    pub async fn list_apps(&self) -> Result<Vec<super::session::ResolvedApplication>> {
+        round_trip(&self.tx, |reply| Request::ListApps { reply }).await
     }
 
     pub async fn read_tree(
@@ -523,6 +733,55 @@ impl AutomationHandle {
         round_trip(&self.tx, |reply| Request::SelectionPreflight { reply }).await
     }
 
+    pub async fn get_app_state(
+        &self,
+        session_id: String,
+        locator: AppLocator,
+        options: GetAppStateOptions,
+    ) -> Result<UiStateRevision> {
+        round_trip(&self.tx, |reply| Request::GetAppState {
+            session_id,
+            locator,
+            options,
+            reply,
+        })
+        .await
+    }
+
+    pub async fn query_elements(
+        &self,
+        session_id: String,
+        lineage_id: String,
+        revision: u64,
+        locator: Locator,
+        limit: usize,
+    ) -> Result<Vec<UiTreeNode>> {
+        round_trip(&self.tx, |reply| Request::QueryElements {
+            session_id,
+            lineage_id,
+            revision,
+            locator,
+            limit,
+            reply,
+        })
+        .await
+    }
+
+    pub async fn expand_element(
+        &self,
+        handle: ElementHandle,
+        continuation_token: Option<String>,
+        limit: usize,
+    ) -> Result<ExpandedElements> {
+        round_trip(&self.tx, |reply| Request::ExpandElement {
+            handle,
+            continuation_token,
+            limit,
+            reply,
+        })
+        .await
+    }
+
     /// Best-effort shutdown — the worker drains in-flight requests and then
     /// exits. The handle's Drop joins the thread.
     pub async fn shutdown(&self) {
@@ -534,6 +793,7 @@ impl AutomationHandle {
 mod tests {
     use super::*;
     use crate::automation::backend::StubBackend;
+    use crate::automation::session::{AppLocator, GetAppStateOptions};
 
     #[tokio::test]
     async fn worker_round_trip_with_stub_backend() {
@@ -653,6 +913,141 @@ mod tests {
         fn pick_at_point(&self, _p: Point) -> Result<ElementInfo> {
             Err(AutomationError::UnsupportedPlatform)
         }
+    }
+
+    struct StateFixtureBackend;
+
+    impl AutomationBackend for StateFixtureBackend {
+        fn capabilities(&self) -> Capabilities {
+            Capabilities {
+                platform: Platform::Macos,
+                has_uia: false,
+                has_input_sim: true,
+                has_screenshot: true,
+                has_events: true,
+                has_a11y_tree: true,
+                monitors: vec![MonitorInfo {
+                    id: "main".into(),
+                    name: "Main".into(),
+                    x: 0,
+                    y: 0,
+                    width: 1_600,
+                    height: 1_200,
+                    is_primary: true,
+                    scale_factor: 2.0,
+                }],
+            }
+        }
+        fn get_focus(&self) -> Result<ElementInfo> {
+            Ok(ElementInfo {
+                element_ref: ElementRef("notes-window".into()),
+                name: Some("Notes".into()),
+                automation_id: Some("main-window".into()),
+                control_type: Some("window".into()),
+                class_name: None,
+                bounding_rect: Some(Rect {
+                    x: 0,
+                    y: 0,
+                    width: 800,
+                    height: 600,
+                }),
+                is_enabled: true,
+                is_focused: true,
+                process_id: Some(42),
+                process_name: Some("Notes".into()),
+                window_title: Some("Notes".into()),
+                children: None,
+            })
+        }
+        fn read_tree(&self, _r: Option<ElementRef>, _o: TreeOpts) -> Result<Vec<ElementInfo>> {
+            Ok(vec![self.get_focus()?])
+        }
+        fn find(&self, _l: &Locator) -> Result<Option<ElementRef>> {
+            Ok(None)
+        }
+        fn screenshot(&self, _o: ScreenshotOpts) -> Result<Screenshot> {
+            Ok(Screenshot {
+                bytes: "cG5n".into(),
+                width: 1_600,
+                height: 1_200,
+                captured_at: 10,
+                format: ImageFormat::Png,
+                source_width: None,
+                source_height: None,
+            })
+        }
+        fn click(&self, _t: ClickTarget, _o: ClickOpts) -> Result<()> {
+            Ok(())
+        }
+        fn type_text(&self, _text: &str, _o: TypeOpts) -> Result<()> {
+            Ok(())
+        }
+        fn send_keys(&self, _c: &KeyChord) -> Result<()> {
+            Ok(())
+        }
+        fn invoke_pattern(
+            &self,
+            _t: ElementRef,
+            _p: PatternKind,
+            _a: serde_json::Value,
+        ) -> Result<serde_json::Value> {
+            Err(AutomationError::UnsupportedPlatform)
+        }
+        fn window_op(&self, _t: ElementRef, _o: WindowOp) -> Result<()> {
+            Err(AutomationError::UnsupportedPlatform)
+        }
+        fn subscribe_events(&self, _f: EventFilter) -> Result<SubscriptionId> {
+            Err(AutomationError::UnsupportedPlatform)
+        }
+        fn unsubscribe(&self, _s: SubscriptionId) -> Result<()> {
+            Err(AutomationError::UnsupportedPlatform)
+        }
+        fn mouse_move(&self, _p: Point) -> Result<()> {
+            Ok(())
+        }
+        fn drag(&self, _f: Point, _t: Point, _o: DragOpts) -> Result<()> {
+            Ok(())
+        }
+        fn scroll(&self, _t: ScrollTarget, _o: ScrollOpts) -> Result<()> {
+            Ok(())
+        }
+        fn hold_key(&self, _c: &KeyChord, _d: u32) -> Result<()> {
+            Ok(())
+        }
+        fn mouse_button(&self, _b: MouseButton, _t: ButtonTransition) -> Result<()> {
+            Ok(())
+        }
+        fn cursor_position(&self) -> Result<Point> {
+            Ok(Point { x: 0, y: 0 })
+        }
+        fn pick_at_point(&self, _p: Point) -> Result<ElementInfo> {
+            self.get_focus()
+        }
+    }
+
+    #[tokio::test]
+    async fn worker_get_app_state_couples_tree_screenshot_and_fresh_turn_token() {
+        let h = Worker::spawn(|| Box::new(StateFixtureBackend));
+        let state = h
+            .get_app_state(
+                "session:worker".into(),
+                AppLocator::DisplayName {
+                    display_name: "Notes".into(),
+                },
+                GetAppStateOptions::default(),
+            )
+            .await
+            .expect("app state");
+
+        assert_eq!(state.app.display_name, "Notes");
+        assert_eq!(state.tree.nodes.len(), 1);
+        assert_eq!(
+            state.screenshot.as_ref().map(|shot| shot.width),
+            Some(1_600)
+        );
+        assert_eq!(state.surface.scale_factor, 2.0);
+        assert!(!state.turn_token.is_empty());
+        h.shutdown().await;
     }
 
     #[tokio::test]
