@@ -70,11 +70,24 @@ export function useElementRect(
     }
     const observer = new ResizeObserver(schedule)
     observer.observe(el)
+    // ResizeObserver does not fire when layout moves the element without
+    // changing its size. Native child webviews still need the new viewport
+    // coordinates in that case — for example, moving the 64px app rail from
+    // the right edge to the left translates the reserved pane by 64px while
+    // preserving its dimensions. Watch only the ancestor chain (not the whole
+    // document subtree) for the class/child changes that can reposition it.
+    const layoutObserver = new MutationObserver(schedule)
+    let ancestor = el.parentElement
+    while (ancestor) {
+      layoutObserver.observe(ancestor, { attributes: true, childList: true })
+      ancestor = ancestor.parentElement
+    }
     window.addEventListener("resize", schedule)
     window.addEventListener("scroll", schedule, true)
     return () => {
       cancelAnimationFrame(frame)
       observer.disconnect()
+      layoutObserver.disconnect()
       window.removeEventListener("resize", schedule)
       window.removeEventListener("scroll", schedule, true)
     }

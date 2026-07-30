@@ -71,6 +71,21 @@ it("re-measures on window resize when the rect changes", () => {
   expect(onChange).toHaveBeenCalledWith({ x: 0, y: 0, width: 80, height: 50 })
 })
 
+it("re-measures when an ancestor layout mutation moves the element without resizing it", async () => {
+  rectValue = { left: 0, top: 0, width: 80, height: 50 }
+  const onChange = jest.fn()
+  const { container } = render(<Probe onChange={onChange} />)
+  onChange.mockClear()
+
+  rectValue = { left: 64, top: 0, width: 80, height: 50 }
+  await act(async () => {
+    container.setAttribute("data-sidebar-side", "left")
+    await Promise.resolve()
+  })
+
+  expect(onChange).toHaveBeenCalledWith({ x: 64, y: 0, width: 80, height: 50 })
+})
+
 it("skips no-op updates when the rect is unchanged", () => {
   rectValue = { left: 0, top: 0, width: 50, height: 50 }
   const onChange = jest.fn()
