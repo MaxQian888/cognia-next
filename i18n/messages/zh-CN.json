@@ -10738,6 +10738,16 @@
         "title": "允许远程控制",
         "toggleAria": "切换 {label} 的远程控制"
       },
+      "lockedComputerUse": {
+        "blocked": "Locked Use 未启用（{reason}）。",
+        "col": "Locked Use",
+        "description": "允许此设备请求短时、与任务绑定的 Locked Use lease；远程控制必须保持开启。此权限不允许管理员认证或绕过安全警告。",
+        "disabledToast": "已为 {label} 关闭 Locked Use。",
+        "enabledToast": "已为 {label} 启用 Locked Use。",
+        "reason": "确认授予 {label} Locked Use 权限",
+        "title": "允许 Locked Use",
+        "toggleAria": "切换 {label} 的 Locked Use"
+      },
       "resume": {
         "blocked": "恢复未完成（{reason}）。",
         "description": "该设备的 JWT 会被移出拒绝名单并恢复访问。",

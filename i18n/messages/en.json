@@ -10738,6 +10738,16 @@
         "title": "Allow remote control",
         "toggleAria": "Toggle remote control for {label}"
       },
+      "lockedComputerUse": {
+        "blocked": "Locked Use not enabled ({reason}).",
+        "col": "Locked Use",
+        "description": "Allows this device to request a short, task-bound Locked Use lease. Remote control must remain enabled. This does not permit administrator authentication or security-warning bypasses.",
+        "disabledToast": "Locked Use disabled for {label}.",
+        "enabledToast": "Locked Use enabled for {label}.",
+        "reason": "Confirm granting Locked Use to {label}",
+        "title": "Allow Locked Use",
+        "toggleAria": "Toggle Locked Use for {label}"
+      },
       "resume": {
         "blocked": "Resume not completed ({reason}).",
         "description": "The device's JWT is removed from the deny-list and regains access.",

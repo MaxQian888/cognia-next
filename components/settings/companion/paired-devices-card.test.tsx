@@ -167,6 +167,84 @@ describe("<PairedDevicesCard />", () => {
     expect(rows[0]?.allowRemoteControl).toBe(false)
   })
 
+  it("enables Locked Use only for a device that already has remote control", async () => {
+    const user = userEvent.setup()
+    await addPairedDevice({
+      deviceId: "dev-locked",
+      label: "Trusted Phone",
+      platform: "ios",
+      pubkey: "k",
+      appVersion: "0.1.0",
+      nowMs: Date.now(),
+    })
+    {
+      const { setRemoteControlAllowed } = await import("@/lib/db/paired-devices")
+      await setRemoteControlAllowed("dev-locked", true)
+    }
+
+    const calls: Array<{ deviceId: string; allowed: boolean }> = []
+    callSpy.mockImplementation(async (name: string, args?: unknown) => {
+      if (name === "companion_set_locked_computer_use") {
+        calls.push(args as { deviceId: string; allowed: boolean })
+      }
+      return undefined as unknown as never
+    })
+
+    render(<PairedDevicesCard />)
+    await user.click(
+      await screen.findByRole("switch", {
+        name: /Toggle Locked Use for Trusted Phone/i,
+      })
+    )
+
+    await waitFor(() => {
+      expect(calls).toEqual([{ deviceId: "dev-locked", allowed: true }])
+    })
+    const rows = await listPairedDevices()
+    expect(rows[0]?.allowLockedComputerUse).toBe(true)
+  })
+
+  it("revokes Locked Use when remote control is disabled", async () => {
+    const user = userEvent.setup()
+    await addPairedDevice({
+      deviceId: "dev-both",
+      label: "Trusted Phone",
+      platform: "ios",
+      pubkey: "k",
+      appVersion: "0.1.0",
+      nowMs: Date.now(),
+    })
+    {
+      const { setLockedComputerUseAllowed, setRemoteControlAllowed } =
+        await import("@/lib/db/paired-devices")
+      await setRemoteControlAllowed("dev-both", true)
+      await setLockedComputerUseAllowed("dev-both", true)
+    }
+
+    const commands: string[] = []
+    callSpy.mockImplementation(async (name: string) => {
+      commands.push(name)
+      return undefined as unknown as never
+    })
+
+    render(<PairedDevicesCard />)
+    await user.click(
+      await screen.findByRole("switch", {
+        name: /Toggle remote control for Trusted Phone/i,
+      })
+    )
+
+    await waitFor(() => {
+      expect(commands).toEqual([
+        "companion_set_locked_computer_use",
+        "companion_set_remote_control",
+      ])
+    })
+    const rows = await listPairedDevices()
+    expect(rows[0]?.allowRemoteControl).toBe(false)
+    expect(rows[0]?.allowLockedComputerUse).toBe(false)
+  })
+
   it("resuming a paused device clears the deny-list entry", async () => {
     const user = userEvent.setup()
     await addPairedDevice({
