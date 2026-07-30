@@ -202,6 +202,7 @@
     "settings": "设置",
     "skills": "技能",
     "sourceControl": "源代码管理",
+    "templates": "模板",
     "twin": "数字分身",
     "workflows": "工作流",
     "workspacesGroup": "工作区"
@@ -263,14 +264,7 @@
       "interrupted": "已中断",
       "running": "运行中"
     },
-    "tabs": {
-      "active": "活动",
-      "history": "历史",
-      "running": "正在运行",
-      "supervisor": "进程"
-    },
     "supervisor": {
-      "jobs": "后台任务",
       "jobStatus": {
         "exited": "已退出",
         "failed": "失败",
@@ -278,7 +272,7 @@
         "killed": "已终止",
         "running": "运行中"
       },
-      "monitors": "Monitor",
+      "jobs": "后台任务",
       "monitorStatus": {
         "cancelled": "已取消",
         "expired": "已过期",
@@ -286,12 +280,19 @@
         "unsatisfiable": "条件不再可满足",
         "waiting": "等待中"
       },
+      "monitors": "Monitor",
       "noOutput": "暂无输出。",
       "owner": {
         "app": "应用",
         "scheduledTask": "任务 {id}",
         "session": "会话 {id}"
       }
+    },
+    "tabs": {
+      "active": "活动",
+      "history": "历史",
+      "running": "正在运行",
+      "supervisor": "进程"
     },
     "title": "任务中心",
     "toast": {

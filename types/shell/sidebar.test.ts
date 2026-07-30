@@ -1,4 +1,6 @@
 import { SIDEBAR_NAV_META, DEFAULT_SIDEBAR_LAYOUT, DEFAULT_SIDEBAR_SIDE } from "./sidebar"
+import enMessages from "@/i18n/messages/en.json"
+import zhCnMessages from "@/i18n/messages/zh-CN.json"
 
 describe("sidebar nav meta", () => {
   it("has unique ids", () => {
@@ -23,6 +25,16 @@ describe("sidebar nav meta", () => {
     }
   })
 
+  it.each([
+    ["en", enMessages],
+    ["zh-CN", zhCnMessages],
+  ])("defines every dynamic rail label in %s", (_locale, messages) => {
+    const labels = messages.desktop.guildRail as Record<string, unknown>
+    for (const item of SIDEBAR_NAV_META) {
+      expect(labels[item.i18nKey]).toEqual(expect.any(String))
+    }
+  })
+
   it("pins the three work-arrives-here entries, in rail order", () => {
     expect(DEFAULT_SIDEBAR_LAYOUT.pinned).toEqual(["inbox", "workflows", "agent-teams"])
   })
@@ -40,6 +52,7 @@ describe("sidebar nav meta", () => {
       "plugins",
       "scheduler",
       "skills",
+      "templates",
       "twin",
     ])
     // Unpinned is not hidden — `resolveSidebarLayout` derives overflow from

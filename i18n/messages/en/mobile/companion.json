@@ -48,6 +48,16 @@
     "pairing": "Device pairing",
     "push": "Push notifications"
   },
+  "lockedComputerUse": {
+    "blocked": "Locked Use not enabled ({reason}).",
+    "col": "Locked Use",
+    "description": "Allows this device to request a short, task-bound Locked Use lease. Remote control must remain enabled. This does not permit administrator authentication or security-warning bypasses.",
+    "disabledToast": "Locked Use disabled for {label}.",
+    "enabledToast": "Locked Use enabled for {label}.",
+    "reason": "Confirm granting Locked Use to {label}",
+    "title": "Allow Locked Use",
+    "toggleAria": "Toggle Locked Use for {label}"
+  },
   "logto": {
     "awaitingCode": "A browser window opened. After you authorize, paste the full redirect URL (or just the code) below.",
     "cancel": "Cancel",

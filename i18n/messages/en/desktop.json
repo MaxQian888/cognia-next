@@ -202,6 +202,7 @@
     "settings": "Settings",
     "skills": "Skills",
     "sourceControl": "Source Control",
+    "templates": "Templates",
     "twin": "Digital twin",
     "workflows": "Workflows",
     "workspacesGroup": "Workspaces"
@@ -263,14 +264,7 @@
       "interrupted": "Interrupted",
       "running": "Running"
     },
-    "tabs": {
-      "active": "Active",
-      "history": "History",
-      "running": "Running",
-      "supervisor": "Processes"
-    },
     "supervisor": {
-      "jobs": "Background jobs",
       "jobStatus": {
         "exited": "Exited",
         "failed": "Failed",
@@ -278,7 +272,7 @@
         "killed": "Killed",
         "running": "Running"
       },
-      "monitors": "Monitors",
+      "jobs": "Background jobs",
       "monitorStatus": {
         "cancelled": "Cancelled",
         "expired": "Expired",
@@ -286,12 +280,19 @@
         "unsatisfiable": "Unsatisfiable",
         "waiting": "Waiting"
       },
+      "monitors": "Monitors",
       "noOutput": "No output yet.",
       "owner": {
         "app": "App",
         "scheduledTask": "Task {id}",
         "session": "Session {id}"
       }
+    },
+    "tabs": {
+      "active": "Active",
+      "history": "History",
+      "running": "Running",
+      "supervisor": "Processes"
     },
     "title": "Job Center",
     "toast": {
