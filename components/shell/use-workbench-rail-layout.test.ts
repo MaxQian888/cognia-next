@@ -4,7 +4,11 @@
 
 import { act, renderHook } from "@testing-library/react"
 
-import { useWorkbenchRailLayout, workbenchRailLayoutOf } from "./use-workbench-rail-layout"
+import {
+  useWorkbenchRailLayout,
+  useWorkbenchRailPersistent,
+  workbenchRailLayoutOf,
+} from "./use-workbench-rail-layout"
 import { useSettingsStore } from "@/stores/settings/settings-store"
 import { CONTEXT_ACTIVITY_RAIL_ORDER } from "@/types/context-workbench"
 import {
@@ -35,6 +39,53 @@ describe("workbenchRailLayoutOf", () => {
       order: DEFAULT_WORKBENCH_RAIL_LAYOUT.order,
       hidden: ["ai"],
     })
+  })
+})
+
+describe("useWorkbenchRailPersistent", () => {
+  it("keeps the rail on screen when the user has expressed no preference", () => {
+    // Defaults ON: the rail is what makes the right-hand panels discoverable at
+    // all, and the pre-minibar behaviour — a column that vanishes completely —
+    // is the opt-out. Four hosts read this to decide their collapsed width, so
+    // a wrong default is four surfaces wrong at once.
+    setStored(undefined)
+    const { result } = renderHook(() => useWorkbenchRailPersistent())
+    expect(result.current).toBe(true)
+  })
+
+  it("honours an explicit opt-out", () => {
+    useSettingsStore.setState({
+      settings: { workbenchRailPersistent: false } as never,
+      save: saveMock as never,
+    })
+    const { result } = renderHook(() => useWorkbenchRailPersistent())
+    expect(result.current).toBe(false)
+  })
+
+  it("does not re-render when an unrelated rail edit lands", () => {
+    // A one-field selector on purpose: the hosts that read this want only the
+    // boolean and must not re-render on every reorder of the rail.
+    useSettingsStore.setState({
+      settings: { workbenchRailPersistent: true, workbenchRail: { hidden: [] } } as never,
+      save: saveMock as never,
+    })
+    let renders = 0
+    const { result } = renderHook(() => {
+      renders += 1
+      return useWorkbenchRailPersistent()
+    })
+    const before = renders
+    act(() => {
+      useSettingsStore.setState({
+        settings: {
+          workbenchRailPersistent: true,
+          workbenchRail: { hidden: ["ai"] },
+        } as never,
+        save: saveMock as never,
+      })
+    })
+    expect(result.current).toBe(true)
+    expect(renders).toBe(before)
   })
 })
 

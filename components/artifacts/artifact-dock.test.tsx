@@ -184,6 +184,35 @@ describe("ArtifactDock — converged workbench shell", () => {
     expect(screen.getByTestId("list")).toHaveAttribute("data-session", "sess-1")
   })
 
+  it("passes rail-only through to whichever surface is active", () => {
+    // The dock shell shrinks its own column; both surfaces have to be told, or
+    // they keep drawing a panel body in a column too narrow for one.
+    const { unmount } = render(<ArtifactDock railOnly />)
+    expect(screen.getByTestId("context-workbench-activity-rail")).toHaveAttribute(
+      "data-rail-only",
+      "true"
+    )
+    unmount()
+
+    activateArtifact()
+    render(<ArtifactDock railOnly />)
+    expect(screen.getByTestId("context-workbench-activity-rail")).toHaveAttribute(
+      "data-rail-only",
+      "true"
+    )
+  })
+
+  it("shows an attention marker on the rail only while something is unread", () => {
+    // With a persistent rail the marker belongs on the rail itself — that is
+    // now what the user is looking at — rather than only on the chat header's
+    // toggle, which is hidden behind the collapsed column.
+    render(<ArtifactDock railOnly />)
+    expect(screen.queryByTestId("context-workbench-activity-attention")).toBeNull()
+
+    act(() => useArtifactDockLayoutStore.setState({ unreadArtifact: true }))
+    expect(screen.getByTestId("context-workbench-activity-attention")).toBeInTheDocument()
+  })
+
   it("opens the browser inside the same workbench chrome, scoped to the chat session", () => {
     act(() => useArtifactDockLayoutStore.getState().openBrowser())
     render(<ArtifactDock />)

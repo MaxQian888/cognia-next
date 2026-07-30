@@ -19,8 +19,11 @@
 import * as React from "react"
 import { useTranslations } from "next-intl"
 
+import { Label } from "@/components/ui/label"
+import { Switch } from "@/components/ui/switch"
+import { useSettingsStore } from "@/stores/settings/settings-store"
 import { CustomizerLists, type CustomizerItem } from "./customizer-list"
-import { useWorkbenchRailLayout } from "./use-workbench-rail-layout"
+import { useWorkbenchRailLayout, useWorkbenchRailPersistent } from "./use-workbench-rail-layout"
 import { mergeVisibleOrder } from "@/lib/shell/bar-items"
 import type { WorkbenchRailCatalogItem } from "@/lib/shell/workbench-rail"
 
@@ -28,12 +31,30 @@ export function WorkbenchCustomizer(): React.ReactElement {
   const t = useTranslations("contextWorkbench.customize")
   const activityT = useTranslations("contextWorkbench.activities")
   const { resolved, isDefault, reorder, hide, show, reset } = useWorkbenchRailLayout()
+  const persistentRail = useWorkbenchRailPersistent()
+  const save = useSettingsStore((s) => s.save)
 
   const toItems = (items: WorkbenchRailCatalogItem[]): CustomizerItem[] =>
     items.map((i) => ({ id: i.id, Icon: i.Icon, label: activityT(i.id as never) }))
 
   return (
     <div className="space-y-3" data-testid="workbench-customizer">
+      {/* Sits above the order editor because it decides whether that rail is on
+          screen at all when the workbench is shut. */}
+      <div className="flex items-start justify-between gap-3 rounded-md border p-3">
+        <div className="space-y-1">
+          <Label htmlFor="workbench-persistent-rail" className="text-sm">
+            {t("persistentRail")}
+          </Label>
+          <p className="text-xs text-muted-foreground">{t("persistentRailHint")}</p>
+        </div>
+        <Switch
+          id="workbench-persistent-rail"
+          data-testid="workbench-persistent-rail"
+          checked={persistentRail}
+          onCheckedChange={(checked) => void save({ workbenchRailPersistent: checked })}
+        />
+      </div>
       <p className="text-xs text-muted-foreground">{t("hint")}</p>
       <CustomizerLists
         testIdPrefix="workbench-customizer-list"

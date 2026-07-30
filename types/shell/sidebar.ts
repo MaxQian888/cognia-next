@@ -36,6 +36,7 @@ export const SIDEBAR_NAV_META: readonly SidebarNavMeta[] = [
   { id: "inbox", route: "/inbox", i18nKey: "inbox", group: "feature" },
   { id: "twin", route: "/twin", i18nKey: "twin", group: "feature" },
   { id: "discover", route: "/discover", i18nKey: "discover", group: "feature" },
+  { id: "templates", route: "/templates", i18nKey: "templates", group: "feature" },
   { id: "skills", route: "/skills", i18nKey: "skills", group: "feature" },
   { id: "plugins", route: "/plugins", i18nKey: "plugins", group: "feature" },
   { id: "agent-teams", route: "/agent-teams", i18nKey: "agentTeams", group: "feature" },
@@ -92,13 +93,15 @@ export type SidebarSide = "left" | "right"
 /**
  * The rail's shipped edge.
  *
- * Right, so the chat pane owns the left edge where reading starts and the
- * navigation clusters with the context workbench on the trailing side. Users
- * who prefer the Discord/Slack arrangement switch it back in the customizer.
- * Desktop-only — on the mobile shell the rail lives inside a drawer, where
- * "which edge" has no meaning.
+ * Left — the Discord/Slack arrangement this app has always used, and the one
+ * every muscle memory built against. Moving it to the right shipped briefly as
+ * the default (the chat pane would own the leading edge, the navigation would
+ * cluster with the context workbench) and read as disorienting rather than
+ * tidy, so the right edge stays available in the customizer but is no longer
+ * where the rail lands out of the box. Desktop-only — on the mobile shell the
+ * rail lives inside a drawer, where "which edge" has no meaning.
  */
-export const DEFAULT_SIDEBAR_SIDE: SidebarSide = "right"
+export const DEFAULT_SIDEBAR_SIDE: SidebarSide = "left"
 
 /**
  * The rail's shipped pins.

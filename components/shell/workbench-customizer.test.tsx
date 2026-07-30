@@ -20,11 +20,13 @@ jest.mock("next-intl", () => ({
   useTranslations: () => (key: string) => key,
 }))
 
-const saveMock = jest.fn(async (_patch?: { workbenchRail?: WorkbenchRailLayout }) => {})
+const saveMock = jest.fn(
+  async (_patch?: { workbenchRail?: WorkbenchRailLayout; workbenchRailPersistent?: boolean }) => {}
+)
 
-function setLayout(layout?: Partial<WorkbenchRailLayout>) {
+function setLayout(layout?: Partial<WorkbenchRailLayout>, persistent?: boolean) {
   useSettingsStore.setState({
-    settings: { workbenchRail: layout } as never,
+    settings: { workbenchRail: layout, workbenchRailPersistent: persistent } as never,
     save: saveMock as never,
   })
 }
@@ -105,5 +107,31 @@ describe("WorkbenchCustomizer", () => {
   it("explains that hiding does not strand the panel", () => {
     renderCustomizer()
     expect(screen.getByText("hint")).toBeInTheDocument()
+  })
+
+  describe("persistent rail switch", () => {
+    it("is on when the user has never touched it", () => {
+      // The rail is what makes the right-hand panels discoverable at all, so
+      // the pre-minibar behaviour is the opt-out rather than the default.
+      renderCustomizer()
+      expect(screen.getByTestId("workbench-persistent-rail")).toBeChecked()
+    })
+
+    it("reflects an explicit opt-out", () => {
+      setLayout(undefined, false)
+      renderCustomizer()
+      expect(screen.getByTestId("workbench-persistent-rail")).not.toBeChecked()
+    })
+
+    it("writes only its own settings key, leaving the rail order untouched", () => {
+      renderCustomizer()
+      fireEvent.click(screen.getByTestId("workbench-persistent-rail"))
+      const patch = saveMock.mock.calls.at(-1)?.[0]
+      expect(patch).toEqual({ workbenchRailPersistent: false })
+      // Kept out of `workbenchRail` on purpose: that type's mutators rebuild
+      // their object, and its "restore defaults" means "put my activity order
+      // back" — which must not also switch the rail off.
+      expect(patch).not.toHaveProperty("workbenchRail")
+    })
   })
 })

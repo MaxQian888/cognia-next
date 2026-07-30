@@ -1,4 +1,4 @@
-import { SIDEBAR_NAV_META, DEFAULT_SIDEBAR_LAYOUT } from "./sidebar"
+import { SIDEBAR_NAV_META, DEFAULT_SIDEBAR_LAYOUT, DEFAULT_SIDEBAR_SIDE } from "./sidebar"
 
 describe("sidebar nav meta", () => {
   it("has unique ids", () => {
@@ -49,6 +49,14 @@ describe("sidebar nav meta", () => {
 
   it("default hides nothing", () => {
     expect(DEFAULT_SIDEBAR_LAYOUT.hidden).toEqual([])
+  })
+
+  it("ships the rail on the left edge", () => {
+    // The right edge shipped as the default briefly and read as disorienting —
+    // this is the Discord/Slack arrangement every muscle memory was built on.
+    // Still a preference (`sidebarSide`), just not where the rail lands by
+    // default.
+    expect(DEFAULT_SIDEBAR_SIDE).toBe("left")
   })
 
   it("every default-pinned id exists in the catalog", () => {

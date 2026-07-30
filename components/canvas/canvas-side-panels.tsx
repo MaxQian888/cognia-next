@@ -92,14 +92,24 @@ export const CANVAS_SIDE_PANELS_ICON_ONLY_BREAKPOINT = 280
 
 export interface CanvasSidePanelsProps {
   mobile?: boolean
+  /**
+   * The shell has shrunk this column to the activity rail. Only the Workbench
+   * surface honours it — the legacy rail predates the persistent minibar and
+   * exists solely as a one-release rollback path.
+   */
+  railOnly?: boolean
 }
 
-export function CanvasSidePanels({ mobile = false }: CanvasSidePanelsProps) {
+export function CanvasSidePanels({ mobile = false, railOnly = false }: CanvasSidePanelsProps) {
   const enabled = useContextWorkbenchSurfaceFlag("canvas")
-  return enabled ? <CanvasContextWorkbench mobile={mobile} /> : <LegacyCanvasSidePanels />
+  return enabled ? (
+    <CanvasContextWorkbench mobile={mobile} railOnly={railOnly} />
+  ) : (
+    <LegacyCanvasSidePanels />
+  )
 }
 
-function CanvasContextWorkbench({ mobile }: { mobile: boolean }) {
+function CanvasContextWorkbench({ mobile, railOnly }: { mobile: boolean; railOnly: boolean }) {
   const tWorkbench = useTranslations("contextWorkbench")
   const workbenchInstanceId = useContextWorkbenchInstanceId("canvas")
   const activeId = useArtifactStore((state) => state.activeCanvasId)
@@ -390,6 +400,8 @@ function CanvasContextWorkbench({ mobile }: { mobile: boolean }) {
         resource={resource}
         panels={panels}
         onCollapse={() => (mobile ? setMobileRightOpen(false) : setRightCollapsed(true))}
+        onEnsureVisible={() => (mobile ? setMobileRightOpen(true) : setRightCollapsed(false))}
+        railOnly={mobile ? false : railOnly}
         onResetLayout={resetCanvasLayout}
         placement={mobile ? "mobile-sheet" : "adjacent-editor"}
         manageOwnWidth={false}

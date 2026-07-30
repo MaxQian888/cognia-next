@@ -63,7 +63,9 @@ import {
   fleetOpencodeUninstall,
   islandDebugGeometry,
   isIslandWindowOpen,
+  islandGetHideOnFullscreen,
   islandListMonitors,
+  islandSetHideOnFullscreen,
   islandSetMonitor,
   openIslandWindow,
   type CodexHooksStatus,
@@ -96,6 +98,7 @@ export function FleetSection() {
   const [opencodeStatus, setOpencodeStatus] = useState<OpencodeStatus>("not-installed")
   const [islandOpen, setIslandOpen] = useState(false)
   const [islandMonitors, setIslandMonitors] = useState<IslandMonitorInfo[]>([])
+  const [islandHideOnFullscreen, setIslandHideOnFullscreen] = useState(false)
   const [busy, setBusy] = useState(false)
 
   // Read the status sources without touching React state — the caller applies
@@ -103,14 +106,16 @@ export function FleetSection() {
   // stay on the right side of the effect's await boundary.
   const fetchStatus = useCallback(async () => {
     try {
-      const [monitor, hooks, codex, opencode, island, monitors] = await Promise.all([
-        fleetMonitorStatus(),
-        readFleetHooksStatus(),
-        fleetCodexHooksStatus(),
-        fleetOpencodeStatus(),
-        isIslandWindowOpen(),
-        islandListMonitors(),
-      ])
+      const [monitor, hooks, codex, opencode, island, monitors, hideOnFullscreen] =
+        await Promise.all([
+          fleetMonitorStatus(),
+          readFleetHooksStatus(),
+          fleetCodexHooksStatus(),
+          fleetOpencodeStatus(),
+          isIslandWindowOpen(),
+          islandListMonitors(),
+          islandGetHideOnFullscreen(),
+        ])
       return {
         monitorEnabled: monitor.enabled,
         monitorPort: monitor.port,
@@ -120,6 +125,7 @@ export function FleetSection() {
         opencodeStatus: opencode.status,
         islandOpen: island,
         islandMonitors: monitors,
+        islandHideOnFullscreen: hideOnFullscreen,
       }
     } catch (e) {
       log.error("refresh_failed", { error: String(e) })
@@ -137,6 +143,7 @@ export function FleetSection() {
       setOpencodeStatus(s.opencodeStatus)
       setIslandOpen(s.islandOpen)
       setIslandMonitors(s.islandMonitors)
+      setIslandHideOnFullscreen(s.islandHideOnFullscreen)
     }
     setLoaded(true)
   }, [])
@@ -278,6 +285,30 @@ export function FleetSection() {
       }
     },
     [busy]
+  )
+
+  /**
+   * Opt into the island yielding the top strip to full-screen apps.
+   *
+   * Optimistic: the switch reflects the new value before the round-trip so the
+   * toggle doesn't lag, and reverts if Rust refused. Unlike the monitor picker
+   * this does NOT `refresh()` — the whole status fan-out for one boolean the
+   * caller already knows.
+   */
+  const toggleIslandHideOnFullscreen = useCallback(
+    async (next: boolean) => {
+      if (busy) return
+      setBusy(true)
+      setIslandHideOnFullscreen(next)
+      try {
+        const ok = await islandSetHideOnFullscreen(next)
+        if (!ok) setIslandHideOnFullscreen(!next)
+        else toast.success(t("saved"))
+      } finally {
+        setBusy(false)
+      }
+    },
+    [busy, t]
   )
 
   // "primary" is the Select sentinel for "no persisted preference" — Radix
@@ -530,6 +561,33 @@ export function FleetSection() {
             onCheckedChange={(v) => void toggleIsland(v)}
             aria-label={t("island.label")}
             data-testid="fleet-island-switch"
+          />
+        </div>
+
+        {/*
+         * Opt-in, not the default: the island's NSPanel already floats over
+         * every Space, and withdrawing there unconditionally made it look
+         * broken outside Cognia's own desktop. The copy names macOS because
+         * only macOS has the full-screen Space model this reads — elsewhere
+         * `display_is_fullscreen` is a constant `false` and the switch is inert.
+         */}
+        <div
+          className="flex items-start justify-between gap-3"
+          data-testid="fleet-island-fullscreen-row"
+        >
+          <div className="space-y-0.5">
+            <Label htmlFor="fleet-island-fullscreen" className="text-xs font-medium">
+              {t("island.hideOnFullscreen.label")}
+            </Label>
+            <p className="text-[11px] text-muted-foreground">{t("island.hideOnFullscreen.desc")}</p>
+          </div>
+          <Switch
+            id="fleet-island-fullscreen"
+            checked={islandHideOnFullscreen}
+            disabled={busy || !loaded}
+            onCheckedChange={(v) => void toggleIslandHideOnFullscreen(v)}
+            aria-label={t("island.hideOnFullscreen.label")}
+            data-testid="fleet-island-fullscreen-switch"
           />
         </div>
 

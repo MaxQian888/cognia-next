@@ -361,19 +361,27 @@ impl ExternalSelectionCandidate {
 pub enum SelectionToolbarAction {
     Copy,
     Explain,
-    Translate { target_locale: String },
+    Translate {
+        target_locale: String,
+    },
     Ask,
     Remember,
     Speak,
     /// Contextual. The renderer's classifier decided the selection was a link
     /// — but this payload is a UX hint, not authority. `open_target` re-parses
     /// it and refuses anything that is not http(s).
-    OpenLink { url: String },
-    ComposeEmail { address: String },
+    OpenLink {
+        url: String,
+    },
+    ComposeEmail {
+        address: String,
+    },
     /// Only the engine id crosses the boundary; the query is the live
     /// candidate's text, which Rust already owns, and the URL template lives
     /// here so a renderer string never reaches the OS opener uninspected.
-    SearchWeb { engine: String },
+    SearchWeb {
+        engine: String,
+    },
     ConvertUnit,
 }
 
@@ -855,7 +863,9 @@ fn spawn_publish<R: Runtime>(
         let subrole = preflight
             .as_ref()
             .and_then(|p| p.secure_field.then(|| "AXSecureTextField".to_string()));
-        let source_url = preflight.as_ref().and_then(|p| trim_source_url(p.source_url.as_deref()));
+        let source_url = preflight
+            .as_ref()
+            .and_then(|p| trim_source_url(p.source_url.as_deref()));
         let candidate =
             ExternalSelectionCandidate::from_snapshot(snapshot, SelectionOrigin::Accessibility)
                 .with_source_element(subrole, source_url);
@@ -1604,7 +1614,10 @@ fn is_selection_navigation_key(vk: u32, settle_armed: bool) -> bool {
 /// Belt to the interlock's braces: the observer and the click path can both
 /// legitimately fire for one user gesture, and re-publishing would restart the
 /// enter animation and the idle countdown for no reason.
-fn is_same_selection(current: &ExternalSelectionCandidate, snapshot: &TextSelectionSnapshot) -> bool {
+fn is_same_selection(
+    current: &ExternalSelectionCandidate,
+    snapshot: &TextSelectionSnapshot,
+) -> bool {
     current.text == snapshot.text && current.source_app == snapshot.source_app
 }
 
@@ -1967,8 +1980,7 @@ mod tests {
         include_str!("../permissions/selection-toolbar-app-commands.toml");
     /// The overlay's capability, which also has to grant the plugin commands
     /// its prefs go through.
-    const TOOLBAR_CAPABILITY_JSON: &str =
-        include_str!("../capabilities/selection-toolbar.json");
+    const TOOLBAR_CAPABILITY_JSON: &str = include_str!("../capabilities/selection-toolbar.json");
     /// The renderer's own list of what the overlay invokes. Read rather than
     /// re-typed: a hand-copied mirror in this file only ever asserts that two
     /// stale lists agree with each other.
@@ -1980,7 +1992,9 @@ mod tests {
             .find("export const OVERLAY_COMMANDS = {")
             .expect("OVERLAY_COMMANDS moved or was renamed in lib/tauri/selection-toolbar.ts");
         let body = &OVERLAY_BRIDGE_TS[start..];
-        let end = body.find("} as const").expect("OVERLAY_COMMANDS is not `as const`");
+        let end = body
+            .find("} as const")
+            .expect("OVERLAY_COMMANDS is not `as const`");
         let mut commands: Vec<String> = body[..end]
             .lines()
             .filter_map(|line| {
@@ -2371,7 +2385,10 @@ mod tests {
         // Digits and letters are ordinary keys — they defer to the shortcut
         // claim window rather than being ignored outright.
         for vk in [0x31, 0x36, 0x41, 0x1B] {
-            assert!(!is_modifier_key(vk), "vk {vk:#04x} should not be a modifier");
+            assert!(
+                !is_modifier_key(vk),
+                "vk {vk:#04x} should not be a modifier"
+            );
         }
     }
 
@@ -2617,7 +2634,11 @@ mod tests {
             let action = SelectionToolbarAction::ComposeEmail {
                 address: hostile.to_string(),
             };
-            assert_eq!(action.open_target("ignored"), None, "{hostile} must be refused");
+            assert_eq!(
+                action.open_target("ignored"),
+                None,
+                "{hostile} must be refused"
+            );
         }
     }
 
@@ -2689,7 +2710,9 @@ mod tests {
     #[test]
     fn source_url_keeps_the_page_but_drops_everything_sensitive() {
         assert_eq!(
-            trim_source_url(Some("https://example.com/docs/a?token=secret&q=my+search#frag")),
+            trim_source_url(Some(
+                "https://example.com/docs/a?token=secret&q=my+search#frag"
+            )),
             Some("https://example.com/docs/a".to_string())
         );
         assert_eq!(
@@ -2804,8 +2827,10 @@ mod tests {
     #[test]
     fn republishing_the_same_selection_is_suppressed() {
         let snapshot = build_text_selection("hello", "TextEdit", None, None).unwrap();
-        let candidate =
-            ExternalSelectionCandidate::from_snapshot(snapshot.clone(), SelectionOrigin::Accessibility);
+        let candidate = ExternalSelectionCandidate::from_snapshot(
+            snapshot.clone(),
+            SelectionOrigin::Accessibility,
+        );
         assert!(is_same_selection(&candidate, &snapshot));
 
         let elsewhere = build_text_selection("hello", "Safari", None, None).unwrap();

@@ -22,7 +22,10 @@ import type { PanelImperativeHandle } from "react-resizable-panels"
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable"
 import { isProIdePanePinnedWithin } from "@/lib/codeserver/pane-manager"
 import { MOBILE_DURATION, MOBILE_EASE } from "@/lib/ui/motion"
+import { magnetAsPercent, snapPanelSize } from "@/lib/ui/panel-snap"
 import { cn } from "@/lib/utils"
+import { WORKBENCH_RAIL_WIDTH_PX } from "@/types/shell/workbench-rail"
+import { useWorkbenchRailPersistent } from "@/components/shell/use-workbench-rail-layout"
 import { useBreakpoint } from "@/hooks/ui"
 import { useArtifactStore } from "@/stores/artifact/artifact-store"
 import { useActiveArtifactId } from "@/hooks/artifacts/use-session-artifacts"
@@ -90,7 +93,7 @@ function motionDurationScale(element: HTMLElement): number {
 function animateDockResize(
   panel: HTMLDivElement,
   content: HTMLDivElement | null,
-  /** Target width as a percent of the group, or null when collapsing to zero. */
+  /** Target width as a percent of the group, or null when collapsing. */
   targetPercent: number | null,
   apply: () => void
 ): () => void {
@@ -194,6 +197,11 @@ function useDockAttentionSignal(): void {
  * The delay is not cosmetic. `animateDockResize` freezes the content's width so
  * the shrinking shell wipes it rather than reflowing it; unmounting on the same
  * frame would leave that animation wiping an empty box.
+ *
+ * **With a persistent rail this never retracts** — callers pass `false`. The
+ * workbench stays mounted so its activity rail can keep drawing, and it drops
+ * the panel *body* itself via `railOnly`. The lease invariant above is
+ * untouched: rail-only unmounts every panel, exactly as a zero-width dock did.
  */
 function useDockContentMounted(
   dockCollapsed: boolean,
@@ -272,12 +280,80 @@ function ArtifactWorkspaceDockDesktop({ children }: { children: ReactNode }) {
   const dockSizeRequest = useArtifactDockLayoutStore((s) => s.dockSizeRequest)
   const setDockSize = useArtifactDockLayoutStore((s) => s.setDockSize)
   const requestDockSize = useArtifactDockLayoutStore((s) => s.requestDockSize)
+  const setDockCollapsed = useArtifactDockLayoutStore((s) => s.setDockCollapsed)
+  const railPersistent = useWorkbenchRailPersistent()
   const dockPanelRef = useRef<PanelImperativeHandle | null>(null)
   const dockPanelElementRef = useRef<HTMLDivElement | null>(null)
   const dockContentElementRef = useRef<HTMLDivElement | null>(null)
   const previousDockCollapsedRef = useRef(dockCollapsed)
   const previousDockSizeRequestRef = useRef(dockSizeRequest)
-  const dockContentMounted = useDockContentMounted(dockCollapsed, dockPanelElementRef)
+  /**
+   * Whether the panel *body* is still on screen. Retracts one animation after a
+   * collapse, so the shrinking shell wipes real content instead of an empty box.
+   *
+   * Two consumers now read this one delay: whether `<ArtifactDock />` mounts at
+   * all (only when the rail is not persistent — otherwise the rail has to keep
+   * drawing), and `railOnly`, which is what actually drops the body. Deriving
+   * `railOnly` from the raw `dockCollapsed` instead would flip it on the first
+   * frame of the collapse and leave a lone 48px rail sitting inside a
+   * frozen-width box for the whole 280ms.
+   */
+  const dockBodyMounted = useDockContentMounted(dockCollapsed, dockPanelElementRef)
+  const dockContentMounted = railPersistent || dockBodyMounted
+  /**
+   * What the panel shrinks to. `0%` is the pre-minibar behaviour; with the rail
+   * persistent it is the rail's own width, so the collapsed dock still shows a
+   * column of activity icons. `react-resizable-panels` also uses this as the
+   * drag target: dragging below `minSize` snaps here on its own.
+   */
+  const collapsedSize = railPersistent ? `${WORKBENCH_RAIL_WIDTH_PX}px` : "0%"
+
+  /**
+   * The dock's live width as the drag reports it, plus whether that drag began
+   * from the rail. Both are read once on release to decide where the panel
+   * settles — see `handleResizeRelease`. Refs rather than state: a drag writes
+   * per tick, and re-rendering the whole workspace on every tick to hold a
+   * number nobody displays would be pure cost.
+   */
+  const latestDockPercentRef = useRef(dockSize)
+  const dragStartCollapsedRef = useRef(dockCollapsed)
+
+  /**
+   * Release-snap. Runs on the divider's `pointerup`, never during the drag, so
+   * the pointer is never fought — see `lib/ui/panel-snap.ts`.
+   */
+  const handleResizeRelease = () => {
+    const element = dockPanelElementRef.current
+    const groupWidthPx = element?.parentElement?.offsetWidth ?? 0
+    const wasCollapsed = dragStartCollapsedRef.current
+    const presets = DOCK_MODE_WIDTH_PERCENT[dockProfile]
+    const snapped = snapPanelSize(latestDockPercentRef.current, {
+      presets: [presets.narrow, presets.wide],
+      floor: dockFloorPercent(element, workspaceProfile),
+      // Opening out of the rail returns to the width the dock was left at,
+      // which is exactly what `dockSize` still holds — a collapse never
+      // overwrites it.
+      expandTo: dockSize,
+      wasCollapsed,
+      magnet: magnetAsPercent(groupWidthPx),
+    })
+    if (snapped.kind === "collapsed") {
+      setDockCollapsed(true)
+      return
+    }
+    if (wasCollapsed) {
+      // Re-opening is the store's job: `setDockCollapsed(false)` also clears the
+      // dismissal and the unread flag, and its effect animates back to
+      // `dockSize`. Only ask for a different width if the snap picked one.
+      setDockCollapsed(false)
+      if (snapped.size !== dockSize) requestDockSize(snapped.size)
+      return
+    }
+    // Deliberately NOT routed through `setDockCollapsed(false)`: that also
+    // raises `mobileSheetOpen`, and an ordinary desktop resize must not arm a
+    // full-height Sheet for whenever the window is next narrowed to a phone.
+    requestDockSize(snapped.size)
+  }
 
   // Match the conversation sidebar: animate only collapse/expand, then remove
   // the transition so manual divider dragging remains immediate.
@@ -343,9 +419,29 @@ function ArtifactWorkspaceDockDesktop({ children }: { children: ReactNode }) {
         className="flex-1 min-h-0"
         onLayoutChanged={(layout) => {
           const dock = layout["artifact-dock"]
-          if (dockCollapsed || typeof dock !== "number") return
-          // Reject only the collapse itself (0%), not a legitimately narrow
-          // drag. This used to gate on the *artifact* floor (24%) regardless of
+          if (typeof dock !== "number") return
+          // Tracked before the collapsed early-out: dragging *out* of the rail
+          // only produces layouts while the store still says collapsed, and the
+          // release-snap has to know where the pointer actually left it.
+          latestDockPercentRef.current = dock
+          if (dockCollapsed) return
+          // `react-resizable-panels` collapses a `collapsible` panel on its own
+          // once a drag goes below `minSize`. Nothing used to tell the store, so
+          // the dock sat visually shut while `dockCollapsed` stayed false — and
+          // the next ⌘J (or header toggle, or Views menu) spent itself calling
+          // `collapse()` on an already-collapsed panel and appeared dead.
+          // Mirroring it here is what keeps those five entry points honest.
+          //
+          // Asked of the panel rather than inferred from the percentage: the
+          // panel is the authority on its own collapsed state, and a percentage
+          // test would also fire on the 0% every layout reports before the group
+          // has measured.
+          if (dockPanelRef.current?.isCollapsed()) {
+            setDockCollapsed(true)
+            return
+          }
+          // Reject only the collapse itself, not a legitimately narrow drag.
+          // This used to gate on the *artifact* floor (24%) regardless of
           // profile, while the workspace profile's real floor is 480px — on a
           // 2560px screen that is ~18.75%, so dragging the workspace dock down
           // to its own minimum silently failed to persist and the next
@@ -361,17 +457,26 @@ function ArtifactWorkspaceDockDesktop({ children }: { children: ReactNode }) {
 
         {/* Fades and narrows in lockstep with the panel. A hard `hidden` made
             the divider pop in over a zero-width dock on expand, and vanish
-            before the dock had finished retracting on collapse. */}
+            before the dock had finished retracting on collapse.
+
+            It stays live over a *persistent* rail, though: dragging this edge is
+            how the minibar is opened, so the old unconditional `disabled` would
+            have made "拖动开" impossible. Only a dock collapsed all the way to
+            zero has nothing left to grab. */}
         <ResizableHandle
           withHandle
-          aria-hidden={dockCollapsed || undefined}
+          aria-hidden={(dockCollapsed && !railPersistent) || undefined}
           className={cn(
             // Literal twin of DOCK_RESIZE_DURATION_MS / DOCK_RESIZE_EASE — see
             // their declaration for why this cannot read them directly.
             "transition-[width,opacity] duration-[calc(280ms*var(--motion-duration-scale,1))] ease-[cubic-bezier(0.32,0.72,0,1)]",
-            dockCollapsed && "w-0 opacity-0 [&>div]:opacity-0"
+            dockCollapsed && !railPersistent && "w-0 opacity-0 [&>div]:opacity-0"
           )}
-          disabled={dockCollapsed}
+          disabled={dockCollapsed && !railPersistent}
+          onPointerDown={() => {
+            dragStartCollapsedRef.current = dockCollapsed
+          }}
+          onPointerUp={handleResizeRelease}
           // Editor-splitter convention: double-click restores the current
           // profile's preset width. Routed through the request token so the
           // change animates like the narrow/wide buttons instead of snapping.
@@ -385,18 +490,18 @@ function ArtifactWorkspaceDockDesktop({ children }: { children: ReactNode }) {
           id="artifact-dock"
           panelRef={dockPanelRef}
           elementRef={dockPanelElementRef}
-          defaultSize={dockCollapsed ? "0%" : `${dockSize}%`}
+          defaultSize={dockCollapsed ? collapsedSize : `${dockSize}%`}
           minSize={dockMinSize}
           maxSize={dockMaxSize}
           collapsible
-          collapsedSize="0%"
+          collapsedSize={collapsedSize}
         >
           <div
             ref={dockContentElementRef}
             data-testid="artifact-dock-wrapper"
             className="h-full min-w-0 overflow-hidden"
           >
-            {dockContentMounted ? <ArtifactDock /> : null}
+            {dockContentMounted ? <ArtifactDock railOnly={!dockBodyMounted} /> : null}
           </div>
         </ResizablePanel>
       </ResizablePanelGroup>

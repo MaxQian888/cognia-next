@@ -324,17 +324,17 @@ describe("navigation rail placement", () => {
       </DesktopAppShell>
     )
 
-  test("defaults to the trailing edge", () => {
+  test("defaults to the leading edge", () => {
     platformValue = "tauri"
-    renderShell()
-    expect(railComesBeforeContent()).toBe(false)
-  })
-
-  test("moves to the leading edge when the setting says left", () => {
-    platformValue = "tauri"
-    settingsStateRef.settings = { sidebarSide: "left" }
     renderShell()
     expect(railComesBeforeContent()).toBe(true)
+  })
+
+  test("moves to the trailing edge when the setting says right", () => {
+    platformValue = "tauri"
+    settingsStateRef.settings = { sidebarSide: "right" }
+    renderShell()
+    expect(railComesBeforeContent()).toBe(false)
   })
 
   // The extension host bar appears only once a plugin registers a surface. The

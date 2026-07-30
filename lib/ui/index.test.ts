@@ -12,6 +12,11 @@ describe("lib/ui barrel", () => {
     expect(typeof ui.captureScreenshot).toBe("function")
   })
 
+  it("re-exports the panel snap helper", () => {
+    expect(typeof ui.snapPanelSize).toBe("function")
+    expect(typeof ui.PANEL_SNAP_MAGNET_PX).toBe("number")
+  })
+
   it("avatar helpers behave the same when imported via barrel", () => {
     expect(ui.initials("Alice Bob")).toBe("AB")
     expect(ui.deterministicColor("seed")).toMatch(/^oklch\(/)

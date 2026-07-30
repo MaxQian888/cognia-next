@@ -43,7 +43,8 @@ pub(crate) use macos_panel::{
     // ordinary — activating — NSWindow.
     configure_pet_panel as configure_overlay_panel,
     current_panel_generation as current_overlay_panel_generation,
-    reveal_pet_panel as reveal_overlay_panel, set_panel_key as set_overlay_panel_key,
+    reveal_pet_panel as reveal_overlay_panel,
+    set_panel_key as set_overlay_panel_key,
     PetPanelRole as OverlayPanelRole,
 };
 

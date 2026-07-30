@@ -8,6 +8,7 @@ import "@testing-library/jest-dom"
 import { CanvasShell } from "./canvas-shell"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { useCanvasLayoutStore } from "@/stores/canvas/canvas-layout-store"
+import { useSettingsStore } from "@/stores/settings/settings-store"
 
 const mockSidePanelEffectStarted = jest.fn()
 const mockSidePanelEffectStopped = jest.fn()
@@ -17,13 +18,17 @@ jest.mock("./canvas-document-rail", () => ({
   CanvasDocumentRail: () => <div data-testid="document-rail">Document rail</div>,
 }))
 jest.mock("./canvas-side-panels", () => ({
-  CanvasSidePanels: () => {
+  CanvasSidePanels: ({ railOnly }: { railOnly?: boolean }) => {
     const ReactImpl = jest.requireActual<typeof import("react")>("react")
     ReactImpl.useEffect(() => {
       mockSidePanelEffectStarted()
       return () => mockSidePanelEffectStopped()
     }, [])
-    return <div data-testid="side-panels">Side panels</div>
+    return (
+      <div data-testid="side-panels" data-rail-only={railOnly ? "true" : undefined}>
+        Side panels
+      </div>
+    )
   },
 }))
 jest.mock("./canvas-workspace", () => ({
@@ -39,6 +44,11 @@ jest.mock("@/hooks/canvas/use-canvas-layout-shortcuts", () => ({
 // work in jsdom — replace its primitives with simple divs that pass
 // children through. The shadcn wrapper imports `Group`, `Panel`, and
 // `Separator` from this module (see components/ui/resizable.tsx).
+// Records the imperative calls the shell makes on the right panel. `defaultSize`
+// is read once at layout time, so collapsing has to be driven through this
+// handle — asserting on the prop would pass while the column never moved.
+const rightPanelHandle = { collapse: jest.fn(), resize: jest.fn(), expand: jest.fn() }
+
 jest.mock("react-resizable-panels", () => {
   const ReactImpl = jest.requireActual<typeof import("react")>("react")
   type DivProps = React.ComponentProps<"div"> & { children?: React.ReactNode }
@@ -52,6 +62,8 @@ jest.mock("react-resizable-panels", () => {
     collapsible: _collapsible,
     collapsedSize: _collapsedSize,
     withHandle: _withHandle,
+    panelRef: _panelRef,
+    elementRef: _elementRef,
     ...rest
   }: DivProps & Record<string, unknown>) => rest
   return {
@@ -61,8 +73,15 @@ jest.mock("react-resizable-panels", () => {
         { "data-testid": "panel-group", ...filterProps(rest) },
         children
       ),
-    Panel: ({ children, ...rest }: DivProps) =>
-      ReactImpl.createElement("div", { "data-testid": "panel", ...filterProps(rest) }, children),
+    Panel: ({ children, ...rest }: DivProps & Record<string, unknown>) => {
+      const panelRef = rest.panelRef as { current: unknown } | undefined
+      if (panelRef && rest.id === "canvas-right") panelRef.current = rightPanelHandle
+      return ReactImpl.createElement(
+        "div",
+        { "data-testid": "panel", ...filterProps(rest) },
+        children
+      )
+    },
     Separator: ({ children, ...rest }: DivProps) =>
       ReactImpl.createElement(
         "div",
@@ -90,8 +109,35 @@ describe("CanvasShell", () => {
     mockSidePanelEffectStarted.mockClear()
     mockSidePanelEffectStopped.mockClear()
     useIsMobileMock.mockReturnValue(false)
+    // The persistent rail defaults to on; start from clean settings so a test
+    // that switches it off cannot leak into the next.
+    useSettingsStore.setState({ settings: {} as never })
+    rightPanelHandle.collapse.mockClear()
+    rightPanelHandle.resize.mockClear()
+    rightPanelHandle.expand.mockClear()
     act(() => {
       useCanvasLayoutStore.getState().resetLayout()
+    })
+  })
+
+  describe("collapse actually moves the column", () => {
+    it("drives the panel imperatively when the collapsed flag flips", () => {
+      // `defaultSize` / `collapsedSize` are read once when the group lays out,
+      // and the group re-keys only on `layoutVersion` (which only `resetLayout`
+      // bumps). Without the imperative call the rail toggle and ⌘J updated the
+      // store while the column stayed exactly where it was.
+      renderWithProviders(<CanvasShell />)
+      expect(rightPanelHandle.collapse).not.toHaveBeenCalled()
+
+      act(() => {
+        useCanvasLayoutStore.getState().setRightCollapsed(true)
+      })
+      expect(rightPanelHandle.collapse).toHaveBeenCalledTimes(1)
+
+      act(() => {
+        useCanvasLayoutStore.getState().setRightCollapsed(false)
+      })
+      expect(rightPanelHandle.resize).toHaveBeenCalledTimes(1)
     })
   })
 
@@ -231,12 +277,48 @@ describe("CanvasShell", () => {
       expect(wrapper).toHaveStyle({ opacity: "0" })
     })
 
-    it("targets opacity:0 on the wrapper when right rail is collapsed", () => {
+    it("keeps the right wrapper visible when collapsed, because the rail lives in it", () => {
       act(() => {
         useCanvasLayoutStore.getState().setRightCollapsed(true)
       })
       renderWithProviders(<CanvasShell />)
       const wrapper = screen.getByTestId("canvas-right-wrapper")
+      // Collapsed now means "shrunk to the activity rail". Fading the wrapper
+      // out would hide the very column that keeps the panels discoverable.
+      expect(wrapper).toHaveStyle({ opacity: "1" })
+    })
+
+    it("tells the side panels to draw rail-only while the column is collapsed", () => {
+      renderWithProviders(<CanvasShell />)
+      expect(screen.getByTestId("side-panels")).not.toHaveAttribute("data-rail-only")
+
+      act(() => {
+        useCanvasLayoutStore.getState().setRightCollapsed(true)
+      })
+      // The shell shrinks the column; the workbench inside it is what actually
+      // drops the panel body, so the flag has to reach it.
+      expect(screen.getByTestId("side-panels")).toHaveAttribute("data-rail-only", "true")
+    })
+
+    it("does not ask for rail-only when the whole column is going away", () => {
+      useSettingsStore.setState({ settings: { workbenchRailPersistent: false } as never })
+      act(() => {
+        useCanvasLayoutStore.getState().setRightCollapsed(true)
+      })
+      renderWithProviders(<CanvasShell />)
+      // With no persistent rail the column collapses to zero and the workbench
+      // unmounts with it — a rail-only render would be a contradiction.
+      expect(screen.getByTestId("side-panels")).not.toHaveAttribute("data-rail-only")
+    })
+
+    it("targets opacity:0 on the right wrapper once the persistent rail is off", () => {
+      useSettingsStore.setState({ settings: { workbenchRailPersistent: false } as never })
+      act(() => {
+        useCanvasLayoutStore.getState().setRightCollapsed(true)
+      })
+      renderWithProviders(<CanvasShell />)
+      const wrapper = screen.getByTestId("canvas-right-wrapper")
+      // motion.div writes the animate target into the inline style synchronously.
       expect(wrapper).toHaveStyle({ opacity: "0" })
     })
   })

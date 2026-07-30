@@ -24,7 +24,16 @@ jest.mock("@/components/ui/resizable", () => {
     resize: (size: number | string) => void
   }
 
+  // Shared between the mock group and the mock panel so a test can reproduce
+  // the real library's own behaviour: "a collapsible panel will collapse when
+  // its size is less than `minSize`". That happens *inside* the drag, with no
+  // imperative call — which is exactly the case the dock used to miss.
+  const collapsedByDrag: Record<string, boolean> = {}
+
   return {
+    __setCollapsedByDrag: (id: string, value: boolean) => {
+      collapsedByDrag[id] = value
+    },
     ResizablePanelGroup: ({
       children,
       onLayoutChanged,
@@ -49,6 +58,27 @@ jest.mock("@/components/ui/resizable", () => {
           data-testid="resize-dock-collapsed"
           onClick={() => onLayoutChanged?.({ "artifact-dock": 0 })}
         />
+        {/* What the real library does on its own when a drag crosses `minSize`:
+            the panel is already collapsed by the time the layout is reported. */}
+        <button
+          type="button"
+          data-testid="drag-dock-shut"
+          onClick={() => {
+            collapsedByDrag["artifact-dock"] = true
+            onLayoutChanged?.({ "artifact-dock": 3.75 })
+          }}
+        />
+        {/* Mid-drag layout reports at the widths the release-snap tests need.
+            The real divider produces a stream of these; one is enough to leave
+            the dock at a given width when the pointer comes up. */}
+        {[10, 25, 35.5, 42].map((percent) => (
+          <button
+            key={percent}
+            type="button"
+            data-testid={`resize-dock-to-${percent}`}
+            onClick={() => onLayoutChanged?.({ "artifact-dock": percent })}
+          />
+        ))}
       </div>
     ),
     ResizablePanel: ({
@@ -57,6 +87,7 @@ jest.mock("@/components/ui/resizable", () => {
       defaultSize,
       minSize,
       maxSize,
+      collapsedSize,
       elementRef,
       panelRef,
     }: {
@@ -65,24 +96,32 @@ jest.mock("@/components/ui/resizable", () => {
       defaultSize?: number | string
       minSize?: number | string
       maxSize?: number | string
+      // Mirrors the real prop: the size a collapse settles at. Hardcoding "0%"
+      // here would have hidden the persistent rail entirely — the dock now
+      // collapses to the rail's width, not to nothing.
+      collapsedSize?: number | string
       elementRef?: React.Ref<HTMLDivElement>
       panelRef?: React.Ref<MockPanelHandle>
     }) => {
       const [size, setSize] = useState(defaultSize)
-      const collapsedRef = useRef(defaultSize === "0%")
+      const shut = collapsedSize ?? "0%"
+      const collapsedRef = useRef(defaultSize === shut)
       useImperativeHandle(panelRef, () => ({
         collapse: () => {
+          collapsedByDrag[id] = false
           collapsedRef.current = true
-          setSize("0%")
+          setSize(shut)
         },
         expand: () => {
+          collapsedByDrag[id] = false
           collapsedRef.current = false
           setSize(defaultSize)
         },
         getSize: () => ({ asPercentage: 0, inPixels: 0 }),
-        isCollapsed: () => collapsedRef.current,
+        isCollapsed: () => collapsedByDrag[id] || collapsedRef.current,
         resize: (nextSize) => {
-          collapsedRef.current = nextSize === 0 || nextSize === "0%"
+          collapsedByDrag[id] = false
+          collapsedRef.current = nextSize === 0 || nextSize === shut
           setSize(nextSize)
         },
       }))
@@ -101,11 +140,24 @@ jest.mock("@/components/ui/resizable", () => {
     ResizableHandle: ({
       className,
       onDoubleClick,
+      // Forwarded because the release-snap hangs off them: the divider decides
+      // where the panel lands on `pointerup`, reading whether the drag began
+      // from the rail on `pointerdown`.
+      onPointerDown,
+      onPointerUp,
     }: {
       className?: string
       onDoubleClick?: () => void
+      onPointerDown?: () => void
+      onPointerUp?: () => void
     }) => (
-      <div data-testid="resizable-handle" className={className} onDoubleClick={onDoubleClick} />
+      <div
+        data-testid="resizable-handle"
+        className={className}
+        onDoubleClick={onDoubleClick}
+        onPointerDown={onPointerDown}
+        onPointerUp={onPointerUp}
+      />
     ),
   }
 })
@@ -116,7 +168,9 @@ jest.mock("@/components/ui/resizable", () => {
 // Literal attribute name rather than the imported constant — a jest.mock
 // factory referencing a module-scope import hits the TDZ trap.
 jest.mock("./artifact-dock", () => ({
-  ArtifactDock: () => <div data-testid="dock" data-pro-ide-region="" />,
+  ArtifactDock: ({ railOnly }: { railOnly?: boolean }) => (
+    <div data-testid="dock" data-rail-only={railOnly ? "true" : undefined} data-pro-ide-region="" />
+  ),
 }))
 
 jest.mock("./artifact-panel", () => ({
@@ -138,6 +192,7 @@ import { useBreakpoint } from "@/hooks/ui"
 import { useArtifactStore } from "@/stores/artifact/artifact-store"
 import { useArtifactDockLayoutStore } from "@/stores/artifact/artifact-dock-layout-store"
 import { useChatStore } from "@/stores/chat"
+import { useSettingsStore } from "@/stores/settings/settings-store"
 
 const SESSION = "session-1"
 import {
@@ -153,6 +208,9 @@ beforeEach(() => {
   localStorage.clear()
   useBreakpointMock.mockReturnValue("desktop")
   __resetCodeServerPaneManagerForTesting()
+  // The persistent rail is a settings field defaulting to on; start every test
+  // from a clean settings object so one that switches it off cannot leak.
+  useSettingsStore.setState({ settings: {} as never })
   act(() => {
     useArtifactDockLayoutStore.getState().resetLayout()
     // Tabs and the active artifact are bucketed per conversation.
@@ -179,9 +237,43 @@ describe("ArtifactWorkspaceDock", () => {
     expect(screen.queryByTestId("sheet-panel")).not.toBeInTheDocument()
   })
 
-  it("keeps nothing mounted behind a collapsed dock, but only after it has retracted", async () => {
+  it("drops the panel body behind a collapsed dock, but only after it has retracted", async () => {
     jest.useFakeTimers()
     try {
+      act(() => useArtifactDockLayoutStore.getState().setDockCollapsed(false))
+      render(
+        <ArtifactWorkspaceDock>
+          <div data-testid="chat" />
+        </ArtifactWorkspaceDock>
+      )
+      expect(screen.getByTestId("dock")).not.toHaveAttribute("data-rail-only")
+
+      act(() => useArtifactDockLayoutStore.getState().setDockCollapsed(true))
+
+      // Still showing its body through the collapse animation: `animateDockResize`
+      // pins the content's width so the shrinking shell wipes it, and dropping
+      // it on the same frame would leave that animation wiping a blank box.
+      expect(screen.getByTestId("dock")).not.toHaveAttribute("data-rail-only")
+
+      act(() => jest.advanceTimersByTime(400))
+
+      // Once retracted the body must actually go: a zero-width dock used to keep
+      // Monaco, the chat pane and the embedded browser alive — and the browser
+      // holds a process-wide webview lease released only on unmount. The shell
+      // itself stays so the activity rail can keep drawing.
+      expect(screen.getByTestId("dock")).toHaveAttribute("data-rail-only", "true")
+
+      act(() => useArtifactDockLayoutStore.getState().setDockCollapsed(false))
+      expect(screen.getByTestId("dock")).not.toHaveAttribute("data-rail-only")
+    } finally {
+      jest.useRealTimers()
+    }
+  })
+
+  it("unmounts the dock entirely when the persistent rail is switched off", async () => {
+    jest.useFakeTimers()
+    try {
+      useSettingsStore.setState({ settings: { workbenchRailPersistent: false } as never })
       act(() => useArtifactDockLayoutStore.getState().setDockCollapsed(false))
       render(
         <ArtifactWorkspaceDock>
@@ -191,21 +283,12 @@ describe("ArtifactWorkspaceDock", () => {
       expect(screen.getByTestId("dock")).toBeInTheDocument()
 
       act(() => useArtifactDockLayoutStore.getState().setDockCollapsed(true))
-
-      // Still mounted through the collapse animation: `animateDockResize` pins
-      // the content's width so the shrinking shell wipes it, and unmounting on
-      // the same frame would leave that animation wiping a blank box.
-      expect(screen.getByTestId("dock")).toBeInTheDocument()
-
       act(() => jest.advanceTimersByTime(400))
 
-      // Once retracted it must actually go: a zero-width dock used to keep
-      // Monaco, the chat pane and the embedded browser alive — and the browser
-      // holds a process-wide webview lease released only on unmount.
+      // No rail to keep on screen, so the pre-minibar contract holds: nothing
+      // survives behind a dock collapsed to zero width.
       expect(screen.queryByTestId("dock")).not.toBeInTheDocument()
-
-      act(() => useArtifactDockLayoutStore.getState().setDockCollapsed(false))
-      expect(screen.getByTestId("dock")).toBeInTheDocument()
+      expect(screen.getByTestId("resizable-panel-artifact-dock")).toHaveAttribute("data-size", "0%")
     } finally {
       jest.useRealTimers()
     }
@@ -329,6 +412,114 @@ describe("ArtifactWorkspaceDock", () => {
     expect(useArtifactDockLayoutStore.getState().dockSize).toBe(42)
   })
 
+  it("records a drag that shut the dock, so the next toggle is not a dead press", () => {
+    act(() => useArtifactDockLayoutStore.getState().setDockCollapsed(false))
+    render(
+      <ArtifactWorkspaceDock>
+        <div data-testid="chat" />
+      </ArtifactWorkspaceDock>
+    )
+
+    // `react-resizable-panels` collapses the panel itself once a drag crosses
+    // `minSize`. Nothing used to write that back, so the dock sat visually shut
+    // while the store still said "open" — and the next ⌘J / header toggle /
+    // Views-menu press spent itself collapsing an already-collapsed panel and
+    // looked broken. Only the second press did anything.
+    act(() => screen.getByTestId("drag-dock-shut").click())
+
+    expect(useArtifactDockLayoutStore.getState().dockCollapsed).toBe(true)
+    // The width the drag passed through is not persisted as a real width — it
+    // is the collapse itself.
+    expect(useArtifactDockLayoutStore.getState().dockSize).toBe(34)
+
+    act(() => useArtifactDockLayoutStore.getState().toggleDock())
+    expect(useArtifactDockLayoutStore.getState().dockCollapsed).toBe(false)
+  })
+
+  describe("release snap", () => {
+    // The magnet is a physical 24px, so it only becomes a percentage once the
+    // group has measured. jsdom reports every width as 0.
+    function withGroupWidth(px: number) {
+      return jest.spyOn(HTMLElement.prototype, "offsetWidth", "get").mockReturnValue(px)
+    }
+
+    function dragTo(percent: number) {
+      const handle = screen.getByTestId("resizable-handle")
+      act(() => handle.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true })))
+      act(() => screen.getByTestId(`resize-dock-to-${percent}`).click())
+      act(() => handle.dispatchEvent(new MouseEvent("pointerup", { bubbles: true })))
+    }
+
+    it("clicks a drop near a width preset into place", () => {
+      const offsetWidth = withGroupWidth(1280)
+      act(() => useArtifactDockLayoutStore.getState().setDockCollapsed(false))
+      render(
+        <ArtifactWorkspaceDock>
+          <div data-testid="chat" />
+        </ArtifactWorkspaceDock>
+      )
+
+      // 35.5% sits 1.5% from the compact profile's narrow preset (34%), which on
+      // a 1280px group is 19px — inside the 24px magnet.
+      dragTo(35.5)
+
+      expect(useArtifactDockLayoutStore.getState().dockSize).toBe(34)
+      offsetWidth.mockRestore()
+    })
+
+    it("leaves a deliberate width where the user put it", () => {
+      const offsetWidth = withGroupWidth(1280)
+      act(() => useArtifactDockLayoutStore.getState().setDockCollapsed(false))
+      render(
+        <ArtifactWorkspaceDock>
+          <div data-testid="chat" />
+        </ArtifactWorkspaceDock>
+      )
+
+      dragTo(42)
+
+      expect(useArtifactDockLayoutStore.getState().dockSize).toBe(42)
+      offsetWidth.mockRestore()
+    })
+
+    it("reopens to the remembered width when the drag starts from the rail", () => {
+      const offsetWidth = withGroupWidth(1280)
+      act(() => {
+        useArtifactDockLayoutStore.getState().setDockSize(45)
+        useArtifactDockLayoutStore.getState().setDockCollapsed(true)
+      })
+      render(
+        <ArtifactWorkspaceDock>
+          <div data-testid="chat" />
+        </ArtifactWorkspaceDock>
+      )
+      expect(useArtifactDockLayoutStore.getState().dockCollapsed).toBe(true)
+
+      // Barely clearing the floor still means "put it back", not "settle here".
+      dragTo(25)
+
+      const state = useArtifactDockLayoutStore.getState()
+      expect(state.dockCollapsed).toBe(false)
+      expect(state.dockSize).toBe(45)
+      offsetWidth.mockRestore()
+    })
+
+    it("stays on the rail when the drag never clears the floor", () => {
+      const offsetWidth = withGroupWidth(1280)
+      act(() => useArtifactDockLayoutStore.getState().setDockCollapsed(true))
+      render(
+        <ArtifactWorkspaceDock>
+          <div data-testid="chat" />
+        </ArtifactWorkspaceDock>
+      )
+
+      dragTo(10)
+
+      expect(useArtifactDockLayoutStore.getState().dockCollapsed).toBe(true)
+      offsetWidth.mockRestore()
+    })
+  })
+
   it("persists a workspace-profile drag below the artifact floor", () => {
     // jsdom reports every width as 0, and the workspace floor is only a
     // percentage once the group's width is known.
@@ -403,7 +594,9 @@ describe("ArtifactWorkspaceDock", () => {
       </ArtifactWorkspaceDock>
     )
 
-    expect(screen.getByTestId("resizable-panel-artifact-dock")).toHaveAttribute("data-size", "0%")
+    // Collapsed means "shrunk to the activity rail", not "gone" — the rail is
+    // what keeps the right-hand panels discoverable.
+    expect(screen.getByTestId("resizable-panel-artifact-dock")).toHaveAttribute("data-size", "48px")
 
     act(() => useArtifactDockLayoutStore.getState().setDockCollapsed(false))
     const dockPanel = screen.getByTestId("resizable-panel-artifact-dock")
@@ -418,7 +611,7 @@ describe("ArtifactWorkspaceDock", () => {
     await waitFor(() => expect(dockPanel.style.transitionProperty).toBe(""))
 
     act(() => useArtifactDockLayoutStore.getState().setDockCollapsed(true))
-    expect(dockPanel).toHaveAttribute("data-size", "0%")
+    expect(dockPanel).toHaveAttribute("data-size", "48px")
     expect(dockPanel.style.transitionProperty).toBe("flex-grow")
   })
 
@@ -482,7 +675,7 @@ describe("ArtifactWorkspaceDock", () => {
       act(() => useArtifactDockLayoutStore.getState().setDockCollapsed(true))
 
       // The size change still lands — it just lands in one frame.
-      expect(dockPanel).toHaveAttribute("data-size", "0%")
+      expect(dockPanel).toHaveAttribute("data-size", "48px")
       expect(dockPanel.style.transitionProperty).toBe("")
       expect(body.style.width).toBe("")
 
@@ -503,7 +696,28 @@ describe("ArtifactWorkspaceDock", () => {
     )
     const handle = screen.getByTestId("resizable-handle")
 
-    // Collapsed: a hard `hidden` removed the divider before the dock had
+    // Over a persistent rail the divider stays fully live even while collapsed:
+    // dragging this edge outward is the gesture that opens the minibar, so
+    // fading or disabling it here would make that impossible.
+    expect(handle.className).not.toContain("opacity-0")
+    expect(handle.className).toContain("transition-[width,opacity]")
+    expect(handle.className).not.toContain("hidden")
+
+    act(() => useArtifactDockLayoutStore.getState().setDockCollapsed(false))
+
+    expect(handle.className).not.toContain("opacity-0")
+  })
+
+  it("fades the divider away only when there is no rail left to drag", () => {
+    useSettingsStore.setState({ settings: { workbenchRailPersistent: false } as never })
+    render(
+      <ArtifactWorkspaceDock>
+        <div data-testid="chat" />
+      </ArtifactWorkspaceDock>
+    )
+    const handle = screen.getByTestId("resizable-handle")
+
+    // Collapsed to zero: a hard `hidden` removed the divider before the dock had
     // finished retracting, and popped it back over a zero-width dock on expand.
     expect(handle.className).toContain("opacity-0")
     expect(handle.className).toContain("transition-[width,opacity]")

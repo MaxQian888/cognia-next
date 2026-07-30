@@ -203,6 +203,38 @@ describe("CanvasSidePanels", () => {
     ).toBe("history")
   })
 
+  it("passes the shell's rail-only state through to the workbench", async () => {
+    // The Canvas shell shrinks its own column to the rail; the workbench has to
+    // be told, or it keeps drawing a panel body inside a column that is no
+    // longer wide enough for one — and reports itself visible to any panel
+    // asking, which is what made plugin panels claim visibility while the whole
+    // column was closed.
+    window.localStorage.setItem(
+      "cognia-canvas-feature-flags-v1",
+      JSON.stringify({ "contextWorkbench.v1": true })
+    )
+    seedDocument("doc-1")
+    renderWithProviders(<CanvasSidePanels railOnly />)
+
+    expect(screen.getByTestId("context-workbench-activity-rail")).toHaveAttribute(
+      "data-rail-only",
+      "true"
+    )
+  })
+
+  it("draws the full workbench when the column is not shrunk", async () => {
+    window.localStorage.setItem(
+      "cognia-canvas-feature-flags-v1",
+      JSON.stringify({ "contextWorkbench.v1": true })
+    )
+    seedDocument("doc-1")
+    renderWithProviders(<CanvasSidePanels />)
+
+    expect(screen.getByTestId("context-workbench-activity-rail")).not.toHaveAttribute(
+      "data-rail-only"
+    )
+  })
+
   it("resets the canvas shell layout from the Context Workbench layout menu", async () => {
     window.localStorage.setItem(
       "cognia-canvas-feature-flags-v1",

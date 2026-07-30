@@ -13,6 +13,13 @@ export {
 } from "./avatar"
 export { captureScreenshot } from "./screenshot"
 export {
+  PANEL_SNAP_MAGNET_PX,
+  magnetAsPercent,
+  snapPanelSize,
+  type PanelSnapOptions,
+  type PanelSnapResult,
+} from "./panel-snap"
+export {
   MOBILE_EASE,
   MOBILE_DURATION,
   STAGGER_CHILD,

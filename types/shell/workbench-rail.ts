@@ -15,6 +15,16 @@
 
 import { CONTEXT_ACTIVITY_RAIL_ORDER } from "@/types/context-workbench"
 
+/**
+ * The rail's width in px — the `w-12` the workbench draws, named because it is
+ * now also a *layout* number every host needs: it is what a collapsed panel
+ * shrinks to when the rail is persistent, so `ResizablePanel.collapsedSize`,
+ * the collapse animation's target and the workbench's own class all have to
+ * agree. Lives in this pure module rather than beside the icon map so the chat
+ * dock can read it without pulling lucide into its module graph.
+ */
+export const WORKBENCH_RAIL_WIDTH_PX = 48
+
 /** User customization of the workbench activity rail. */
 export interface WorkbenchRailLayout {
   /**

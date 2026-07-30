@@ -208,9 +208,10 @@ describe("SidebarCustomizer — rail side", () => {
 
   it("is offered in the browser too, which also honours the stored edge", () => {
     // `desktop-app-shell.tsx` applies `sidebarSide` for every non-mobile
-    // platform. Hiding the toggle on web left those users with the new
-    // right-edge default, no way back, and no explanation.
+    // platform, so hiding the toggle on web would strand anyone who moved the
+    // rail there with no way back and no explanation.
     platformValue = "web"
+    setLayout(["workflows"], [], "right")
     renderCustomizer()
     expect(sideGroup()).toBeInTheDocument()
     fireEvent.click(screen.getByRole("radio", { name: "customize.sideLeft" }))

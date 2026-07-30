@@ -56,6 +56,8 @@ const mockFleet = {
   isIslandWindowOpen: jest.fn(),
   islandListMonitors: jest.fn(),
   islandSetMonitor: jest.fn(),
+  islandGetHideOnFullscreen: jest.fn(),
+  islandSetHideOnFullscreen: jest.fn(),
   islandDebugGeometry: jest.fn(),
 }
 jest.mock("@/lib/tauri/fleet", () => ({
@@ -76,6 +78,8 @@ jest.mock("@/lib/tauri/fleet", () => ({
   isIslandWindowOpen: () => mockFleet.isIslandWindowOpen(),
   islandListMonitors: () => mockFleet.islandListMonitors(),
   islandSetMonitor: (name: string | null) => mockFleet.islandSetMonitor(name),
+  islandGetHideOnFullscreen: () => mockFleet.islandGetHideOnFullscreen(),
+  islandSetHideOnFullscreen: (hide: boolean) => mockFleet.islandSetHideOnFullscreen(hide),
   islandDebugGeometry: () => mockFleet.islandDebugGeometry(),
 }))
 
@@ -159,6 +163,8 @@ beforeEach(() => {
     },
   ])
   mockFleet.islandSetMonitor.mockResolvedValue(true)
+  mockFleet.islandGetHideOnFullscreen.mockResolvedValue(false)
+  mockFleet.islandSetHideOnFullscreen.mockResolvedValue(true)
   mockHooks.readFleetHooksStatus.mockResolvedValue(hooksStatus("not-installed", "missing"))
 })
 
@@ -418,6 +424,49 @@ describe("FleetSection", () => {
     )
     fireEvent.click(screen.getByTestId("fleet-island-switch"))
     await waitFor(() => expect(mockFleet.closeIslandWindow).toHaveBeenCalled())
+  })
+
+  describe("hide under full-screen apps", () => {
+    it("ships off, so the island floats over other apps' full-screen Spaces", async () => {
+      await renderLoaded()
+      expect(
+        screen.getByTestId("fleet-island-fullscreen-switch").getAttribute("aria-checked")
+      ).toBe("false")
+    })
+
+    it("reflects the persisted opt-in", async () => {
+      mockFleet.islandGetHideOnFullscreen.mockResolvedValue(true)
+      await renderLoaded()
+      expect(
+        screen.getByTestId("fleet-island-fullscreen-switch").getAttribute("aria-checked")
+      ).toBe("true")
+    })
+
+    it("persists the opt-in and reports it saved", async () => {
+      await renderLoaded()
+      fireEvent.click(screen.getByTestId("fleet-island-fullscreen-switch"))
+      await waitFor(() => expect(mockFleet.islandSetHideOnFullscreen).toHaveBeenCalledWith(true))
+      await waitFor(() =>
+        expect(
+          screen.getByTestId("fleet-island-fullscreen-switch").getAttribute("aria-checked")
+        ).toBe("true")
+      )
+      expect(toastSuccess).toHaveBeenCalled()
+    })
+
+    // The switch is optimistic so it doesn't lag the round-trip; a Rust refusal
+    // has to take it back, or the UI would claim a preference that isn't stored.
+    it("reverts the switch when Rust refuses the write", async () => {
+      mockFleet.islandSetHideOnFullscreen.mockResolvedValue(false)
+      await renderLoaded()
+      fireEvent.click(screen.getByTestId("fleet-island-fullscreen-switch"))
+      await waitFor(() => expect(mockFleet.islandSetHideOnFullscreen).toHaveBeenCalledWith(true))
+      await waitFor(() =>
+        expect(
+          screen.getByTestId("fleet-island-fullscreen-switch").getAttribute("aria-checked")
+        ).toBe("false")
+      )
+    })
   })
 
   it("hides the display picker with a single monitor", async () => {

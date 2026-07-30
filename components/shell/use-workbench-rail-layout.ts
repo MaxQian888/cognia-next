@@ -59,6 +59,20 @@ export function workbenchRailLayoutOf(
   }
 }
 
+/**
+ * Whether the activity rail stays on screen when the panel body is closed.
+ *
+ * A one-field selector rather than part of {@link useWorkbenchRailLayout},
+ * because the hosts that need it (the chat dock's `ResizablePanel`, Canvas, the
+ * workflow editor) only want this boolean and must not re-render on every
+ * reorder of the rail. Defaults to on: the rail is what makes the right-hand
+ * panels discoverable at all, and the pre-minibar behaviour — a column that
+ * vanishes completely — is the opt-out.
+ */
+export function useWorkbenchRailPersistent(): boolean {
+  return useSettingsStore((s) => s.settings?.workbenchRailPersistent ?? true)
+}
+
 export function useWorkbenchRailLayout(): UseWorkbenchRailLayout {
   const settings = useSettingsStore((s) => s.settings)
   const save = useSettingsStore((s) => s.save)

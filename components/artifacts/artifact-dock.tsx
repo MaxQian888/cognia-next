@@ -65,15 +65,28 @@ import { resolveContextCapabilities } from "@/lib/context-workbench/capabilities
 import { useContextCommentBadge } from "@/hooks/context-workbench/use-context-comment-badge"
 import { BrowserPreviewPane } from "@/components/browser/browser-preview-pane"
 
-export function ArtifactDock() {
+/**
+ * The activity that carries the dock's unread dot, per surface.
+ *
+ * `notifyNewArtifact` names no panel — it only knows something arrived — so the
+ * marker goes wherever the rail would actually land, which is the surface's
+ * lowest-ordered panel. Those differ: the artifact surface opens on `preview`
+ * (`preview-run`), while the session surface's first panel is the artifact list
+ * (`review`). One shared constant put the dot on the session surface's *browser*
+ * icon, pointing at a panel that has nothing to do with the new artifact.
+ */
+const ARTIFACT_ATTENTION_ACTIVITY = "preview-run"
+const SESSION_ATTENTION_ACTIVITY = "review"
+
+export function ArtifactDock({ railOnly }: { railOnly?: boolean }) {
   const activeArtifactId = useActiveArtifactId()
   // The only branch in the dock: which resource backs the one workbench shell.
   // The browser used to force a surface swap because it is session-scoped; it
   // is now a panel on both surfaces, so opening it keeps your artifact context.
   return activeArtifactId ? (
-    <ArtifactContextWorkbench artifactId={activeArtifactId} />
+    <ArtifactContextWorkbench artifactId={activeArtifactId} railOnly={railOnly} />
   ) : (
-    <SessionContextWorkbench />
+    <SessionContextWorkbench railOnly={railOnly} />
   )
 }
 
@@ -235,9 +248,11 @@ export interface SheetHost {
 export function ArtifactContextWorkbench({
   artifactId,
   mobile,
+  railOnly,
 }: {
   artifactId: string
   mobile?: SheetHost
+  railOnly?: boolean
 }) {
   const tWorkbench = useTranslations("contextWorkbench")
   const workbenchInstanceId = useContextWorkbenchInstanceId("artifact")
@@ -247,6 +262,10 @@ export function ArtifactContextWorkbench({
   const hadPendingReview = useRef(false)
   const activeSessionId = useChatStore((state) => state.activeSessionId)
   const setDockCollapsed = useArtifactDockLayoutStore((state) => state.setDockCollapsed)
+  // Something arrived while the dock was dismissed. With a persistent rail the
+  // marker belongs on the rail itself — that is now the thing the user is
+  // looking at — rather than only on the chat header's toggle.
+  const unreadArtifact = useArtifactDockLayoutStore((state) => state.unreadArtifact)
   const smartReveal = useContextWorkbenchStore((state) => state.smartReveal)
   const scopeKey = `${workbenchInstanceId}::artifact:${artifactId}`
   // The session surface's own scope key. Session-scoped panels (browser,
@@ -373,6 +392,10 @@ export function ArtifactContextWorkbench({
               )
             }
             asideTargetSessionId={activeSessionId ?? undefined}
+            // A conversation can own several named asides; an artifact / canvas
+            // / project-file chat is a property OF that resource and stays
+            // single.
+            multiAside
           />
         ),
       },
@@ -551,7 +574,7 @@ export function ArtifactContextWorkbench({
   // The id outlived its artifact (evicted by the persist cap, or cleared in
   // another tab). Fall through to the session workbench so the dock keeps a
   // single shell.
-  if (!artifact) return <SessionContextWorkbench mobile={mobile} />
+  if (!artifact) return <SessionContextWorkbench mobile={mobile} railOnly={railOnly} />
   const resource: ContextResource = {
     kind: "artifact",
     artifactId,
@@ -587,6 +610,8 @@ export function ArtifactContextWorkbench({
       sessionScopeKey={sessionScopeKey}
       onCollapse={() => setDockCollapsed(true)}
       onEnsureVisible={() => setDockCollapsed(false)}
+      railOnly={railOnly}
+      attentionActivity={unreadArtifact ? ARTIFACT_ATTENTION_ACTIVITY : undefined}
       onModeWidthHint={dockWidthHint}
       resolvedMode={resolvedDockMode}
       onResetLayout={resetDockLayout}
@@ -678,7 +703,13 @@ function ArtifactSelectionCommentPanel({
  * workbench chrome the artifact surface uses, so the chat right rail never
  * changes shape.
  */
-export function SessionContextWorkbench({ mobile }: { mobile?: SheetHost }) {
+export function SessionContextWorkbench({
+  mobile,
+  railOnly,
+}: {
+  mobile?: SheetHost
+  railOnly?: boolean
+}) {
   const tWorkbench = useTranslations("contextWorkbench")
   const workbenchInstanceId = useContextWorkbenchInstanceId("artifact")
   const activeSessionId = useChatStore((state) => state.activeSessionId)
@@ -692,6 +723,7 @@ export function SessionContextWorkbench({ mobile }: { mobile?: SheetHost }) {
   )
   const unresolvedCommentCount = useContextCommentBadge("session", activeSessionId)
   const setDockCollapsed = useArtifactDockLayoutStore((state) => state.setDockCollapsed)
+  const unreadArtifact = useArtifactDockLayoutStore((state) => state.unreadArtifact)
   const workspaceAvailable = hasWorkspaceFsBackend()
   const workspaceLayout = mobile?.panelMode === "mobile" ? "mobile" : "desktop"
   const dockWidthHint = useDockWidthHint()
@@ -858,6 +890,8 @@ export function SessionContextWorkbench({ mobile }: { mobile?: SheetHost }) {
       headerLeading={hasArtifactTabs ? <ArtifactTabStrip className="flex-1" /> : undefined}
       onCollapse={() => setDockCollapsed(true)}
       onEnsureVisible={() => setDockCollapsed(false)}
+      railOnly={railOnly}
+      attentionActivity={unreadArtifact ? SESSION_ATTENTION_ACTIVITY : undefined}
       onModeWidthHint={dockWidthHint}
       resolvedMode={resolvedDockMode}
       onResetLayout={resetDockLayout}

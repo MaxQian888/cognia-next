@@ -15,6 +15,11 @@
 //! it flips do we pay for a `CGWindowListCopyWindowInfo` sweep to distinguish a
 //! genuine full-screen Space from a user who simply auto-hides their menu bar.
 //!
+//! Yielding is **opt-in** (`IslandConfig::hide_on_fullscreen`, default off) —
+//! it shipped unconditional first and read as the island being broken anywhere
+//! outside Cognia's own desktop. `island_anchor` short-circuits on the flag, so
+//! nothing in this module runs at all unless the user turned it on.
+//!
 //! ## Why polling and not `NSWorkspaceActiveSpaceDidChangeNotification`
 //!
 //! Registering an AppKit notification observer from Rust needs a block or a

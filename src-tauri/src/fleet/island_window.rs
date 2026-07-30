@@ -126,10 +126,12 @@ pub struct IslandGeometry {
     /// Top safe-area inset (logical px) of the island's current display —
     /// the notch height on built-in notched displays, 0 everywhere else.
     pub top_inset: f64,
-    /// Whether a full-screen app currently owns the island's display. The
-    /// renderer suppresses the idle pill entirely in this regime (the top strip
-    /// belongs to that app), and only materializes when a session needs the
-    /// user. See `island_space`.
+    /// Whether the island should withdraw because a full-screen app owns its
+    /// display. This is the *effective* flag, not the raw verdict: it is only
+    /// ever true when the user turned [`IslandConfig::hide_on_fullscreen`] on.
+    /// While it is true the renderer suppresses the idle pill entirely (the top
+    /// strip belongs to that app) and only materializes when a session needs the
+    /// user. See `island_space` for the verdict itself.
     pub fullscreen: bool,
 }
 
@@ -148,6 +150,20 @@ pub struct IslandConfig {
     /// broken" rather than "you closed the window". `#[serde(default)]` keeps
     /// config files written before this field readable (they restore closed).
     pub open: bool,
+    /// Withdraw the island completely while a full-screen app owns its display?
+    ///
+    /// Default **false**: the island floats over every Space (that is what the
+    /// panel's `CanJoinAllSpaces | FullScreenAuxiliary` collection behavior is
+    /// for) and a user who opened a status overlay expects to see it there too.
+    /// This shipped as unconditional behavior first, and read as "the island only
+    /// works on Cognia's own desktop" — a bug, not a courtesy. Turning it on
+    /// restores yielding the top strip, for people watching video or presenting;
+    /// even then a session that needs the user still materializes the island.
+    ///
+    /// Gating the flag here rather than in the renderer also skips
+    /// `island_space`'s `CGWindowListCopyWindowInfo` sweep entirely while it is
+    /// off, which is now the common case.
+    pub hide_on_fullscreen: bool,
 }
 
 fn island_config_path() -> Option<std::path::PathBuf> {
@@ -269,20 +285,30 @@ fn clamp_island_size(width: f64, height: f64, area_logical: (f64, f64)) -> (f64,
     (width.min(area_w).max(1.0), height.min(area_h).max(1.0))
 }
 
-/// The monitor the island should live on: the persisted preference when that
-/// monitor is still connected, else the primary.
-fn resolve_target_monitor<R: Runtime>(app: &AppHandle<R>) -> Option<tauri::Monitor> {
-    if let Some(name) = load_island_config().monitor {
+/// The monitor the island should live on: `preferred` when that monitor is
+/// still connected, else the primary. Takes the name rather than reading the
+/// config so a caller that already loaded it (every placement does — it needs
+/// `hide_on_fullscreen` from the same file) doesn't re-read from disk.
+fn resolve_monitor_named<R: Runtime>(
+    app: &AppHandle<R>,
+    preferred: Option<&str>,
+) -> Option<tauri::Monitor> {
+    if let Some(name) = preferred {
         if let Ok(monitors) = app.available_monitors() {
             if let Some(m) = monitors
                 .into_iter()
-                .find(|m| m.name().map(|n| n.as_str()) == Some(name.as_str()))
+                .find(|m| m.name().map(|n| n.as_str()) == Some(name))
             {
                 return Some(m);
             }
         }
     }
     app.primary_monitor().ok().flatten()
+}
+
+/// The monitor the island should live on, reading the persisted preference.
+fn resolve_target_monitor<R: Runtime>(app: &AppHandle<R>) -> Option<tauri::Monitor> {
+    resolve_monitor_named(app, load_island_config().monitor.as_deref())
 }
 
 /// `NSScreen.safeAreaInsets.top` (physical px) for the screen backing
@@ -366,7 +392,10 @@ fn raw_top_safe_inset<R: Runtime>(app: &AppHandle<R>, monitor: &tauri::Monitor) 
 }
 
 fn island_anchor<R: Runtime>(app: &AppHandle<R>) -> IslandAnchor {
-    let Some(monitor) = resolve_target_monitor(app) else {
+    // One config read serves both halves of the placement: which monitor to
+    // anchor to, and whether a full-screen app on it should hide the island.
+    let cfg = load_island_config();
+    let Some(monitor) = resolve_monitor_named(app, cfg.monitor.as_deref()) else {
         return IslandAnchor::fallback();
     };
     let scale = monitor.scale_factor();
@@ -386,7 +415,11 @@ fn island_anchor<R: Runtime>(app: &AppHandle<R>) -> IslandAnchor {
             h: frame.h,
             scale,
             top_inset: monitor_top_safe_inset(app, &monitor),
-            fullscreen: island_space::display_is_fullscreen(frame, work_y, scale),
+            // `&&` on purpose, not a helper taking both values: the left side
+            // must short-circuit, or the window sweep would run on every
+            // geometry tick for users who never asked the island to hide.
+            fullscreen: cfg.hide_on_fullscreen
+                && island_space::display_is_fullscreen(frame, work_y, scale),
         }
     }
     #[cfg(not(target_os = "macos"))]
@@ -786,6 +819,12 @@ pub struct IslandDisplayDebug {
     /// Free menu-bar probe: does the work area start below the frame top?
     pub menu_bar_occupies_top: bool,
     /// Full verdict, including the window sweep when the probe says hidden.
+    ///
+    /// Deliberately the RAW verdict, un-gated by
+    /// [`IslandConfig::hide_on_fullscreen`] — a diagnostics dump exists to show
+    /// what the machinery detected, and comparing this against
+    /// [`IslandDebugGeometry::geometry`]'s (gated) flag is how the preference's
+    /// effect is read off the dump.
     pub fullscreen: bool,
 }
 
@@ -927,6 +966,35 @@ pub async fn island_list_monitors(app: AppHandle) -> Result<Vec<IslandMonitorInf
             }
         })
         .collect())
+}
+
+/// Read the "hide while a full-screen app owns the display" preference.
+///
+/// Lives in `island-window.json` next to the monitor choice rather than in the
+/// renderer's settings row, because the placement path that consumes it runs in
+/// Rust and on the tray-toggle path never goes through a renderer at all.
+#[tauri::command]
+pub async fn island_get_hide_on_fullscreen() -> bool {
+    load_island_config().hide_on_fullscreen
+}
+
+/// Persist the "hide while a full-screen app owns the display" preference and
+/// push the new regime to a live island immediately.
+///
+/// Without the push the island would still correct itself — the hover monitor
+/// re-samples the geometry every few hundred ms — but a preference the user just
+/// flipped must take effect while they are still looking at the switch.
+#[tauri::command]
+pub async fn island_set_hide_on_fullscreen(app: AppHandle, hide: bool) -> Result<(), String> {
+    let mut cfg = load_island_config();
+    if cfg.hide_on_fullscreen != hide {
+        cfg.hide_on_fullscreen = hide;
+        save_island_config(&cfg)?;
+    }
+    if let Some(window) = app.get_webview_window(ISLAND_LABEL) {
+        reposition_island(&app, &window)?;
+    }
+    Ok(())
 }
 
 /// Persist the preferred monitor (`None` → follow the primary) and move a
@@ -1073,10 +1141,27 @@ mod tests {
         let cfg = IslandConfig {
             monitor: Some("DELL U2723QE".into()),
             open: true,
+            hide_on_fullscreen: true,
         };
         let json = serde_json::to_string(&cfg).unwrap();
         let back: IslandConfig = serde_json::from_str(&json).unwrap();
         assert_eq!(back, cfg);
+        assert!(json.contains("hideOnFullscreen"));
+    }
+
+    /// The island must float over full-screen Spaces unless the user asked it
+    /// not to. This is the whole fix: hiding there shipped unconditionally and
+    /// read as "the island only works on Cognia's own desktop".
+    #[test]
+    fn hiding_on_fullscreen_is_off_until_the_user_opts_in() {
+        assert!(!IslandConfig::default().hide_on_fullscreen);
+        // Config files written before the preference existed also restore to
+        // showing everywhere — no migration, the serde default carries it.
+        let legacy: IslandConfig = serde_json::from_str(r#"{"monitor":null,"open":true}"#).unwrap();
+        assert!(!legacy.hide_on_fullscreen);
+
+        let opted_in: IslandConfig = serde_json::from_str(r#"{"hideOnFullscreen":true}"#).unwrap();
+        assert!(opted_in.hide_on_fullscreen);
     }
 
     #[test]

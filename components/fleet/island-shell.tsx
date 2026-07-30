@@ -120,7 +120,8 @@ export function IslandShell() {
   // `topInset` is the notch height (logical px): the window spans the notch
   // strip (so slam-to-top hover still lands on the window) and the card is
   // padded below the inset so its content clears the camera housing.
-  // `fullscreen` says a full-screen app owns this display right now.
+  // `fullscreen` says the island should yield this display to a full-screen app
+  // — the raw Space verdict AND the user's opt-in, already combined by Rust.
   //
   // Both arrive two ways: as the return of every `island_resize` (so the very
   // first layout already knows the regime) and as a `fleet://island-geometry`
@@ -236,10 +237,14 @@ export function IslandShell() {
     setTucked(false)
   }
 
-  // Full-screen Space: the top strip belongs to that app. An idle status pill
-  // parked there is noise over a video / presentation / editor, and even the
-  // 6px tucked sliver is a visible black bar. So while a full-screen app owns
-  // this display the island withdraws COMPLETELY — nothing painted, window
+  // Full-screen Space, and only when the user asked for this: `geometry
+  // .fullscreen` arrives ALREADY gated by the "hide under full-screen apps"
+  // preference (`island_set_hide_on_fullscreen`), which ships OFF — the
+  // overlay's NSPanel floats over every Space by design, and withdrawing there
+  // unconditionally made the island look like it only worked on Cognia's own
+  // desktop. So this branch is opt-in, for people watching video or presenting.
+  //
+  // When it is on the island withdraws COMPLETELY — nothing painted, window
   // shrunk to a sliver and click-through — and materializes only when a session
   // actually needs the user. Hover reveal is deliberately not a way back in
   // here: slamming to the top of a full-screen app is how you reach that app's
