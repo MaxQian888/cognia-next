@@ -74,10 +74,11 @@ const DECIDE_TIMEOUT_MS: u64 = 800;
 /// being a memory hazard.
 const BODY_LIMIT_BYTES: usize = 16 * 1024 * 1024;
 
-/// Default for how long an SSE pump tolerates total silence from the upstream
-/// before giving up on the stream. Overridable per-install via
-/// `GatewayConfig::stream_idle_timeout_secs`; this is the value that field
-/// defaults to.
+/// How long an SSE pump tolerates total silence from the upstream before giving
+/// up on the stream. The live value is always read per-request from
+/// `GatewayConfig::stream_idle_timeout_secs`, whose default is produced by
+/// `types::default_stream_idle_timeout_secs`; this mirrors that default so the
+/// tests below exercise the shipped timing rather than an invented one.
 ///
 /// Streaming requests deliberately skip `apply_timeout` (a long generation is
 /// not a hung one) and `reqwest` here sets only a connect timeout, so an
@@ -91,6 +92,7 @@ const BODY_LIMIT_BYTES: usize = 16 * 1024 * 1024;
 /// protocols emit keepalives (Anthropic `event: ping`, OpenAI incremental
 /// chunks) far more often than that, so this fires only on a genuinely dead
 /// connection.
+#[cfg(test)]
 const STREAM_IDLE_TIMEOUT: Duration = Duration::from_secs(300);
 
 /// Why a stream was abandoned, in terms of the timeout that actually fired.
@@ -2879,6 +2881,19 @@ mod tests {
             .next()
             .expect("groq candidate");
         assert_eq!(up_gate_key(&candidate), "up:groq:sk-g");
+    }
+
+    #[test]
+    fn the_test_idle_timeout_still_matches_the_shipped_default() {
+        // `STREAM_IDLE_TIMEOUT` is `#[cfg(test)]`-only and hand-mirrors the
+        // default `GatewayConfig` carries. Nothing else ties the two together,
+        // so without this the tests below could go on asserting 300s timing
+        // long after the shipped default had moved — passing while proving
+        // nothing about what users run.
+        assert_eq!(
+            GatewayConfig::default().stream_idle_timeout(),
+            Some(STREAM_IDLE_TIMEOUT)
+        );
     }
 
     #[tokio::test(start_paused = true)]

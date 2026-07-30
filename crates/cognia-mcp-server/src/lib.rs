@@ -47,7 +47,9 @@ use parking_lot::Mutex;
 
 use automation_proxy::AutomationProxy;
 use cognia_automation::automation::dispatcher::Enforcement;
-use http_server::{spawn_server, ServerHandle};
+#[cfg(test)]
+use http_server::spawn_server;
+use http_server::{spawn_server_with_verifiers, ClientVerifier, ClientVerifierStore, ServerHandle};
 use orchestration_proxy::{OrchestrationEventSink, OrchestrationProxy, OrchestrationReply};
 use sidecar::SidecarProcess;
 use types::{ExternalBridgeSettings, McpServerError, McpServerStatus};
@@ -167,6 +169,75 @@ impl McpServerState {
             ));
         }
 
+        let verifiers = ClientVerifierStore::from_tokens(&[token])?;
+        self.start_with_verifier_store(
+            port,
+            verifiers,
+            settings_json,
+            sidecar_path,
+            automation,
+            orchestration_sink,
+        )
+        .await
+    }
+
+    /// Start with irreversible SHA-256 client credential verifiers. This is
+    /// the host-managed bridge path: plaintext credentials are shown once to
+    /// their client and never persisted by the server.
+    pub async fn start_with_verifiers(
+        &self,
+        port: u16,
+        verifiers: Vec<String>,
+        settings_json: String,
+        sidecar_path: String,
+        automation: Option<(AutomationHandle, Enforcement)>,
+        orchestration_sink: Option<OrchestrationEventSink>,
+    ) -> Result<u16, McpServerError> {
+        let store = ClientVerifierStore::from_hex(&verifiers)?;
+        self.start_with_verifier_store(
+            port,
+            store,
+            settings_json,
+            sidecar_path,
+            automation,
+            orchestration_sink,
+        )
+        .await
+    }
+
+    /// Start the host-managed listener with credential identity and scope
+    /// metadata. The verifier is irreversible; plaintext credentials never
+    /// cross this boundary.
+    pub async fn start_with_clients(
+        &self,
+        port: u16,
+        clients: Vec<ClientVerifier>,
+        settings_json: String,
+        sidecar_path: String,
+        automation: Option<(AutomationHandle, Enforcement)>,
+        orchestration_sink: Option<OrchestrationEventSink>,
+    ) -> Result<u16, McpServerError> {
+        let store = ClientVerifierStore::from_clients(&clients)?;
+        self.start_with_verifier_store(
+            port,
+            store,
+            settings_json,
+            sidecar_path,
+            automation,
+            orchestration_sink,
+        )
+        .await
+    }
+
+    async fn start_with_verifier_store(
+        &self,
+        port: u16,
+        verifiers: ClientVerifierStore,
+        settings_json: String,
+        sidecar_path: String,
+        automation: Option<(AutomationHandle, Enforcement)>,
+        orchestration_sink: Option<OrchestrationEventSink>,
+    ) -> Result<u16, McpServerError> {
         // Validate settings JSON early — we want a clear error, not a
         // cryptic sidecar crash on malformed env.
         let _settings: ExternalBridgeSettings = serde_json::from_str(&settings_json)
@@ -254,7 +325,8 @@ impl McpServerState {
         ));
 
         // Bind and spawn the axum listener.
-        let server_handle = spawn_server(port, token, Arc::clone(&sidecar), sessions).await?;
+        let server_handle =
+            spawn_server_with_verifiers(port, verifiers, Arc::clone(&sidecar), sessions).await?;
 
         let bound_port = server_handle.bound_port;
         let started_at = Utc::now().to_rfc3339();
@@ -270,6 +342,26 @@ impl McpServerState {
         }
 
         Ok(bound_port)
+    }
+
+    /// Replace the verifier set used by a running listener. Revocation and
+    /// rotation therefore take effect without a restart.
+    pub fn replace_client_verifiers(&self, verifiers: &[String]) -> Result<(), McpServerError> {
+        let inner = self.inner.lock();
+        let Some((server, ..)) = &inner.server else {
+            return Err(McpServerError::NotRunning);
+        };
+        server.client_verifiers.replace_hex(verifiers)
+    }
+
+    pub fn replace_bridge_clients(&self, clients: &[ClientVerifier]) -> Result<(), McpServerError> {
+        let inner = self.inner.lock();
+        let Some((server, ..)) = &inner.server else {
+            return Err(McpServerError::NotRunning);
+        };
+        server.client_verifiers.replace_clients(clients, true)?;
+        server.sessions.close_all();
+        Ok(())
     }
 
     // ── Orchestration reply plumbing ──────────────────────────────────────

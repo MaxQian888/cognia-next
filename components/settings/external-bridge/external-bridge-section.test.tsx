@@ -33,6 +33,7 @@ jest.mock("@/lib/external-bridge/tauri-control", () => ({
     port: null,
     startedAt: null,
   })),
+  isHostManagedBridgeAvailable: () => false,
   startMcpServer: (...args: unknown[]) => mockStartMcpServer(args[0]),
   restartMcpServer: (...args: unknown[]) => mockRestartMcpServer(args[0]),
   stopMcpServer: () => mockStopMcpServer(),

@@ -58,6 +58,31 @@ import {
 /** Function the caller injects so the server always sees fresh settings. */
 export type SettingsGetter = () => Promise<ExternalBridgeSettings | undefined>
 
+type BridgeRequestExtra = {
+  _meta?: Record<string, unknown>
+}
+
+async function scopedSettings(
+  settingsGetter: SettingsGetter,
+  extra: BridgeRequestExtra
+): Promise<ExternalBridgeSettings | undefined> {
+  const settings = await settingsGetter()
+  const advertisedScopes = extra._meta?.cogniaBridgeScopes
+  if (advertisedScopes === undefined) return settings
+  if (!Array.isArray(advertisedScopes)) {
+    return settings ? { ...settings, enabledScopes: [] } : settings
+  }
+  const allowed = new Set(
+    advertisedScopes.filter(
+      (scope): scope is BridgeScope =>
+        typeof scope === "string" && ALL_BRIDGE_SCOPES.includes(scope as BridgeScope)
+    )
+  )
+  return settings
+    ? { ...settings, enabledScopes: settings.enabledScopes.filter((scope) => allowed.has(scope)) }
+    : settings
+}
+
 export interface BuildServerOptions {
   serverInfo?: { name: string; version: string }
   settingsGetter: SettingsGetter
@@ -119,11 +144,11 @@ function registerWikiTools(server: McpServer, settingsGetter: SettingsGetter) {
         k: z.number().int().min(1).max(20).optional().describe("Result count (default 5)"),
       },
     },
-    async (args) =>
+    async (args, extra) =>
       runWithGate({
         tool: "wiki_search",
         scope: "wiki:cognia",
-        check: checkToolCall(await settingsGetter(), "wiki_search"),
+        check: checkToolCall(await scopedSettings(settingsGetter, extra), "wiki_search"),
         body: () => wikiSearch({ query: args.query, scope: args.scope, k: args.k }),
       })
   )
@@ -141,11 +166,11 @@ function registerWikiTools(server: McpServer, settingsGetter: SettingsGetter) {
       },
       inputSchema: { slug: z.string().describe("Article slug (from wiki_search results)") },
     },
-    async (args) =>
+    async (args, extra) =>
       runWithGate({
         tool: "wiki_read",
         scope: "wiki:cognia",
-        check: checkToolCall(await settingsGetter(), "wiki_read"),
+        check: checkToolCall(await scopedSettings(settingsGetter, extra), "wiki_read"),
         body: async () => {
           const article = await wikiRead({ slug: args.slug })
           if (!article) return { error: `wiki article '${args.slug}' not found` }
@@ -198,9 +223,9 @@ function registerRagTool(server: McpServer, settingsGetter: SettingsGetter) {
           .describe("Dynamic context-budget trimming; may shorten chunk content (default off)."),
       },
     },
-    async (args) => {
+    async (args, extra) => {
       const ragScope = args.scope ?? "all"
-      const settings = await settingsGetter()
+      const settings = await scopedSettings(settingsGetter, extra)
       // Per-call gate + audit label share one mapping (bridgeScopeForRagScope):
       // rag:twin for twin, rag:user-repo for user-repo, rag:cognia for
       // cognia-self/runtime/all — so a user-repo call is never mislabeled.
@@ -251,8 +276,8 @@ function registerRuntimeTool(server: McpServer, settingsGetter: SettingsGetter) 
         filter: z.record(z.string(), z.unknown()).optional(),
       },
     },
-    async (args) => {
-      const settings = await settingsGetter()
+    async (args, extra) => {
+      const settings = await scopedSettings(settingsGetter, extra)
       const check = checkRuntimeCall(settings, args.entityType)
       // The audit-log scope reflects what was actually checked even on
       // unknown entity types — the gate already mapped it to a scope or
@@ -325,11 +350,11 @@ function registerComputerUseTool(server: McpServer, settingsGetter: SettingsGett
         transition: z.enum(["down", "up"]).optional(),
       },
     },
-    async (args) =>
+    async (args, extra) =>
       runWithGate({
         tool: "computer_use",
         scope: "mcp:computer-use",
-        check: checkToolCall(await settingsGetter(), "computer_use"),
+        check: checkToolCall(await scopedSettings(settingsGetter, extra), "computer_use"),
         body: () => computerUse(args as Parameters<typeof computerUse>[0]),
       })
   )
@@ -366,11 +391,11 @@ function registerOrchestrationTools(server: McpServer, settingsGetter: SettingsG
         cwd: z.string().optional().describe("Working directory for the run."),
       },
     },
-    async (args) =>
+    async (args, extra) =>
       runWithGate({
         tool: "agent_dispatch",
         scope: "agent:dispatch",
-        check: checkToolCall(await settingsGetter(), "agent_dispatch"),
+        check: checkToolCall(await scopedSettings(settingsGetter, extra), "agent_dispatch"),
         body: () => agentDispatch(args as Parameters<typeof agentDispatch>[0]),
       })
   )
@@ -398,11 +423,11 @@ function registerOrchestrationTools(server: McpServer, settingsGetter: SettingsG
         timezone: z.string().optional().describe("IANA timezone for cron schedules."),
       },
     },
-    async (args) =>
+    async (args, extra) =>
       runWithGate({
         tool: "schedule_task",
         scope: "agent:dispatch",
-        check: checkToolCall(await settingsGetter(), "schedule_task"),
+        check: checkToolCall(await scopedSettings(settingsGetter, extra), "schedule_task"),
         body: () => scheduleTask(args as Parameters<typeof scheduleTask>[0]),
       })
   )
@@ -424,11 +449,11 @@ function registerOrchestrationTools(server: McpServer, settingsGetter: SettingsG
         sessionId: z.string().describe("Owning Cognia chat session id."),
       },
     },
-    async (args) =>
+    async (args, extra) =>
       runWithGate({
         tool: "list_scheduled_tasks",
         scope: "agent:dispatch",
-        check: checkToolCall(await settingsGetter(), "list_scheduled_tasks"),
+        check: checkToolCall(await scopedSettings(settingsGetter, extra), "list_scheduled_tasks"),
         body: () => listScheduledTasks(args as Parameters<typeof listScheduledTasks>[0]),
       })
   )
@@ -450,11 +475,11 @@ function registerOrchestrationTools(server: McpServer, settingsGetter: SettingsG
         taskId: z.string().describe("Exact scheduled-task id."),
       },
     },
-    async (args) =>
+    async (args, extra) =>
       runWithGate({
         tool: "cancel_scheduled_task",
         scope: "agent:dispatch",
-        check: checkToolCall(await settingsGetter(), "cancel_scheduled_task"),
+        check: checkToolCall(await scopedSettings(settingsGetter, extra), "cancel_scheduled_task"),
         body: () => cancelScheduledTask(args as Parameters<typeof cancelScheduledTask>[0]),
       })
   )
@@ -478,11 +503,11 @@ function registerOrchestrationTools(server: McpServer, settingsGetter: SettingsG
         ultracode: z.boolean().optional().describe("Run with the ultracode orchestration."),
       },
     },
-    async (args) =>
+    async (args, extra) =>
       runWithGate({
         tool: "team_run",
         scope: "agent:team",
-        check: checkToolCall(await settingsGetter(), "team_run"),
+        check: checkToolCall(await scopedSettings(settingsGetter, extra), "team_run"),
         body: () => teamRun(args as Parameters<typeof teamRun>[0]),
       })
   )
@@ -509,11 +534,11 @@ function registerOrchestrationTools(server: McpServer, settingsGetter: SettingsG
           .describe("Only unclaimed external-pickup teams."),
       },
     },
-    async (args) =>
+    async (args, extra) =>
       runWithGate({
         tool: "team_list",
         scope: "agent:team",
-        check: checkToolCall(await settingsGetter(), "team_list"),
+        check: checkToolCall(await scopedSettings(settingsGetter, extra), "team_list"),
         body: () => teamList(args as Parameters<typeof teamList>[0]),
       })
   )
@@ -540,11 +565,11 @@ function registerOrchestrationTools(server: McpServer, settingsGetter: SettingsG
         reason: z.string().optional().describe("Reason shown in the consent prompt / audit."),
       },
     },
-    async (args) =>
+    async (args, extra) =>
       runWithGate({
         tool: "plugin_tool_invoke",
         scope: "plugin:tools",
-        check: checkToolCall(await settingsGetter(), "plugin_tool_invoke"),
+        check: checkToolCall(await scopedSettings(settingsGetter, extra), "plugin_tool_invoke"),
         body: () => pluginToolInvoke(args as Parameters<typeof pluginToolInvoke>[0]),
       })
   )
@@ -570,11 +595,14 @@ function registerConnectorTools(server: McpServer, settingsGetter: SettingsGette
       },
       inputSchema: {},
     },
-    async () =>
+    async (extra) =>
       runWithGate({
         tool: "connectors_list_adapters",
         scope: "inbox:connectors:read",
-        check: checkToolCall(await settingsGetter(), "connectors_list_adapters"),
+        check: checkToolCall(
+          await scopedSettings(settingsGetter, extra),
+          "connectors_list_adapters"
+        ),
         body: () => connectorsListAdapters(),
       })
   )
@@ -600,11 +628,14 @@ function registerConnectorTools(server: McpServer, settingsGetter: SettingsGette
         limit: z.number().int().min(1).max(200).optional(),
       },
     },
-    async (args) =>
+    async (args, extra) =>
       runWithGate({
         tool: "connectors_list_conversations",
         scope: "inbox:connectors:read",
-        check: checkToolCall(await settingsGetter(), "connectors_list_conversations"),
+        check: checkToolCall(
+          await scopedSettings(settingsGetter, extra),
+          "connectors_list_conversations"
+        ),
         body: () => connectorsListConversations(args),
       })
   )
@@ -628,11 +659,11 @@ function registerConnectorTools(server: McpServer, settingsGetter: SettingsGette
         limit: z.number().int().min(1).max(500).optional(),
       },
     },
-    async (args) =>
+    async (args, extra) =>
       runWithGate({
         tool: "connectors_get_audit",
         scope: "inbox:connectors:read",
-        check: checkToolCall(await settingsGetter(), "connectors_get_audit"),
+        check: checkToolCall(await scopedSettings(settingsGetter, extra), "connectors_get_audit"),
         body: () => connectorsGetAudit(args),
       })
   )
@@ -657,11 +688,14 @@ function registerConnectorTools(server: McpServer, settingsGetter: SettingsGette
         limit: z.number().int().min(1).max(5000).optional(),
       },
     },
-    async (args) =>
+    async (args, extra) =>
       runWithGate({
         tool: "connectors_export_audit",
         scope: "inbox:connectors:read",
-        check: checkToolCall(await settingsGetter(), "connectors_export_audit"),
+        check: checkToolCall(
+          await scopedSettings(settingsGetter, extra),
+          "connectors_export_audit"
+        ),
         body: () => connectorsExportAudit(args),
       })
   )
@@ -681,11 +715,11 @@ function registerConnectorTools(server: McpServer, settingsGetter: SettingsGette
       },
       inputSchema: {},
     },
-    async () =>
+    async (extra) =>
       runWithGate({
         tool: "connectors_list_drafts",
         scope: "inbox:connectors:read",
-        check: checkToolCall(await settingsGetter(), "connectors_list_drafts"),
+        check: checkToolCall(await scopedSettings(settingsGetter, extra), "connectors_list_drafts"),
         body: () => connectorsListDrafts(),
       })
   )
@@ -711,11 +745,14 @@ function registerConnectorTools(server: McpServer, settingsGetter: SettingsGette
         sourceTaskId: z.string().optional(),
       },
     },
-    async (args) =>
+    async (args, extra) =>
       runWithGate({
         tool: "connectors_send_message",
         scope: "inbox:connectors:send",
-        check: checkToolCall(await settingsGetter(), "connectors_send_message"),
+        check: checkToolCall(
+          await scopedSettings(settingsGetter, extra),
+          "connectors_send_message"
+        ),
         body: () =>
           connectorsSendMessage({
             adapterId: args.adapterId,
@@ -755,11 +792,11 @@ function registerInboundTools(server: McpServer, settingsGetter: SettingsGetter)
         source: z.string().optional(),
       },
     },
-    async (args) =>
+    async (args, extra) =>
       runWithGate({
         tool: "record_lesson",
         scope: "inbound:write",
-        check: checkToolCall(await settingsGetter(), "record_lesson"),
+        check: checkToolCall(await scopedSettings(settingsGetter, extra), "record_lesson"),
         body: () =>
           recordLesson({
             title: args.title,
@@ -786,11 +823,11 @@ function registerInboundTools(server: McpServer, settingsGetter: SettingsGetter)
         source: z.string().optional(),
       },
     },
-    async (args) =>
+    async (args, extra) =>
       runWithGate({
         tool: "save_skill_draft",
         scope: "inbound:write",
-        check: checkToolCall(await settingsGetter(), "save_skill_draft"),
+        check: checkToolCall(await scopedSettings(settingsGetter, extra), "save_skill_draft"),
         body: () =>
           saveSkillDraft({
             name: args.name,
@@ -817,11 +854,11 @@ function registerInboundTools(server: McpServer, settingsGetter: SettingsGetter)
         source: z.string().optional(),
       },
     },
-    async (args) =>
+    async (args, extra) =>
       runWithGate({
         tool: "ingest_note",
         scope: "inbound:write",
-        check: checkToolCall(await settingsGetter(), "ingest_note"),
+        check: checkToolCall(await scopedSettings(settingsGetter, extra), "ingest_note"),
         body: () =>
           ingestNote({
             title: args.title,
@@ -872,11 +909,11 @@ function registerMemoryTools(server: McpServer, settingsGetter: SettingsGetter) 
         path: z.string().optional().describe("Workspace-relative path context"),
       },
     },
-    async (args) =>
+    async (args, extra) =>
       runWithGate({
         tool: "memory_search",
         scope: "memory:read",
-        check: checkToolCall(await settingsGetter(), "memory_search"),
+        check: checkToolCall(await scopedSettings(settingsGetter, extra), "memory_search"),
         body: () =>
           memorySearch({
             query: args.query,
@@ -915,11 +952,11 @@ function registerMemoryTools(server: McpServer, settingsGetter: SettingsGetter) 
         limit: z.number().int().min(1).max(200).optional().describe("Row cap (default 50)"),
       },
     },
-    async (args) =>
+    async (args, extra) =>
       runWithGate({
         tool: "memory_list",
         scope: "memory:read",
-        check: checkToolCall(await settingsGetter(), "memory_list"),
+        check: checkToolCall(await scopedSettings(settingsGetter, extra), "memory_list"),
         body: () =>
           memoryList({
             type: args.type,
@@ -964,11 +1001,11 @@ function registerMemoryTools(server: McpServer, settingsGetter: SettingsGetter) 
         tags: z.array(z.string()).optional(),
       },
     },
-    async (args) =>
+    async (args, extra) =>
       runWithGate({
         tool: "memory_store",
         scope: "memory:write",
-        check: checkToolCall(await settingsGetter(), "memory_store"),
+        check: checkToolCall(await scopedSettings(settingsGetter, extra), "memory_store"),
         body: () =>
           memoryStore({
             text: args.text,
@@ -1008,11 +1045,11 @@ function registerMemoryTools(server: McpServer, settingsGetter: SettingsGetter) 
         pinned: z.boolean().optional(),
       },
     },
-    async (args) =>
+    async (args, extra) =>
       runWithGate({
         tool: "memory_update",
         scope: "memory:write",
-        check: checkToolCall(await settingsGetter(), "memory_update"),
+        check: checkToolCall(await scopedSettings(settingsGetter, extra), "memory_update"),
         body: () =>
           memoryUpdate({
             id: args.id,
@@ -1042,11 +1079,11 @@ function registerMemoryTools(server: McpServer, settingsGetter: SettingsGetter) 
         id: z.string().describe("Memory id (from memory_search / memory_list)"),
       },
     },
-    async (args) =>
+    async (args, extra) =>
       runWithGate({
         tool: "memory_forget",
         scope: "memory:write",
-        check: checkToolCall(await settingsGetter(), "memory_forget"),
+        check: checkToolCall(await scopedSettings(settingsGetter, extra), "memory_forget"),
         body: () => memoryForget({ id: args.id }),
       })
   )
@@ -1081,9 +1118,9 @@ function registerResources(server: McpServer, settingsGetter: SettingsGetter) {
 
 function registerWikiResource(server: McpServer, settingsGetter: SettingsGetter) {
   const template = new ResourceTemplate("cognia://wiki/{slug}", {
-    list: async () => {
+    list: async (extra) => {
       const start = Date.now()
-      const s = await settingsGetter()
+      const s = await scopedSettings(settingsGetter, extra)
       const enabled = new Set(s?.enabledScopes ?? [])
       if (!enabled.has("wiki:cognia") && !enabled.has("wiki:user-repo")) {
         await recordCall({
@@ -1124,9 +1161,9 @@ function registerWikiResource(server: McpServer, settingsGetter: SettingsGetter)
       description: "A generated code wiki article for a module in the Cognia codebase.",
       mimeType: "text/markdown",
     },
-    async (uri) => {
+    async (uri, _variables, extra) => {
       const start = Date.now()
-      const s = await settingsGetter()
+      const s = await scopedSettings(settingsGetter, extra)
       const parts = parseResourceUri(uri.href)
       if (!parts) {
         await recordCall({
@@ -1178,9 +1215,9 @@ function registerWikiResource(server: McpServer, settingsGetter: SettingsGetter)
 
 function registerSkillResource(server: McpServer, settingsGetter: SettingsGetter) {
   const template = new ResourceTemplate("cognia://skill/{id}", {
-    list: async () => {
+    list: async (extra) => {
       const start = Date.now()
-      const s = await settingsGetter()
+      const s = await scopedSettings(settingsGetter, extra)
       const enabled = new Set(s?.enabledScopes ?? [])
       if (!enabled.has("runtime:skills")) {
         await recordCall({
@@ -1217,9 +1254,9 @@ function registerSkillResource(server: McpServer, settingsGetter: SettingsGetter
       description: "A Cognia skill definition exported as SKILL.md.",
       mimeType: "text/markdown",
     },
-    async (uri) => {
+    async (uri, _variables, extra) => {
       const start = Date.now()
-      const s = await settingsGetter()
+      const s = await scopedSettings(settingsGetter, extra)
       const check = checkScope(s, "runtime:skills")
       if (!check.allowed) {
         await recordCall({
@@ -1275,9 +1312,9 @@ function registerSkillResource(server: McpServer, settingsGetter: SettingsGetter
 
 function registerCharacterResource(server: McpServer, settingsGetter: SettingsGetter) {
   const template = new ResourceTemplate("cognia://character/{id}", {
-    list: async () => {
+    list: async (extra) => {
       const start = Date.now()
-      const s = await settingsGetter()
+      const s = await scopedSettings(settingsGetter, extra)
       const enabled = new Set(s?.enabledScopes ?? [])
       if (!enabled.has("runtime:characters")) {
         await recordCall({
@@ -1314,9 +1351,9 @@ function registerCharacterResource(server: McpServer, settingsGetter: SettingsGe
       description: "A Cognia character definition as JSON.",
       mimeType: "application/json",
     },
-    async (uri) => {
+    async (uri, _variables, extra) => {
       const start = Date.now()
-      const s = await settingsGetter()
+      const s = await scopedSettings(settingsGetter, extra)
       const check = checkScope(s, "runtime:characters")
       if (!check.allowed) {
         await recordCall({
@@ -1451,21 +1488,17 @@ function registerPrompts(server: McpServer, settingsGetter: SettingsGetter) {
           z
             .string()
             .describe("Character id (discover via runtime_query entityType=character, op=list)"),
-          async (value) => {
-            const s = await settingsGetter()
-            if (!checkScope(s, "runtime:characters").allowed) return []
-            const chars = await listCharacters()
-            return chars
-              .map((c) => c.id)
-              .filter((id) => id.startsWith(value ?? ""))
-              .slice(0, 20)
-          }
+          // The SDK v1 completion callback has no RequestHandlerExtra, so it
+          // cannot observe the server-stamped per-client scopes. Returning no
+          // ids prevents cross-client metadata disclosure; authorized clients
+          // can discover ids through runtime_query.
+          async () => []
         ),
       },
     },
-    async ({ characterId }) => {
+    async ({ characterId }, extra) => {
       const start = Date.now()
-      const s = await settingsGetter()
+      const s = await scopedSettings(settingsGetter, extra)
       const check = checkScope(s, "runtime:characters")
       if (!check.allowed) {
         await recordCall({

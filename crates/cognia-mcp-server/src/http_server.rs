@@ -26,7 +26,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use axum::{
-    extract::{ConnectInfo, State},
+    extract::{ConnectInfo, Extension, State},
     http::{HeaderMap, StatusCode},
     middleware::{from_fn_with_state, Next},
     response::{IntoResponse, Response},
@@ -34,10 +34,12 @@ use axum::{
     Json, Router,
 };
 use serde_json::json;
+use sha2::{Digest, Sha256};
+use subtle::ConstantTimeEq;
 use tokio::sync::watch;
 use tower_http::limit::RequestBodyLimitLayer;
 
-use super::proxy_common::{token_matches, RateLimiter};
+use super::proxy_common::RateLimiter;
 use super::sidecar::SidecarProcess;
 use super::streamable_http::{self, SessionRegistry};
 use super::types::McpServerError;
@@ -53,12 +55,161 @@ pub struct ServerHandle {
     pub bound_port: u16,
     /// Send `()` here to initiate graceful shutdown.
     pub shutdown: watch::Sender<()>,
+    /// Live verifier set. Client rotation/revocation updates this in place so
+    /// an already-bound listener never continues accepting a revoked token.
+    pub client_verifiers: ClientVerifierStore,
+    /// Active streamable-HTTP sessions, closed whenever client credentials
+    /// change so established streams cannot bypass the new verifier set.
+    pub(crate) sessions: Arc<SessionRegistry>,
+}
+
+#[derive(Clone, Default)]
+pub struct ClientVerifierStore {
+    entries: Arc<parking_lot::RwLock<Vec<ClientVerifierEntry>>>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ClientVerifier {
+    pub client_id: String,
+    pub verifier: String,
+    pub scopes: Vec<String>,
+    pub expires_at: Option<u64>,
+}
+
+#[derive(Debug, Clone)]
+struct ClientVerifierEntry {
+    client_id: String,
+    digest: [u8; 32],
+    scopes: Option<Vec<String>>,
+    expires_at: Option<u64>,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct ClientAuthorization {
+    pub(crate) client_id: String,
+    /// `None` is used only by the legacy single-token façade and delegates
+    /// scope enforcement to the static sidecar settings.
+    pub(crate) scopes: Option<Vec<String>>,
+}
+
+impl ClientVerifierStore {
+    pub fn from_tokens(tokens: &[String]) -> Result<Self, McpServerError> {
+        if tokens.is_empty() {
+            return Err(McpServerError::TokenMissing);
+        }
+        Ok(Self {
+            entries: Arc::new(parking_lot::RwLock::new(
+                tokens
+                    .iter()
+                    .map(|token| {
+                        let digest: [u8; 32] = Sha256::digest(token.as_bytes()).into();
+                        ClientVerifierEntry {
+                            client_id: hex::encode(digest),
+                            digest,
+                            scopes: None,
+                            expires_at: None,
+                        }
+                    })
+                    .collect(),
+            )),
+        })
+    }
+
+    pub fn from_hex(verifiers: &[String]) -> Result<Self, McpServerError> {
+        if verifiers.is_empty() {
+            return Err(McpServerError::TokenMissing);
+        }
+        let store = Self::default();
+        store.replace_hex(verifiers)?;
+        Ok(store)
+    }
+
+    pub fn replace_hex(&self, verifiers: &[String]) -> Result<(), McpServerError> {
+        let clients = verifiers
+            .iter()
+            .enumerate()
+            .map(|(index, verifier)| ClientVerifier {
+                client_id: format!("legacy-{index}"),
+                verifier: verifier.clone(),
+                scopes: Vec::new(),
+                expires_at: None,
+            })
+            .collect::<Vec<_>>();
+        self.replace_clients(&clients, false)
+    }
+
+    pub fn from_clients(clients: &[ClientVerifier]) -> Result<Self, McpServerError> {
+        if clients.is_empty() {
+            return Err(McpServerError::TokenMissing);
+        }
+        let store = Self::default();
+        store.replace_clients(clients, true)?;
+        Ok(store)
+    }
+
+    pub fn replace_clients(
+        &self,
+        clients: &[ClientVerifier],
+        scope_restricted: bool,
+    ) -> Result<(), McpServerError> {
+        let mut parsed = Vec::with_capacity(clients.len());
+        for client in clients {
+            let bytes = hex::decode(&client.verifier).map_err(|_| {
+                McpServerError::InvalidSettings("invalid client credential verifier".into())
+            })?;
+            let digest: [u8; 32] = bytes.try_into().map_err(|_| {
+                McpServerError::InvalidSettings("invalid client credential verifier".into())
+            })?;
+            parsed.push(ClientVerifierEntry {
+                client_id: client.client_id.clone(),
+                digest,
+                scopes: scope_restricted.then(|| client.scopes.clone()),
+                expires_at: client.expires_at,
+            });
+        }
+        *self.entries.write() = parsed;
+        Ok(())
+    }
+
+    fn authorize(&self, token: &str) -> Option<ClientAuthorization> {
+        let supplied: [u8; 32] = Sha256::digest(token.as_bytes()).into();
+        self.entries
+            .read()
+            .iter()
+            .find(|expected| {
+                expected
+                    .expires_at
+                    .is_none_or(|expires_at| expires_at > unix_time_ms())
+                    && bool::from(supplied.ct_eq(&expected.digest))
+            })
+            .map(|entry| ClientAuthorization {
+                client_id: entry.client_id.clone(),
+                scopes: entry.scopes.clone(),
+            })
+    }
+
+    fn prune_expired(&self) -> bool {
+        let now = unix_time_ms();
+        let mut entries = self.entries.write();
+        let before = entries.len();
+        entries.retain(|entry| entry.expires_at.is_none_or(|expires_at| expires_at > now));
+        entries.len() != before
+    }
+}
+
+fn unix_time_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis()
+        .try_into()
+        .unwrap_or(u64::MAX)
 }
 
 /// Shared state injected into every axum handler.
 #[derive(Clone)]
 pub(crate) struct AppState {
-    token: Arc<String>,
+    client_verifiers: ClientVerifierStore,
     sidecar: Arc<SidecarProcess>,
     pub(crate) sessions: Arc<SessionRegistry>,
     /// Per-peer bad-token lockout for the auth middleware. Reuses the proxy
@@ -77,6 +228,21 @@ pub async fn spawn_server(
     sidecar: Arc<SidecarProcess>,
     sessions: Arc<SessionRegistry>,
 ) -> Result<ServerHandle, McpServerError> {
+    spawn_server_with_verifiers(
+        port,
+        ClientVerifierStore::from_tokens(&[token])?,
+        sidecar,
+        sessions,
+    )
+    .await
+}
+
+pub async fn spawn_server_with_verifiers(
+    port: u16,
+    client_verifiers: ClientVerifierStore,
+    sidecar: Arc<SidecarProcess>,
+    sessions: Arc<SessionRegistry>,
+) -> Result<ServerHandle, McpServerError> {
     let bind_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), port);
     let listener = tokio::net::TcpListener::bind(bind_addr)
         .await
@@ -87,7 +253,7 @@ pub async fn spawn_server(
         .port();
 
     let state = AppState {
-        token: Arc::new(token),
+        client_verifiers: client_verifiers.clone(),
         sidecar,
         sessions: Arc::clone(&sessions),
         auth_limiter: Arc::new(RateLimiter::default()),
@@ -114,13 +280,33 @@ pub async fn spawn_server(
 
     // Idle-session reaper — swept every 30s, cancelled by the shutdown signal.
     let mut reap_rx = tx.subscribe();
+    let reap_sessions = Arc::clone(&sessions);
     tokio::spawn(async move {
         loop {
             tokio::select! {
                 _ = tokio::time::sleep(std::time::Duration::from_secs(30)) => {
-                    sessions.reap_idle();
+                    reap_sessions.reap_idle();
                 }
                 _ = reap_rx.changed() => break,
+            }
+        }
+    });
+
+    // Expired credentials must also terminate already-established SSE
+    // sessions. A one-second host-local sweep keeps expiry enforcement
+    // independent of controller refreshes or Bridge restarts.
+    let mut expiry_rx = tx.subscribe();
+    let expiry_verifiers = client_verifiers.clone();
+    let expiry_sessions = Arc::clone(&sessions);
+    tokio::spawn(async move {
+        loop {
+            tokio::select! {
+                _ = tokio::time::sleep(std::time::Duration::from_secs(1)) => {
+                    if expiry_verifiers.prune_expired() {
+                        expiry_sessions.close_all();
+                    }
+                }
+                _ = expiry_rx.changed() => break,
             }
         }
     });
@@ -143,6 +329,8 @@ pub async fn spawn_server(
     Ok(ServerHandle {
         bound_port,
         shutdown: tx,
+        client_verifiers,
+        sessions,
     })
 }
 
@@ -154,7 +342,11 @@ async fn healthz() -> impl IntoResponse {
     Json(json!({ "ok": true, "version": env!("CARGO_PKG_VERSION") }))
 }
 
-async fn mcp_post(State(state): State<AppState>, body: axum::body::Bytes) -> impl IntoResponse {
+async fn mcp_post(
+    State(state): State<AppState>,
+    Extension(authorization): Extension<ClientAuthorization>,
+    body: axum::body::Bytes,
+) -> impl IntoResponse {
     let request_str = match std::str::from_utf8(&body) {
         Ok(s) => s.trim().to_string(),
         Err(_) => return error_body(StatusCode::BAD_REQUEST, "request body must be UTF-8"),
@@ -163,6 +355,11 @@ async fn mcp_post(State(state): State<AppState>, body: axum::body::Bytes) -> imp
     if request_str.is_empty() {
         return error_body(StatusCode::BAD_REQUEST, "request body required");
     }
+
+    let request_str = match stamp_client_authorization(&request_str, &authorization) {
+        Ok(request) => request,
+        Err(error) => return error_body(StatusCode::BAD_REQUEST, &error),
+    };
 
     match state.sidecar.round_trip(&request_str).await {
         Ok(response) => {
@@ -227,7 +424,7 @@ async fn auth_middleware(
     State(state): State<AppState>,
     ConnectInfo(peer): ConnectInfo<SocketAddr>,
     headers: HeaderMap,
-    request: axum::extract::Request,
+    mut request: axum::extract::Request,
     next: Next,
 ) -> Response {
     // 1. Cross-origin / DNS-rebinding guard (all routes, including healthz).
@@ -270,11 +467,12 @@ async fn auth_middleware(
         return error_body(StatusCode::UNAUTHORIZED, "missing bearer token");
     };
 
-    if !token_matches(supplied_token, &state.token) {
+    let Some(authorization) = state.client_verifiers.authorize(supplied_token) else {
         state.auth_limiter.record_bad_token(ip, now);
         return error_body(StatusCode::UNAUTHORIZED, "invalid token");
-    }
+    };
 
+    request.extensions_mut().insert(authorization);
     next.run(request).await
 }
 
@@ -286,6 +484,40 @@ fn error_body(status: StatusCode, message: &str) -> Response {
     (status, Json(json!({ "error": message }))).into_response()
 }
 
+pub(crate) fn stamp_client_authorization(
+    request: &str,
+    authorization: &ClientAuthorization,
+) -> Result<String, String> {
+    let mut value: serde_json::Value =
+        serde_json::from_str(request).map_err(|error| format!("invalid JSON: {error}"))?;
+    let object = value
+        .as_object_mut()
+        .ok_or_else(|| "JSON-RPC request must be an object".to_string())?;
+    let params = object
+        .entry("params")
+        .or_insert_with(|| serde_json::Value::Object(serde_json::Map::new()))
+        .as_object_mut()
+        .ok_or_else(|| "JSON-RPC params must be an object".to_string())?;
+    let metadata = params
+        .entry("_meta")
+        .or_insert_with(|| serde_json::Value::Object(serde_json::Map::new()))
+        .as_object_mut()
+        .ok_or_else(|| "JSON-RPC params._meta must be an object".to_string())?;
+    metadata.insert(
+        "cogniaBridgeClientId".into(),
+        serde_json::Value::String(authorization.client_id.clone()),
+    );
+    if let Some(scopes) = &authorization.scopes {
+        metadata.insert(
+            "cogniaBridgeScopes".into(),
+            serde_json::to_value(scopes).map_err(|error| error.to_string())?,
+        );
+    } else {
+        metadata.remove("cogniaBridgeScopes");
+    }
+    serde_json::to_string(&value).map_err(|error| error.to_string())
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -293,6 +525,7 @@ fn error_body(status: StatusCode, message: &str) -> Response {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::proxy_common::token_matches;
     use crate::sidecar::spawn_echo_for_tests;
 
     /// An empty session registry backed by the echo spawner (tests).
@@ -308,11 +541,6 @@ mod tests {
     #[test]
     fn body_limit_is_one_mib() {
         assert_eq!(BODY_LIMIT_BYTES, 1024 * 1024);
-    }
-
-    #[test]
-    fn body_limit_larger_than_remote_control_8kib() {
-        assert!(BODY_LIMIT_BYTES > 8 * 1024);
     }
 
     #[test]
@@ -334,6 +562,51 @@ mod tests {
     #[test]
     fn token_matches_rejects_length_mismatch() {
         assert!(!token_matches("short", "long-token-value"));
+    }
+
+    #[test]
+    fn verifier_store_accepts_only_credentials_with_a_registered_digest() {
+        let token = "client-token-with-more-than-thirty-two-characters".to_string();
+        let verifier = hex::encode(Sha256::digest(token.as_bytes()));
+        let store = ClientVerifierStore::from_hex(&[verifier]).unwrap();
+
+        assert!(store.authorize(&token).is_some());
+        assert!(store
+            .authorize("different-client-token-with-more-than-thirty-two")
+            .is_none());
+    }
+
+    #[test]
+    fn verifier_store_rejects_expired_client_credentials_without_a_restart() {
+        let token = "expired-client-token-with-more-than-thirty-two-characters";
+        let store = ClientVerifierStore::from_clients(&[ClientVerifier {
+            client_id: "expired-client".into(),
+            verifier: hex::encode(Sha256::digest(token.as_bytes())),
+            scopes: vec!["wiki:cognia".into()],
+            expires_at: Some(unix_time_ms().saturating_sub(1)),
+        }])
+        .unwrap();
+
+        assert!(store.authorize(token).is_none());
+    }
+
+    #[test]
+    fn server_stamps_client_identity_and_overwrites_untrusted_scopes() {
+        let authorization = ClientAuthorization {
+            client_id: "client-a".into(),
+            scopes: Some(vec!["wiki:cognia".into()]),
+        };
+        let stamped = stamp_client_authorization(
+            r#"{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{"_meta":{"cogniaBridgeScopes":["memory:write"]}}}"#,
+            &authorization,
+        )
+        .unwrap();
+        let value: serde_json::Value = serde_json::from_str(&stamped).unwrap();
+        assert_eq!(value["params"]["_meta"]["cogniaBridgeClientId"], "client-a");
+        assert_eq!(
+            value["params"]["_meta"]["cogniaBridgeScopes"],
+            json!(["wiki:cognia"])
+        );
     }
 
     // ── DNS-rebinding / cross-origin guard (P1-2) ─────────────────────────

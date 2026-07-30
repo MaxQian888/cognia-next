@@ -39,13 +39,25 @@ import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
 import { useCapability } from "@/hooks/use-host-profile"
 import { generateToken } from "@/lib/external-bridge/token"
+import { issueHostAdminLease } from "@/lib/tauri/admin-lease"
 import {
+  createExternalBridgeClient,
+  getExternalBridgeConfig,
+  getExternalBridgeStatus,
   getMcpServerStatus,
+  isHostManagedBridgeAvailable,
+  listExternalBridgeClients,
+  restartExternalBridge,
   restartMcpServer,
+  rotateExternalBridgeClient,
+  startExternalBridge,
   startMcpServer,
+  stopExternalBridge,
   stopMcpServer,
+  updateExternalBridgeConfig,
   type McpServerStatus,
 } from "@/lib/external-bridge/tauri-control"
+import { isRemoteHostActive } from "@/lib/tauri/transport-routing"
 import type { ExternalBridgeSettings } from "@/types/wiki"
 
 import { NumberRow } from "../../common/number-row"
@@ -64,12 +76,16 @@ export function BridgeServerPanel({ settings, onChange }: BridgeServerPanelProps
   const [showToken, setShowToken] = useState(false)
   const [busy, setBusy] = useState(false)
   const [rotateConfirming, setRotateConfirming] = useState(false)
+  const [oneTimeCredential, setOneTimeCredential] = useState<string | null>(null)
   const [serverStatus, setServerStatus] = useState<McpServerStatus>({
     running: false,
     port: null,
     startedAt: null,
   })
   const hostAvailable = useCapability("mcp-runtime")
+  const remoteHostActive = isRemoteHostActive()
+  const hostManaged = remoteHostActive && isHostManagedBridgeAvailable()
+  const bridgeAvailable = remoteHostActive ? hostManaged : hostAvailable
 
   // Poll the Rust HTTP server status so an external `mcp_server_stop` (e.g. the
   // Tauri shutdown handler) is reflected without a reload — but only while the
@@ -85,8 +101,19 @@ export function BridgeServerPanel({ settings, onChange }: BridgeServerPanelProps
     }
     const refresh = async () => {
       try {
-        const status = await getMcpServerStatus()
-        if (!cancelled) setServerStatus(status)
+        if (hostManaged) {
+          const status = await getExternalBridgeStatus()
+          if (!cancelled) {
+            setServerStatus({
+              running: status.state === "running",
+              port: status.endpoint ? Number(new URL(status.endpoint).port) : null,
+              startedAt: status.startedAt ?? null,
+            })
+          }
+        } else {
+          const status = await getMcpServerStatus()
+          if (!cancelled) setServerStatus(status)
+        }
       } catch {
         // swallow — web mode + desktop init races both fall here
       }
@@ -103,22 +130,61 @@ export function BridgeServerPanel({ settings, onChange }: BridgeServerPanelProps
       if (timer) clearTimeout(timer)
       document.removeEventListener("visibilitychange", onVisibility)
     }
-  }, [])
+  }, [hostManaged])
 
   const onToggleEnabled = useCallback(
     async (enabled: boolean) => {
       const next: ExternalBridgeSettings = { ...settings, enabled }
       // Generate a token on first enable so the HTTP transport works out of
       // the box (stdio doesn't need it but the server requires one regardless).
-      if (enabled && !next.bearerToken) {
+      if (enabled && !hostManaged && !next.bearerToken) {
         next.bearerToken = await generateToken()
         next.tokenRotatedAt = Date.now()
       }
       onChange(next)
       // Drive the Rust HTTP server. Web mode silently no-ops via the wrapper.
-      if (!hostAvailable) return
+      if (!bridgeAvailable) return
       try {
         if (enabled) {
+          if (hostManaged) {
+            const lease = await issueHostAdminLease([
+              "external_bridge_config_update",
+              "external_bridge_client_create",
+              "external_bridge_start",
+            ])
+            let config = await getExternalBridgeConfig()
+            const desiredPort = next.httpPort ?? DEFAULT_BRIDGE_HTTP_PORT
+            if (
+              config.port !== desiredPort ||
+              config.enabledScopes.join("\0") !== next.enabledScopes.join("\0")
+            ) {
+              config = await updateExternalBridgeConfig(
+                {
+                  expectedRevision: config.revision,
+                  enabledScopes: next.enabledScopes,
+                  port: desiredPort,
+                  bindMode: "loopback",
+                  autoStart: config.autoStart,
+                },
+                lease.token
+              )
+            }
+            const clients = await listExternalBridgeClients()
+            if (!clients.some((client) => !client.revokedAt)) {
+              const created = await createExternalBridgeClient(
+                {
+                  name: t("server.defaultClientName"),
+                  scopes: config.enabledScopes,
+                },
+                lease.token
+              )
+              setOneTimeCredential(created.credential)
+            }
+            const port = await startExternalBridge(lease.token)
+            onChange({ ...next, httpPort: port })
+            toast.success(t("server.toastServerStarted", { port }))
+            return
+          }
           const sidecarPath = await resolveSidecarPath()
           if (!sidecarPath) {
             // Rust spawns `node <sidecarPath>`; starting with a path that is
@@ -136,20 +202,32 @@ export function BridgeServerPanel({ settings, onChange }: BridgeServerPanelProps
           onChange({ ...next, httpPort: port })
           toast.success(t("server.toastServerStarted", { port }))
         } else {
-          await stopMcpServer()
+          if (hostManaged) {
+            const lease = await issueHostAdminLease(["external_bridge_stop"])
+            await stopExternalBridge(lease.token)
+          } else await stopMcpServer()
           toast.success(t("server.toastServerStopped"))
         }
       } catch (err) {
         toast.error(err instanceof Error ? err.message : String(err))
       }
     },
-    [settings, onChange, hostAvailable, t]
+    [settings, onChange, bridgeAvailable, hostManaged, t]
   )
 
   const onRotateToken = useCallback(async () => {
     setRotateConfirming(false)
     setBusy(true)
     try {
+      if (hostManaged) {
+        const client = (await listExternalBridgeClients()).find((candidate) => !candidate.revokedAt)
+        if (!client) throw new Error(t("server.noActiveClientError"))
+        const lease = await issueHostAdminLease(["external_bridge_client_rotate"])
+        const rotated = await rotateExternalBridgeClient(client.id, lease.token)
+        setOneTimeCredential(rotated.credential)
+        toast.success(t("server.toastTokenRegenerated"))
+        return
+      }
       const next = await generateToken()
       onChange({ ...settings, bearerToken: next, tokenRotatedAt: Date.now() })
       toast.success(t("server.toastTokenRegenerated"))
@@ -158,7 +236,7 @@ export function BridgeServerPanel({ settings, onChange }: BridgeServerPanelProps
     } finally {
       setBusy(false)
     }
-  }, [settings, onChange, t])
+  }, [settings, onChange, hostManaged, t])
 
   // Editing the port used to persist and stop there: the listener kept serving
   // the old port with nothing saying so, and the setup snippet immediately
@@ -168,8 +246,35 @@ export function BridgeServerPanel({ settings, onChange }: BridgeServerPanelProps
     async (port: number) => {
       const next: ExternalBridgeSettings = { ...settings, httpPort: port }
       onChange(next)
-      if (!hostAvailable || !serverStatus.running || !next.bearerToken) return
+      if (!bridgeAvailable || !serverStatus.running) return
       if (serverStatus.port === port) return
+      if (hostManaged) {
+        try {
+          const lease = await issueHostAdminLease([
+            "external_bridge_config_update",
+            "external_bridge_restart",
+          ])
+          const config = await getExternalBridgeConfig()
+          await updateExternalBridgeConfig(
+            {
+              expectedRevision: config.revision,
+              enabledScopes: next.enabledScopes,
+              port,
+              bindMode: "loopback",
+              autoStart: config.autoStart,
+            },
+            lease.token
+          )
+          const bound = await restartExternalBridge(lease.token)
+          setServerStatus((current) => ({ ...current, running: true, port: bound }))
+          if (bound !== port) onChange({ ...next, httpPort: bound })
+          toast.success(t("server.toastServerStarted", { port: bound }))
+        } catch {
+          toast.error(t("server.toastRestartFailed"))
+        }
+        return
+      }
+      if (!next.bearerToken) return
       const sidecarPath = await resolveSidecarPath()
       if (!sidecarPath) return
       try {
@@ -186,16 +291,17 @@ export function BridgeServerPanel({ settings, onChange }: BridgeServerPanelProps
         toast.error(err instanceof Error ? err.message : String(err))
       }
     },
-    [settings, onChange, hostAvailable, serverStatus.running, serverStatus.port, t]
+    [settings, onChange, bridgeAvailable, hostManaged, serverStatus.running, serverStatus.port, t]
   )
 
   const onCopyToken = useCallback(async () => {
-    if (!settings.bearerToken) return
-    await navigator.clipboard.writeText(settings.bearerToken)
+    const credential = hostManaged ? oneTimeCredential : settings.bearerToken
+    if (!credential) return
+    await navigator.clipboard.writeText(credential)
     toast.success(t("server.toastTokenCopied"))
-  }, [settings.bearerToken, t])
+  }, [hostManaged, oneTimeCredential, settings.bearerToken, t])
 
-  const statusKey = !hostAvailable ? "web" : serverStatus.running ? "live" : "idle"
+  const statusKey = !bridgeAvailable ? "web" : serverStatus.running ? "live" : "idle"
   const configuredPort = settings.httpPort ?? DEFAULT_BRIDGE_HTTP_PORT
   const portDiverged =
     serverStatus.running && serverStatus.port !== null && serverStatus.port !== configuredPort
@@ -229,9 +335,11 @@ export function BridgeServerPanel({ settings, onChange }: BridgeServerPanelProps
           <Label className="text-muted-foreground">{t("server.bearerTokenLabel")}</Label>
           <div className="flex flex-wrap items-center gap-2">
             <code className="rounded bg-muted px-2 py-0.5 font-mono text-xs break-all">
-              {settings.bearerToken
+              {(hostManaged ? oneTimeCredential : settings.bearerToken)
                 ? showToken
-                  ? settings.bearerToken
+                  ? hostManaged
+                    ? oneTimeCredential
+                    : settings.bearerToken
                   : "•".repeat(16)
                 : t("server.tokenNone")}
             </code>
@@ -239,7 +347,7 @@ export function BridgeServerPanel({ settings, onChange }: BridgeServerPanelProps
               size="sm"
               variant="outline"
               onClick={() => setShowToken((s) => !s)}
-              disabled={!settings.bearerToken}
+              disabled={!(hostManaged ? oneTimeCredential : settings.bearerToken)}
             >
               {showToken ? t("server.hide") : t("server.show")}
             </Button>
@@ -247,7 +355,7 @@ export function BridgeServerPanel({ settings, onChange }: BridgeServerPanelProps
               size="sm"
               variant="outline"
               onClick={() => void onCopyToken()}
-              disabled={!settings.bearerToken}
+              disabled={!(hostManaged ? oneTimeCredential : settings.bearerToken)}
               aria-label={t("server.copyTokenAria")}
             >
               <CopyIcon className="h-3.5 w-3.5" />
@@ -256,7 +364,7 @@ export function BridgeServerPanel({ settings, onChange }: BridgeServerPanelProps
               size="sm"
               variant="outline"
               onClick={() => setRotateConfirming(true)}
-              disabled={busy || !settings.bearerToken}
+              disabled={busy || (hostManaged ? false : !settings.bearerToken)}
               aria-label={t("server.rotateTokenAria")}
             >
               <RefreshCwIcon className="h-3.5 w-3.5" />

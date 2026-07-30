@@ -29,7 +29,7 @@ use std::time::Duration;
 
 use axum::{
     body::Bytes,
-    extract::State,
+    extract::{Extension, State},
     http::{HeaderMap, StatusCode},
     response::{
         sse::{Event, KeepAlive, Sse},
@@ -45,7 +45,7 @@ use tokio::process::{Child, ChildStdin};
 use tokio::sync::{broadcast, Mutex as AsyncMutex};
 use tokio::time::Instant;
 
-use super::http_server::AppState;
+use super::http_server::{stamp_client_authorization, AppState, ClientAuthorization};
 use super::sidecar::{spawn_streaming_node, SidecarLines};
 
 /// How long a streaming POST waits for the matching JSON-RPC response.
@@ -73,6 +73,7 @@ pub(crate) struct StreamSession {
     stdin: AsyncMutex<ChildStdin>,
     tx: broadcast::Sender<String>,
     last_seen: Mutex<Instant>,
+    client_id: String,
     /// Kept alive so `kill_on_drop` terminates the child when the session is
     /// removed from the registry.
     _child: Child,
@@ -118,8 +119,17 @@ impl SessionRegistry {
         self.sessions.lock().get(id).cloned()
     }
 
-    fn remove(&self, id: &str) -> bool {
-        self.sessions.lock().remove(id).is_some()
+    fn remove(&self, id: &str, client_id: &str) -> bool {
+        let mut sessions = self.sessions.lock();
+        if sessions
+            .get(id)
+            .is_some_and(|session| session.client_id == client_id)
+        {
+            sessions.remove(id);
+            true
+        } else {
+            false
+        }
     }
 
     #[cfg(test)]
@@ -144,8 +154,21 @@ impl SessionRegistry {
         stale.len()
     }
 
+    /// Terminate every streaming session. Used when the Bridge client
+    /// verifier set changes so an already-open SSE stream cannot outlive a
+    /// credential rotation, revocation, or expiry update.
+    pub(crate) fn close_all(&self) -> usize {
+        let mut sessions = self.sessions.lock();
+        let count = sessions.len();
+        sessions.clear();
+        count
+    }
+
     /// Spawn a sidecar child + reader task and register a new session.
-    async fn create_session(&self) -> Result<(String, Arc<StreamSession>), String> {
+    async fn create_session(
+        &self,
+        client_id: String,
+    ) -> Result<(String, Arc<StreamSession>), String> {
         let (child, stdin, lines) = match &self.spawner {
             Spawner::Node {
                 sidecar_path,
@@ -167,6 +190,7 @@ impl SessionRegistry {
             stdin: AsyncMutex::new(stdin),
             tx,
             last_seen: Mutex::new(Instant::now()),
+            client_id,
             _child: child,
         });
         let id = uuid::Uuid::new_v4().to_string();
@@ -207,6 +231,7 @@ fn spawn_reader(mut lines: SidecarLines, tx: broadcast::Sender<String>) {
 /// `POST /mcp/stream` (and the `/mcp/sse` back-compat alias).
 pub(crate) async fn post_handler(
     State(state): State<AppState>,
+    Extension(authorization): Extension<ClientAuthorization>,
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
@@ -236,7 +261,13 @@ pub(crate) async fn post_handler(
 
     let (session, sid, is_new) = match header_sid {
         Some(sid) => match registry.get(&sid) {
-            Some(s) => (s, sid, false),
+            Some(s) if s.client_id == authorization.client_id => (s, sid, false),
+            Some(_) => {
+                return error_body(
+                    StatusCode::FORBIDDEN,
+                    "Mcp-Session-Id belongs to another client",
+                )
+            }
             None => return error_body(StatusCode::NOT_FOUND, "unknown Mcp-Session-Id"),
         },
         None => {
@@ -246,7 +277,10 @@ pub(crate) async fn post_handler(
                     "missing Mcp-Session-Id (send `initialize` first)",
                 );
             }
-            match registry.create_session().await {
+            match registry
+                .create_session(authorization.client_id.clone())
+                .await
+            {
                 Ok((sid, s)) => (s, sid, true),
                 Err(e) => {
                     return error_body(StatusCode::BAD_GATEWAY, &format!("session spawn: {e}"))
@@ -258,6 +292,10 @@ pub(crate) async fn post_handler(
 
     // Subscribe BEFORE writing so the matching response can't slip past.
     let rx = session.tx.subscribe();
+    let request_str = match stamp_client_authorization(&request_str, &authorization) {
+        Ok(request) => request,
+        Err(error) => return error_body(StatusCode::BAD_REQUEST, &error),
+    };
     if let Err(e) = session.write_line(&request_str).await {
         return error_body(StatusCode::BAD_GATEWAY, &format!("sidecar error: {e}"));
     }
@@ -297,7 +335,11 @@ pub(crate) async fn post_handler(
 }
 
 /// `GET /mcp/stream` — long-lived SSE channel for server-initiated messages.
-pub(crate) async fn get_handler(State(state): State<AppState>, headers: HeaderMap) -> Response {
+pub(crate) async fn get_handler(
+    State(state): State<AppState>,
+    Extension(authorization): Extension<ClientAuthorization>,
+    headers: HeaderMap,
+) -> Response {
     let Some(sid) = headers
         .get(SESSION_HEADER)
         .and_then(|v| v.to_str().ok())
@@ -308,6 +350,12 @@ pub(crate) async fn get_handler(State(state): State<AppState>, headers: HeaderMa
     let Some(session) = state.sessions.get(&sid) else {
         return error_body(StatusCode::NOT_FOUND, "unknown Mcp-Session-Id");
     };
+    if session.client_id != authorization.client_id {
+        return error_body(
+            StatusCode::FORBIDDEN,
+            "Mcp-Session-Id belongs to another client",
+        );
+    }
     session.touch();
     // No request id → never terminates; every line is forwarded as an event.
     let stream = response_event_stream(session.tx.subscribe(), None);
@@ -317,7 +365,11 @@ pub(crate) async fn get_handler(State(state): State<AppState>, headers: HeaderMa
 }
 
 /// `DELETE /mcp/stream` — end the session (kills the sidecar child on drop).
-pub(crate) async fn delete_handler(State(state): State<AppState>, headers: HeaderMap) -> Response {
+pub(crate) async fn delete_handler(
+    State(state): State<AppState>,
+    Extension(authorization): Extension<ClientAuthorization>,
+    headers: HeaderMap,
+) -> Response {
     let Some(sid) = headers
         .get(SESSION_HEADER)
         .and_then(|v| v.to_str().ok())
@@ -325,7 +377,7 @@ pub(crate) async fn delete_handler(State(state): State<AppState>, headers: Heade
     else {
         return error_body(StatusCode::BAD_REQUEST, "missing Mcp-Session-Id");
     };
-    if state.sessions.remove(&sid) {
+    if state.sessions.remove(&sid, &authorization.client_id) {
         StatusCode::NO_CONTENT.into_response()
     } else {
         error_body(StatusCode::NOT_FOUND, "unknown Mcp-Session-Id")
@@ -465,7 +517,10 @@ mod tests {
             return;
         };
         let reg = echo_registry();
-        let (_sid, session) = reg.create_session().await.expect("create session");
+        let (_sid, session) = reg
+            .create_session("client-a".into())
+            .await
+            .expect("create session");
         assert_eq!(reg.len(), 1);
 
         let rx = session.tx.subscribe();
@@ -487,7 +542,7 @@ mod tests {
             return;
         };
         let reg = echo_registry();
-        let (_sid, session) = reg.create_session().await.expect("create");
+        let (_sid, session) = reg.create_session("client-a".into()).await.expect("create");
         let rx = session.tx.subscribe();
         // A notification (no id) then the real response — only the latter matches.
         session
@@ -514,7 +569,7 @@ mod tests {
             Spawner::Echo,
             Duration::from_millis(0),
         ));
-        let _ = reg.create_session().await.expect("create");
+        let _ = reg.create_session("client-a".into()).await.expect("create");
         assert_eq!(reg.len(), 1);
         // Let `last_seen` fall strictly behind `now`.
         tokio::time::sleep(Duration::from_millis(5)).await;
@@ -526,7 +581,21 @@ mod tests {
     #[tokio::test]
     async fn remove_unknown_session_is_false() {
         let reg = echo_registry();
-        assert!(!reg.remove("does-not-exist"));
+        assert!(!reg.remove("does-not-exist", "client-a"));
+    }
+
+    #[tokio::test]
+    async fn close_all_drops_every_client_bound_session() {
+        let reg = echo_registry();
+        if reg.create_session("client-a".into()).await.is_err() {
+            return;
+        }
+        if reg.create_session("client-b".into()).await.is_err() {
+            return;
+        }
+
+        assert_eq!(reg.close_all(), 2);
+        assert_eq!(reg.len(), 0);
     }
 
     /// Probe whether `node` is on PATH (the echo spawner needs it).

@@ -7,11 +7,20 @@
  */
 
 import {
+  createExternalBridgeClient,
+  getExternalBridgeConfig,
+  getExternalBridgeStatus,
   getMcpServerStatus,
   isMcpServerHostAvailable,
+  listExternalBridgeClients,
+  restartExternalBridge,
   restartMcpServer,
+  rotateExternalBridgeClient,
+  startExternalBridge,
   startMcpServer,
+  stopExternalBridge,
   stopMcpServer,
+  updateExternalBridgeConfig,
 } from "./tauri-control"
 import { transport } from "@/lib/tauri"
 import type { ExternalBridgeSettings } from "@/types/wiki"
@@ -108,20 +117,94 @@ describe("getMcpServerStatus", () => {
     expect(status.startedAt).toBe("2026-05-04T12:34:56Z")
   })
 
-  it("queries the process-owned status through an active remote host", async () => {
+  it("does not fall back to legacy MCP lifecycle through an active remote host", async () => {
     setTauri(false)
     setActiveRemoteTransport({
       call: jest.fn(),
       subscribe: jest.fn(() => () => {}),
     })
-    expect(isMcpServerHostAvailable()).toBe(true)
-    callSpy.mockResolvedValueOnce({ running: true, port: 47890, startedAt: "remote" })
+    expect(isMcpServerHostAvailable()).toBe(false)
 
     await expect(getMcpServerStatus()).resolves.toEqual({
-      running: true,
-      port: 47890,
-      startedAt: "remote",
+      running: false,
+      port: null,
+      startedAt: null,
     })
-    expect(callSpy).toHaveBeenCalledWith("mcp_server_status")
+    expect(callSpy).not.toHaveBeenCalled()
+  })
+})
+
+describe("host-managed External Bridge", () => {
+  it("uses revisioned host configuration and scoped client RPCs", async () => {
+    callSpy
+      .mockResolvedValueOnce({
+        revision: 1,
+        enabledScopes: ["wiki:cognia"],
+        port: 47890,
+        bindMode: "loopback",
+        autoStart: false,
+      })
+      .mockResolvedValueOnce({ revision: 2 })
+      .mockResolvedValueOnce({ client: { id: "client-1" }, credential: "once" })
+      .mockResolvedValueOnce([{ id: "client-1" }])
+      .mockResolvedValueOnce({ client: { id: "client-1" }, credential: "rotated" })
+
+    await getExternalBridgeConfig()
+    await updateExternalBridgeConfig(
+      {
+        expectedRevision: 1,
+        enabledScopes: ["wiki:cognia"],
+        port: 47890,
+        bindMode: "loopback",
+        autoStart: false,
+      },
+      "lease-1"
+    )
+    await createExternalBridgeClient({ name: "Cursor", scopes: ["wiki:cognia"] }, "lease-1")
+    await listExternalBridgeClients()
+    await rotateExternalBridgeClient("client-1", "lease-1")
+
+    expect(callSpy.mock.calls).toEqual([
+      ["external_bridge_config_get"],
+      [
+        "external_bridge_config_update",
+        {
+          update: {
+            expectedRevision: 1,
+            enabledScopes: ["wiki:cognia"],
+            port: 47890,
+            bindMode: "loopback",
+            autoStart: false,
+          },
+          adminLease: "lease-1",
+        },
+      ],
+      [
+        "external_bridge_client_create",
+        { name: "Cursor", scopes: ["wiki:cognia"], adminLease: "lease-1" },
+      ],
+      ["external_bridge_client_list"],
+      ["external_bridge_client_rotate", { clientId: "client-1", adminLease: "lease-1" }],
+    ])
+  })
+
+  it("routes lifecycle and redacted status through the host APIs", async () => {
+    callSpy
+      .mockResolvedValueOnce(47890)
+      .mockResolvedValueOnce(47891)
+      .mockResolvedValueOnce(undefined)
+      .mockResolvedValueOnce({ state: "stopped", configRevision: 2 })
+
+    await startExternalBridge("lease-1")
+    await restartExternalBridge("lease-1")
+    await stopExternalBridge("lease-1")
+    await getExternalBridgeStatus()
+
+    expect(callSpy.mock.calls).toEqual([
+      ["external_bridge_start", { adminLease: "lease-1" }],
+      ["external_bridge_restart", { adminLease: "lease-1" }],
+      ["external_bridge_stop", { adminLease: "lease-1" }],
+      ["external_bridge_status"],
+    ])
   })
 })

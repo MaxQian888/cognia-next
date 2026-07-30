@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 
 import { BridgeServerPanel } from "./server-panel"
 import type { ExternalBridgeSettings } from "@/types/wiki"
@@ -12,15 +12,37 @@ const mockStatus = jest.fn()
 const mockStart = jest.fn()
 const mockStop = jest.fn()
 const mockRestart = jest.fn()
+const mockHostStatus = jest.fn()
+const mockHostConfig = jest.fn()
+const mockHostConfigUpdate = jest.fn()
+const mockHostClients = jest.fn()
+const mockHostClientCreate = jest.fn()
+const mockHostStart = jest.fn()
+let mockHostManaged = false
 jest.mock("@/lib/external-bridge/tauri-control", () => ({
   getMcpServerStatus: () => mockStatus(),
+  getExternalBridgeStatus: () => mockHostStatus(),
+  getExternalBridgeConfig: () => mockHostConfig(),
+  updateExternalBridgeConfig: (...a: unknown[]) => mockHostConfigUpdate(...a),
+  listExternalBridgeClients: () => mockHostClients(),
+  createExternalBridgeClient: (...a: unknown[]) => mockHostClientCreate(...a),
+  startExternalBridge: () => mockHostStart(),
+  isHostManagedBridgeAvailable: () => mockHostManaged,
   startMcpServer: (...a: unknown[]) => mockStart(...a),
   restartMcpServer: (...a: unknown[]) => mockRestart(...a),
   stopMcpServer: () => mockStop(),
 }))
 
+let mockRemoteActive = false
+jest.mock("@/lib/tauri/transport-routing", () => ({
+  isRemoteHostActive: () => mockRemoteActive,
+}))
+
 jest.mock("@/lib/external-bridge/token", () => ({
   generateToken: jest.fn(() => Promise.resolve("tok_generated")),
+}))
+jest.mock("@/lib/tauri/admin-lease", () => ({
+  issueHostAdminLease: jest.fn(async () => ({ token: "lease-1" })),
 }))
 
 let capability = true
@@ -45,9 +67,36 @@ function setup(over: Partial<ExternalBridgeSettings> = {}) {
   return { onChange }
 }
 
+async function settleInitialStatus(): Promise<void> {
+  await act(async () => {
+    await Promise.resolve()
+  })
+}
+
 beforeEach(() => {
   capability = true
+  mockHostManaged = false
+  mockRemoteActive = false
   mockStatus.mockReset().mockResolvedValue({ running: false, port: null, startedAt: null })
+  mockHostStatus.mockReset().mockResolvedValue({
+    state: "stopped",
+    endpoint: null,
+    startedAt: null,
+  })
+  mockHostConfig.mockReset().mockResolvedValue({
+    revision: 1,
+    enabledScopes: ["wiki:cognia"],
+    port: 47890,
+    bindMode: "loopback",
+    autoStart: false,
+  })
+  mockHostConfigUpdate.mockReset()
+  mockHostClients.mockReset().mockResolvedValue([])
+  mockHostClientCreate.mockReset().mockResolvedValue({
+    client: { id: "client-1" },
+    credential: "cognia_once",
+  })
+  mockHostStart.mockReset().mockResolvedValue(47890)
   mockStart.mockReset().mockResolvedValue(3001)
   mockStop.mockReset().mockResolvedValue(undefined)
   mockRestart.mockReset().mockResolvedValue(3001)
@@ -55,6 +104,33 @@ beforeEach(() => {
 })
 
 describe("BridgeServerPanel", () => {
+  it("uses host-owned config and sidecar resolution for an active remote host", async () => {
+    capability = false
+    mockHostManaged = true
+    mockRemoteActive = true
+    const { onChange } = setup({
+      enabled: false,
+      enabledScopes: ["wiki:cognia"],
+      httpPort: 47890,
+    })
+
+    fireEvent.click(screen.getByRole("switch", { name: "server.toggleAriaLabel" }))
+
+    await waitFor(() => expect(mockHostStart).toHaveBeenCalled())
+    expect(mockHostClientCreate).toHaveBeenCalledWith(
+      {
+        name: "server.defaultClientName",
+        scopes: ["wiki:cognia"],
+      },
+      "lease-1"
+    )
+    expect(mockResolveSidecar).not.toHaveBeenCalled()
+    expect(mockStart).not.toHaveBeenCalled()
+    for (const [next] of onChange.mock.calls) {
+      expect(next).not.toHaveProperty("bearerToken")
+    }
+  })
+
   it("starts the server with the configured port and the real sidecar path", async () => {
     const { onChange } = setup({ enabled: false, bearerToken: "tok_abc", httpPort: 4444 })
 
@@ -113,8 +189,9 @@ describe("BridgeServerPanel", () => {
     expect(mockStart).not.toHaveBeenCalled()
   })
 
-  it("persists an edited HTTP port", () => {
+  it("persists an edited HTTP port", async () => {
     const { onChange } = setup({ httpPort: 3001 })
+    await settleInitialStatus()
 
     const input = screen.getByLabelText("server.httpPort")
     fireEvent.change(input, { target: { value: "4444" } })
@@ -123,8 +200,9 @@ describe("BridgeServerPanel", () => {
     expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ httpPort: 4444 }))
   })
 
-  it("refuses 0, which cannot be written into a client config ahead of time", () => {
+  it("refuses 0, which cannot be written into a client config ahead of time", async () => {
     setup({ httpPort: 3001 })
+    await settleInitialStatus()
     expect(screen.getByLabelText("server.httpPort")).toHaveAttribute("min", "1")
   })
 
@@ -185,24 +263,27 @@ describe("BridgeServerPanel", () => {
     expect(mockStart).not.toHaveBeenCalled()
   })
 
-  it("shows when the token was last rotated", () => {
+  it("shows when the token was last rotated", async () => {
     // Persisted on every rotation and previously never displayed, so "did I
     // already rotate this?" had no answer in the UI.
     const rotated = Date.UTC(2026, 6, 28, 8, 15)
     setup({ bearerToken: "tok_abc", tokenRotatedAt: rotated })
+    await settleInitialStatus()
 
     expect(screen.getByTestId("bridge-token-rotated-at")).toHaveTextContent(
       `server.tokenRotatedAt:${new Date(rotated).toLocaleString()}`
     )
   })
 
-  it("omits the rotation line when the token has never been rotated", () => {
+  it("omits the rotation line when the token has never been rotated", async () => {
     setup({ bearerToken: "tok_abc", tokenRotatedAt: undefined })
+    await settleInitialStatus()
     expect(screen.queryByTestId("bridge-token-rotated-at")).not.toBeInTheDocument()
   })
 
-  it("masks the token until revealed", () => {
+  it("masks the token until revealed", async () => {
     setup({ bearerToken: "tok_secret_value" })
+    await settleInitialStatus()
 
     expect(screen.queryByText("tok_secret_value")).not.toBeInTheDocument()
     fireEvent.click(screen.getByRole("button", { name: "server.show" }))

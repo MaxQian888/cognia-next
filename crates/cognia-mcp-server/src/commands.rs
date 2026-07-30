@@ -191,7 +191,9 @@ pub fn first_existing_sidecar(candidates: &[std::path::PathBuf]) -> Option<std::
 /// Single source of truth for the spawn path and the client setup snippet —
 /// they disagreed before, and neither pointed at a real file.
 #[tauri::command]
-pub async fn mcp_server_sidecar_path(app: tauri::AppHandle) -> Result<Option<String>, McpServerError> {
+pub async fn mcp_server_sidecar_path(
+    app: tauri::AppHandle,
+) -> Result<Option<String>, McpServerError> {
     Ok(resolve_sidecar_path(&app).map(|path| path.to_string_lossy().into_owned()))
 }
 
@@ -207,10 +209,10 @@ pub fn resolve_sidecar_path<R: tauri::Runtime>(
     if let Some(explicit) = std::env::var_os(MCP_SIDECAR_PATH_ENV) {
         candidates.push(explicit.into());
     }
-    if let Ok(resource) = app
-        .path()
-        .resolve("sidecar/cognia-mcp.mjs", tauri::path::BaseDirectory::Resource)
-    {
+    if let Ok(resource) = app.path().resolve(
+        "sidecar/cognia-mcp.mjs",
+        tauri::path::BaseDirectory::Resource,
+    ) {
         candidates.push(resource);
     }
     if let Ok(home) = app.path().home_dir() {
@@ -261,7 +263,7 @@ mod tests {
             Some(present.clone())
         );
         // A directory is not a spawnable script.
-        assert_eq!(first_existing_sidecar(&[dir.clone()]), None);
+        assert_eq!(first_existing_sidecar(std::slice::from_ref(&dir)), None);
         // Nothing installed → None, so the caller can say so instead of
         // printing a path that is not there.
         assert_eq!(first_existing_sidecar(&[missing]), None);
@@ -351,6 +353,14 @@ mod tests {
             let handle = crate::http_server::ServerHandle {
                 bound_port: 12345,
                 shutdown: tx,
+                client_verifiers: crate::http_server::ClientVerifierStore::from_tokens(&[
+                    "a-sufficiently-long-mcp-test-token".into(),
+                ])
+                .unwrap(),
+                sessions: Arc::new(crate::streamable_http::SessionRegistry::new(
+                    crate::streamable_http::Spawner::Echo,
+                    crate::streamable_http::DEFAULT_IDLE_TTL,
+                )),
             };
             let mut inner = state.inner.lock();
             inner.status.running = true;

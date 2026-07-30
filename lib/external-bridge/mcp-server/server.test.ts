@@ -70,6 +70,52 @@ describe("buildMcpServer — tool registration", () => {
   )
 })
 
+describe("buildMcpServer — per-client scope projection", () => {
+  it("intersects host scopes with server-stamped client scopes", async () => {
+    const { client } = await makeWiredPair(
+      settings({ enabledScopes: ["wiki:cognia", "memory:write"] })
+    )
+    const denied = await client.callTool({
+      name: "memory_store",
+      arguments: { text: "must not be written" },
+      _meta: { cogniaBridgeScopes: ["wiki:cognia"] },
+    })
+
+    expect(denied.isError).toBe(true)
+    await client.close()
+  })
+
+  it("never lets client scopes expand the host allowlist", async () => {
+    const { client } = await makeWiredPair(settings({ enabledScopes: ["wiki:cognia"] }))
+    const denied = await client.callTool({
+      name: "memory_store",
+      arguments: { text: "must not be written" },
+      _meta: { cogniaBridgeScopes: ["memory:write"] },
+    })
+
+    expect(denied.isError).toBe(true)
+    await client.close()
+  })
+
+  it.each([
+    ["schedule_task", { sessionId: "s1", prompt: "hi", intervalMs: 60_000 }],
+    ["list_scheduled_tasks", { sessionId: "s1" }],
+    ["cancel_scheduled_task", { sessionId: "s1", taskId: "t1" }],
+  ])("applies the client scope projection to %s", async (toolName, args) => {
+    const { client } = await makeWiredPair(
+      settings({ enabledScopes: ["agent:dispatch", "wiki:cognia"] })
+    )
+    const denied = await client.callTool({
+      name: toolName,
+      arguments: args,
+      _meta: { cogniaBridgeScopes: ["wiki:cognia"] },
+    })
+
+    expect(denied.isError).toBe(true)
+    await client.close()
+  })
+})
+
 describe("buildMcpServer — orchestration tools (Thread D)", () => {
   it.each([
     ["agent_dispatch", { subagentId: "x", prompt: "hi" }],
