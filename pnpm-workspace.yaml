@@ -24,7 +24,14 @@ overrides:
   "@babel/runtime": "^7.28.4"
   "@hono/node-server": "^2.0.5"
   adm-zip: "^0.6.0"
-  brace-expansion: "^5.0.8"
+  # brace-expansion v5 changed its CommonJS export from a callable function to
+  # `{ expand }`. A graph-wide override therefore crashes the still-supported
+  # minimatch 3/5/9 consumers before ESLint can load. Pin the latest maintenance
+  # line compatible with each parent API instead.
+  "minimatch@3.1.5>brace-expansion": "1.1.16"
+  "minimatch@5.1.9>brace-expansion": "2.1.2"
+  "minimatch@9.0.9>brace-expansion": "2.1.2"
+  "minimatch@10.2.5>brace-expansion": "5.0.8"
   dompurify: "^3.4.12"
   esbuild: "^0.28.1"
   postcss: "^8.5.10"
