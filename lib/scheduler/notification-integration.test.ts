@@ -2,7 +2,11 @@
  * @jest-environment jsdom
  */
 
-import { notifyTaskEvent, testNotificationChannel } from "./notification-integration"
+import {
+  __setSchedulerNotificationSettingsForTesting,
+  notifyTaskEvent,
+  testNotificationChannel,
+} from "./notification-integration"
 import type { ScheduledTask, TaskExecution } from "@/types/scheduler"
 
 // Mock dependencies
@@ -24,6 +28,18 @@ jest.mock("@/lib/notifications/runtime", () => ({
   notify: jest.fn().mockResolvedValue("center-id"),
 }))
 
+// The `im` channel test pushes through the conversation notifier (which owns the
+// DND / opt-in / PII gating downstream); stub it so the assertion is about what
+// the scheduler asked for, not about delivery.
+jest.mock("@/lib/notifications/conversation-notify", () => ({
+  notifyConversationOverIM: jest.fn().mockResolvedValue("center-id"),
+}))
+
+// Lazily imported by the IM fallback resolution when no test reader is injected.
+jest.mock("@/lib/db/settings", () => ({
+  getSettings: jest.fn().mockResolvedValue({}),
+}))
+
 jest.mock("@cognia/logging", () => ({
   loggers: {
     app: {
@@ -43,10 +59,16 @@ jest.mock("@cognia/logging", () => ({
 
 import { notify } from "@/lib/tauri/notification"
 import { notify as centerNotify } from "@/lib/notifications/runtime"
+import { notifyConversationOverIM } from "@/lib/notifications/conversation-notify"
+import { getSettings } from "@/lib/db/settings"
 import { toast } from "sonner"
 
 const mockSendNotification = notify as jest.MockedFunction<typeof notify>
 const mockCenterNotify = centerNotify as jest.MockedFunction<typeof centerNotify>
+const mockNotifyConversationOverIM = notifyConversationOverIM as jest.MockedFunction<
+  typeof notifyConversationOverIM
+>
+const mockGetSettings = getSettings as unknown as jest.Mock
 
 describe("notification-integration", () => {
   const mockTask = {
@@ -166,6 +188,270 @@ describe("notification-integration", () => {
       expect(mockCenterNotify).toHaveBeenCalledWith(
         expect.objectContaining({ channels: ["center", "toast", "os"] })
       )
+    })
+
+    it("describes a progress event", async () => {
+      await notifyTaskEvent(mockTask, mockExecution, "progress")
+
+      expect(mockCenterNotify).toHaveBeenCalledWith(
+        expect.objectContaining({
+          level: "info",
+          title: "Task Progress: Test Task",
+        })
+      )
+    })
+
+    // Auto-pause is the one event whose body has to tell the operator what to do
+    // next, so its wording is pinned rather than left to drift.
+    it("warns on auto-pause and names the failure threshold", async () => {
+      const pausedTask = {
+        ...mockTask,
+        config: { pauseAfterConsecutiveFailures: 3 },
+      } as unknown as ScheduledTask
+
+      await notifyTaskEvent(pausedTask, mockExecution, "auto-paused")
+
+      expect(mockCenterNotify).toHaveBeenCalledWith(
+        expect.objectContaining({
+          level: "warning",
+          title: "Task Auto-Paused: Test Task",
+          body: expect.stringContaining("3 consecutive failures"),
+        })
+      )
+    })
+
+    it("falls back to a generic body when the threshold is unset", async () => {
+      const pausedTask = { ...mockTask, config: {} } as unknown as ScheduledTask
+
+      await notifyTaskEvent(pausedTask, mockExecution, "auto-paused")
+
+      expect(mockCenterNotify).toHaveBeenCalledWith(
+        expect.objectContaining({ body: expect.stringContaining("several consecutive failures") })
+      )
+    })
+
+    it("reports a completion without a measured duration", async () => {
+      const noDuration = { ...mockExecution, duration: undefined }
+
+      await notifyTaskEvent(mockTask, noDuration, "complete")
+
+      expect(mockCenterNotify).toHaveBeenCalledWith(
+        expect.objectContaining({ body: expect.stringContaining("Completed successfully") })
+      )
+    })
+
+    // The `im` channel: the center, the delivery implementation and the
+    // per-conversation opt-in all existed already — the scheduler's narrower
+    // channel union was the only thing blocking a task result from reaching a
+    // chat window.
+    describe("im channel", () => {
+      afterEach(() => __setSchedulerNotificationSettingsForTesting(null))
+
+      function imTask(
+        imTarget: { conversationKey: string } | undefined,
+        channels: readonly string[] = ["im"]
+      ): ScheduledTask {
+        return {
+          ...mockTask,
+          notification: { ...mockTask.notification, channels, imTarget },
+        } as unknown as ScheduledTask
+      }
+
+      it("delivers to the task's own target and carries the conversation sourceRef", async () => {
+        __setSchedulerNotificationSettingsForTesting(async () => ({}))
+
+        await notifyTaskEvent(
+          imTask({ conversationKey: "discord:a1:ch_ops" }),
+          mockExecution,
+          "error"
+        )
+
+        expect(mockCenterNotify).toHaveBeenCalledTimes(1)
+        expect(mockCenterNotify).toHaveBeenCalledWith(
+          expect.objectContaining({
+            channels: ["center", "im"],
+            // im-deliver resolves its destination from this and nothing else.
+            sourceRef: { kind: "conversation", id: "discord:a1:ch_ops" },
+            // Task grouping survives even though the ref had to change.
+            groupKey: "task:task-1",
+          })
+        )
+      })
+
+      it("falls back to the global ops channel when the task names no target", async () => {
+        __setSchedulerNotificationSettingsForTesting(async () => ({
+          fallbackConversationKey: "slack:ops:C123",
+        }))
+
+        await notifyTaskEvent(imTask(undefined), mockExecution, "error")
+
+        expect(mockCenterNotify).toHaveBeenCalledWith(
+          expect.objectContaining({
+            channels: ["center", "im"],
+            sourceRef: { kind: "conversation", id: "slack:ops:C123" },
+          })
+        )
+      })
+
+      it("prefers the task target over the global fallback", async () => {
+        __setSchedulerNotificationSettingsForTesting(async () => ({
+          fallbackConversationKey: "slack:ops:C123",
+        }))
+
+        await notifyTaskEvent(
+          imTask({ conversationKey: "discord:a1:ch_own" }),
+          mockExecution,
+          "error"
+        )
+
+        expect(mockCenterNotify).toHaveBeenCalledWith(
+          expect.objectContaining({
+            sourceRef: { kind: "conversation", id: "discord:a1:ch_own" },
+          })
+        )
+      })
+
+      // No target anywhere → drop only the IM channel. The durable center record
+      // still has to be written, or asking for IM delivery would LOSE the event.
+      it("keeps the center record and the task sourceRef when no target resolves", async () => {
+        __setSchedulerNotificationSettingsForTesting(async () => ({}))
+
+        await notifyTaskEvent(imTask(undefined, ["im", "toast"]), mockExecution, "error")
+
+        expect(mockCenterNotify).toHaveBeenCalledWith(
+          expect.objectContaining({
+            channels: ["center", "toast"],
+            sourceRef: { kind: "task", id: "task-1" },
+          })
+        )
+      })
+
+      it("emits one record for im + toast + desktop together", async () => {
+        __setSchedulerNotificationSettingsForTesting(async () => ({}))
+
+        await notifyTaskEvent(
+          imTask({ conversationKey: "discord:a1:ch_ops" }, ["im", "toast", "desktop"]),
+          mockExecution,
+          "complete"
+        )
+
+        expect(mockCenterNotify).toHaveBeenCalledTimes(1)
+        expect(mockCenterNotify).toHaveBeenCalledWith(
+          expect.objectContaining({ channels: ["center", "toast", "os", "im"] })
+        )
+      })
+
+      it("treats a whitespace-only target as absent", async () => {
+        __setSchedulerNotificationSettingsForTesting(async () => ({
+          fallbackConversationKey: "   ",
+        }))
+
+        await notifyTaskEvent(
+          imTask({ conversationKey: "  " }, ["im", "toast"]),
+          mockExecution,
+          "error"
+        )
+
+        expect(mockCenterNotify).toHaveBeenCalledWith(
+          expect.objectContaining({ channels: ["center", "toast"] })
+        )
+      })
+
+      // A settings read failure must cost only the IM channel, never the others.
+      it("degrades to the remaining channels when the settings read throws", async () => {
+        __setSchedulerNotificationSettingsForTesting(async () => {
+          throw new Error("db closed")
+        })
+
+        await notifyTaskEvent(imTask(undefined, ["im", "toast"]), mockExecution, "error")
+
+        expect(mockCenterNotify).toHaveBeenCalledWith(
+          expect.objectContaining({ channels: ["center", "toast"] })
+        )
+      })
+
+      // `testNotificationChannel` switches on the channel; a missing `im` case
+      // would fall straight through to `{ success: true }` and claim the test
+      // passed without sending anything.
+      describe('testNotificationChannel("im")', () => {
+        it("fails with a readable reason when no conversation resolves", async () => {
+          __setSchedulerNotificationSettingsForTesting(async () => ({}))
+
+          const result = await testNotificationChannel("im")
+
+          expect(result.success).toBe(false)
+          expect(result.error).toContain("No IM conversation is configured")
+        })
+
+        it("pushes through the conversation notifier using the passed key", async () => {
+          __setSchedulerNotificationSettingsForTesting(async () => ({}))
+
+          const result = await testNotificationChannel("im", undefined, "discord:a1:ch_typed")
+
+          expect(result.success).toBe(true)
+          expect(mockNotifyConversationOverIM).toHaveBeenCalledWith(
+            expect.objectContaining({
+              conversationKey: "discord:a1:ch_typed",
+              source: "scheduler",
+            })
+          )
+        })
+
+        it("falls back to the global ops channel when no key is passed", async () => {
+          __setSchedulerNotificationSettingsForTesting(async () => ({
+            fallbackConversationKey: "slack:ops:C123",
+          }))
+
+          const result = await testNotificationChannel("im")
+
+          expect(result.success).toBe(true)
+          expect(mockNotifyConversationOverIM).toHaveBeenCalledWith(
+            expect.objectContaining({ conversationKey: "slack:ops:C123" })
+          )
+        })
+      })
+
+      // Production path: no injected reader, so the lazy `getSettings` import
+      // runs. Without this the real fallback lookup would be untested.
+      it("reads the fallback from real settings when nothing is injected", async () => {
+        __setSchedulerNotificationSettingsForTesting(null)
+        mockGetSettings.mockResolvedValueOnce({
+          schedulerNotifications: { fallbackConversationKey: "lark:ops:oc_1" },
+        })
+
+        await notifyTaskEvent(imTask(undefined), mockExecution, "error")
+
+        expect(mockGetSettings).toHaveBeenCalled()
+        expect(mockCenterNotify).toHaveBeenCalledWith(
+          expect.objectContaining({
+            channels: ["center", "im"],
+            sourceRef: { kind: "conversation", id: "lark:ops:oc_1" },
+          })
+        )
+      })
+
+      it("drops only the IM channel when real settings have no fallback", async () => {
+        __setSchedulerNotificationSettingsForTesting(null)
+        mockGetSettings.mockResolvedValueOnce({})
+
+        await notifyTaskEvent(imTask(undefined, ["im", "toast"]), mockExecution, "error")
+
+        expect(mockCenterNotify).toHaveBeenCalledWith(
+          expect.objectContaining({ channels: ["center", "toast"] })
+        )
+      })
+
+      it("does not read settings at all when im is not requested", async () => {
+        const read = jest.fn(async () => ({ fallbackConversationKey: "slack:ops:C123" }))
+        __setSchedulerNotificationSettingsForTesting(read)
+
+        await notifyTaskEvent(imTask(undefined, ["toast"]), mockExecution, "complete")
+
+        expect(read).not.toHaveBeenCalled()
+        expect(mockCenterNotify).toHaveBeenCalledWith(
+          expect.objectContaining({ channels: ["center", "toast"] })
+        )
+      })
     })
 
     it("should send webhook notification", async () => {

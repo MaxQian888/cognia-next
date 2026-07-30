@@ -17383,10 +17383,14 @@
     "notifications": "通知",
     "notifyChannels": {
       "desktop": "桌面通知",
+      "im": "IM 消息",
       "none": "无",
       "toast": "应用内提示",
       "webhook": "Webhook"
     },
+    "notifyImConversation": "IM 会话",
+    "notifyImConversationHint": "留空则使用设置里的全局运维频道。该会话需已开启主动推送才会收到消息。",
+    "notifyImConversationPlaceholder": "例如 slack:ops-bot:C012AB3CD",
     "notifyOn": "通知时机",
     "notifyOnComplete": "完成时通知",
     "notifyOnError": "失败时通知",

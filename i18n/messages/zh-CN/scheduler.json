@@ -252,8 +252,8 @@
   "eventSourceLiteralPlaceholder": "来源",
   "eventSourcePlaceholder": "留空则匹配任意来源",
   "eventType": "事件类型",
-  "eventTypePlaceholder": "例如 message.created、workflow.completed",
   "eventTypeCustomLabel": "自定义事件类型…",
+  "eventTypePlaceholder": "例如 message.created、workflow.completed",
   "eventTypePresetLabel": "内置事件类型",
   "eventTypePresets": {
     "agent:completed": "代理任务完成",
@@ -430,10 +430,14 @@
   "notifications": "通知",
   "notifyChannels": {
     "desktop": "桌面通知",
+    "im": "IM 消息",
     "none": "无",
     "toast": "应用内提示",
     "webhook": "Webhook"
   },
+  "notifyImConversation": "IM 会话",
+  "notifyImConversationHint": "留空则使用设置里的全局运维频道。该会话需已开启主动推送才会收到消息。",
+  "notifyImConversationPlaceholder": "例如 slack:ops-bot:C012AB3CD",
   "notifyOn": "通知时机",
   "notifyOnComplete": "完成时通知",
   "notifyOnError": "失败时通知",
@@ -495,7 +499,6 @@
   },
   "pausedTasks": "已暂停",
   "payload": {
-    "jsonPlaceholder": "'{'\"key\": \"value\"'}'",
     "additionalDirectories": {
       "heading": "附加目录"
     },
@@ -544,6 +547,7 @@
       "objectivePlaceholder": "这个目标要完成什么？",
       "timeoutMinutes": "超时 (分钟)"
     },
+    "jsonPlaceholder": "'{'\"key\": \"value\"'}'",
     "maxTurns": "最大轮次",
     "maxTurnsPlaceholder": "1–100",
     "mcp": {

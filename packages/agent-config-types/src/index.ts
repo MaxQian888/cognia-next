@@ -2022,6 +2022,19 @@ export interface AppSettings {
    */
   storageRetention?: { traceRetentionDays: number }
   /**
+   * Scheduler notification preferences.
+   *
+   * `fallbackConversationKey` is layer 2 of the scheduler's `im` channel: the
+   * ops chat a task notification lands in when the task names no `imTarget`, or
+   * when the one it names no longer resolves to a bound session. Without it a
+   * failing task whose original conversation was deleted would notify nobody —
+   * exactly when the operator most needs to hear about it.
+   *
+   * Optional and merged forward by `lib/db/settings.ts:getSettings()`, so older
+   * installs pick it up without a schema migration.
+   */
+  schedulerNotifications?: { fallbackConversationKey?: string }
+  /**
    * Source Control feature preferences (AI commit-message generation, …).
    * Merged forward by `lib/db/settings.ts:getSettings()` from
    * `DEFAULT_GIT_SETTINGS` in `types/git`, so older installs pick up new

@@ -17383,10 +17383,14 @@
     "notifications": "Notifications",
     "notifyChannels": {
       "desktop": "Desktop",
+      "im": "IM",
       "none": "None",
       "toast": "Toast",
       "webhook": "Webhook"
     },
+    "notifyImConversation": "IM conversation",
+    "notifyImConversationHint": "Leave empty to use the global ops channel from settings. The conversation must have proactive push enabled to receive anything.",
+    "notifyImConversationPlaceholder": "e.g. slack:ops-bot:C012AB3CD",
     "notifyOn": "Notify On",
     "notifyOnComplete": "Notify on complete",
     "notifyOnError": "Notify on error",

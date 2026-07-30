@@ -37,6 +37,21 @@ describe("TaskNotificationDisplay", () => {
     expect(screen.queryByTestId("webhook-signed-badge")).not.toBeInTheDocument()
   })
 
+  // `im` was added to the channel union; without a case here it would fall to
+  // the unknown-channel fallback and render as the raw "Im".
+  it("renders a labelled IM channel rather than the unknown-channel fallback", () => {
+    const notification: TaskNotificationConfig = {
+      onStart: false,
+      onComplete: true,
+      onError: true,
+      channels: ["im", "toast"],
+      imTarget: { conversationKey: "slack:ops:C1" },
+    }
+    render(<TaskNotificationDisplay notification={notification} />)
+    expect(screen.getByText("IM, Toast")).toBeInTheDocument()
+    expect(screen.queryByText("Im, Toast")).not.toBeInTheDocument()
+  })
+
   // The cognia-next port of TaskNotificationDisplay only surfaces the channel
   // label list + notifyOn mode — webhook URL preview and the "Signed" badge
   // were deferred. Keeping the channel list assertion here so we still pin

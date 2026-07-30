@@ -103,8 +103,22 @@ export type TaskOverlapPolicy = "allow" | "skip" | "queue-one" | "queue-all" | "
 // Task status
 export type ScheduledTaskStatus = "active" | "paused" | "disabled" | "expired"
 
-// Notification channels
-export type NotificationChannel = "desktop" | "toast" | "webhook" | "none"
+/**
+ * Notification channels a task can request.
+ *
+ * `desktop` / `toast` / `im` are all delivered by the Unified Notification
+ * Center (ADR-0042) — this union is the scheduler's own vocabulary and MUST stay
+ * mappable onto `types/notifications`'s `NotificationChannel`. `im` was missing
+ * for a long time even though the center, the delivery implementation
+ * (`lib/notifications/im-deliver.ts`) and the per-conversation opt-in all
+ * existed: the narrower union here was the only thing blocking it, so a task
+ * result could not reach a chat window without authoring a second
+ * `connection:*` task by hand.
+ *
+ * `webhook` is different — a scheduler-owned outbound HTTP integration, not a
+ * user-facing notification, dispatched directly.
+ */
+export type NotificationChannel = "desktop" | "toast" | "webhook" | "im" | "none"
 
 export type BackupTaskType = "full" | "sessions" | "settings" | "plugins" | "all"
 
@@ -356,6 +370,22 @@ export interface TaskNotificationConfig {
   channels?: NotificationChannel[]
   /** Webhook URL for webhook notifications */
   webhookUrl?: string
+  /**
+   * Where the `im` channel delivers. Layer 1 of two: when unset (or when the
+   * conversation no longer resolves) delivery falls back to the global ops
+   * channel in `AppSettings.schedulerNotifications.fallbackConversationKey`, so
+   * a failing task can still reach someone after its original chat is gone.
+   *
+   * Only the conversation key is stored. The adapter is derived from the bound
+   * session's `platformBinding` at delivery time (`im-deliver.ts`) — persisting
+   * it here too would be a second source of truth that goes stale when a
+   * conversation is re-bound to another bot.
+   *
+   * Tasks authored from IM get this filled in with their originating
+   * conversation. Serialized inside the task's `notification` JSON blob, so
+   * adding it needs no Dexie version.
+   */
+  imTarget?: { conversationKey: string }
 }
 
 /**

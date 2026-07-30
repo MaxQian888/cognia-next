@@ -24,6 +24,8 @@ function formatChannels(channels: string[] | undefined, t: Translator): string {
           return t("notifyChannels.toast")
         case "webhook":
           return t("notifyChannels.webhook")
+        case "im":
+          return t("notifyChannels.im")
         default:
           return ch.charAt(0).toUpperCase() + ch.slice(1)
       }

@@ -263,6 +263,12 @@ interface TaskFormState {
   notifyOnComplete: boolean
   notifyOnError: boolean
   notificationChannels: NotificationChannel[]
+  /**
+   * Conversation the `im` channel delivers to. Empty means "use the global ops
+   * channel from settings" — the second layer of the two-layer fallback, so an
+   * operator who wants everything in one place configures it once.
+   */
+  notificationImConversationKey: string
   taskTimeout: number
   maxRetries: number
   retryDelay: number
@@ -401,6 +407,7 @@ function createInitialState(initialValues?: Partial<CreateScheduledTaskInput>): 
     notifyOnComplete: initialValues?.notification?.onComplete ?? true,
     notifyOnError: initialValues?.notification?.onError ?? true,
     notificationChannels: initialValues?.notification?.channels || ["toast"],
+    notificationImConversationKey: initialValues?.notification?.imTarget?.conversationKey ?? "",
     taskTimeout: initialValues?.config?.timeout || DEFAULT_EXECUTION_CONFIG.timeout,
     maxRetries: initialValues?.config?.maxRetries || DEFAULT_EXECUTION_CONFIG.maxRetries,
     retryDelay: initialValues?.config?.retryDelay || DEFAULT_EXECUTION_CONFIG.retryDelay,
@@ -474,26 +481,32 @@ export function TaskForm({
     }
   }, [f.cronExpression])
 
-  // Test notification channel
-  const handleTestNotification = useCallback(async (channel: NotificationChannel) => {
-    updateForm({ isTestingNotification: true, notificationTestResult: null })
-    try {
-      const result = await testNotificationChannel(channel)
-      updateForm({
-        notificationTestResult: { channel, success: result.success, error: result.error },
-        isTestingNotification: false,
-      })
-    } catch (err) {
-      updateForm({
-        notificationTestResult: {
-          channel,
-          success: false,
-          error: err instanceof Error ? err.message : "Test failed",
-        },
-        isTestingNotification: false,
-      })
-    }
-  }, [])
+  // Test notification channel. The IM channel needs the conversation the user
+  // just typed (still unsaved), so the test resolves the same two layers a real
+  // delivery would instead of only reading persisted config.
+  const imConversationKey = f.notificationImConversationKey
+  const handleTestNotification = useCallback(
+    async (channel: NotificationChannel) => {
+      updateForm({ isTestingNotification: true, notificationTestResult: null })
+      try {
+        const result = await testNotificationChannel(channel, undefined, imConversationKey)
+        updateForm({
+          notificationTestResult: { channel, success: result.success, error: result.error },
+          isTestingNotification: false,
+        })
+      } catch (err) {
+        updateForm({
+          notificationTestResult: {
+            channel,
+            success: false,
+            error: err instanceof Error ? err.message : "Test failed",
+          },
+          isTestingNotification: false,
+        })
+      }
+    },
+    [imConversationKey]
+  )
 
   // ---- Payload editor mode + task-type change -----------------------------
 
@@ -625,6 +638,7 @@ export function TaskForm({
       notifyOnComplete: input.notification?.onComplete ?? true,
       notifyOnError: input.notification?.onError ?? true,
       notificationChannels: input.notification?.channels || ["toast"],
+      notificationImConversationKey: input.notification?.imTarget?.conversationKey ?? "",
       taskTimeout: input.config?.timeout || DEFAULT_EXECUTION_CONFIG.timeout,
       maxRetries: input.config?.maxRetries || DEFAULT_EXECUTION_CONFIG.maxRetries,
       retryDelay: input.config?.retryDelay || DEFAULT_EXECUTION_CONFIG.retryDelay,
@@ -815,6 +829,12 @@ export function TaskForm({
         onError: f.notifyOnError,
         onProgress: false,
         channels: f.notificationChannels,
+        // Only persisted when the channel is actually on and a key was typed;
+        // an empty key means "fall back to the global ops channel", which is
+        // expressed by the field's absence rather than by an empty string.
+        ...(f.notificationChannels.includes("im") && f.notificationImConversationKey.trim()
+          ? { imTarget: { conversationKey: f.notificationImConversationKey.trim() } }
+          : {}),
       },
       ...(endAt ? { endAt } : {}),
       ...(f.onSuccessTaskIds.length > 0 ? { onSuccessTaskIds: f.onSuccessTaskIds } : {}),
@@ -1375,7 +1395,7 @@ export function TaskForm({
           <div className="space-y-2">
             <Label className="text-sm font-medium">{t("notificationChannels") || "Channels"}</Label>
             <div className="flex gap-2">
-              {(["desktop", "toast"] as NotificationChannel[]).map((channel) => (
+              {(["desktop", "toast", "im"] as NotificationChannel[]).map((channel) => (
                 <div key={channel} className="flex-1 space-y-1">
                   <button
                     type="button"
@@ -1405,6 +1425,23 @@ export function TaskForm({
                 </div>
               ))}
             </div>
+            {f.notificationChannels.includes("im") && (
+              <div className="space-y-1">
+                <Label
+                  htmlFor="notification-im-conversation"
+                  className="text-xs font-medium text-muted-foreground"
+                >
+                  {t("notifyImConversation")}
+                </Label>
+                <Input
+                  id="notification-im-conversation"
+                  value={f.notificationImConversationKey}
+                  onChange={(e) => updateForm({ notificationImConversationKey: e.target.value })}
+                  placeholder={t("notifyImConversationPlaceholder")}
+                />
+                <p className="text-[10px] text-muted-foreground">{t("notifyImConversationHint")}</p>
+              </div>
+            )}
             {f.notificationTestResult && (
               <p
                 className={cn(

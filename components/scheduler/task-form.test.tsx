@@ -220,6 +220,94 @@ describe("TaskForm", () => {
     )
   })
 
+  // The `im` channel is only reachable if the toggle exists AND the typed
+  // conversation reaches the submitted config — the whole point of wiring it.
+  describe("IM notification channel", () => {
+    it("hides the conversation field until the IM channel is selected", () => {
+      render(<TaskForm onSubmit={jest.fn(async () => undefined)} onCancel={jest.fn()} />)
+      expect(screen.queryByLabelText("notifyImConversation")).not.toBeInTheDocument()
+
+      fireEvent.click(screen.getByRole("button", { name: "im" }))
+      expect(screen.getByLabelText("notifyImConversation")).toBeInTheDocument()
+    })
+
+    it("submits the typed conversation as the task's imTarget", async () => {
+      const onSubmit = jest.fn(async () => undefined)
+      render(<TaskForm onSubmit={onSubmit} onCancel={jest.fn()} />)
+
+      fireEvent.change(document.querySelector("input") as HTMLInputElement, {
+        target: { value: "Digest task" },
+      })
+      fireEvent.click(screen.getByRole("button", { name: "im" }))
+      fireEvent.change(screen.getByLabelText("notifyImConversation"), {
+        target: { value: " slack:ops:C1 " },
+      })
+
+      fireEvent.click(screen.getByTestId("scheduler-task-submit"))
+      await screen.findByTestId("scheduler-task-form")
+
+      expect(onSubmit).toHaveBeenCalledWith(
+        expect.objectContaining({
+          notification: expect.objectContaining({
+            channels: expect.arrayContaining(["im"]),
+            // Trimmed — a stray space would silently target nothing.
+            imTarget: { conversationKey: "slack:ops:C1" },
+          }),
+        })
+      )
+    })
+
+    // Empty means "use the global ops channel", which is expressed by the field
+    // being absent rather than by an empty string.
+    it("omits imTarget entirely when the conversation is left blank", async () => {
+      // The mock needs a declared parameter: a 0-arg `jest.fn` types
+      // `mock.calls` as an empty tuple, so `calls[0][0]` fails to compile.
+      const onSubmit = jest.fn(
+        async (_input: { notification: Record<string, unknown> }) => undefined
+      )
+      render(
+        <TaskForm
+          onSubmit={onSubmit as unknown as React.ComponentProps<typeof TaskForm>["onSubmit"]}
+          onCancel={jest.fn()}
+        />
+      )
+
+      fireEvent.change(document.querySelector("input") as HTMLInputElement, {
+        target: { value: "Digest task" },
+      })
+      fireEvent.click(screen.getByRole("button", { name: "im" }))
+
+      fireEvent.click(screen.getByTestId("scheduler-task-submit"))
+      await screen.findByTestId("scheduler-task-form")
+
+      const submitted = onSubmit.mock.calls[0][0]
+      expect(submitted.notification.channels).toContain("im")
+      expect(submitted.notification).not.toHaveProperty("imTarget")
+    })
+
+    it("seeds the conversation field from an existing task", () => {
+      render(
+        <TaskForm
+          onSubmit={jest.fn(async () => undefined)}
+          onCancel={jest.fn()}
+          initialValues={{
+            name: "Existing",
+            type: "chat",
+            trigger: { type: "interval", intervalMs: 60_000 },
+            notification: {
+              onStart: false,
+              onComplete: true,
+              onError: true,
+              channels: ["im"],
+              imTarget: { conversationKey: "discord:a1:ch_seeded" },
+            },
+          }}
+        />
+      )
+      expect(screen.getByLabelText("notifyImConversation")).toHaveValue("discord:a1:ch_seeded")
+    })
+  })
+
   it("seeds the overlap policy from legacy allowConcurrent and mirrors it on submit", async () => {
     const onSubmit = jest.fn(async () => undefined)
     render(
