@@ -11,6 +11,7 @@ import { CodeAdoptionTrackerInitializer } from "./code-adoption-tracker-initiali
 import { MemoryJobWorkerInitializer } from "./memory-job-worker-initializer"
 import { A2UISurfacePersistenceInitializer } from "./a2ui-surface-persistence-initializer"
 import { IntegrationRuntimeInitializer } from "./integration-runtime-initializer"
+import { TemplatePlatformInitializer } from "./template-platform-initializer"
 
 /**
  * The deferred boot bundle's SINGLE chunk graph (ADR-0068 C3). All
@@ -37,6 +38,7 @@ export function DeferredBootInitializersImpl() {
       <CodeAdoptionTrackerInitializer />
       <MemoryJobWorkerInitializer />
       <A2UISurfacePersistenceInitializer />
+      <TemplatePlatformInitializer />
       <IntegrationRuntimeInitializer />
       <SchedulerInitializer />
       <WorkflowRuntimeProvider />

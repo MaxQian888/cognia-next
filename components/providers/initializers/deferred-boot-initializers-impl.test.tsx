@@ -14,6 +14,9 @@ jest.mock("./memory-job-worker-initializer", () => ({
 jest.mock("./a2ui-surface-persistence-initializer", () => ({
   A2UISurfacePersistenceInitializer: () => <span data-boot="a2ui-surfaces" />,
 }))
+jest.mock("./template-platform-initializer", () => ({
+  TemplatePlatformInitializer: () => <span data-boot="template-platform" />,
+}))
 jest.mock("@/components/scheduler/scheduler-initializer", () => ({
   SchedulerInitializer: () => <span data-boot="scheduler" />,
 }))
@@ -52,6 +55,7 @@ describe("DeferredBootInitializersImpl", () => {
       "task-workspace-tracker",
       "memory-job-worker",
       "a2ui-surfaces",
+      "template-platform",
       "scheduler",
       "workflow",
       "provider-core",
