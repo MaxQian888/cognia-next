@@ -1,7 +1,7 @@
 "use client"
 
-import { useEffect, useMemo, useState, type ComponentProps } from "react"
-import { BriefcaseBusinessIcon, HistoryIcon, Trash2Icon } from "lucide-react"
+import { useCallback, useEffect, useMemo, useState, type ComponentProps } from "react"
+import { BriefcaseBusinessIcon, EyeIcon, HistoryIcon, SquareIcon, Trash2Icon } from "lucide-react"
 import { useTranslations } from "next-intl"
 import { toast } from "sonner"
 
@@ -17,6 +17,15 @@ import { redispatchBackgroundRun } from "@/lib/background-tasks/redispatch"
 import { getBackgroundAgentManager } from "@/lib/ai/agent/background-agent-manager"
 import { cancelSubagentRun } from "@/lib/claude/agents/cancel-subagent"
 import { clearSettledBackgroundTasks, listBackgroundTaskRecords } from "@/lib/db/background-tasks"
+import {
+  cancelBackgroundMonitor,
+  killBackgroundJob,
+  listBackgroundJobs,
+  listBackgroundMonitors,
+  readBackgroundJobTail,
+  type BackgroundJobRecord,
+  type BackgroundMonitorRecord,
+} from "@/lib/jobs/background-jobs"
 import { useSubagentRuntimeStore } from "@/stores/agent/subagent-runtime-store"
 import { useClientLiveQuery } from "@/hooks/data"
 import { ExecutionMonitorPanel } from "@/components/execution/execution-monitor-panel"
@@ -50,18 +59,45 @@ const STATUS_VARIANTS: Record<
 
 const EMPTY_RECORDS: BackgroundTaskJournalRecord[] = []
 
-export function JobCenterPanel() {
+export function JobCenterPanel({ compact = false }: { compact?: boolean }) {
   const t = useTranslations("desktop.jobCenter")
   const liveRecords =
     useClientLiveQuery(() => listBackgroundTaskRecords({ host: "renderer" }), [], EMPTY_RECORDS) ??
     EMPTY_RECORDS
   const records = liveRecords
   const [now, setNow] = useState(() => Date.now())
+  const [jobs, setJobs] = useState<BackgroundJobRecord[]>([])
+  const [monitors, setMonitors] = useState<BackgroundMonitorRecord[]>([])
 
   useEffect(() => {
     const id = window.setInterval(() => setNow(Date.now()), 1000)
     return () => window.clearInterval(id)
   }, [])
+
+  const refreshSupervisor = useCallback(async () => {
+    try {
+      const [nextJobs, nextMonitors] = await Promise.all([
+        listBackgroundJobs(),
+        listBackgroundMonitors(),
+      ])
+      setJobs(nextJobs)
+      setMonitors(nextMonitors)
+    } catch {
+      // Web-only builds have no native supervisor. Keep this surface empty;
+      // an active remote transport starts returning rows without remounting.
+      setJobs([])
+      setMonitors([])
+    }
+  }, [])
+
+  useEffect(() => {
+    const initialId = window.setTimeout(() => void refreshSupervisor(), 0)
+    const id = window.setInterval(() => void refreshSupervisor(), 2_000)
+    return () => {
+      window.clearTimeout(initialId)
+      window.clearInterval(id)
+    }
+  }, [refreshSupervisor])
 
   // Live cross-subsystem executions (broker legs + workflow steps + scheduler),
   // governed by the ExecutionBroker — the same source the scheduler dashboard
@@ -74,9 +110,18 @@ export function JobCenterPanel() {
   const hasAttention =
     active.length > 0 ||
     runningCount > 0 ||
+    jobs.some((job) => job.status === "running") ||
+    monitors.some((monitor) => monitor.status === "waiting") ||
     history.some((record) => record.status === "interrupted")
-  const badgeCount = records.length + runningCount
-  const defaultTab = runningCount > 0 ? "running" : "active"
+  const supervisorCount = jobs.length + monitors.length
+  const badgeCount = records.length + runningCount + supervisorCount
+  const defaultTab =
+    jobs.some((job) => job.status === "running") ||
+    monitors.some((monitor) => monitor.status === "waiting")
+      ? "supervisor"
+      : runningCount > 0
+        ? "running"
+        : "active"
 
   const clearSettled = async () => {
     try {
@@ -94,10 +139,13 @@ export function JobCenterPanel() {
           type="button"
           data-testid="status-job-center"
           aria-label={t("open")}
-          className="flex h-6 shrink-0 items-center gap-1.5 px-2 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+          className={cn(
+            "flex shrink-0 items-center gap-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground",
+            compact ? "touch-target h-9 rounded-md px-2" : "h-6 px-2"
+          )}
         >
-          <BriefcaseBusinessIcon aria-hidden className="size-3" />
-          <span>{t("trigger")}</span>
+          <BriefcaseBusinessIcon aria-hidden className={compact ? "size-5" : "size-3"} />
+          <span className={compact ? "sr-only" : undefined}>{t("trigger")}</span>
           {badgeCount > 0 ? (
             <Badge
               variant={hasAttention ? "secondary" : "outline"}
@@ -137,6 +185,14 @@ export function JobCenterPanel() {
                   {history.length}
                 </Badge>
               </TabsTrigger>
+              <TabsTrigger value="supervisor">
+                {t("tabs.supervisor")}
+                {supervisorCount > 0 ? (
+                  <Badge variant="secondary" className="ml-1 h-4 min-w-4 px-1 text-[10px]">
+                    {supervisorCount}
+                  </Badge>
+                ) : null}
+              </TabsTrigger>
             </TabsList>
             <Button
               type="button"
@@ -173,9 +229,192 @@ export function JobCenterPanel() {
               now={now}
             />
           </TabsContent>
+          <TabsContent value="supervisor" className="min-h-0">
+            <SupervisorList
+              jobs={jobs}
+              monitors={monitors}
+              now={now}
+              onChanged={refreshSupervisor}
+            />
+          </TabsContent>
         </Tabs>
       </SheetContent>
     </Sheet>
+  )
+}
+
+function SupervisorList({
+  jobs,
+  monitors,
+  now,
+  onChanged,
+}: {
+  jobs: BackgroundJobRecord[]
+  monitors: BackgroundMonitorRecord[]
+  now: number
+  onChanged: () => Promise<void>
+}) {
+  const t = useTranslations("desktop.jobCenter")
+  const [tails, setTails] = useState<Record<string, string>>({})
+  const displayOwner = (owner: BackgroundJobRecord["owner"]) => {
+    switch (owner.kind) {
+      case "session":
+        return t("supervisor.owner.session", { id: owner.sessionId })
+      case "scheduledTask":
+        return t("supervisor.owner.scheduledTask", { id: owner.taskId })
+      default:
+        return t("supervisor.owner.app")
+    }
+  }
+  const displayDuration = (startedAt: number, endedAt?: number) => {
+    const elapsed = elapsedParts(startedAt, endedAt, now)
+    return elapsed.minutes > 0
+      ? t("duration.minutesSeconds", { minutes: elapsed.minutes, seconds: elapsed.seconds })
+      : t("duration.seconds", { seconds: elapsed.seconds })
+  }
+
+  if (jobs.length === 0 && monitors.length === 0) {
+    return (
+      <div className="flex min-h-[22rem] p-4">
+        <Empty className="min-h-0 border">
+          <EmptyHeader>
+            <EmptyMedia variant="icon">
+              <BriefcaseBusinessIcon aria-hidden />
+            </EmptyMedia>
+            <EmptyTitle>{t("empty.supervisorTitle")}</EmptyTitle>
+            <EmptyDescription>{t("empty.supervisorDescription")}</EmptyDescription>
+          </EmptyHeader>
+        </Empty>
+      </div>
+    )
+  }
+
+  const showTail = async (job: BackgroundJobRecord) => {
+    try {
+      const output = await readBackgroundJobTail(job)
+      setTails((current) => ({ ...current, [job.id]: output.data || t("supervisor.noOutput") }))
+    } catch (error) {
+      toast.error(t("toast.logFailed", { error: errorMessage(error) }))
+    }
+  }
+
+  const stopJob = async (jobId: string) => {
+    try {
+      await killBackgroundJob(jobId)
+      await onChanged()
+      toast.success(t("toast.jobStopped"))
+    } catch (error) {
+      toast.error(t("toast.jobStopFailed", { error: errorMessage(error) }))
+    }
+  }
+
+  const stopMonitor = async (monitorId: string) => {
+    try {
+      await cancelBackgroundMonitor(monitorId)
+      await onChanged()
+      toast.success(t("toast.monitorCancelled"))
+    } catch (error) {
+      toast.error(t("toast.monitorCancelFailed", { error: errorMessage(error) }))
+    }
+  }
+
+  return (
+    <ScrollArea className="h-[min(68vh,38rem)]">
+      <div className="flex flex-col gap-4 p-4">
+        {jobs.length > 0 ? (
+          <section className="space-y-2" aria-label={t("supervisor.jobs")}>
+            <h3 className="text-sm font-semibold">{t("supervisor.jobs")}</h3>
+            {jobs.map((job) => (
+              <article key={job.id} className="space-y-2 rounded-md border bg-background p-3">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="truncate text-sm font-medium">
+                        {job.label ?? job.command}
+                      </span>
+                      <Badge variant={job.status === "running" ? "secondary" : "outline"}>
+                        {t(`supervisor.jobStatus.${job.status}`)}
+                      </Badge>
+                      <Badge variant="outline">{displayOwner(job.owner)}</Badge>
+                    </div>
+                    <p className="mt-1 truncate text-xs text-muted-foreground">{job.cwd}</p>
+                    <p className="text-xs text-muted-foreground">
+                      {t("fields.elapsed", {
+                        value: displayDuration(job.startedAtMs, job.endedAtMs),
+                      })}
+                    </p>
+                  </div>
+                  <div className="flex shrink-0 gap-1">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => void showTail(job)}
+                    >
+                      <EyeIcon data-icon="inline-start" />
+                      {t("actions.logTail")}
+                    </Button>
+                    {job.status === "running" ? (
+                      <Button
+                        type="button"
+                        variant="destructive"
+                        size="sm"
+                        onClick={() => void stopJob(job.id)}
+                      >
+                        <SquareIcon data-icon="inline-start" />
+                        {t("actions.stop")}
+                      </Button>
+                    ) : null}
+                  </div>
+                </div>
+                {tails[job.id] ? (
+                  <pre className="max-h-40 overflow-auto whitespace-pre-wrap rounded bg-muted p-2 text-xs">
+                    {tails[job.id]}
+                  </pre>
+                ) : null}
+              </article>
+            ))}
+          </section>
+        ) : null}
+
+        {monitors.length > 0 ? (
+          <section className="space-y-2" aria-label={t("supervisor.monitors")}>
+            <h3 className="text-sm font-semibold">{t("supervisor.monitors")}</h3>
+            {monitors.map((monitor) => (
+              <article
+                key={monitor.id}
+                className="flex items-start justify-between gap-3 rounded-md border bg-background p-3"
+              >
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="truncate text-sm font-medium">
+                      {monitor.label ?? monitor.condition.kind}
+                    </span>
+                    <Badge variant={monitor.status === "waiting" ? "secondary" : "outline"}>
+                      {t(`supervisor.monitorStatus.${monitor.status}`)}
+                    </Badge>
+                    <Badge variant="outline">{displayOwner(monitor.owner)}</Badge>
+                  </div>
+                  {monitor.detail ? (
+                    <p className="mt-1 text-xs text-muted-foreground">{monitor.detail}</p>
+                  ) : null}
+                </div>
+                {monitor.status === "waiting" ? (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => void stopMonitor(monitor.id)}
+                  >
+                    {t("actions.cancel")}
+                  </Button>
+                ) : null}
+              </article>
+            ))}
+          </section>
+        ) : null}
+      </div>
+    </ScrollArea>
   )
 }
 

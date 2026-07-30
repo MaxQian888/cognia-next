@@ -41,6 +41,7 @@ import { executeRadarReportTask } from "./radar-report-executor"
 import { executeAgentTeamTask } from "./team-executor"
 import { executeGoalTask } from "./goal-executor"
 import { executePlanTask } from "./plan-executor"
+import { executeBackgroundCommandTask, executeMonitorTask } from "./background-job-executor"
 import { executeScript } from "../script-executor"
 import { sendPrompt, onClaudeMessage, interruptSession } from "@/lib/claude/ipc"
 import type {
@@ -689,6 +690,8 @@ export function registerBuiltInExecutors(): void {
   registerTaskExecutor("agent", executeAgentTask)
   registerTaskExecutor("skill", executeSkillTask)
   registerTaskExecutor("script", executeScriptTask)
+  registerTaskExecutor("background-command", executeBackgroundCommandTask)
+  registerTaskExecutor("monitor", executeMonitorTask)
   registerTaskExecutor("plugin", executePluginTask)
   registerTaskExecutor("backup", executeBackupTask)
   registerTaskExecutor("custom", executeCustomTask)
@@ -702,7 +705,7 @@ export function registerBuiltInExecutors(): void {
   registerTaskExecutor("plan", executePlanTask)
 
   log.info(
-    "Built-in scheduler executors registered: chat, agent, skill, script, plugin, backup, custom, external-agent, twin, wiki-rebuild, wiki-lint, radar-report, agent-team, goal, plan"
+    "Built-in scheduler executors registered: chat, agent, skill, script, background-command, monitor, plugin, backup, custom, external-agent, twin, wiki-rebuild, wiki-lint, radar-report, agent-team, goal, plan"
   )
 }
 
@@ -711,6 +714,8 @@ export {
   executeAgentTask,
   executeSkillTask,
   executeScriptTask,
+  executeBackgroundCommandTask,
+  executeMonitorTask,
   executeExternalAgentTask,
   executePluginTask,
   executeBackupTask,

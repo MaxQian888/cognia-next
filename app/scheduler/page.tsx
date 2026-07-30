@@ -11,6 +11,7 @@ import { useScheduler, useSystemScheduler } from "@/hooks/scheduler"
 import { useUnifiedScheduledItems } from "@/hooks/scheduler/use-unified-items"
 import { bootstrapSchedulerSources } from "@/lib/scheduler/sources/bootstrap"
 import { getSchedulerSourceRegistry } from "@/lib/scheduler/sources/registry"
+import { getSchedulerDataSource } from "@/lib/scheduler/scheduler-data-source"
 import { useBreakpoint } from "@/hooks/ui"
 import {
   BackfillDialog,
@@ -43,6 +44,7 @@ import type { CreateScheduledTaskInput, CreateSystemTaskInput } from "@/types/sc
 import { useSchedulerStore } from "@/stores/scheduler/scheduler-store"
 
 export default function SchedulerPage() {
+  const schedulerHost = getSchedulerDataSource().host
   const {
     tasks,
     executions,
@@ -488,6 +490,7 @@ export default function SchedulerPage() {
         countsByKind={countsByKind}
         selectedTaskId={selectedTask?.id ?? null}
         schedulerStatus={schedulerStatus}
+        schedulerHost={schedulerHost}
         statistics={statistics}
         activeCount={activeTasks.length}
         pausedCount={pausedTasks.length}

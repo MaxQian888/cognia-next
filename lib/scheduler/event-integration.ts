@@ -41,6 +41,8 @@ export type SchedulerEventType =
   | "connection:outbound:send"
   | "connection:scheduled:digest"
   | "connection:housekeeping:daily"
+  | "job:exited"
+  | "monitor:fired"
 
 /**
  * Event data that can be passed to event-triggered tasks
@@ -123,6 +125,8 @@ export function isValidEventType(eventType: string): eventType is SchedulerEvent
     "connection:outbound:send",
     "connection:scheduled:digest",
     "connection:housekeeping:daily",
+    "job:exited",
+    "monitor:fired",
   ]
   return validTypes.includes(eventType as SchedulerEventType)
 }

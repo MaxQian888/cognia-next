@@ -32,6 +32,8 @@ import {
   Pencil,
   Copy,
   Trash2,
+  SquareTerminal,
+  RadioTower,
 } from "lucide-react"
 import {
   DropdownMenu,
@@ -86,6 +88,16 @@ const taskTypeConfig: Record<
     icon: <FileCode className="h-3.5 w-3.5" />,
     bg: "bg-amber-500/10",
     color: "text-amber-500",
+  },
+  "background-command": {
+    icon: <SquareTerminal className="h-3.5 w-3.5" />,
+    bg: "bg-lime-500/10",
+    color: "text-lime-500",
+  },
+  monitor: {
+    icon: <RadioTower className="h-3.5 w-3.5" />,
+    bg: "bg-teal-500/10",
+    color: "text-teal-500",
   },
   test: {
     icon: <TestTube className="h-3.5 w-3.5" />,

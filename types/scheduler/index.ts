@@ -25,6 +25,8 @@ export type ScheduledTaskType =
   | "custom"
   | "plugin"
   | "script"
+  | "background-command"
+  | "monitor"
   | "test"
   | "ai-generation"
   | "chat"
@@ -169,6 +171,8 @@ export type ScheduledTaskPayload =
   | Record<string, unknown>
   | BackupTaskPayload
   | WikiRebuildTaskPayload
+  | BackgroundCommandTaskPayload
+  | MonitorTaskPayload
   | ChatLikeTaskPayload
   | AgentTaskPayload
   | SkillTaskPayload
@@ -176,6 +180,19 @@ export type ScheduledTaskPayload =
   | AgentTeamTaskPayload
   | GoalTaskPayload
   | PlanTaskPayload
+
+export interface BackgroundCommandTaskPayload extends Record<string, unknown> {
+  command: string
+  cwd: string
+  label?: string
+}
+
+export interface MonitorTaskPayload extends Record<string, unknown> {
+  condition: import("@/lib/jobs/background-jobs").BackgroundMonitorCondition
+  /** ISO date or epoch milliseconds. Omit to keep the watch until it settles. */
+  expiresAt?: string | number
+  label?: string
+}
 
 /**
  * Common payload shape for any task that drives a Claude turn through the

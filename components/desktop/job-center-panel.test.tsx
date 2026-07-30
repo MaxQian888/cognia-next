@@ -50,6 +50,19 @@ jest.mock("@/components/execution/execution-monitor-panel", () => ({
   ExecutionMonitorPanel: () => <div data-testid="execution-monitor-panel">monitor</div>,
 }))
 
+const listBackgroundJobs = jest.fn()
+const listBackgroundMonitors = jest.fn()
+const readBackgroundJobTail = jest.fn()
+const killBackgroundJob = jest.fn()
+const cancelBackgroundMonitor = jest.fn()
+jest.mock("@/lib/jobs/background-jobs", () => ({
+  listBackgroundJobs: (...args: unknown[]) => listBackgroundJobs(...args),
+  listBackgroundMonitors: (...args: unknown[]) => listBackgroundMonitors(...args),
+  readBackgroundJobTail: (...args: unknown[]) => readBackgroundJobTail(...args),
+  killBackgroundJob: (...args: unknown[]) => killBackgroundJob(...args),
+  cancelBackgroundMonitor: (...args: unknown[]) => cancelBackgroundMonitor(...args),
+}))
+
 const toastSuccess = jest.fn()
 const toastError = jest.fn()
 jest.mock("sonner", () => ({
@@ -112,6 +125,16 @@ beforeEach(() => {
   managerCancelAgent.mockReturnValue(true)
   liveSubAgent = undefined
   runningCount = 0
+  listBackgroundJobs.mockReset()
+  listBackgroundMonitors.mockReset()
+  readBackgroundJobTail.mockReset()
+  killBackgroundJob.mockReset()
+  cancelBackgroundMonitor.mockReset()
+  listBackgroundJobs.mockResolvedValue([])
+  listBackgroundMonitors.mockResolvedValue([])
+  readBackgroundJobTail.mockResolvedValue({ data: "build ready" })
+  killBackgroundJob.mockResolvedValue({})
+  cancelBackgroundMonitor.mockResolvedValue({})
 })
 
 afterEach(() => {
@@ -219,6 +242,48 @@ it("shows live executions under the Running tab and counts them in the badge", a
   // Running is the default tab when live activity exists → monitor is visible.
   expect(screen.getByTestId("execution-monitor-panel")).toBeInTheDocument()
   expect(screen.getByRole("tab", { name: /Running/ })).toBeInTheDocument()
+})
+
+it("shows supervised jobs and monitors with log and cancellation controls", async () => {
+  const user = userEvent.setup()
+  listBackgroundJobs.mockResolvedValue([
+    {
+      id: "job-1",
+      command: "pnpm build",
+      cwd: "/workspace",
+      owner: { kind: "session", sessionId: "session-1" },
+      status: "running",
+      startedAtMs: Date.now() - 2_000,
+      totalOutputBytes: 42,
+      droppedOutputBytes: 0,
+    },
+  ])
+  listBackgroundMonitors.mockResolvedValue([
+    {
+      id: "monitor-1",
+      condition: { kind: "jobExit", jobId: "job-1" },
+      owner: { kind: "app" },
+      status: "waiting",
+      createdAtMs: Date.now(),
+    },
+  ])
+
+  render(<JobCenterPanel />)
+  await waitFor(() => expect(listBackgroundJobs).toHaveBeenCalled())
+  await user.click(screen.getByTestId("status-job-center"))
+  await user.click(screen.getByRole("tab", { name: /Processes/ }))
+
+  expect(screen.getByText("pnpm build")).toBeInTheDocument()
+  expect(screen.getByText("jobExit")).toBeInTheDocument()
+
+  await user.click(screen.getByRole("button", { name: "Log" }))
+  await waitFor(() => expect(screen.getByText("build ready")).toBeInTheDocument())
+
+  await user.click(screen.getByRole("button", { name: "Stop" }))
+  expect(killBackgroundJob).toHaveBeenCalledWith("job-1")
+
+  await user.click(screen.getByRole("button", { name: "Cancel" }))
+  expect(cancelBackgroundMonitor).toHaveBeenCalledWith("monitor-1")
 })
 
 it("defaults to the Active tab and reaches Running on demand when nothing is live", async () => {

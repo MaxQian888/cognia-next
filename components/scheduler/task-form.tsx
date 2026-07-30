@@ -97,6 +97,8 @@ const TASK_TYPES: Array<{ value: ScheduledTaskType }> = [
   { value: "sync" },
   { value: "backup" },
   { value: "script" },
+  { value: "background-command" },
+  { value: "monitor" },
   { value: "ai-generation" },
   { value: "test" },
   { value: "custom" },

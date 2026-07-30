@@ -132,11 +132,11 @@ function taskListSegments(tasks: readonly ScheduledTask[]): MessageSegment[] {
           "本会话定时任务 / Scheduled tasks:",
           ...tasks.map(
             (task, index) =>
-              `${index + 1}. ${task.name} · ${task.status} · ${task.nextRunAt?.toISOString() ?? "—"} · ${task.id.slice(0, 8)}`
+              `${index + 1}. ${task.name} · ${task.status} · ${task.nextRunAt?.toISOString() ?? "—"} · ${task.id.slice(0, 8)}\n   cognia://scheduler/task/${encodeURIComponent(task.id)}`
           ),
         ].join("\n")
 
-  const children = tasks.map((task, index) => `task-${index}`)
+  const children = tasks.flatMap((_, index) => [`task-${index}`, `task-link-${index}`])
   const components = [
     a2uiComponent.card("root", {
       title: "本会话定时任务 / Scheduled tasks",
@@ -146,13 +146,16 @@ function taskListSegments(tasks: readonly ScheduledTask[]): MessageSegment[] {
           : `${tasks.length} 个任务 / ${tasks.length} task(s)`,
       children,
     }),
-    ...tasks.map((task, index) =>
+    ...tasks.flatMap((task, index) => [
       a2uiComponent.text(
         `task-${index}`,
         `${index + 1}. ${task.name}\n${task.status} · ${task.nextRunAt?.toISOString() ?? "—"} · ${task.id.slice(0, 8)}`,
         { variant: "body" }
-      )
-    ),
+      ),
+      a2uiComponent.link(`task-link-${index}`, "查看任务 / View task", {
+        href: `cognia://scheduler/task/${encodeURIComponent(task.id)}`,
+      }),
+    ]),
   ]
 
   return [

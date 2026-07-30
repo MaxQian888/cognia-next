@@ -186,5 +186,6 @@ describe("IM schedule policy", () => {
     expect(reply).toHaveBeenCalledWith([expect.objectContaining({ type: "a2ui" })], "applied", {
       taskCount: 1,
     })
+    expect(JSON.stringify(reply.mock.calls[0]?.[0])).toContain("cognia://scheduler/task/visible")
   })
 })

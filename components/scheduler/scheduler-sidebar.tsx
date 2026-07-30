@@ -49,6 +49,7 @@ export interface SchedulerSidebarProps {
   countsByKind?: Record<ScheduledItemKind, number>
   selectedTaskId: string | null
   schedulerStatus: string // 'running' | 'stopped' | 'idle'
+  schedulerHost?: "local" | "remote"
   statistics: TaskStatistics | null
   activeCount: number
   pausedCount: number
@@ -103,6 +104,7 @@ export function SchedulerSidebarContent({
   countsByKind,
   selectedTaskId,
   schedulerStatus,
+  schedulerHost = "local",
   statistics,
   activeCount,
   pausedCount,
@@ -225,6 +227,13 @@ export function SchedulerSidebarContent({
               schedulerDotClass
             )}
           />
+          <Badge
+            variant="outline"
+            className="h-5 px-1.5 text-[10px] group-data-[collapsible=icon]:hidden"
+            data-testid="scheduler-host"
+          >
+            {t(`host.${schedulerHost}`)}
+          </Badge>
         </div>
       </SidebarHeader>
 
