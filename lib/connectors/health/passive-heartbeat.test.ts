@@ -1,4 +1,9 @@
-import { deriveHeartbeat, isPassiveTransport, recordPassiveProbe } from "./passive-heartbeat"
+import {
+  benefitsFromProbe,
+  deriveHeartbeat,
+  isPassiveTransport,
+  recordPassiveProbe,
+} from "./passive-heartbeat"
 import type { AdapterInstanceRow } from "@/lib/db/connector-types"
 
 // Heartbeats now write to the dedicated `connectorHeartbeats` table (v51);
@@ -79,6 +84,40 @@ describe("isPassiveTransport", () => {
   })
 })
 
+describe("benefitsFromProbe", () => {
+  it.each([
+    ["discord", "gateway", {}],
+    ["slack", "gateway", { transport: "socket-mode" }],
+    ["qq-official", "gateway", {}],
+    ["dingtalk", "gateway", {}],
+  ])("includes %s gateway transports", (type, transportMode, settings) => {
+    expect(
+      benefitsFromProbe(
+        makeRow({
+          type: type as AdapterInstanceRow["type"],
+          transportMode: transportMode as AdapterInstanceRow["transportMode"],
+          settings,
+        })
+      )
+    ).toBe(true)
+  })
+
+  it("excludes webhook variants of dual-transport gateway adapters", () => {
+    expect(
+      benefitsFromProbe(makeRow({ type: "discord", transportMode: "webhook", settings: {} }))
+    ).toBe(false)
+    expect(
+      benefitsFromProbe(
+        makeRow({
+          type: "slack",
+          transportMode: "webhook",
+          settings: { transport: "events-api-webhook" },
+        })
+      )
+    ).toBe(false)
+  })
+})
+
 describe("deriveHeartbeat", () => {
   const row = makeRow()
 
@@ -150,6 +189,28 @@ describe("deriveHeartbeat", () => {
     })
     expect(derived.state).toBe("degraded")
     expect(derived.reason).toBe("onebot_no_client")
+  })
+
+  it("idle gateway with a failed transport health probe is degraded", async () => {
+    const gateway = makeRow({
+      type: "discord",
+      transportMode: "gateway",
+      settings: {},
+    })
+    const derived = await deriveHeartbeat(gateway, {
+      now: 1_000_000,
+      probeOverrides: {
+        lastInboundAt: async () => null,
+        gatewayPing: async () => false,
+      },
+    })
+    expect(derived).toEqual(
+      expect.objectContaining({
+        state: "degraded",
+        reason: "gateway_probe_failed",
+        pingOk: false,
+      })
+    )
   })
 
   it("never-received-inbound treats age as Infinity", async () => {

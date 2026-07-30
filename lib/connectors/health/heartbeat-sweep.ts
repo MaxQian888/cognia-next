@@ -22,11 +22,13 @@
 import type { PlatformAdapter } from "@/types/connectors/adapter"
 import type { AdapterInstanceRow } from "@/lib/db/connector-types"
 import { getDb } from "@/lib/db/schema"
-import { listRunningAdapters } from "@/lib/connectors/lifecycle"
+import { listRunningAdapters, requeueAdapter } from "@/lib/connectors/lifecycle"
+import { appendAudit } from "@/lib/connectors/audit"
 import { recordHeartbeatNow, HEARTBEAT_INTERVAL_MS } from "./heartbeat"
 import {
   recordPassiveProbe,
-  isPassiveTransport,
+  benefitsFromProbe,
+  type DerivedHeartbeat,
   IDLE_THRESHOLD_MS,
   PASSIVE_HEARTBEAT_INTERVAL_MS,
 } from "./passive-heartbeat"
@@ -62,6 +64,10 @@ export interface StartHeartbeatSweepOptions {
   recordHeartbeat?: (adapter: PlatformAdapter, now: number) => Promise<unknown>
   /** Passive-probe writer (default: `recordPassiveProbe`). Test seam. */
   recordPassive?: (row: AdapterInstanceRow, now: number) => Promise<unknown>
+  /** Re-dial a probe-failed gateway (default: lifecycle requeue). */
+  requeue?: (adapterId: string) => Promise<boolean>
+  /** Audit a successful probe-driven redial. */
+  auditReconnect?: (adapterId: string, at: number) => Promise<unknown>
   /** Loader for adapter rows used in passive gating (default: Dexie). */
   loadRows?: () => Promise<AdapterInstanceRow[]>
 }
@@ -84,6 +90,14 @@ export function startHeartbeatSweep(
     listAdapters = listRunningAdapters,
     recordHeartbeat = (adapter, at) => recordHeartbeatNow(adapter, { now: () => at }),
     recordPassive = (row, at) => recordPassiveProbe(row, at, IDLE_THRESHOLD_MS),
+    requeue = requeueAdapter,
+    auditReconnect = (adapterId, at) =>
+      appendAudit({
+        adapterId,
+        kind: "adapter.resumed",
+        at,
+        fields: { reason: "probe_failure" },
+      }),
     loadRows = () => getDb().adapterInstances.toArray(),
   } = options
 
@@ -117,8 +131,15 @@ export function startHeartbeatSweep(
       const rowById = new Map(rows.map((r) => [r.id, r]))
       for (const entry of running) {
         const row = rowById.get(entry.adapter.id)
-        if (row && isPassiveTransport(row)) {
-          tasks.push(Promise.resolve(recordPassive(row, at)).catch(() => undefined))
+        if (row && benefitsFromProbe(row)) {
+          tasks.push(
+            Promise.resolve(recordPassive(row, at))
+              .then(async (result) => {
+                if (!isFailedProbe(result)) return
+                if (await requeue(row.id)) await auditReconnect(row.id, at)
+              })
+              .catch(() => undefined)
+          )
         }
       }
     }
@@ -146,4 +167,15 @@ export function startHeartbeatSweep(
       scheduler.clearInterval(handle)
     },
   }
+}
+
+function isFailedProbe(value: unknown): value is DerivedHeartbeat {
+  return (
+    !!value &&
+    typeof value === "object" &&
+    "state" in value &&
+    (value as { state?: unknown }).state === "degraded" &&
+    "pingOk" in value &&
+    (value as { pingOk?: unknown }).pingOk === false
+  )
 }

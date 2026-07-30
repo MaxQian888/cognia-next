@@ -38,6 +38,7 @@ import {
   connectorsKeyringGet,
 } from "@/lib/connectors/tauri/commands"
 import { getTenantAccessToken } from "@/lib/connectors/adapters/lark/auth"
+import { getRunningAdapter } from "@/lib/connectors/lifecycle"
 
 export const PASSIVE_HEARTBEAT_INTERVAL_MS = 60_000
 export const IDLE_THRESHOLD_MS = 5 * 60 * 1000
@@ -46,6 +47,7 @@ export interface PassiveProbeOverrides {
   lastInboundAt?: (adapterId: string) => Promise<number | null>
   larkPing?: (row: AdapterInstanceRow) => Promise<boolean>
   onebotPing?: () => Promise<boolean>
+  gatewayPing?: (row: AdapterInstanceRow) => Promise<boolean>
   /** Override `isInQuietHours` to make tests deterministic. */
   isInQuietHours?: (nowMs: number, from: string, to: string, tz: string) => boolean
 }
@@ -61,6 +63,27 @@ export function isPassiveTransport(row: AdapterInstanceRow): boolean {
     return settings.transport === "webhook"
   }
   return false
+}
+
+/** Gateway/socket transports need the same periodic health probe and redial. */
+export function isGatewayTransport(row: AdapterInstanceRow): boolean {
+  if (row.type === "dingtalk") return true
+  if (!["discord", "slack", "qq-official"].includes(row.type)) return false
+  if (row.type === "slack") {
+    return (
+      row.transportMode === "gateway" ||
+      (row.settings as { transport?: string }).transport === "socket-mode"
+    )
+  }
+  return (
+    row.transportMode === "gateway" ||
+    (row.settings as { transportMode?: string }).transportMode === "gateway"
+  )
+}
+
+/** Every adapter type whose idle health needs an explicit periodic probe. */
+export function benefitsFromProbe(row: AdapterInstanceRow): boolean {
+  return isPassiveTransport(row) || isGatewayTransport(row)
 }
 
 async function fetchLastInboundAt(adapterId: string): Promise<number | null> {
@@ -115,7 +138,16 @@ async function pingOneBot(): Promise<boolean> {
   }
 }
 
-interface DerivedHeartbeat {
+async function pingGateway(row: AdapterInstanceRow): Promise<boolean> {
+  try {
+    const entry = getRunningAdapter(row.id)
+    return entry?.adapter.health?.().state === "running"
+  } catch {
+    return false
+  }
+}
+
+export interface DerivedHeartbeat {
   state: AdapterHealthState
   reason?: string
   lastInboundAt: number | null
@@ -166,6 +198,10 @@ export async function deriveHeartbeat(
     pingOk = await (options.probeOverrides?.onebotPing
       ? options.probeOverrides.onebotPing()
       : pingOneBot())
+  } else if (isGatewayTransport(row)) {
+    pingOk = await (options.probeOverrides?.gatewayPing
+      ? options.probeOverrides.gatewayPing(row)
+      : pingGateway(row))
   }
 
   if (pingOk) {
@@ -178,7 +214,9 @@ export async function deriveHeartbeat(
         ? "lark_ping_failed"
         : row.type === "onebot"
           ? "onebot_no_client"
-          : "ping_failed",
+          : isGatewayTransport(row)
+            ? "gateway_probe_failed"
+            : "ping_failed",
     lastInboundAt,
     pingOk: false,
   }
@@ -189,7 +227,7 @@ export async function recordPassiveProbe(
   now: number,
   idleThresholdMs: number,
   probeOverrides?: PassiveProbeOverrides
-): Promise<void> {
+): Promise<DerivedHeartbeat> {
   const derived = await deriveHeartbeat(row, { now, idleThresholdMs, probeOverrides })
   await getDb()
     .connectorHeartbeats.put({
@@ -208,4 +246,5 @@ export async function recordPassiveProbe(
       },
     })
     .catch(() => undefined)
+  return derived
 }
