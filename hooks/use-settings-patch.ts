@@ -3,21 +3,24 @@
 /**
  * Canonical "edit a setting on the phone" helper (ADR-0056, decision D7).
  *
- * Every mobile `/me/*` settings page repeated the same two steps: persist the
- * patch locally via `useSettingsStore.save` (so the UI updates immediately and
- * the standalone engine sees it), then enqueue an `app_settings_update` job so a
- * paired desktop applies the same change when online. This hook is that pattern
- * in one place.
+ * This used to do two steps: persist locally through `useSettingsStore.save`,
+ * then enqueue an `app_settings_update` so a paired desktop applies the same
+ * change. The enqueue now happens inside the one persistence funnel
+ * (`lib/db/settings.ts:saveSettings` → `lib/settings/mirror-to-host.ts`), so it
+ * must NOT be repeated here or every edit would queue twice.
  *
- * The enqueue is harmless when unpaired/standalone — the outbound runner simply
- * has nothing to drain until a desktop connects. The shared queue label lives in
- * the `mobile.settingsPanel` namespace, matching the original per-page call.
+ * Moving it there is what fixed the mobile routes that embed a desktop settings
+ * section — `/me/appearance` renders the desktop `<AppearanceSection />`, which
+ * writes through the store directly and could never have called this hook.
+ * Those edits stayed on the phone forever.
+ *
+ * The hook is kept because nine `/me/*` pages call it and it still names the
+ * intent ("this is a settings edit from the phone") more clearly at the call
+ * site than a bare store selector would.
  */
 
 import { useCallback } from "react"
-import { useTranslations } from "next-intl"
 
-import { enqueue } from "@/lib/db/mobile-outbound-queue"
 import type { AppSettings } from "@cognia/agent-config-types"
 import { useSettingsStore } from "@/stores/settings"
 
@@ -25,18 +28,11 @@ export type SettingsPatchFn = (patch: Partial<AppSettings>) => Promise<void>
 
 export function useSettingsPatch(): SettingsPatchFn {
   const save = useSettingsStore((s) => s.save)
-  const t = useTranslations("mobile.settingsPanel")
 
   return useCallback(
     async (patch: Partial<AppSettings>) => {
       await save(patch as never)
-      const keys = Object.keys(patch ?? {}).join(", ")
-      await enqueue({
-        command: "app_settings_update",
-        payload: { patch },
-        label: t("queueLabel", { keys }),
-      })
     },
-    [save, t]
+    [save]
   )
 }

@@ -27,29 +27,31 @@ beforeEach(() => {
 })
 
 describe("useSettingsPatch", () => {
-  it("persists the patch then enqueues an app_settings_update with the same patch", async () => {
+  it("persists the patch through the settings store", async () => {
     const { result } = renderHook(() => useSettingsPatch())
     await result.current({ permissionMode: "plan" })
 
     expect(saveMock).toHaveBeenCalledWith({ permissionMode: "plan" })
-    expect(enqueueMock).toHaveBeenCalledTimes(1)
-    const arg = enqueueMock.mock.calls[0][0]
-    expect(arg.command).toBe("app_settings_update")
-    expect(arg.payload).toEqual({ patch: { permissionMode: "plan" } })
-    expect(typeof arg.label).toBe("string")
   })
 
-  it("saves before it enqueues (local write wins the race)", async () => {
-    const order: string[] = []
-    saveMock.mockImplementationOnce(async () => {
-      order.push("save")
-    })
-    enqueueMock.mockImplementationOnce(async () => {
-      order.push("enqueue")
-      return undefined as never
-    })
+  it("does not enqueue — the persistence funnel owns host mirroring now", async () => {
+    // This hook used to save and then enqueue `app_settings_update` itself.
+    // That only covered pages which called it, so mobile routes embedding a
+    // desktop settings section (`/me/appearance`) never mirrored anything. The
+    // enqueue moved into `lib/db/settings.ts` → `lib/settings/mirror-to-host.ts`
+    // so every surface is covered; repeating it here would queue each edit
+    // twice, which is what this assertion guards.
     const { result } = renderHook(() => useSettingsPatch())
     await result.current({ bareMode: true })
-    expect(order).toEqual(["save", "enqueue"])
+
+    expect(saveMock).toHaveBeenCalledWith({ bareMode: true })
+    expect(enqueueMock).not.toHaveBeenCalled()
+  })
+
+  it("propagates a persistence failure instead of swallowing it", async () => {
+    saveMock.mockRejectedValueOnce(new Error("dexie closed"))
+    const { result } = renderHook(() => useSettingsPatch())
+
+    await expect(result.current({ bareMode: true })).rejects.toThrow("dexie closed")
   })
 })

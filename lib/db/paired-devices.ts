@@ -9,6 +9,7 @@
  */
 
 import type { DevicePlatform, PairedDeviceRow } from "@/types/mobile/paired-device"
+import type { RoomDescriptorV2 } from "@/lib/signaling/v2-crypto"
 import { getDb } from "./schema"
 
 export interface AddPairedDeviceInput {
@@ -30,12 +31,8 @@ export interface AddPairedDeviceInput {
    * WebRTC support landed.
    */
   rendezvousId?: string
-  /**
-   * ADR-0021 — 32-byte HMAC key (URL-safe base64, unpadded) shared with the
-   * paired device, used to authenticate signaling envelopes. Absent for
-   * legacy rows.
-   */
-  rendezvousSecret?: string
+  signalingRoomDescriptor?: RoomDescriptorV2
+  signalingKeyRef?: string
   /** Defaults to `Date.now()` — pass an explicit value in tests. */
   nowMs?: number
 }
@@ -60,9 +57,10 @@ export async function addPairedDevice(input: AddPairedDeviceInput): Promise<void
   if (input.rendezvousId) {
     row.rendezvousId = input.rendezvousId
   }
-  if (input.rendezvousSecret) {
-    row.rendezvousSecret = input.rendezvousSecret
+  if (input.signalingRoomDescriptor) {
+    row.signalingRoomDescriptor = input.signalingRoomDescriptor
   }
+  if (input.signalingKeyRef) row.signalingKeyRef = input.signalingKeyRef
   await getDb().pairedDevices.put(row)
 }
 
@@ -221,6 +219,24 @@ export async function setRemoteControlAllowed(
 ): Promise<boolean> {
   const updated = await getDb().pairedDevices.update(deviceId, {
     allowRemoteControl: allowed,
+  })
+  return updated > 0
+}
+
+/**
+ * Persist the **agent-control** grant: may this device start and drive external
+ * agents on this desktop.
+ *
+ * Same storage contract as {@link setRemoteControlAllowed} — an explicit
+ * boolean, re-seeded into the Rust mirror on the next boot — but a separate
+ * column, because process execution is a bigger grant than session steering
+ * and the owner should be choosing them independently.
+ *
+ * @returns true if a row was found and updated; false if the deviceId is unknown.
+ */
+export async function setAgentControlAllowed(deviceId: string, allowed: boolean): Promise<boolean> {
+  const updated = await getDb().pairedDevices.update(deviceId, {
+    allowAgentControl: allowed,
   })
   return updated > 0
 }

@@ -11,6 +11,7 @@ import {
   revokePairedDevice,
   setServerFingerprint,
   setPushToken,
+  setAgentControlAllowed,
   setRemoteControlAllowed,
   touchPairedDevice,
 } from "./paired-devices"
@@ -110,7 +111,15 @@ describe("addPairedDevice", () => {
       appVersion: "0.1.0",
       serverFingerprint: "sha256:abc",
       rendezvousId: "room-1",
-      rendezvousSecret: "secret-1",
+      signalingRoomDescriptor: {
+        v: 2,
+        roomId: "room-1",
+        roomNonce: "nonce",
+        desktopSigningKey: "desktop-key",
+        mobileSigningKey: "mobile-key",
+        notAfter: 1_800_000_000_000,
+      },
+      signalingKeyRef: "dev-meta",
       nowMs: 10,
     })
 
@@ -119,7 +128,11 @@ describe("addPairedDevice", () => {
       expect.objectContaining({
         serverFingerprint: "sha256:abc",
         rendezvousId: "room-1",
-        rendezvousSecret: "secret-1",
+        signalingKeyRef: "dev-meta",
+        signalingRoomDescriptor: expect.objectContaining({
+          v: 2,
+          roomId: "room-1",
+        }),
       })
     )
   })
@@ -464,6 +477,55 @@ describe("setRemoteControlAllowed", () => {
 
   it("returns false for an unknown deviceId", async () => {
     expect(await setRemoteControlAllowed("does-not-exist", true)).toBe(false)
+  })
+})
+
+describe("setAgentControlAllowed", () => {
+  async function pair(deviceId: string) {
+    await addPairedDevice({
+      deviceId,
+      label: "x",
+      platform: "ios",
+      pubkey: "pk",
+      appVersion: "0.1.0",
+      nowMs: 1,
+    })
+  }
+
+  it("defaults to undefined for a freshly-paired device (deny by default)", async () => {
+    await pair("dev-ac1")
+    expect((await getPairedDevice("dev-ac1"))?.allowAgentControl).toBeUndefined()
+  })
+
+  it("grants the capability and returns true", async () => {
+    await pair("dev-ac2")
+    expect(await setAgentControlAllowed("dev-ac2", true)).toBe(true)
+    expect((await getPairedDevice("dev-ac2"))?.allowAgentControl).toBe(true)
+  })
+
+  it("records an explicit false when revoked (not deleted)", async () => {
+    await pair("dev-ac3")
+    await setAgentControlAllowed("dev-ac3", true)
+    await setAgentControlAllowed("dev-ac3", false)
+    expect((await getPairedDevice("dev-ac3"))?.allowAgentControl).toBe(false)
+  })
+
+  it("returns false for an unknown deviceId", async () => {
+    expect(await setAgentControlAllowed("does-not-exist", true)).toBe(false)
+  })
+
+  it("is independent of the remote-control grant in both directions", async () => {
+    // The whole point of a second column: letting a phone approve prompts must
+    // not also let it start processes, and vice versa.
+    await pair("dev-ac4")
+    await setRemoteControlAllowed("dev-ac4", true)
+    expect((await getPairedDevice("dev-ac4"))?.allowAgentControl).toBeUndefined()
+
+    await setAgentControlAllowed("dev-ac4", true)
+    await setRemoteControlAllowed("dev-ac4", false)
+    const row = await getPairedDevice("dev-ac4")
+    expect(row?.allowRemoteControl).toBe(false)
+    expect(row?.allowAgentControl).toBe(true)
   })
 })
 

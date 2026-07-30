@@ -78,7 +78,18 @@ export const SECTION_OWNED_KEYS: Partial<Record<SettingsSectionId, (keyof AppSet
   subscription: ["limitsQueryEnabledAccounts", "customLimitsSources"],
   about: ["updates"],
   desktop: ["browserCookieImportEnabled"],
-  companion: ["remoteBrowserEnabled"],
+  // The WebRTC card lives in this section too, and its five keys were missing
+  // from every section — so "reset this section" skipped them and the
+  // changed-settings review never listed them, even though the card writes
+  // them like any other control.
+  companion: [
+    "remoteBrowserEnabled",
+    "webrtcEnabled",
+    "signalingUrl",
+    "iceServers",
+    "turnServers",
+    "turnProvider",
+  ],
   data: ["telemetryEnabled", "behaviorTelemetry", "storageRetention"],
   appearance: [
     "theme",
@@ -199,7 +210,17 @@ export const SECTION_OWNED_KEYS: Partial<Record<SettingsSectionId, (keyof AppSet
   artifacts: ["artifacts"],
   pet: ["petSettings"],
   eval: ["evalSettings"],
-  sidebar: ["sidebarLayout", "sidebarSide", "workbenchRail", "titleBarLayout", "statusBarLayout"],
+  // `workbenchRailPersistent` belongs here with `workbenchRail`: the workbench
+  // customizer writes both, so leaving it out made "reset this section" skip
+  // it and the changed-settings review never list it.
+  sidebar: [
+    "sidebarLayout",
+    "sidebarSide",
+    "workbenchRail",
+    "workbenchRailPersistent",
+    "titleBarLayout",
+    "statusBarLayout",
+  ],
   workflows: ["workflowEditorPerformanceTier"],
 }
 

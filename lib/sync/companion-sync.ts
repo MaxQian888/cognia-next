@@ -27,6 +27,7 @@
 import { subscribeResume } from "@/lib/capacitor/app"
 import { subscribe as subscribeNetwork } from "@/lib/capacitor/network"
 import { transport } from "@/lib/tauri"
+import { loadCompanionConfig } from "@/lib/tauri/transport-companion"
 import type { Transport } from "@/lib/tauri/transport-types"
 
 import { clearCursors, loadCursors, saveCursor } from "./cursor-store"
@@ -46,6 +47,11 @@ import { syncTerminalHistory } from "./handlers/terminal-history"
 import { syncTwinProfile } from "./handlers/twin-profile"
 import { syncWorkflows } from "./handlers/workflows"
 import { syncWorkflowRuns } from "./handlers/workflow-runs"
+import {
+  syncTemplateDefinitions,
+  syncTemplateInstances,
+  syncTemplatePackages,
+} from "./handlers/template-platform"
 import type { SyncCursor, SyncOutcome, SyncableTable } from "./types"
 
 export type SyncFn = (transport: Transport, cursor: SyncCursor) => Promise<SyncOutcome>
@@ -94,6 +100,9 @@ const DEFAULT_HANDLERS: RegisteredHandler[] = [
   // the desktop task board (tasks + team-meta rows) so the mobile workspace
   // can render the kanban offline; controls travel back as Companion RPC.
   { table: "agentTeamBoard", run: syncAgentTeamBoard },
+  { table: "templateDefinitions", run: syncTemplateDefinitions },
+  { table: "templatePackages", run: syncTemplatePackages },
+  { table: "templateInstances", run: syncTemplateInstances },
 ]
 
 /**
@@ -122,10 +131,35 @@ const stateMap = new Map<SyncableTable, SyncState>()
  */
 let hydratePromise: Promise<void> | null = null
 
+/**
+ * Which host these cursors belong to — the device id it issued at pair time.
+ *
+ * Unpaired clients get `""`, which is a real key: it keeps their (empty)
+ * cursors from colliding with any host's, and the moment they pair, the key
+ * changes and the reset below runs.
+ */
+function currentServerKey(): string {
+  return loadCompanionConfig()?.deviceId ?? ""
+}
+
+/** The host whose cursors `stateMap` currently holds. */
+let hydratedServerKey: string | null = null
+
 async function ensureHydrated(): Promise<void> {
+  const serverKey = currentServerKey()
+  // The host changed under us — a re-pair, or (later) a switch. Everything in
+  // memory belongs to the previous one.
+  if (hydratedServerKey !== null && hydratedServerKey !== serverKey) {
+    hydratePromise = null
+    stateMap.clear()
+    await resetMirrorsForHostChange([hydratedServerKey])
+  }
   if (hydratePromise) return hydratePromise
+  const isColdStart = hydratedServerKey === null
+  hydratedServerKey = serverKey
   hydratePromise = (async () => {
-    const persisted = await loadCursors()
+    if (isColdStart) await resetMirrorsLeftByAnotherHost(serverKey)
+    const persisted = await loadCursors(serverKey)
     for (const [table, row] of persisted) {
       stateMap.set(table, {
         since: row.since,
@@ -135,6 +169,75 @@ async function ensureHydrated(): Promise<void> {
     }
   })()
   return hydratePromise
+}
+
+/**
+ * Drop the mirrored rows when the client starts talking to a different host.
+ *
+ * Partitioning the cursors alone is not enough. It stops a client resuming
+ * from the wrong watermark, but the *rows* pulled from the previous host are
+ * still sitting in the same tables, so the two hosts' sessions, messages and
+ * characters would simply pile up together. These tables are a cache of a
+ * host's state, not the client's own data, so clearing and re-pulling loses
+ * nothing.
+ *
+ * Failures are swallowed: a wipe that could not run leaves a stale cache,
+ * which is what the user had before, whereas throwing here would break sync
+ * entirely.
+ */
+async function resetMirrorsForHostChange(previousServerKeys: readonly string[]): Promise<void> {
+  if (previousServerKeys.length === 0) return
+  try {
+    const { getDb } = await import("@/lib/db/schema")
+    const db = getDb()
+    await Promise.all(
+      SYNC_HANDLER_TABLES.map(async (table) => {
+        // `settings` is a singleton the client also writes locally; clearing it
+        // would throw away device-local preferences the host never had. The
+        // mirrored subset is overwritten by the first pull anyway.
+        if (table === "settings") return
+        try {
+          await (db as unknown as Record<string, { clear: () => Promise<void> }>)[table]?.clear()
+        } catch {
+          // One table failing must not stop the rest.
+        }
+      })
+    )
+    const { clearCursorsForServer } = await import("./cursor-store")
+    for (const key of previousServerKeys) {
+      await clearCursorsForServer(key)
+    }
+  } catch {
+    // See jsdoc.
+  }
+}
+
+/**
+ * Cold-start half of the wipe above.
+ *
+ * `ensureHydrated`'s in-memory check only fires when *this process* already
+ * talked to a different host. Re-pairing is normally a restart, and on iOS the
+ * app is routinely killed between the `CompanionConfig` write and the next sync
+ * tick — so on its own that check lets host A's rows sit in the tables while
+ * host B's cursors start from zero, which is the exact blend the per-host
+ * cursors were introduced to prevent.
+ *
+ * The persisted cursors are the durable record of who we last talked to: they
+ * are written per host and deleted for the host we leave, so a row under a
+ * foreign `serverKey` at cold start means the switch happened while we were not
+ * running.
+ *
+ * An unpaired client (`serverKey === ""`) never wipes. It is not "talking to a
+ * different host" yet, and `loadCompanionConfig` reads a cache that is empty
+ * until `hydrateCompanionConfig` resolves at boot — so a sync that races
+ * hydration would otherwise destroy the mirror of the host it is still paired
+ * to.
+ */
+async function resetMirrorsLeftByAnotherHost(serverKey: string): Promise<void> {
+  if (serverKey === "") return
+  const { listCursorServerKeys } = await import("./cursor-store")
+  const foreign = (await listCursorServerKeys()).filter((key) => key !== serverKey)
+  await resetMirrorsForHostChange(foreign)
 }
 
 function getState(table: SyncableTable): SyncState {
@@ -221,6 +324,7 @@ export function runSyncDown(opts: RunSyncDownOptions = {}): Promise<SyncOutcome[
       // Fire-and-forget Dexie persistence so the next cold start can resume
       // from this cursor. Failures are swallowed by `cursor-store.saveCursor`.
       void saveCursor({
+        serverKey: hydratedServerKey ?? "",
         table,
         since: state.since,
         lastSyncAt: state.lastSyncAt,
@@ -306,5 +410,9 @@ export function __resetSyncStateForTests(): void {
   stateMap.clear()
   inflight = null
   hydratePromise = null
+  // Also forget which host we were hydrated for, or the next test's first
+  // `ensureHydrated` would see a "host change" and wipe the tables it just
+  // seeded.
+  hydratedServerKey = null
   void clearCursors()
 }

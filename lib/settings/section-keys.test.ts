@@ -99,6 +99,22 @@ describe("section-keys", () => {
     })
   })
 
+  describe("workbench rail", () => {
+    it("owns both rail keys, not just the layout", () => {
+      // The workbench customizer writes `workbenchRail` and
+      // `workbenchRailPersistent` from the same panel. Claiming only the first
+      // made "reset this section" leave the rail-persistence switch behind and
+      // kept it out of the changed-settings review. Neither key is in DEFAULTS
+      // (both fall back at the read site), so the completeness guard above
+      // cannot catch this one.
+      expect(SECTION_OWNED_KEYS.sidebar).toEqual(
+        expect.arrayContaining(["workbenchRail", "workbenchRailPersistent"])
+      )
+      expect(resetKeysForSection("sidebar")).toContain("workbenchRailPersistent")
+      expect(keyToSection("workbenchRailPersistent")).toBe("sidebar")
+    })
+  })
+
   describe("keyToSection", () => {
     it("maps a key back to its owning section", () => {
       expect(keyToSection("theme")).toBe("appearance")

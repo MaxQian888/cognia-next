@@ -56,7 +56,11 @@ describe("MobileComputerUsePage", () => {
     fireEvent.click(screen.getByTestId("computer-use-master-switch"))
     await waitFor(() => expect(saveMock).toHaveBeenCalled())
     expect(saveMock).toHaveBeenCalledWith({ mobileComputerUseEnabled: true })
-    expect(enqueueMock).toHaveBeenCalled()
+    // Host mirroring moved out of `useSettingsPatch` and into the persistence
+    // funnel (`lib/settings/mirror-to-host.ts`) so it also covers the mobile
+    // routes that embed a desktop settings section. Enqueuing here as well
+    // would send every edit twice.
+    expect(enqueueMock).not.toHaveBeenCalled()
   })
 
   it("disables the switch and shows a spinner while the patch is in flight", async () => {

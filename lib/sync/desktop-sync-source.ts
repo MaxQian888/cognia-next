@@ -16,15 +16,19 @@
  */
 
 import type {
+  AppSettings,
   Skill,
   StoredMessage,
   ChatSession,
   Character,
   McpServer,
 } from "@cognia/agent-config-types"
+import { CROSS_PLATFORM_SETTING_KEYS } from "@cognia/agent-config-types/settings-sync"
 import type { WorkflowRunRow } from "@/types/workflow/visual"
 import type { TerminalHistoryRow } from "@/lib/db/terminal-history"
 import { getDb } from "@/lib/db/schema"
+import { resolveTurnServerCredentials } from "@/lib/credentials/turn-credentials"
+import { getProvisionedTurnSnapshot } from "@/lib/signaling/provisioned-turn-state"
 import { useAccountStore } from "@/stores/account/account-store"
 import { listen } from "@tauri-apps/api/event"
 import { invoke } from "@tauri-apps/api/core"
@@ -155,6 +159,12 @@ export async function readDexieDelta(
       return readMemoriesDelta(since)
     case "agentTeamBoard":
       return readAgentTeamBoardDelta(since)
+    case "templateDefinitions":
+      return readTemplateDefinitionsDelta(since)
+    case "templatePackages":
+      return readTemplatePackagesDelta(since)
+    case "templateInstances":
+      return readTemplateInstancesDelta(since)
     default:
       throw new Error(`unknown sync table: ${table}`)
   }
@@ -208,6 +218,25 @@ async function readMessagesDelta(since: number): Promise<SyncDelta<StoredMessage
 async function readWorkflowsDelta(since: number): Promise<SyncDelta<unknown>> {
   const rows = await getDb().workflows.where("updatedAt").above(since).toArray()
   return finalizeDelta("workflows", rows as UpdatedAtRow[], since)
+}
+
+async function readTemplateDefinitionsDelta(since: number): Promise<SyncDelta<unknown>> {
+  const rows = await getDb().templateDefinitions.where("updatedAt").above(since).toArray()
+  return finalizeDelta("templateDefinitions", rows, since)
+}
+
+async function readTemplatePackagesDelta(since: number): Promise<SyncDelta<unknown>> {
+  const rows = await getDb().templatePackages.where("importedAt").above(since).toArray()
+  return finalizeDelta(
+    "templatePackages",
+    rows.map((item) => ({ ...item, updatedAt: item.importedAt })),
+    since
+  )
+}
+
+async function readTemplateInstancesDelta(since: number): Promise<SyncDelta<unknown>> {
+  const rows = await getDb().templateInstances.where("updatedAt").above(since).toArray()
+  return finalizeDelta("templateInstances", rows, since)
 }
 
 /**
@@ -339,15 +368,59 @@ async function readAgentTeamBoardDelta(since: number): Promise<SyncDelta<unknown
 async function readSettingsDelta(since: number): Promise<SyncDelta<unknown>> {
   const row = await getDb().settings.get("singleton")
   if (!row) return { rows: [], deleted_ids: [], next_since: since }
-  const updatedAt = Number((row as { updatedAt?: number }).updatedAt ?? 0)
+  const provisionedTurn = getProvisionedTurnSnapshot()
+  const updatedAt = Math.max(
+    Number((row as { updatedAt?: number }).updatedAt ?? 0),
+    provisionedTurn.updatedAt
+  )
   if (since === 0 || updatedAt > since) {
     return {
-      rows: [row],
+      rows: [await projectMirroredSettings(row, provisionedTurn.servers, updatedAt)],
       deleted_ids: [],
       next_since: updatedAt > 0 ? updatedAt : Date.now(),
     }
   }
   return { rows: [], deleted_ids: [], next_since: since }
+}
+
+/**
+ * Narrow the settings singleton to the fields a paired client is allowed to
+ * see, before it goes on the wire.
+ *
+ * This used to emit the whole row. The client only *applied* the mirrored
+ * subset, so the omission looked harmless — but the full row had already
+ * crossed the wire, which meant every paired device received the host's
+ * `apiKey`, `apiBaseUrl`, `providerSettings`, `customProviders`,
+ * `searchProviders`, `skillsShToken`, `subscriptionSettings`, `webdavSync`
+ * credentials and `networkProxy` auth. The `app_settings_update` allowlist
+ * documented "provider configuration stays desktop-only", but that only ever
+ * constrained the write direction; nothing constrained the read direction.
+ *
+ * Redacting at the source rather than at the client is the point: a client
+ * cannot un-receive a secret, and non-first-party clients speak this same wire
+ * protocol.
+ */
+async function projectMirroredSettings(
+  row: AppSettings,
+  provisionedTurnServers: RTCIceServer[],
+  updatedAt: number
+): Promise<Partial<AppSettings>> {
+  // `id` and `updatedAt` are envelope fields, not preferences: the client keys
+  // its singleton by `id` and the cursor arithmetic above reads `updatedAt`.
+  const projected: Record<string, unknown> = {
+    id: row.id,
+    updatedAt,
+  }
+  for (const key of CROSS_PLATFORM_SETTING_KEYS) {
+    if (row[key] !== undefined) projected[key] = row[key]
+  }
+  const staticTurnServers = row.turnServers
+    ? await resolveTurnServerCredentials(row.turnServers)
+    : []
+  if (row.turnServers !== undefined || provisionedTurnServers.length > 0) {
+    projected.turnServers = [...staticTurnServers, ...provisionedTurnServers]
+  }
+  return projected as Partial<AppSettings>
 }
 
 interface UpdatedAtRow {

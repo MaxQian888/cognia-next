@@ -124,14 +124,18 @@ describe("NotificationPreferencesSection", () => {
     expect(screen.getByTestId("notification-sound")).toBeChecked()
   })
 
-  it("toggling a channel merges it (keeping center) and enqueues a server update", async () => {
+  it("toggling a channel merges it, keeping center", async () => {
     render(<NotificationPreferencesSection />)
     fireEvent.click(screen.getByTestId("notification-channel-os"))
     await Promise.resolve()
     await Promise.resolve()
     const prefs = lastPrefs()
     expect(prefs?.globalDefaultChannels).toEqual(expect.arrayContaining(["center", "toast", "os"]))
-    expect(enqueueMock).toHaveBeenCalled()
+    // Host mirroring moved into the persistence funnel
+    // (`lib/settings/mirror-to-host.ts`), which also covers the mobile routes
+    // that embed a desktop settings section. A second enqueue here would send
+    // every edit twice.
+    expect(enqueueMock).not.toHaveBeenCalled()
   })
 
   it("changing the minimum OS level persists minOsLevel", async () => {

@@ -121,7 +121,11 @@ describe("MobilePreferencesPage", () => {
     await Promise.resolve()
     await Promise.resolve()
     expect(saveMock).toHaveBeenCalledWith({ reduceMotion: true })
-    expect(enqueueMock).toHaveBeenCalled()
+    // Host mirroring moved out of `useSettingsPatch` and into the persistence
+    // funnel (`lib/settings/mirror-to-host.ts`) so it also covers the mobile
+    // routes that embed a desktop settings section. Enqueuing here as well
+    // would send every edit twice.
+    expect(enqueueMock).not.toHaveBeenCalled()
   })
 
   it("toggling telemetry persists the new value", async () => {
@@ -182,7 +186,11 @@ describe("MobilePreferencesPage", () => {
     await Promise.resolve()
     await Promise.resolve()
     expect(saveMock).toHaveBeenCalledWith({ defaultModel: "claude-sonnet-4-6" })
-    expect(enqueueMock).toHaveBeenCalled()
+    // Host mirroring moved out of `useSettingsPatch` and into the persistence
+    // funnel (`lib/settings/mirror-to-host.ts`) so it also covers the mobile
+    // routes that embed a desktop settings section. Enqueuing here as well
+    // would send every edit twice.
+    expect(enqueueMock).not.toHaveBeenCalled()
   })
 
   it("toggling the sign-out biometric switch persists the new policy", async () => {

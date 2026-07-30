@@ -147,7 +147,11 @@ describe("MobileWebSearchPage", () => {
     await Promise.resolve()
     await Promise.resolve()
     expect(saveMock).toHaveBeenCalledWith({ searchEnabled: true })
-    expect(enqueueMock).toHaveBeenCalled()
+    // Host mirroring moved out of `useSettingsPatch` and into the persistence
+    // funnel (`lib/settings/mirror-to-host.ts`) so it also covers the mobile
+    // routes that embed a desktop settings section. Enqueuing here as well
+    // would send every edit twice.
+    expect(enqueueMock).not.toHaveBeenCalled()
   })
 
   it("changing the result count persists a numeric value", async () => {

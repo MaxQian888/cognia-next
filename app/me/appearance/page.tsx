@@ -8,11 +8,16 @@
  * ----------------------------
  * `<AppearanceSection />` is already responsive:
  *   - its tab strip uses `overflow-x-auto` so it scrolls on narrow screens,
- *   - every tab reads/writes through `useSettingsStore`, which the mobile
- *     client wires to the same Dexie row + companion `app_settings_update`
- *     RPC the desktop uses,
+ *   - every tab reads/writes through `useSettingsStore`, whose persistence
+ *     funnel mirrors host-writable keys up to the paired desktop
+ *     (`lib/settings/mirror-to-host.ts`),
  *   - the custom theme editor, wallpaper uploader, VSCode import dialog,
  *     and contrast audit all render unchanged inside a `space-y-*` column.
+ *
+ * That mirroring is recent. This comment previously claimed the same thing
+ * while it was not true: the section writes through the store, the store only
+ * wrote locally, and the enqueue lived in a hook the section never called — so
+ * every appearance edit made on the phone stayed on the phone.
  *
  * Embedding the section directly into a mobile-shell page (instead of
  * routing through `/settings?section=appearance` and its desktop sidebar
