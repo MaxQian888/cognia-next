@@ -185,6 +185,40 @@ describe("SchedulerDatabase", () => {
       expect(pausedTasks.length).toBe(1)
     })
 
+    it("queries active event tasks through the persisted compound index", async () => {
+      await Promise.all([
+        schedulerDb.createTask(
+          createMockTask({
+            id: "event-alpha",
+            trigger: { type: "event", eventType: "alpha" },
+          })
+        ),
+        schedulerDb.createTask(
+          createMockTask({
+            id: "event-beta",
+            trigger: { type: "event", eventType: "beta" },
+          })
+        ),
+        schedulerDb.createTask(
+          createMockTask({
+            id: "event-paused",
+            status: "paused",
+            trigger: { type: "event", eventType: "alpha" },
+          })
+        ),
+        schedulerDb.createTask(createMockTask({ id: "cron-active" })),
+      ])
+
+      expect(schedulerDb.tasks.schema.idxByName["[status+eventType]"]).toBeDefined()
+      await expect(schedulerDb.getActiveEventTasks("alpha")).resolves.toEqual([
+        expect.objectContaining({ id: "event-alpha" }),
+      ])
+      expect((await schedulerDb.getActiveEventTasks()).map((task) => task.id).sort()).toEqual([
+        "event-alpha",
+        "event-beta",
+      ])
+    })
+
     it("should get overdue active tasks via the [status+nextRunAt] index", async () => {
       const now = new Date()
       await schedulerDb.createTask(
@@ -662,6 +696,55 @@ describe("SchedulerDatabase", () => {
       const upgraded = new SchedulerDatabase(name)
       await upgraded.open()
       expect((await upgraded.getTask("legacy-user"))?.createdBy).toEqual({ kind: "user" })
+      upgraded.close()
+      await Dexie.delete(name)
+    })
+  })
+
+  describe("schema v4 event index migration", () => {
+    it("backfills eventType from the serialized trigger and excludes non-events", async () => {
+      const name = `CogniaSchedulerDB-v4-${crypto.randomUUID()}`
+      const legacy = new Dexie(name)
+      legacy.version(3).stores({
+        tasks: "id, name, type, status, nextRunAt, createdAt, [status+nextRunAt], [status+type]",
+        executions: "id, taskId, status, startedAt, [taskId+startedAt]",
+      })
+      await legacy.open()
+      for (const row of [
+        createMockTask({
+          id: "legacy-event",
+          trigger: { type: "event", eventType: "job:exited" },
+        }),
+        createMockTask({ id: "legacy-cron" }),
+      ]) {
+        await legacy.table("tasks").add({
+          ...row,
+          trigger: JSON.stringify(row.trigger),
+          payload: JSON.stringify(row.payload),
+          config: JSON.stringify(row.config),
+          notification: JSON.stringify(row.notification),
+          createdBy: JSON.stringify({ kind: "user" }),
+          createdAt: row.createdAt.toISOString(),
+          updatedAt: row.updatedAt.toISOString(),
+        })
+      }
+      legacy.close()
+
+      const upgraded = new SchedulerDatabase(name)
+      await upgraded.open()
+      expect(upgraded.verno).toBe(4)
+      await expect(upgraded.getActiveEventTasks("job:exited")).resolves.toEqual([
+        expect.objectContaining({ id: "legacy-event" }),
+      ])
+      expect((await upgraded.getActiveEventTasks()).map((task) => task.id)).toEqual([
+        "legacy-event",
+      ])
+      expect(await upgraded.tasks.get("legacy-event")).toEqual(
+        expect.objectContaining({ eventType: "job:exited" })
+      )
+      expect(await upgraded.tasks.get("legacy-cron")).toEqual(
+        expect.objectContaining({ eventType: "" })
+      )
       upgraded.close()
       await Dexie.delete(name)
     })

@@ -22,6 +22,8 @@ interface DBScheduledTask {
   description?: string
   type: string
   trigger: string // JSON serialized TaskTrigger
+  /** Denormalized event trigger discriminator for the v4 compound index. */
+  eventType: string
   payload?: string // JSON serialized Record<string, unknown>
   config: string // JSON serialized TaskExecutionConfig
   notification: string // JSON serialized TaskNotificationConfig
@@ -118,6 +120,25 @@ class SchedulerDatabase extends Dexie {
           .toCollection()
           .modify((task) => {
             if (!task.createdBy) task.createdBy = JSON.stringify({ kind: "user" })
+          })
+      )
+
+    // v4 — event-trigger lookup. `trigger` is serialized JSON, so the previous
+    // query loaded every active task and filtered it in JavaScript. Persisting
+    // the event discriminator makes both exact-event and all-event lookups use
+    // one compound index. Empty string denotes a non-event trigger.
+    this.version(4)
+      .stores({
+        tasks:
+          "id, name, type, status, nextRunAt, createdAt, [status+nextRunAt], [status+type], [status+eventType]",
+        executions: "id, taskId, status, startedAt, [taskId+startedAt]",
+      })
+      .upgrade((tx) =>
+        tx
+          .table<DBScheduledTask, string>("tasks")
+          .toCollection()
+          .modify((task) => {
+            task.eventType = eventTypeFromSerializedTrigger(task.trigger)
           })
       )
   }
@@ -256,20 +277,17 @@ class SchedulerDatabase extends Dexie {
     return tasks
   }
 
-  /**
-   * Get active event-triggered tasks, optionally filtered by eventType
-   */
+  /** Get active event-triggered tasks, optionally filtered by eventType. */
   async getActiveEventTasks(eventType?: string): Promise<ScheduledTask[]> {
-    // Use status index to narrow down, then filter by trigger type in memory
-    // (trigger.type is inside serialized JSON, not a separate indexed column)
-    const activeTasks = await this.tasks.where("status").equals("active").toArray()
-
-    return activeTasks
-      .map(safeDeserializeTask)
-      .filter((t): t is ScheduledTask => t !== null)
-      .filter(
-        (t) => t.trigger.type === "event" && (!eventType || t.trigger.eventType === eventType)
-      )
+    const collection = eventType
+      ? this.tasks.where("[status+eventType]").equals(["active", eventType])
+      : this.tasks
+          .where("[status+eventType]")
+          // Empty string is the persisted sentinel for non-event triggers.
+          // Excluding the lower bound reads only active event rows.
+          .between(["active", ""], ["active", Dexie.maxKey], false, true)
+    const dbTasks = await collection.toArray()
+    return dbTasks.map(safeDeserializeTask).filter((t): t is ScheduledTask => t !== null)
   }
 
   /**
@@ -503,6 +521,7 @@ function serializeTask(task: ScheduledTask): DBScheduledTask {
       ...task.trigger,
       runAt: task.trigger.runAt?.toISOString(),
     }),
+    eventType: task.trigger.type === "event" ? task.trigger.eventType : "",
     payload: task.payload !== undefined ? JSON.stringify(task.payload) : undefined,
     config: JSON.stringify(task.config),
     notification: JSON.stringify(task.notification),
@@ -523,6 +542,17 @@ function serializeTask(task: ScheduledTask): DBScheduledTask {
     lastTerminalAt: task.lastTerminalAt?.toISOString(),
     createdAt: task.createdAt.toISOString(),
     updatedAt: task.updatedAt.toISOString(),
+  }
+}
+
+function eventTypeFromSerializedTrigger(serialized: string): string {
+  try {
+    const trigger = JSON.parse(serialized) as { type?: unknown; eventType?: unknown }
+    return trigger.type === "event" && typeof trigger.eventType === "string"
+      ? trigger.eventType
+      : ""
+  } catch {
+    return ""
   }
 }
 
