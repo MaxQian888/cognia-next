@@ -43,10 +43,30 @@ interface ActiveContextHost {
    * dock returned true and changed nothing on screen.
    */
   ensureVisible?: () => void
+  /**
+   * Shut the host's own container — the dual of {@link ensureVisible}. Without
+   * it a plugin's `setMode("collapsed")` wrote the per-scope layout mode and
+   * stopped there, which the chat dock does not read: its collapsed flag lives
+   * in `artifact-dock-layout-store`, so the call returned true and nothing
+   * moved on screen.
+   */
+  collapse?: () => void
+  /**
+   * Whether the host's container is actually showing its panel body right now.
+   *
+   * The counterpart to `ensureVisible` on the *reporting* side. Visibility used
+   * to be inferred from `layout.mode !== "collapsed"`, a per-scope field the
+   * chat dock never writes — so while the dock sat at zero width a plugin's
+   * `onDidChangeVisibility` still reported its panel as visible. Hosts that are
+   * always on screen omit it and are treated as visible.
+   */
+  isVisible?: () => boolean
 }
 
 export interface ActiveContextHostOptions {
   ensureVisible?: () => void
+  collapse?: () => void
+  isVisible?: () => boolean
 }
 
 const hosts = new Map<string, ActiveContextHost>()
@@ -121,6 +141,8 @@ export function setActiveContextForHost(
     // blank the palette until the next registry mutation.
     panels: hosts.get(scopeKey)?.panels ?? [],
     ensureVisible: options.ensureVisible,
+    collapse: options.collapse,
+    isVisible: options.isVisible,
   })
   activeScopeKey = scopeKey
   notify()
@@ -129,6 +151,23 @@ export function setActiveContextForHost(
     if (activeScopeKey === scopeKey) activeScopeKey = newestHost()?.scopeKey ?? null
     notify()
   }
+}
+
+/**
+ * Re-broadcast because a host's own visibility flipped.
+ *
+ * Deliberately narrower than {@link setActiveContextForHost}: that one also
+ * stamps `touchedAt` and makes the host active, so re-registering on every
+ * collapse would let a background workbench steal "in front" from the one the
+ * user is actually looking at. Collapsing a surface is the opposite of
+ * claiming focus.
+ *
+ * Unknown scopes are dropped, not queued — the host republishes on its next
+ * render, exactly like {@link publishActiveContextPanels}.
+ */
+export function notifyActiveContextHostVisibility(scopeKey: string): void {
+  if (!hosts.has(scopeKey)) return
+  notify()
 }
 
 export function touchActiveContextHost(scopeKey: string): void {
@@ -300,6 +339,18 @@ function ownedActiveWorkbench(pluginId: string): ActiveWorkbenchSnapshot | null 
 export function setActiveWorkbenchMode(pluginId: string, mode: ContextWorkbenchMode): boolean {
   const active = ownedActiveWorkbench(pluginId)
   if (!active) return false
+  // Collapsing has to reach the *host*: three of the four hosts shrink a
+  // container they own and never read the per-scope mode, so writing it alone
+  // returned true and left the panel exactly where it was. Hosts without a
+  // container of their own supply no `collapse` and fall through to the mode,
+  // which for them is the real thing.
+  if (mode === "collapsed") {
+    const collapse = hosts.get(active.scopeKey)?.collapse
+    if (collapse) {
+      collapse()
+      return true
+    }
+  }
   useContextWorkbenchStore.getState().setMode(active.scopeKey, mode)
   return true
 }
@@ -315,7 +366,11 @@ export function isPluginContextPanelVisible(pluginId: string, requestedPanelId: 
   if (!active) return false
   return (
     active.layout.activePanelId === qualifyPluginPanelId(pluginId, requestedPanelId) &&
-    active.layout.mode !== "collapsed"
+    active.layout.mode !== "collapsed" &&
+    // …and the container around it is actually open. `mode` is per-scope and
+    // three of the four hosts never write `collapsed` to it, so this used to
+    // report a panel as visible while the whole right column sat at zero width.
+    (hosts.get(active.scopeKey)?.isVisible?.() ?? true)
   )
 }
 

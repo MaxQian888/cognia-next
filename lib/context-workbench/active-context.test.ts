@@ -2,8 +2,10 @@ import { contextPanelRegistry } from "./panel-registry"
 import {
   getActiveContextResource,
   getActiveContextRevision,
+  getActiveWorkbench,
   getActiveWorkbenchPanels,
   isPluginContextPanelVisible,
+  notifyActiveContextHostVisibility,
   publishActiveContextPanels,
   resetActiveContextForTesting,
   revealActiveWorkbenchActivity,
@@ -150,6 +152,112 @@ describe("isPluginContextPanelVisible", () => {
 
     disposeHost()
     expect(isPluginContextPanelVisible("plugin-a", "inbox")).toBe(false)
+  })
+
+  it("is false while the host's own container is shut, whatever the mode says", () => {
+    // The chat dock, Canvas and the workflow editor all shrink a container they
+    // own and never write `collapsed` to the per-scope mode. Reading the mode
+    // alone therefore reported a plugin's panel as visible while the entire
+    // right column sat at the activity rail — or at zero width.
+    let bodyHidden = false
+    const disposeHost = setActiveContextForHost("dock", resource, {
+      isVisible: () => !bodyHidden,
+    })
+    useContextWorkbenchStore.getState().navigatePanel("dock", "plugin-a:inbox", "narrow")
+    expect(isPluginContextPanelVisible("plugin-a", "inbox")).toBe(true)
+
+    bodyHidden = true
+    expect(useContextWorkbenchStore.getState().layouts["dock"]?.mode).not.toBe("collapsed")
+    expect(isPluginContextPanelVisible("plugin-a", "inbox")).toBe(false)
+
+    disposeHost()
+  })
+})
+
+describe("setActiveWorkbenchMode — collapse reaches the host", () => {
+  const resource = {
+    kind: "session" as const,
+    sessionId: "session-1",
+    capabilities: [],
+  }
+
+  function ownPanel() {
+    useContextWorkbenchStore.getState().navigatePanel("dock", "plugin-a:inbox", "narrow")
+  }
+
+  it("routes a collapse to the container's owner instead of the per-scope mode", () => {
+    const collapse = jest.fn()
+    const disposeHost = setActiveContextForHost("dock", resource, { collapse })
+    ownPanel()
+
+    expect(setActiveWorkbenchMode("plugin-a", "collapsed")).toBe(true)
+    expect(collapse).toHaveBeenCalledTimes(1)
+    // The per-scope mode is left alone: it is per-*resource*, and writing it
+    // would make the dock re-open and re-close as the user changes artifact.
+    expect(useContextWorkbenchStore.getState().layouts["dock"]?.mode).toBe("narrow")
+
+    disposeHost()
+  })
+
+  it("still writes the mode for hosts with no container of their own", () => {
+    const disposeHost = setActiveContextForHost("dock", resource)
+    ownPanel()
+
+    expect(setActiveWorkbenchMode("plugin-a", "collapsed")).toBe(true)
+    expect(useContextWorkbenchStore.getState().layouts["dock"]?.mode).toBe("collapsed")
+
+    disposeHost()
+  })
+
+  it("leaves widths to the store even when the host owns a container", () => {
+    const collapse = jest.fn()
+    const disposeHost = setActiveContextForHost("dock", resource, { collapse })
+    ownPanel()
+
+    expect(setActiveWorkbenchMode("plugin-a", "wide")).toBe(true)
+    expect(collapse).not.toHaveBeenCalled()
+    expect(useContextWorkbenchStore.getState().layouts["dock"]?.mode).toBe("wide")
+
+    disposeHost()
+  })
+})
+
+describe("notifyActiveContextHostVisibility", () => {
+  const resource = {
+    kind: "session" as const,
+    sessionId: "session-1",
+    capabilities: [],
+  }
+
+  it("re-broadcasts without stealing 'in front' from another host", () => {
+    const listener = jest.fn()
+    const disposeBackground = setActiveContextForHost("dock", resource)
+    const disposeForeground = setActiveContextForHost("editor", resource)
+    // `getActiveWorkbench` reports nothing for a scope with no stored layout,
+    // so give the foreground host one to be identified by.
+    useContextWorkbenchStore.getState().navigatePanel("editor", "preview", "narrow")
+    const unsubscribe = subscribeActiveContext(listener)
+
+    notifyActiveContextHostVisibility("dock")
+
+    expect(listener).toHaveBeenCalledTimes(1)
+    // Still the editor's: collapsing a background surface is the opposite of
+    // claiming focus, so it must not re-stamp the active scope.
+    expect(getActiveWorkbench()?.scopeKey).toBe("editor")
+
+    unsubscribe()
+    disposeForeground()
+    disposeBackground()
+  })
+
+  it("drops a notify for a scope that has no host", () => {
+    const listener = jest.fn()
+    const unsubscribe = subscribeActiveContext(listener)
+
+    notifyActiveContextHostVisibility("nobody")
+
+    expect(listener).not.toHaveBeenCalled()
+    unsubscribe()
   })
 })
 

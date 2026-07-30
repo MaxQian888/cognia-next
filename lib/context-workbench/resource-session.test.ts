@@ -32,6 +32,99 @@ describe("resource workbench sessions", () => {
     })
   })
 
+  it("stamps a new aside with an indexable binding key and the resolved workspace", async () => {
+    // Both columns are load-bearing. Without `projectId` the row is absent from
+    // `[projectId+updatedAt]` — invisible to the sidebar AND outside
+    // `deleteProjectCascade`, so it outlives its own workspace. Without
+    // `surfaceBindingKey` the only way to find it by binding is a full scan.
+    const rows = new Map<string, ChatSession>()
+    const binding: SessionSurfaceBinding = { kind: "session", sessionId: "main-1" }
+    const created = await ensureResourceWorkbenchSession(binding, "Aside", {
+      get: async (id) => rows.get(id),
+      put: async (session) => void rows.set(session.id, session),
+      update: async () => undefined,
+      resolveProjectId: async () => "proj-main",
+      now: () => 1,
+    })
+
+    expect(created.surfaceBindingKey).toBe("session:main-1")
+    expect(created.projectId).toBe("proj-main")
+  })
+
+  it("repairs a pre-v131 row that carries neither column", async () => {
+    const rows = new Map<string, ChatSession>()
+    const binding: SessionSurfaceBinding = { kind: "session", sessionId: "main-1" }
+    const legacyId = resourceWorkbenchSessionId(binding)
+    rows.set(legacyId, {
+      id: legacyId,
+      title: "Aside",
+      kind: "resource-workbench",
+      visibility: "embedded",
+      surfaceBinding: binding,
+      createdAt: 1,
+      updatedAt: 1,
+    })
+    const patches: Array<Partial<ChatSession>> = []
+
+    const repaired = await ensureResourceWorkbenchSession(binding, "Aside", {
+      get: async (id) => rows.get(id),
+      put: async (session) => void rows.set(session.id, session),
+      update: async (_id, patch) => void patches.push(patch),
+      resolveProjectId: async () => "proj-main",
+      now: () => 2,
+    })
+
+    expect(repaired.surfaceBindingKey).toBe("session:main-1")
+    expect(repaired.projectId).toBe("proj-main")
+    expect(patches[0]).toMatchObject({
+      surfaceBindingKey: "session:main-1",
+      projectId: "proj-main",
+    })
+  })
+
+  it("never moves an already-scoped aside into another workspace", async () => {
+    // The repair path only ever fills a gap: re-opening a workbench while a
+    // different workspace is active must not re-file an existing sidechat.
+    const rows = new Map<string, ChatSession>()
+    const binding: SessionSurfaceBinding = { kind: "session", sessionId: "main-1" }
+    const id = resourceWorkbenchSessionId(binding)
+    rows.set(id, {
+      id,
+      title: "Aside",
+      kind: "resource-workbench",
+      visibility: "embedded",
+      surfaceBinding: binding,
+      surfaceBindingKey: "session:main-1",
+      projectId: "proj-original",
+      createdAt: 1,
+      updatedAt: 1,
+    })
+    const resolveProjectId = jest.fn(async () => "proj-active")
+
+    const result = await ensureResourceWorkbenchSession(binding, "Aside", {
+      get: async (rowId) => rows.get(rowId),
+      put: async (session) => void rows.set(session.id, session),
+      update: async () => undefined,
+      resolveProjectId,
+      now: () => 2,
+    })
+
+    expect(result.projectId).toBe("proj-original")
+    expect(resolveProjectId).not.toHaveBeenCalled()
+  })
+
+  it("moves the binding key with the binding on a rename", async () => {
+    // A stale key would leave the row enumerable under the resource it no
+    // longer belongs to.
+    const patches: Array<Partial<ChatSession>> = []
+    await migrateResourceSessionBinding(
+      "session-1",
+      { kind: "project-file", projectId: "p", rootId: "r", relPath: "new.ts" },
+      { update: async (_id, patch) => void patches.push(patch), now: () => 3 }
+    )
+    expect(patches[0].surfaceBindingKey).toBe("project:p:r:new.ts")
+  })
+
   it("reuses the same resource conversation across desktop, mobile, and synced hosts", () => {
     const binding: SessionSurfaceBinding = { kind: "artifact", artifactId: "artifact-1" }
     expect(resourceWorkbenchSessionId(binding, "desktop-window")).toBe(
