@@ -78,5 +78,12 @@ pnpm mobile:open:ios
   `mobile/android/app/src/main/AndroidManifest.xml` (Wave 1.3 commit).
 - `mobile/ios/App/Pods`, the copied `public/` bundle, build products, and local
   Xcode state are generated and intentionally gitignored.
-- The Push Notifications capability and `aps-environment` entitlement must
-  still be enabled in Xcode with the selected Apple Developer team.
+- The Push Notifications capability is applied by `pnpm mobile:sync:ios`:
+  `configure-ios-project.mjs` writes `App/App.entitlements` with
+  `aps-environment` and points both build configurations at it via
+  `CODE_SIGN_ENTITLEMENTS`. The entitlement always says `development` — Xcode
+  derives the shipped value from the provisioning profile at signing time, so a
+  distribution profile promotes it to `production` on its own. What still needs
+  a human is the Apple side: the App ID must have the Push Notifications
+  capability enabled (step 2 above) and a matching profile selected under
+  Signing & Capabilities.

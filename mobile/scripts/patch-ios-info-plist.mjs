@@ -159,11 +159,12 @@ export function patchPlist(xml) {
 
   // Push notifications need the `remote-notification` background mode so
   // silent / content-available APNs payloads can wake the app to sync.
-  // `fetch` gives the outbound queue a bounded recovery opportunity. The
-  // `aps-environment` entitlement + Push Notifications capability still have to
-  // be added via an App.entitlements file in Xcode (see IOS_BOOTSTRAP.md) —
-  // only the Info.plist half is automatable here, and without it
-  // `PushNotifications.register()` background delivery never fires.
+  // `fetch` gives the outbound queue a bounded recovery opportunity. This is
+  // only the delivery half; the `aps-environment` entitlement that lets the app
+  // REGISTER with APNs is written by `configure-ios-project.mjs`
+  // (`configureEntitlements`), which runs right after this patcher in
+  // `pnpm mobile:sync:ios`. Both halves are needed — with only one,
+  // `PushNotifications.register()` fails on device.
   if (!/UIBackgroundModes/.test(out)) {
     const insert =
       `\t<key>UIBackgroundModes</key>\n\t<array>\n` +

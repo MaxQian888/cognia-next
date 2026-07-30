@@ -28,8 +28,10 @@ import {
   BookmarkIcon,
   BookOpenIcon,
   BrainIcon,
+  CloudIcon,
   CalendarClockIcon,
   ChartBarIcon,
+  ClipboardCheckIcon,
   DatabaseIcon,
   HardDriveIcon,
   HistoryIcon,
@@ -133,6 +135,14 @@ export const ME_ENTRIES: MeEntry[] = [
     href: "/me/subscription",
     section: "account",
     keywords: ["account", "plan", "anthropic", "订阅", "账号", "套餐"],
+  },
+  {
+    id: "cloud-account",
+    icon: CloudIcon,
+    labelKey: "cloudAccountRow",
+    href: "/me/cloud-account",
+    section: "account",
+    keywords: ["logto", "cloud", "sso", "oidc", "sign in", "云", "登录", "账号"],
   },
   {
     id: "sync",
@@ -453,6 +463,14 @@ export const ME_ENTRIES: MeEntry[] = [
     href: "/me/a2ui",
     section: "connection",
     keywords: ["a2ui", "mini app", "agent ui", "迷你应用", "界面"],
+  },
+  {
+    id: "eval",
+    icon: ClipboardCheckIcon,
+    labelKey: "evalRow",
+    href: "/me/eval",
+    section: "connection",
+    keywords: ["eval", "evaluation", "judge", "scorer", "dataset", "评估", "评分", "数据集"],
   },
 
   // === Automation ===

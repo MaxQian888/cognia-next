@@ -60,6 +60,7 @@ import { SessionSettingsSheet } from "@/components/chat/session-settings-sheet"
 import { MobileQuickActions } from "@/components/mobile/home/mobile-quick-actions"
 import { MobileActiveRunsCard } from "@/components/mobile/home/mobile-active-runs-card"
 import { MobileCommandPalette } from "@/components/mobile/home/mobile-command-palette"
+import { JobCenterPanel } from "@/components/desktop/job-center-panel"
 import { useMobileHomeLayout } from "@/components/mobile/home/use-mobile-home-layout"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -426,6 +427,7 @@ export function AppShellMobile() {
               panels (artifact library, browser, workspace) at all. It also
               carries the unread dot, which had no host on this breakpoint. */}
           <ArtifactDockToggle className="touch-target" />
+          <JobCenterPanel compact />
 
           <Button
             type="button"

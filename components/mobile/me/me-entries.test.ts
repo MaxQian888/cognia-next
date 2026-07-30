@@ -28,6 +28,28 @@ describe("me-entries registry", () => {
     expect(new Set(ids).size).toBe(ids.length)
   })
 
+  it("routes the two newly-reachable settings sections", () => {
+    // The registry IS the reachability: a `/me/*` route with no entry here is a
+    // page nothing links to. Cloud sign-in and the Eval defaults both shipped
+    // their route before their row.
+    const byId = Object.fromEntries(ME_ENTRIES.map((entry) => [entry.id, entry]))
+    expect(byId["cloud-account"]?.href).toBe("/me/cloud-account")
+    expect(byId["cloud-account"]?.labelKey).toBe("cloudAccountRow")
+    expect(byId.eval?.href).toBe("/me/eval")
+    expect(byId.eval?.labelKey).toBe("evalRow")
+  })
+
+  it("makes the new rows findable by what a user would actually type", () => {
+    const cloud = ME_ENTRIES.find((entry) => entry.id === "cloud-account") as MeEntry
+    const evalRow = ME_ENTRIES.find((entry) => entry.id === "eval") as MeEntry
+    // Both locales: the search box is the only way to reach a row the user
+    // cannot see, and a Chinese-only user typing "登录" must find it.
+    expect(matchMeEntry(cloud, "logto", echo)).toBe(true)
+    expect(matchMeEntry(cloud, "登录", echo)).toBe(true)
+    expect(matchMeEntry(evalRow, "judge", echo)).toBe(true)
+    expect(matchMeEntry(evalRow, "评估", echo)).toBe(true)
+  })
+
   it("assigns each companion illustration to one matching core feature entry", () => {
     const spots = Object.fromEntries(
       ME_ENTRIES.filter((entry) => entry.spotIcon).map((entry) => [entry.id, entry.spotIcon])
