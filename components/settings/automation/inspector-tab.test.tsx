@@ -99,6 +99,7 @@ function state(revision = 1): UiStateRevision {
             updated: [],
           },
     truncation: [],
+    instructionPack: null,
     capturedAt: revision,
   }
 }

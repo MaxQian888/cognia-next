@@ -198,6 +198,25 @@ export interface TruncationDescriptor {
   omittedNodes: number
 }
 
+export interface PreferredLocator {
+  purpose: string
+  automationId: string | null
+  role: string | null
+  name: string | null
+}
+
+/**
+ * Cognia-authored, bundle-ID-scoped navigation guidance. The schema cannot
+ * express policy, consent, redaction, confirmations, or target allow-lists.
+ */
+export interface InstructionPack {
+  bundleId: string
+  version: number
+  guidance: string[]
+  preferredLocators: PreferredLocator[]
+  loadingRoleHints: string[]
+}
+
 export interface UiStateRevision {
   sessionId: string
   lineageId: string
@@ -210,6 +229,7 @@ export interface UiStateRevision {
   tree: UiTreeProjection
   diff: UiTreeDiff | null
   truncation: TruncationDescriptor[]
+  instructionPack: InstructionPack | null
   capturedAt: number
 }
 

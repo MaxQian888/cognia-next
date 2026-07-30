@@ -13,6 +13,7 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use uuid::Uuid;
 
+use crate::automation::instruction_pack::{InstructionPack, InstructionPackRegistry};
 use crate::automation::platform::shared::tree_shape;
 use crate::automation::types::{
     DragOpts, ElementInfo, KeyChord, Locator, MouseButton, Point, Rect, Screenshot, ScrollOpts,
@@ -177,6 +178,7 @@ pub struct UiStateRevision {
     pub tree: UiTreeProjection,
     pub diff: Option<UiTreeDiff>,
     pub truncation: Vec<TruncationDescriptor>,
+    pub instruction_pack: Option<InstructionPack>,
     pub captured_at: i64,
 }
 
@@ -348,11 +350,22 @@ struct ExpansionRecord {
     offset: usize,
 }
 
-#[derive(Default)]
 pub struct UiSessionManager {
     sessions: HashMap<String, SessionRecord>,
     tokens: HashMap<String, TokenRecord>,
     expansion_tokens: HashMap<String, ExpansionRecord>,
+    instruction_packs: InstructionPackRegistry,
+}
+
+impl Default for UiSessionManager {
+    fn default() -> Self {
+        Self {
+            sessions: HashMap::new(),
+            tokens: HashMap::new(),
+            expansion_tokens: HashMap::new(),
+            instruction_packs: InstructionPackRegistry::default(),
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -370,6 +383,12 @@ impl UiSessionManager {
         &mut self,
         capture: CapturedUiState,
     ) -> Result<UiStateRevision, SessionError> {
+        let instruction_pack = capture
+            .app
+            .bundle_id
+            .as_deref()
+            .and_then(|bundle_id| self.instruction_packs.for_bundle_id(bundle_id))
+            .cloned();
         let app_identity = application_identity(&capture.app);
         let previous = self.sessions.get(&capture.session_id);
         let same_lineage = previous.is_some_and(|record| record.app_identity == app_identity);
@@ -456,6 +475,7 @@ impl UiSessionManager {
             tree,
             diff,
             truncation,
+            instruction_pack,
             captured_at: capture.captured_at,
         };
         self.tokens
@@ -942,6 +962,14 @@ mod tests {
         assert_eq!(state.revision, 1);
         assert_eq!(state.tree.nodes.len(), 1);
         assert!(!state.turn_token.is_empty());
+        assert_eq!(
+            state
+                .instruction_pack
+                .as_ref()
+                .expect("bundle-matched built-in instruction pack")
+                .bundle_id,
+            "com.apple.Notes"
+        );
 
         let handle = state.tree.nodes[0].handle.clone();
         let request = ActionRequest {
