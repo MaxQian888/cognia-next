@@ -15,6 +15,7 @@
  */
 
 import type { NormalizedInboundEvent } from "@/types/connectors/event"
+import type { MessageSegment } from "@/types/connectors/segment"
 import type { AdapterInstanceRow, ConversationOverrideRow } from "@/lib/db/connector-types"
 import type { ConnectorMode } from "@/types/connectors/policy"
 import type { ResolvedBinding } from "./../policy-resolve"
@@ -47,6 +48,7 @@ import {
 } from "@/lib/connectors/conversation-admission"
 import { parseControlCommand, isReadonlyCommand } from "./parse"
 import { handleGoalCommand } from "./goal"
+import { handleScheduleCommand, type ScheduleCommandScheduler } from "./schedule"
 import * as R from "./render"
 
 const CONNECTOR_MODES: ReadonlySet<string> = new Set<ConnectorMode>(["auto", "manual", "draft"])
@@ -72,6 +74,7 @@ export interface ControlCommandDeps {
   isKnownProvider?: (provider: string) => Promise<boolean>
   /** Injectable `/goal` handler (defaults to the real connector goal router). */
   handleGoal?: typeof handleGoalCommand
+  scheduler?: ScheduleCommandScheduler
   getAgentTopicStatus?: (conversationKey: string) => Promise<
     R.AgentTopicStatusView & {
       activatedBy?: string
@@ -140,6 +143,15 @@ export function isCommandAllowed(
   return event.channel.kind === "private" || inAllowlist
 }
 
+/** Strict allowlist membership used by high-impact control-plane writes. */
+export function isSenderInCommandAllowlist(
+  event: NormalizedInboundEvent,
+  policy: AdapterInstanceRow["controlCommands"] | undefined
+): boolean {
+  const allow = policy?.allowedUserIds ?? []
+  return allow.includes(event.sender.id) || allow.includes(event.sender.remoteUserId)
+}
+
 /**
  * Handle an inbound control command. Returns `true` when the message was a
  * command (handled — bus skips AI + fan-out), `false` when it should flow on
@@ -174,7 +186,7 @@ export async function maybeHandleControlCommand(
   const resolveWorkflow = deps.resolveWorkflow ?? resolveWorkflowByNameOrId
 
   const reply = async (
-    text: string,
+    content: string | MessageSegment[],
     kind: "applied" | "denied" | "unknown",
     extraFields?: Record<string, unknown>
   ): Promise<void> => {
@@ -183,7 +195,7 @@ export async function maybeHandleControlCommand(
       conversationKey: event.conversationKey,
       request: {
         conversationRef: event.conversationRef,
-        segments: [{ type: "text", text }],
+        segments: typeof content === "string" ? [{ type: "text", text: content }] : content,
         metadata: { idempotencyKey: newIdempotencyKey() },
       },
       source: "ai-run",
@@ -205,6 +217,12 @@ export async function maybeHandleControlCommand(
   const { name, arg } = parsed
 
   // ── Permission gate for state-changing commands ──
+  // Scheduler writes always require explicit allowlist membership, even when
+  // the adapter's general command mode is `everyone` or `private-only`.
+  if (name === "schedule" && !isSenderInCommandAllowlist(event, policy)) {
+    await reply(R.renderDenied(), "denied", { reason: "schedule_allowlist_required" })
+    return true
+  }
   if (name !== "agent" && !isReadonlyCommand(name) && !isCommandAllowed(event, policy)) {
     await reply(R.renderDenied(), "denied")
     return true
@@ -465,6 +483,19 @@ export async function maybeHandleControlCommand(
       // audit) and `ensureSession` (the IM-bound session the guard checks).
       const handleGoal = deps.handleGoal ?? handleGoalCommand
       await handleGoal({ event, arg, ensureSession, reply })
+      return true
+    }
+
+    case "tasks":
+    case "schedule": {
+      await handleScheduleCommand({
+        name,
+        arg,
+        event,
+        characterId: override?.characterId ?? resolved.characterId,
+        reply,
+        scheduler: deps.scheduler,
+      })
       return true
     }
 

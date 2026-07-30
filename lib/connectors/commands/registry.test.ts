@@ -2,7 +2,7 @@ import { CONTROL_COMMAND_SPECS, larkMenuManifest, nativeExposedCommands } from "
 import { READONLY_COMMANDS, parseControlCommand } from "./parse"
 
 describe("control command registry", () => {
-  it("keeps the full 16-command surface parse.ts previously hardcoded", () => {
+  it("keeps the complete registered command surface", () => {
     expect(CONTROL_COMMAND_SPECS.map((s) => s.name).sort()).toEqual(
       [
         "agent",
@@ -16,9 +16,11 @@ describe("control command registry", () => {
         "new",
         "reasoning",
         "resume",
+        "schedule",
         "sessions",
         "status",
         "switch",
+        "tasks",
         "team",
         "workflow",
       ].sort()
@@ -31,7 +33,7 @@ describe("control command registry", () => {
 
   it("derives the readonly set parse.ts used to hardcode", () => {
     expect([...READONLY_COMMANDS].sort()).toEqual(
-      ["commands", "dir", "help", "sessions", "status"].sort()
+      ["commands", "dir", "help", "sessions", "status", "tasks"].sort()
     )
   })
 

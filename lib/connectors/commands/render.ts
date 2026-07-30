@@ -37,6 +37,12 @@ const COMMAND_HELP: Array<{ name: ControlCommandName; usage: string; desc: strin
     usage: "/agent status|off|verify",
     desc: "查看/关闭话题激活或启动免 @ 探测 / topic activation and delivery probe",
   },
+  { name: "tasks", usage: "/tasks", desc: "列出本会话定时任务 / list scheduled tasks" },
+  {
+    name: "schedule",
+    usage: "/schedule <间隔> <提示词> | cron <表达式> <提示词> | off <n|id>",
+    desc: "创建或关闭定时任务 / create or stop a scheduled task",
+  },
   { name: "dir", usage: "/dir", desc: "查看工作目录上下文 / working-dir context" },
 ]
 

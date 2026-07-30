@@ -173,6 +173,21 @@ describe("isCommandAllowed", () => {
 })
 
 describe("maybeHandleControlCommand", () => {
+  it("requires explicit allowlist membership for /schedule even in everyone mode", async () => {
+    const h = harness()
+    await maybeHandleControlCommand(
+      makeEvent({ plainText: "/schedule 5m summarize" }),
+      makeAdapter({ controlCommands: { mode: "everyone" } }),
+      undefined,
+      RESOLVED,
+      h.deps
+    )
+    expect(h.enqueued[0].text).toMatch(/not allowed/)
+    expect(h.audits[0]).toEqual(
+      expect.objectContaining({ kind: "command.denied", command: "schedule" })
+    )
+  })
+
   it("/agent status is readable by an ordinary topic participant", async () => {
     const h = harness()
     await maybeHandleControlCommand(

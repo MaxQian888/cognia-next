@@ -31,6 +31,8 @@ export type ControlCommandName =
   | "workflow"
   | "agent"
   | "goal"
+  | "tasks"
+  | "schedule"
 
 export interface ControlCommandSpec {
   name: ControlCommandName
@@ -59,6 +61,13 @@ export const CONTROL_COMMAND_SPECS: readonly ControlCommandSpec[] = [
   { name: "workflow", readonly: false, nativeExposed: false, usage: "/workflow <name>" },
   { name: "agent", readonly: false, nativeExposed: false, usage: "/agent <name>" },
   { name: "goal", readonly: false, nativeExposed: false, usage: "/goal <text>" },
+  { name: "tasks", readonly: true, nativeExposed: false, usage: "/tasks" },
+  {
+    name: "schedule",
+    readonly: false,
+    nativeExposed: false,
+    usage: "/schedule <interval> <prompt> | cron <expr> <prompt> | off <n|id>",
+  },
 ]
 
 /** Specs published to platform-native slash manifests. */
