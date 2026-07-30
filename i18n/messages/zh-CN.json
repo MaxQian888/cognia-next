@@ -2648,7 +2648,8 @@
         "review": "评审",
         "security": "安全"
       },
-      "missingDependencies": "缺失 {count} 项依赖"
+      "missingDependencies": "缺失 {count} 项依赖",
+      "openStudioForBindings": "请打开模板工作室配置必需的绑定。"
     },
     "templatesTab": "模板",
     "trySampleTeam": "试用示例团队",
@@ -3187,6 +3188,26 @@
       }
     },
     "pictureInPicture": {
+      "actions": {
+        "clickText": "点击文字",
+        "cursorPosition": "读取光标位置",
+        "doubleClick": "双击",
+        "drag": "拖拽",
+        "findText": "查找文字",
+        "holdKey": "长按按键",
+        "key": "发送按键",
+        "leftClick": "左键单击",
+        "middleClick": "中键单击",
+        "mouseDown": "按下鼠标",
+        "mouseMove": "移动光标",
+        "mouseUp": "松开鼠标",
+        "rightClick": "右键单击",
+        "screenshot": "截取屏幕",
+        "scroll": "滚动",
+        "tripleClick": "三击",
+        "type": "输入文字",
+        "wait": "等待"
+      },
       "activity": "当前操作：{action}",
       "close": "关闭",
       "done": "已完成",
@@ -3194,6 +3215,7 @@
       "hide": "隐藏画中画",
       "justNow": "刚刚",
       "move": "移动画中画",
+      "resize": "调整画中画大小",
       "screenAlt": "桌面自动化画面",
       "secondsAgo": "{seconds} 秒前",
       "show": "显示画中画",
@@ -4064,9 +4086,12 @@
     "branch": {
       "ariaLineage": "跳到「{title}」中创建这条分支的那条消息",
       "cancel": "取消",
+      "childCount": "{count, plural, other {# 个分支}}",
+      "childListLabel": "从这里分出的分支",
       "confirm": "创建分支",
       "createError": "创建分支失败",
       "created": "分支已创建",
+      "createdAside": "已分支为旁支",
       "description": "将此对话派生为一个新的独立会话，原会话保持不变。",
       "direct": {
         "hint": "原样复制到这条消息为止的对话。",
@@ -4075,6 +4100,16 @@
       "lineage": "分叉自 {title}",
       "lineageAnchorMissing": "该分叉点已不在这个对话里。",
       "lineageUnknownParent": "已删除的对话",
+      "pick": {
+        "all": "全选",
+        "empty": "至少勾选一条消息",
+        "label": "带走已选的 {count} 条",
+        "none": "清空",
+        "open": "选择要带走哪些消息…",
+        "roleAssistant": "助手",
+        "roleUser": "你"
+      },
+      "pointCount": "{count, plural, other {此处分出 # 条}}",
       "summary": {
         "generating": "正在生成摘要……",
         "hint": "总结目前为止的对话并作为分支起点（让上下文更精简）。",
@@ -4085,6 +4120,13 @@
       },
       "summaryEmpty": "请先填写摘要再分支",
       "summaryError": "生成摘要失败",
+      "target": {
+        "aside": "作为本会话的新旁支",
+        "asideHint": "停在右栏本线程旁边。适合你预计会回灌的探索。",
+        "label": "去向",
+        "session": "新建独立会话",
+        "sessionHint": "会出现在侧栏。适合你打算保留的方向。"
+      },
       "title": "分支对话"
     },
     "branchNavigator": {
@@ -4575,6 +4617,11 @@
       },
       "ariaSettings": "会话设置",
       "bareMode": "极简模式",
+      "branchAria": "分支对话",
+      "branchEmpty": "还没有可分支的内容 —— 这个对话还没有消息。",
+      "branchError": "无法分支该对话。",
+      "branchSuccess": "已分支，已切换到新对话。",
+      "branchTooltip": "分支对话 —— 把当前线程复制成一个可以另走一路的新对话",
       "briefMode": "简短输出",
       "cancel": "取消",
       "compactAria": "压缩",
@@ -4847,6 +4894,7 @@
       "bookmarkRemoveTooltip": "取消收藏",
       "bookmarkTooltip": "收藏",
       "branchLabel": "分支对话",
+      "branchStreamingTooltip": "等这条回复结束后再分支",
       "branchTooltip": "从这里分支",
       "bringBackDone": "已添加到主对话的输入框",
       "bringBackLabel": "带回主对话",
@@ -4925,6 +4973,8 @@
       "stopReading": "停止朗读",
       "todoPlanTitle": "计划 · {done}/{total} 已完成",
       "toolCallFailed": "工具调用失败",
+      "truncateFromLabel": "从这里删除",
+      "truncateFromTooltip": "删除这条消息以及其后的全部内容",
       "unknownPart": "未知内容（{type}）",
       "usageCacheHit": "缓存命中：{n}",
       "usageCacheWrite": "缓存写入：{n}",
@@ -5170,6 +5220,10 @@
       "position": "{current}/{total}",
       "previous": "上一个匹配"
     },
+    "selection": {
+      "askError": "无法为这段内容开旁支。",
+      "askInAside": "开旁支追问"
+    },
     "sessionCost": {
       "byModelTitle": "按模型拆分",
       "cache": "缓存",
@@ -5295,6 +5349,14 @@
       "interruptedNotice": "该请求已被中断——工具调用已被拒绝。重新发送消息可重试。",
       "titleFallback": "允许执行 {tool}？",
       "toolLabel": "工具"
+    },
+    "truncateFrom": {
+      "cancel": "保留",
+      "confirm": "永久删除",
+      "description": "{count, plural, =1 {将永久删除这条消息。} other {将永久删除这 # 条消息。}} 挂在它们下面的分支变体也会一并删除。此操作不可撤销。",
+      "done": "{count, plural, other {已删除 # 条消息。}}",
+      "error": "无法删除这些消息。",
+      "title": "从这条消息起全部删除？"
     },
     "twinBadge": {
       "fewShotOff": "风格少样本已关闭",
@@ -5430,6 +5492,7 @@
   "contextWorkbench": {
     "actions": {
       "collapse": "收起工作台",
+      "expand": "展开工作台",
       "focus": "聚焦模式",
       "layoutMenu": "布局选项",
       "narrow": "窄栏模式",
@@ -5461,6 +5524,31 @@
       "selectionReady": "该指令将仅作用于当前选区。",
       "sendToAi": "发送给 AI"
     },
+    "asides": {
+      "actionError": "操作失败。",
+      "cancel": "取消",
+      "clear": "清空",
+      "clearBody": "将永久删除这条旁支里的消息，旁支本身保留。",
+      "clearTitle": "清空这条旁支？",
+      "cleared": "旁支已清空。",
+      "createError": "无法新建旁支。",
+      "defaultName": "旁支 {n}",
+      "delete": "删除",
+      "deleteBody": "将永久删除这条旁支及其消息。",
+      "deleteTitle": "删除这条旁支？",
+      "deleted": "旁支已删除。",
+      "fallbackName": "旁支",
+      "listLabel": "旁支",
+      "moreAria": "旁支操作",
+      "nameLabel": "旁支名称",
+      "newAria": "新建旁支",
+      "promote": "扶正为独立会话",
+      "promoted": "已扶正，现在是一个独立会话。",
+      "rename": "重命名",
+      "renameTitle": "重命名旁支",
+      "save": "保存",
+      "switchAria": "切换旁支"
+    },
     "comments": "评论",
     "commentsPanel": {
       "add": "添加评论",
@@ -5491,6 +5579,8 @@
       "hint": "隐藏某个活动只会移除它的图标按钮——面板仍可通过命令面板和快捷键到达。",
       "onRail": "在活动栏上",
       "onRailEmpty": "活动栏上暂无活动。",
+      "persistentRail": "常驻图标栏",
+      "persistentRailHint": "收起工作台后，活动图标会留在右侧的窄列里，可以拖拽重新展开。关闭后整个右栏会完全收起。",
       "restoreDefaults": "恢复默认",
       "showItem": "显示"
     },
@@ -5911,14 +6001,16 @@
         "clearSettled": "清除已结束",
         "collect": "收集",
         "collectAria": "收集后台运行 {runId}",
+        "logTail": "日志",
         "reDispatched": "已重新派发",
-        "rerun": "重新运行"
+        "rerun": "重新运行",
+        "stop": "停止"
       },
       "delivery": {
         "pending": "待投递",
         "pendingHint": "当发起的聊天打开且空闲时投递。"
       },
-      "description": "由 dispatch_agent 启动的后台子代理运行。",
+      "description": "当前主机上的代理运行、受监管后台进程与持久 Monitor。",
       "duration": {
         "minutesSeconds": "{minutes} 分 {seconds} 秒",
         "seconds": "{seconds} 秒"
@@ -5927,7 +6019,9 @@
         "activeDescription": "仍在运行的分离子代理会显示在这里。",
         "activeTitle": "暂无活动后台任务",
         "historyDescription": "完成、失败和中断的运行会保留在这里，直到被清除。",
-        "historyTitle": "暂无后台历史"
+        "historyTitle": "暂无后台历史",
+        "supervisorDescription": "后台命令与 Monitor 监视会显示在这里。",
+        "supervisorTitle": "暂无受监管任务或 Monitor"
       },
       "fields": {
         "elapsed": "耗时：{value}",
@@ -5957,10 +6051,35 @@
         "interrupted": "已中断",
         "running": "运行中"
       },
+      "supervisor": {
+        "jobStatus": {
+          "exited": "已退出",
+          "failed": "失败",
+          "interrupted": "已中断",
+          "killed": "已终止",
+          "running": "运行中"
+        },
+        "jobs": "后台任务",
+        "monitorStatus": {
+          "cancelled": "已取消",
+          "expired": "已过期",
+          "fired": "已触发",
+          "unsatisfiable": "条件不再可满足",
+          "waiting": "等待中"
+        },
+        "monitors": "Monitor",
+        "noOutput": "暂无输出。",
+        "owner": {
+          "app": "应用",
+          "scheduledTask": "任务 {id}",
+          "session": "会话 {id}"
+        }
+      },
       "tabs": {
         "active": "活动",
         "history": "历史",
-        "running": "正在运行"
+        "running": "正在运行",
+        "supervisor": "进程"
       },
       "title": "任务中心",
       "toast": {
@@ -5971,6 +6090,11 @@
         "collectFailed": "无法收集后台结果：{error}",
         "collectMissing": "这个后台运行已不可用。",
         "collected": "已收集后台结果。",
+        "jobStopFailed": "无法停止后台任务：{error}",
+        "jobStopped": "后台任务已停止。",
+        "logFailed": "无法读取任务输出：{error}",
+        "monitorCancelFailed": "无法取消 Monitor：{error}",
+        "monitorCancelled": "Monitor 已取消。",
         "rerunFailed": "无法重新运行：{reason}",
         "rerunStarted": "已在后台重新运行。"
       },
@@ -6219,6 +6343,7 @@
       "delete": "删除",
       "deleteConfirmAction": "删除会话",
       "deleteConfirmBody": "将永久删除此会话及其全部消息，且无法撤销。",
+      "deleteConfirmBranches": "{count, plural, other {它的 # 个分支将作为独立会话保留。}}",
       "deleteConfirmTitle": "删除「{title}」？",
       "dragHandle": "拖拽以重新排序或移动到文件夹",
       "moveToFolder": "移动到文件夹",
@@ -10528,17 +10653,47 @@
       "uses": "{count, plural, other {# 次运行}}"
     },
     "companion": {
-      "diagnostics": {
-        "description": "测试桌面服务器在哪些本地 URL 上可达。当手机报告连接错误时，可用来确认局域网或隧道路径是否正常。",
-        "desktopOnly": "仅在 Tauri 桌面版中可用。",
-        "empty": "无可探测地址——请先启动伴侣服务器。",
-        "failed": "失败",
-        "ms": "毫秒",
-        "ok": "正常",
-        "probeFailed": "探测失败：{message}",
-        "probing": "探测中…",
-        "testButton": "测试可达性",
-        "title": "连接诊断"
+      "agentControl": {
+        "blocked": "未启用运行 Agent 权限（{reason}）。",
+        "col": "运行 Agent",
+        "description": "允许此设备在本桌面上启动和停止外部 Agent 进程。启动策略仍会限制可运行的程序、工作目录和环境变量——但在这些限制内由该设备决定运行什么。远程控制是另一项独立且更小的授权。",
+        "disabledToast": "已为 {label} 关闭运行 Agent 权限。",
+        "enabledToast": "已为 {label} 启用运行 Agent 权限。",
+        "reason": "确认允许 {label} 在本桌面运行 Agent",
+        "title": "允许运行 Agent",
+        "toggleAria": "切换 {label} 的运行 Agent 权限"
+      },
+      "channels": {
+        "blocked": {
+          "loopbackOnly": "仅绑定到本机——请把服务器改为局域网绑定。",
+          "noSignaling": "未配置信令服务器。",
+          "serverStopped": "伴侣服务器未运行。"
+        },
+        "channel": {
+          "lan": "局域网",
+          "mdns": "局域网发现",
+          "tunnel": "公网隧道",
+          "webrtc": "直连（WebRTC）"
+        },
+        "description": "已配对设备连到这台桌面的所有路径，以及它们当前是否可用。",
+        "desktopOnly": "只能在桌面端测试可达性。",
+        "noReason": "未提供原因",
+        "probeButton": "测试可达性",
+        "probeFailed": "可达性测试失败：{message}",
+        "probeFailedShort": "不可达——{message}",
+        "probeOk": "可达，耗时 {ms} 毫秒",
+        "probing": "测试中…",
+        "state": {
+          "blocked": "受阻",
+          "live": "开启",
+          "off": "关闭"
+        },
+        "summary": {
+          "blocked": "没有任何路径能连到这台桌面",
+          "none": "未启用任何路径",
+          "reachable": "可达"
+        },
+        "title": "连接路径"
       },
       "groups": {
         "advanced": "高级与诊断",
@@ -10551,7 +10706,6 @@
         "awaitingCode": "已打开浏览器窗口。授权后，请将完整的回调 URL（或仅 code）粘贴到下方。",
         "cancel": "取消",
         "description": "登录你的 Logto 租户，使此桌面端可作为云端 / 无头 companion 网关的已认证客户端。",
-        "desktopOnly": "云登录仅在桌面应用中可用（会话保存在操作系统钥匙串中）。",
         "errors": {
           "codeMalformed": "无法从输入中解析出 code。请粘贴完整的回调 URL 或 code 值。",
           "missingFields": "Issuer、Client ID、API 资源与回调 URI 均为必填。",
@@ -10572,6 +10726,7 @@
         "loading": "正在检查云会话…",
         "signIn": "使用 Logto 登录",
         "signOut": "退出登录",
+        "storageFallback": "登录令牌保存在本浏览器/应用内的加密保险库中，而不是操作系统钥匙串。",
         "submitCode": "完成登录",
         "title": "Logto 云登录",
         "toast": {
@@ -10793,7 +10948,7 @@
         "tokenPlaceholder": "eyJ..."
       },
       "webrtc": {
-        "description": "第三层传输通道（ADR-0021）。基于无状态汇合点和 HMAC 签名信封，让已配对的手机在任意网络下都能直连本桌面，无需依赖隧道。",
+        "description": "第三层传输通道（ADR-0021）。使用信令 v2 角色认证和端到端加密信封，汇合服务无法读取 SDP 或 ICE。",
         "deviceTier": {
           "awaiting": "等待对端",
           "connected": "已连接",
@@ -10816,6 +10971,7 @@
         "invalidUrl": "信令 URL 必须以 ws:// 或 wss:// 开头",
         "noDevices": "暂无启用 WebRTC 的已配对设备。用最新版移动端重新配对一台手机，这里就会出现。",
         "pollFailed": "无法读取信令枢纽状态（{reason}）。下方设备列表可能过期。",
+        "protocolMode": "v2 角色隔离",
         "reconnectButton": "重连",
         "reconnectFailed": "重连失败（{reason}）。",
         "reconnectSuccess": "已发起重连。",
@@ -10826,7 +10982,7 @@
         "savingButton": "保存中…",
         "signalingUrlHelp": "公共汇合点的 WebSocket 接入地址。自部署时替换为你自己的 URL。",
         "signalingUrlLabel": "信令服务器 URL",
-        "signalingUrlPlaceholder": "wss://signaling.cognia.cn/v1/signaling",
+        "signalingUrlPlaceholder": "wss://signaling.cognia.cn/v2/signaling",
         "title": "WebRTC 远程访问",
         "turnProviderAuthTokenLabel": "Twilio Auth Token",
         "turnProviderCloudflare": "Cloudflare Calls",
@@ -11234,6 +11390,7 @@
       "biometricUnavailable": "本设备未注册生物识别。",
       "canvasRow": "画布",
       "charactersRow": "角色",
+      "cloudAccountRow": "云账号",
       "commandHistoryRow": "命令历史",
       "computerUse": {
         "masterStateOff": "移动端 Computer Use 已停用。",
@@ -11300,6 +11457,7 @@
       "devicesRow": "已配对设备",
       "dexieMaintenance": "Dexie 维护",
       "diagnosticsRow": "诊断",
+      "evalRow": "Agent 评估",
       "externalAgentsRow": "外部 Agent",
       "feedback": {
         "copyDescription": "应用版本、User Agent 和当前同步快照。",
@@ -11548,6 +11706,21 @@
       "proxy": {
         "description": "用于出站请求的 HTTP/SOCKS 代理在桌面端管理。",
         "title": "代理"
+      },
+      "rendezvous": {
+        "description": "不在同一网络时，本设备如何连上已配对的主机。这些配置在主机端设置，并镜像到这里。",
+        "provider": {
+          "cloudflare-calls": "由 Cloudflare Calls 按需签发凭证。",
+          "none": "未配置凭证提供方——只能使用上面的静态列表。",
+          "twilio": "由 Twilio 按需签发凭证。"
+        },
+        "serverCount": "{count, plural, =0 {无} other {# 台}}",
+        "signalingLabel": "信令服务器",
+        "sourceBuiltIn": "内置默认",
+        "sourceHost": "来自主机",
+        "stunLabel": "STUN",
+        "title": "直连",
+        "turnLabel": "TURN 中继"
       },
       "title": "网络"
     },
@@ -11907,7 +12080,6 @@
       "fontScaleSm": "小",
       "language": "语言",
       "privacyTitle": "无障碍与隐私",
-      "queueLabel": "已排队——桌面上线后会自动同步。",
       "reconnectButton": "重连 WebRTC",
       "reconnectFailed": "重连失败（{reason}）。",
       "reconnectInactive": "WebRTC 通道当前未启用。",
@@ -17269,6 +17441,10 @@
     "footerSuccess": "成功率",
     "formatExpression": "格式化表达式",
     "handler": "处理函数",
+    "host": {
+      "local": "本地主机",
+      "remote": "远程主机"
+    },
     "importError": "导入失败：{message}",
     "importExport": {
       "exportAll": "导出全部任务",
@@ -17305,6 +17481,7 @@
     "kindFilter": {
       "all": "全部",
       "app": "应用",
+      "background-command": "后台命令",
       "backup": "备份",
       "connector": "连接器",
       "plugin": "插件",
@@ -17743,6 +17920,7 @@
       "name": "名称",
       "nextRun": "下次运行"
     },
+    "sourceConversationMissing": "来源 IM 会话已不再绑定聊天会话。",
     "startedAt": "开始时间",
     "statistics": "统计",
     "stats": {
@@ -17808,6 +17986,7 @@
       "external-agent": "外部代理 (ACP)",
       "goal": "目标",
       "im-push": "IM 推送",
+      "monitor": "Monitor",
       "plan": "计划",
       "plugin": "插件",
       "script": "脚本",
@@ -18808,8 +18987,9 @@
         "emptyAll": "暂无会话，开始聊天后会出现在这里。",
         "emptyFilter": "没有匹配该筛选条件的会话。",
         "filterPlaceholder": "按标题或 id 过滤…",
-        "fork": "分支",
-        "forkDisabledTip": "需要会话至少完成一次回复后才能在 SDK 层分支。",
+        "fork": "SDK 会话 fork",
+        "forkDisabledTip": "需要该会话已有可 fork 的 SDK 对话 —— 至少完成一次回复，且只有会下发 session id 的 provider 才有。",
+        "forkFailedToast": "无法 fork 该 SDK 会话。",
         "forkedToast": "已分支为 `{title}`。",
         "rename": "重命名",
         "renameDesc": "为会话选择新的显示名。重命名不会影响聊天历史或底层 SDK 会话。",
@@ -22775,10 +22955,12 @@
       "server": {
         "bearerTokenLabel": "Bearer Token（仅 HTTP）",
         "copyTokenAria": "复制 Token",
+        "defaultClientName": "Cognia 控制端",
         "hide": "隐藏",
         "httpPort": "HTTP 端口",
         "httpPortDiverged": "监听器仍在端口 {bound} 上。重启外部桥接以切换端口。",
         "httpPortHelp": "HTTP 传输监听的端口，下方的接入片段会使用该值。",
+        "noActiveClientError": "没有可用的 External Bridge 客户端。",
         "regenerateWarning": "⚠ 重新生成将立即作废旧 Token。",
         "rotateConfirmAction": "轮换 Token",
         "rotateConfirmCancel": "取消",
@@ -22790,6 +22972,7 @@
         "statusOff": "服务器已关闭，不接受任何外部流量。",
         "statusStdioActive": "Stdio 传输已激活。Tauri HTTP 服务器离线 — 关闭再开启以重启。",
         "title": "MCP 服务器",
+        "toastRestartFailed": "无法重启 MCP 服务器，请检查主机状态后重试。",
         "toastServerStarted": "MCP HTTP 服务器已在 127.0.0.1:{port} 启动",
         "toastServerStopped": "MCP 服务器已停止。",
         "toastSidecarMissing": "MCP sidecar 未安装，无法启动外部桥接。",
@@ -24369,6 +24552,8 @@
           "connectionScheduledDigest": "定时连接摘要已发布。",
           "custom": "自定义事件——通常由外部工具发起。",
           "goalCompleted": "某个目标循环到达终止状态。",
+          "jobExited": "受监管后台任务已退出。",
+          "monitorFired": "持久 Monitor 条件已触发。",
           "planCompleted": "某个计划到达终止状态。",
           "sessionCompleted": "一个会话已结束。",
           "sessionCreated": "新建了一个会话。",
@@ -24563,18 +24748,37 @@
         "activeBadge": "已连接",
         "activeBanner": "正在驱动 {label}——新的终端、文件与 git 操作都指向该主机。",
         "cancel": "取消",
+        "capabilitiesUnknown": "能力未知——连接一次以向该主机查询",
         "capabilityNote": "读取(打开文件、git status、diff、log)在配对后即可用。写入文件、commit 与 push 需要主机在其 allow-list 中授权本设备控制。",
         "connect": "连接",
         "disconnect": "断开",
         "emptyBody": "配对一台远程 Cognia 服务器,即可从这里驱动它的终端、文件与 git。在「添加主机」标签页添加一台。",
         "emptyTitle": "还没有远程主机",
+        "featureCategory": {
+          "host": "远程主机执行",
+          "proxy": "控制端代理",
+          "unavailable": "当前不可用"
+        },
+        "featureManifest": "功能契约 schema {schema} · 主机构建 {build}",
+        "featureManifestUnknown": "缺少 operation 级功能契约——主机返回契约前保持写操作禁用",
+        "featurePermissionNote": "已声明的 operation 仍需通过对应命令权限；管理写入需要 remote-control，高风险写入还需要 Owner admin lease。",
+        "featureVersion": "{feature} v{version}",
         "neverConnected": "从未连接",
+        "none": "无",
         "remove": "移除",
         "removeA11y": "移除 {label}",
         "rename": "重命名",
         "renameLabel": "主机名称",
         "save": "保存",
-        "serverVersion": "cognia {version}"
+        "serverVersion": "cognia {version}",
+        "state": {
+          "connecting": "连接中",
+          "degraded": "降级",
+          "disconnected": "已断开",
+          "ready": "就绪",
+          "revoked": "已撤销",
+          "versionMismatch": "需要升级"
+        }
       },
       "tabs": {
         "add": "添加主机",
@@ -26638,13 +26842,18 @@
       "codexNotInstalled": "未检测到 Codex CLI 目录，已自动创建镜像。",
       "desktopOnly": "同步仅在桌面端可用。",
       "emptyTrash": "清空回收站（{count}）",
+      "errored": "{count} 个失败",
       "lastAt": "上次：{when}",
       "mirrorClaude": "镜像到 ~/.claude/skills/",
       "mirrorCodex": "镜像到 ~/.agents/skills/（Codex）",
       "mirrorTargetsLabel": "镜像目标",
+      "noChanges": "没有变更。",
       "pullAll": "全部从本地拉取",
+      "pulled": "已拉取 {count} 个",
       "pushAll": "全部推送到本地",
+      "pushed": "已推送 {count} 个",
       "retry": "重试",
+      "skipped": "已跳过 {count} 个",
       "status": {
         "error": "同步错误",
         "never": "从未同步",
@@ -26653,7 +26862,9 @@
       },
       "syncNow": "立即同步",
       "tooLargeForDisk": "资源 {path} 超出 2 MB 磁盘上限，已跳过该镜像。",
-      "trashEmptied": "{count, plural, =0 {回收站本就为空。} other {已清理 # 个废弃技能。}}"
+      "trashEmptied": "{count, plural, =0 {回收站本就为空。} other {已清理 # 个废弃技能。}}",
+      "unavailableRead": "当前主机无法使用技能。",
+      "unavailableWrite": "当前主机无法写入技能。"
     },
     "syncLabel": "同步",
     "tabs": {
@@ -27820,6 +28031,157 @@
   },
   "tauriDemo": {
     "buttonLabel": "调用 Rust greet()"
+  },
+  "templateStudio": {
+    "actions": {
+      "cancel": "取消",
+      "confirmImport": "导入包",
+      "create": "创建草稿",
+      "export": "导出",
+      "import": "导入",
+      "instantiate": "创建资源",
+      "newDraft": "新建草稿",
+      "openEditor": "打开编辑器",
+      "preflight": "检查计划",
+      "publish": "发布"
+    },
+    "create": {
+      "description": "创建一份可审查、可发布的便携模板定义。",
+      "domain": "模板类型",
+      "name": "名称",
+      "templateDescription": "描述",
+      "title": "创建模板草稿"
+    },
+    "defaults": {
+      "teamLead": "团队负责人"
+    },
+    "description": "搜索、检查、发布、导入并实例化可复用的 Cognia 模板。",
+    "domains": {
+      "a2ui": "Mini App",
+      "agentTeam": "Agent 团队",
+      "character": "角色",
+      "customMode": "自定义模式",
+      "document": "文档",
+      "goal": "目标",
+      "prompt": "提示词预设",
+      "scheduler": "定时任务",
+      "skill": "技能",
+      "subagent": "子 Agent",
+      "subscription": "订阅预设",
+      "workflow": "工作流"
+    },
+    "empty": {
+      "noDescription": "暂无描述",
+      "noResults": "没有符合当前筛选条件的模板。"
+    },
+    "filters": {
+      "allDomains": "全部类型",
+      "allTrust": "全部信任级别",
+      "domain": "模板类型",
+      "search": "搜索模板",
+      "trust": "信任级别"
+    },
+    "import": {
+      "definitionCount": "{count} 个定义",
+      "description": "将惰性定义加入模板库前，请先检查该模板包。",
+      "inert": "导入不会创建资源，也不会运行模板内容。",
+      "title": "导入模板包"
+    },
+    "inputKinds": {
+      "boolean": "输入 true 或 false",
+      "character": "角色 ID",
+      "enum": "选择一个值",
+      "model": "模型 ID",
+      "number": "输入数字",
+      "provider": "提供商 ID",
+      "resource": "资源 ID",
+      "secretRef": "密钥引用",
+      "skill": "技能 ID",
+      "string": "输入内容",
+      "tool": "工具 ID",
+      "twinSlot": "Twin ID",
+      "workflow": "工作流 ID"
+    },
+    "inspector": {
+      "empty": "请选择一个模板，以检查其定义和可用操作。",
+      "hash": "内容哈希：{hash}",
+      "payload": "便携载荷",
+      "readOnly": "仅目录",
+      "required": "（必填）",
+      "source": "来源：{source}"
+    },
+    "instances": {
+      "detached": "已分离",
+      "resources": "{count} 个资源"
+    },
+    "issues": {
+      "agent-team": {
+        "task-cycle": "团队任务图中存在依赖循环。"
+      },
+      "binding": {
+        "required": "尚未选择必需的绑定。"
+      },
+      "dependency": {
+        "optional-fallback": "可选依赖将使用回退方案。",
+        "required-missing": "缺少必需的依赖。"
+      },
+      "host-version": {
+        "unsupported": "该模板与当前主机版本不兼容。"
+      },
+      "platform": {
+        "unsupported": "该模板与当前平台不兼容。"
+      },
+      "plugin": {
+        "permission-missing": "插件缺少所需的领域权限。"
+      },
+      "source": {
+        "unavailable": "该模板来源当前不可用。"
+      }
+    },
+    "messages": {
+      "draftCreated": "模板草稿已创建。",
+      "imported": "模板包已导入。",
+      "instantiated": "模板资源已创建。",
+      "published": "模板版本 {version} 已发布。"
+    },
+    "mobile": {
+      "description": "可在此浏览并实例化兼容模板。创作、发布、导入和导出仍需在桌面端完成。",
+      "title": "移动端模板访问"
+    },
+    "operations": {
+      "bind": "绑定现有资源",
+      "create": "创建资源",
+      "enable": "启用资源",
+      "permission": "请求权限",
+      "update": "更新资源"
+    },
+    "preflight": {
+      "blocked": "计划已阻止",
+      "needs-confirmation": "需要确认",
+      "ready": "计划已就绪"
+    },
+    "status": {
+      "conflict": "冲突",
+      "deprecated": "已弃用",
+      "draft": "草稿",
+      "published": "已发布",
+      "tombstone": "已移除",
+      "yanked": "已撤回"
+    },
+    "tabs": {
+      "drafts": "草稿",
+      "instances": "实例",
+      "library": "模板库",
+      "packages": "模板包",
+      "published": "已发布"
+    },
+    "title": "模板工作室",
+    "trust": {
+      "built-in": "内置",
+      "signed-unknown": "已签名，发布者未知",
+      "unsigned": "未签名",
+      "verified-publisher": "已验证发布者"
+    }
   },
   "terminal": {
     "commandMenu": {
@@ -33605,6 +33967,19 @@
       "recentHint": "你最近添加的节点。",
       "removeFromFavorites": "取消收藏",
       "searchPlaceholder": "搜索节点…"
+    },
+    "templateLibrary": {
+      "create": "创建工作流",
+      "creating": "正在创建…",
+      "emptyDescription": "已发布的工作流模板会显示在这里。",
+      "emptyTitle": "暂无工作流模板",
+      "noDescription": "暂无描述",
+      "trust": {
+        "built-in": "内置",
+        "signed-unknown": "已签名，发布者未知",
+        "unsigned": "未签名",
+        "verified-publisher": "已验证发布者"
+      }
     },
     "toolbar": {
       "namePlaceholder": "工作流名称",

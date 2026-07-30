@@ -313,6 +313,10 @@
   "footerSuccess": "Success",
   "formatExpression": "Format expression",
   "handler": "Handler",
+  "host": {
+    "local": "Local host",
+    "remote": "Remote host"
+  },
   "importError": "Import failed: {message}",
   "importExport": {
     "exportAll": "Export all tasks",
@@ -350,6 +354,7 @@
     "all": "All",
     "app": "App",
     "backup": "Backup",
+    "background-command": "Background Command",
     "connector": "Connector",
     "plugin": "Plugin",
     "system": "System",
@@ -787,6 +792,7 @@
     "name": "Name",
     "nextRun": "Next Run"
   },
+  "sourceConversationMissing": "The source IM conversation is no longer bound to a chat session.",
   "startedAt": "Started at",
   "statistics": "Statistics",
   "stats": {
@@ -852,6 +858,7 @@
     "external-agent": "External Agent (ACP)",
     "goal": "Goal",
     "im-push": "IM Push",
+    "monitor": "Monitor",
     "plan": "Plan",
     "plugin": "Plugin",
     "script": "Script",

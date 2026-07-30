@@ -1,4 +1,19 @@
 {
+  "actions": {
+    "collapse": "Collapse workbench",
+    "expand": "Expand workbench",
+    "focus": "Focus mode",
+    "layoutMenu": "Layout options",
+    "narrow": "Narrow mode",
+    "pin": "Pin panel",
+    "pinHint": "Pinned panels stay put — automatic reveals become badges instead",
+    "resetLayout": "Reset layout",
+    "resize": "Resize workbench",
+    "retry": "Retry panel",
+    "switchPanel": "Switch panel",
+    "unpin": "Unpin panel",
+    "wide": "Wide mode"
+  },
   "activities": {
     "ai": "AI",
     "comments": "Comments",
@@ -8,19 +23,9 @@
     "templates": "Templates",
     "workspace": "Workspace"
   },
+  "activityRailLabel": "Context Workbench activities",
   "aiActions": "AI actions",
   "aiLoading": "Preparing the resource conversation…",
-  "customize": {
-    "dragHint": "Drag to reorder",
-    "hidden": "Hidden",
-    "hiddenEmpty": "Nothing hidden.",
-    "hideItem": "Hide",
-    "hint": "Hiding an activity removes its rail button only — the panel stays reachable from the command palette and its shortcut.",
-    "onRail": "On the rail",
-    "onRailEmpty": "No activities on the rail.",
-    "restoreDefaults": "Restore defaults",
-    "showItem": "Show"
-  },
   "artifactSelectionComment": {
     "label": "Selection instruction",
     "placeholder": "Tell AI what to do with this selection",
@@ -28,8 +33,32 @@
     "selectionReady": "This instruction will be scoped to the selected range.",
     "sendToAi": "Send to AI"
   },
+  "asides": {
+    "actionError": "That didn't work.",
+    "cancel": "Cancel",
+    "clear": "Clear",
+    "clearBody": "The messages in this aside will be permanently deleted. The aside itself stays.",
+    "clearTitle": "Clear this aside?",
+    "cleared": "Aside cleared.",
+    "createError": "Couldn't create an aside.",
+    "defaultName": "Aside {n}",
+    "delete": "Delete",
+    "deleteBody": "This aside and its messages will be permanently deleted.",
+    "deleteTitle": "Delete this aside?",
+    "deleted": "Aside deleted.",
+    "fallbackName": "Aside",
+    "listLabel": "Asides",
+    "moreAria": "Aside actions",
+    "nameLabel": "Aside name",
+    "newAria": "New aside",
+    "promote": "Promote to a conversation",
+    "promoted": "Promoted. It's now a conversation of its own.",
+    "rename": "Rename",
+    "renameTitle": "Rename aside",
+    "save": "Save",
+    "switchAria": "Switch aside"
+  },
   "comments": "Comments",
-  "webviewPanelPending": "This panel's webview has not loaded yet.",
   "commentsPanel": {
     "add": "Add comment",
     "cancel": "Cancel",
@@ -51,22 +80,20 @@
     "toggleReaction": "Toggle {emoji} reaction",
     "you": "You"
   },
-  "exportResourceSession": "Export this resource conversation",
-  "activityRailLabel": "Context Workbench activities",
-  "actions": {
-    "collapse": "Collapse workbench",
-    "focus": "Focus mode",
-    "layoutMenu": "Layout options",
-    "narrow": "Narrow mode",
-    "pin": "Pin panel",
-    "pinHint": "Pinned panels stay put — automatic reveals become badges instead",
-    "resetLayout": "Reset layout",
-    "resize": "Resize workbench",
-    "retry": "Retry panel",
-    "switchPanel": "Switch panel",
-    "unpin": "Unpin panel",
-    "wide": "Wide mode"
+  "customize": {
+    "persistentRail": "Keep the icon rail on screen",
+    "persistentRailHint": "Closing the workbench leaves its activity icons in a narrow column you can drag back open. Turn this off to have the whole right column collapse away.",
+    "dragHint": "Drag to reorder",
+    "hidden": "Hidden",
+    "hiddenEmpty": "Nothing hidden.",
+    "hideItem": "Hide",
+    "hint": "Hiding an activity removes its rail button only — the panel stays reachable from the command palette and its shortcut.",
+    "onRail": "On the rail",
+    "onRailEmpty": "No activities on the rail.",
+    "restoreDefaults": "Restore defaults",
+    "showItem": "Show"
   },
+  "exportResourceSession": "Export this resource conversation",
   "metadata": {
     "artifactTitle": "Artifact properties",
     "artifactType": "Type",
@@ -93,7 +120,6 @@
   "mobileTitle": "Context Workbench",
   "panelError": "Panel unavailable",
   "panelErrorDescription": "This panel stopped unexpectedly. The rest of your work is unchanged.",
-  "proposalReview": "Proposal review",
   "projectProposal": {
     "apply": "Apply accepted",
     "discard": "Discard",
@@ -102,6 +128,7 @@
     "stale": "The file changed after this proposal was created. Rebase or discard it before applying.",
     "undo": "Undo apply"
   },
+  "proposalReview": "Proposal review",
   "resourceChat": "AI conversation",
   "sessionSidechat": "Side chat",
   "unavailable": {
@@ -117,5 +144,6 @@
       "description": "Filesystem workspace tools require a supported desktop or sandbox backend.",
       "title": "Workspace is not available"
     }
-  }
+  },
+  "webviewPanelPending": "This panel's webview has not loaded yet."
 }

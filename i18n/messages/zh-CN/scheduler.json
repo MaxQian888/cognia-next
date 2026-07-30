@@ -313,6 +313,10 @@
   "footerSuccess": "成功率",
   "formatExpression": "格式化表达式",
   "handler": "处理函数",
+  "host": {
+    "local": "本地主机",
+    "remote": "远程主机"
+  },
   "importError": "导入失败：{message}",
   "importExport": {
     "exportAll": "导出全部任务",
@@ -350,6 +354,7 @@
     "all": "全部",
     "app": "应用",
     "backup": "备份",
+    "background-command": "后台命令",
     "connector": "连接器",
     "plugin": "插件",
     "system": "系统",
@@ -787,6 +792,7 @@
     "name": "名称",
     "nextRun": "下次运行"
   },
+  "sourceConversationMissing": "来源 IM 会话已不再绑定聊天会话。",
   "startedAt": "开始时间",
   "statistics": "统计",
   "stats": {
@@ -852,6 +858,7 @@
     "external-agent": "外部代理 (ACP)",
     "goal": "目标",
     "im-push": "IM 推送",
+    "monitor": "Monitor",
     "plan": "计划",
     "plugin": "插件",
     "script": "脚本",

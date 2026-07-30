@@ -1,4 +1,19 @@
 {
+  "actions": {
+    "collapse": "收起工作台",
+    "expand": "展开工作台",
+    "focus": "聚焦模式",
+    "layoutMenu": "布局选项",
+    "narrow": "窄栏模式",
+    "pin": "固定面板",
+    "pinHint": "固定后面板不再被自动切换，自动打开改为角标提示",
+    "resetLayout": "重置布局",
+    "resize": "调整工作台宽度",
+    "retry": "重试面板",
+    "switchPanel": "切换面板",
+    "unpin": "取消固定面板",
+    "wide": "宽栏模式"
+  },
   "activities": {
     "ai": "AI",
     "comments": "评论",
@@ -8,19 +23,9 @@
     "templates": "模板",
     "workspace": "工作区"
   },
+  "activityRailLabel": "上下文工作台活动",
   "aiActions": "AI 操作",
   "aiLoading": "正在准备资源会话…",
-  "customize": {
-    "dragHint": "拖拽以排序",
-    "hidden": "已隐藏",
-    "hiddenEmpty": "暂无隐藏项。",
-    "hideItem": "隐藏",
-    "hint": "隐藏某个活动只会移除它的图标按钮——面板仍可通过命令面板和快捷键到达。",
-    "onRail": "在活动栏上",
-    "onRailEmpty": "活动栏上暂无活动。",
-    "restoreDefaults": "恢复默认",
-    "showItem": "显示"
-  },
   "artifactSelectionComment": {
     "label": "选区指令",
     "placeholder": "告诉 AI 如何处理该选区",
@@ -28,8 +33,32 @@
     "selectionReady": "该指令将仅作用于当前选区。",
     "sendToAi": "发送给 AI"
   },
+  "asides": {
+    "actionError": "操作失败。",
+    "cancel": "取消",
+    "clear": "清空",
+    "clearBody": "将永久删除这条旁支里的消息，旁支本身保留。",
+    "clearTitle": "清空这条旁支？",
+    "cleared": "旁支已清空。",
+    "createError": "无法新建旁支。",
+    "defaultName": "旁支 {n}",
+    "delete": "删除",
+    "deleteBody": "将永久删除这条旁支及其消息。",
+    "deleteTitle": "删除这条旁支？",
+    "deleted": "旁支已删除。",
+    "fallbackName": "旁支",
+    "listLabel": "旁支",
+    "moreAria": "旁支操作",
+    "nameLabel": "旁支名称",
+    "newAria": "新建旁支",
+    "promote": "扶正为独立会话",
+    "promoted": "已扶正，现在是一个独立会话。",
+    "rename": "重命名",
+    "renameTitle": "重命名旁支",
+    "save": "保存",
+    "switchAria": "切换旁支"
+  },
   "comments": "评论",
-  "webviewPanelPending": "该面板的 webview 尚未加载。",
   "commentsPanel": {
     "add": "添加评论",
     "cancel": "取消",
@@ -51,22 +80,20 @@
     "toggleReaction": "切换 {emoji} 表情回应",
     "you": "你"
   },
-  "exportResourceSession": "导出此资源会话",
-  "activityRailLabel": "上下文工作台活动",
-  "actions": {
-    "collapse": "收起工作台",
-    "focus": "聚焦模式",
-    "layoutMenu": "布局选项",
-    "narrow": "窄栏模式",
-    "pin": "固定面板",
-    "pinHint": "固定后面板不再被自动切换，自动打开改为角标提示",
-    "resetLayout": "重置布局",
-    "resize": "调整工作台宽度",
-    "retry": "重试面板",
-    "switchPanel": "切换面板",
-    "unpin": "取消固定面板",
-    "wide": "宽栏模式"
+  "customize": {
+    "persistentRail": "常驻图标栏",
+    "persistentRailHint": "收起工作台后，活动图标会留在右侧的窄列里，可以拖拽重新展开。关闭后整个右栏会完全收起。",
+    "dragHint": "拖拽以排序",
+    "hidden": "已隐藏",
+    "hiddenEmpty": "暂无隐藏项。",
+    "hideItem": "隐藏",
+    "hint": "隐藏某个活动只会移除它的图标按钮——面板仍可通过命令面板和快捷键到达。",
+    "onRail": "在活动栏上",
+    "onRailEmpty": "活动栏上暂无活动。",
+    "restoreDefaults": "恢复默认",
+    "showItem": "显示"
   },
+  "exportResourceSession": "导出此资源会话",
   "metadata": {
     "artifactTitle": "产物属性",
     "artifactType": "类型",
@@ -93,7 +120,6 @@
   "mobileTitle": "上下文工作台",
   "panelError": "面板暂不可用",
   "panelErrorDescription": "此面板意外停止，其他工作内容未受影响。",
-  "proposalReview": "提案审阅",
   "projectProposal": {
     "apply": "应用已接受项",
     "discard": "放弃",
@@ -102,6 +128,7 @@
     "stale": "文件在提案创建后已发生变化，请先重基或放弃提案。",
     "undo": "撤销应用"
   },
+  "proposalReview": "提案审阅",
   "resourceChat": "AI 会话",
   "sessionSidechat": "侧聊",
   "unavailable": {
@@ -117,5 +144,6 @@
       "description": "文件系统工作区工具需要受支持的桌面端或沙箱后端。",
       "title": "工作区暂不可用"
     }
-  }
+  },
+  "webviewPanelPending": "该面板的 webview 尚未加载。"
 }

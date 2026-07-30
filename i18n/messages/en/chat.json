@@ -68,9 +68,12 @@
   "branch": {
     "ariaLineage": "Go to the message this branch was created from, in {title}",
     "cancel": "Cancel",
+    "childCount": "{count, plural, =1 {1 branch} other {# branches}}",
+    "childListLabel": "Branches from here",
     "confirm": "Create branch",
-    "created": "Branch created",
     "createError": "Failed to create branch",
+    "created": "Branch created",
+    "createdAside": "Branched into an aside",
     "description": "Fork this conversation into a new, independent session. The original is left unchanged.",
     "direct": {
       "hint": "Copy the conversation up to this message verbatim.",
@@ -79,6 +82,16 @@
     "lineage": "from {title}",
     "lineageAnchorMissing": "That branch point is no longer in the conversation.",
     "lineageUnknownParent": "a deleted conversation",
+    "pick": {
+      "all": "Select all",
+      "empty": "Pick at least one message",
+      "label": "Carry {count} selected",
+      "none": "Clear",
+      "open": "Choose which messages to carry…",
+      "roleAssistant": "Assistant",
+      "roleUser": "You"
+    },
+    "pointCount": "{count, plural, =1 {1 branch from here} other {# branches from here}}",
     "summary": {
       "generating": "Generating summary…",
       "hint": "Summarize the conversation so far and seed the branch with it (keeps context small).",
@@ -89,6 +102,13 @@
     },
     "summaryEmpty": "Add a summary before branching",
     "summaryError": "Failed to generate summary",
+    "target": {
+      "aside": "A new aside on this conversation",
+      "asideHint": "Lives in the dock beside this thread. For something you expect to fold back.",
+      "label": "Where it goes",
+      "session": "A new conversation",
+      "sessionHint": "Appears in the sidebar. For a direction you mean to keep."
+    },
     "title": "Branch conversation"
   },
   "branchNavigator": {
@@ -603,6 +623,11 @@
       "simplified": "Simplified",
       "standard": "Standard"
     },
+    "branchAria": "Branch conversation",
+    "branchEmpty": "Nothing to branch yet — this conversation has no messages.",
+    "branchError": "Couldn't branch this conversation.",
+    "branchSuccess": "Branched. The new conversation is now active.",
+    "branchTooltip": "Branch conversation — copies this thread into a new one you can take elsewhere",
     "forkAria": "Fork session",
     "forkSuccess": "Session forked. The new branch is now active.",
     "forkTooltip": "Fork conversation — branches a new session from this one's history",
@@ -851,6 +876,7 @@
     "bookmarkRemoveTooltip": "Remove bookmark",
     "bookmarkTooltip": "Bookmark",
     "branchLabel": "Branch conversation",
+    "branchStreamingTooltip": "Wait for this reply to finish before branching",
     "branchTooltip": "Branch from here",
     "bringBackDone": "Added to the main conversation's message box",
     "bringBackLabel": "Bring back to the main conversation",
@@ -929,6 +955,8 @@
     "stopReading": "Stop reading",
     "todoPlanTitle": "Plan · {done}/{total} done",
     "toolCallFailed": "Tool call failed",
+    "truncateFromLabel": "Delete from here",
+    "truncateFromTooltip": "Delete this message and everything after it",
     "unknownPart": "Unknown content ({type})",
     "usageCacheHit": "Cache hit: {n}",
     "usageCacheWrite": "Cache write: {n}",
@@ -1174,6 +1202,10 @@
     "position": "{current}/{total}",
     "previous": "Previous match"
   },
+  "selection": {
+    "askError": "Couldn't open an aside for that.",
+    "askInAside": "Ask in an aside"
+  },
   "sessionCost": {
     "byModelTitle": "By model",
     "cache": "Cache",
@@ -1299,6 +1331,14 @@
     "interruptedNotice": "This request was interrupted — the tool was already denied. Resend the message to retry.",
     "titleFallback": "Allow {tool}?",
     "toolLabel": "Tool"
+  },
+  "truncateFrom": {
+    "cancel": "Keep them",
+    "confirm": "Delete permanently",
+    "description": "{count, plural, =1 {This message will be permanently deleted.} other {These # messages will be permanently deleted.}} Branch variants hanging off them go too. This can't be undone.",
+    "done": "{count, plural, =1 {Deleted 1 message.} other {Deleted # messages.}}",
+    "error": "Couldn't delete those messages.",
+    "title": "Delete from this message on?"
   },
   "twinBadge": {
     "fewShotOff": "Style few-shot off",

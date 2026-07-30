@@ -28,6 +28,7 @@
   "biometricUnavailable": "本设备未注册生物识别。",
   "canvasRow": "画布",
   "charactersRow": "角色",
+  "cloudAccountRow": "云账号",
   "commandHistoryRow": "命令历史",
   "computerUse": {
     "masterStateOff": "移动端 Computer Use 已停用。",
@@ -94,6 +95,7 @@
   "devicesRow": "已配对设备",
   "dexieMaintenance": "Dexie 维护",
   "diagnosticsRow": "诊断",
+  "evalRow": "Agent 评估",
   "externalAgentsRow": "外部 Agent",
   "feedback": {
     "copyDescription": "应用版本、User Agent 和当前同步快照。",

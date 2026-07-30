@@ -213,14 +213,16 @@
       "clearSettled": "Clear settled",
       "collect": "Collect",
       "collectAria": "Collect background run {runId}",
+      "logTail": "Log",
       "reDispatched": "re-dispatched",
-      "rerun": "Re-run"
+      "rerun": "Re-run",
+      "stop": "Stop"
     },
     "delivery": {
       "pending": "Pending delivery",
       "pendingHint": "Delivered when the originating chat is open and idle."
     },
-    "description": "Background subagent runs started by dispatch_agent.",
+    "description": "Agent runs, supervised background processes, and durable monitors on the active host.",
     "duration": {
       "minutesSeconds": "{minutes}m {seconds}s",
       "seconds": "{seconds}s"
@@ -229,7 +231,9 @@
       "activeDescription": "Detached subagents will appear here while they are still running.",
       "activeTitle": "No active background jobs",
       "historyDescription": "Done, failed, and interrupted runs remain here until cleared.",
-      "historyTitle": "No background history"
+      "historyTitle": "No background history",
+      "supervisorDescription": "Background commands and Monitor watches will appear here.",
+      "supervisorTitle": "No supervised jobs or monitors"
     },
     "fields": {
       "elapsed": "Elapsed: {value}",
@@ -262,7 +266,32 @@
     "tabs": {
       "active": "Active",
       "history": "History",
-      "running": "Running"
+      "running": "Running",
+      "supervisor": "Processes"
+    },
+    "supervisor": {
+      "jobs": "Background jobs",
+      "jobStatus": {
+        "exited": "Exited",
+        "failed": "Failed",
+        "interrupted": "Interrupted",
+        "killed": "Killed",
+        "running": "Running"
+      },
+      "monitors": "Monitors",
+      "monitorStatus": {
+        "cancelled": "Cancelled",
+        "expired": "Expired",
+        "fired": "Fired",
+        "unsatisfiable": "Unsatisfiable",
+        "waiting": "Waiting"
+      },
+      "noOutput": "No output yet.",
+      "owner": {
+        "app": "App",
+        "scheduledTask": "Task {id}",
+        "session": "Session {id}"
+      }
     },
     "title": "Job Center",
     "toast": {
@@ -273,6 +302,11 @@
       "collectFailed": "Could not collect background result: {error}",
       "collectMissing": "That background run is no longer available.",
       "collected": "Background result collected.",
+      "jobStopFailed": "Could not stop background job: {error}",
+      "jobStopped": "Background job stopped.",
+      "logFailed": "Could not read job output: {error}",
+      "monitorCancelFailed": "Could not cancel monitor: {error}",
+      "monitorCancelled": "Monitor cancelled.",
       "rerunFailed": "Could not re-run: {reason}",
       "rerunStarted": "Re-running in the background."
     },
@@ -521,6 +555,7 @@
     "delete": "Delete",
     "deleteConfirmAction": "Delete conversation",
     "deleteConfirmBody": "This permanently removes the conversation and all its messages. This cannot be undone.",
+    "deleteConfirmBranches": "{count, plural, =1 {Its 1 branch will be kept as a conversation of its own.} other {Its # branches will be kept as conversations of their own.}}",
     "deleteConfirmTitle": "Delete “{title}”?",
     "dragHandle": "Drag to reorder or move to a folder",
     "moveToFolder": "Move to folder",

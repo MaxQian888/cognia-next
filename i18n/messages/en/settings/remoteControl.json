@@ -23,6 +23,8 @@
       "connectionScheduledDigest": "A scheduled connection digest was published.",
       "custom": "Free-form event — typically posted from external tooling.",
       "goalCompleted": "A goal loop reached a terminal status.",
+      "jobExited": "A supervised background job exited.",
+      "monitorFired": "A durable Monitor condition fired.",
       "planCompleted": "A plan reached a terminal status.",
       "sessionCompleted": "A chat session ended.",
       "sessionCreated": "A new chat session was created.",

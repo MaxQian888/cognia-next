@@ -6,7 +6,6 @@
   "fontScaleSm": "S",
   "language": "Language",
   "privacyTitle": "Accessibility & privacy",
-  "queueLabel": "Queued — desktop will apply this when online.",
   "reconnectButton": "Reconnect WebRTC",
   "reconnectFailed": "Reconnect failed ({reason}).",
   "reconnectInactive": "WebRTC tier isn't active right now.",

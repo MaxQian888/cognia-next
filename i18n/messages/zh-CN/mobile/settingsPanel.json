@@ -6,7 +6,6 @@
   "fontScaleSm": "小",
   "language": "语言",
   "privacyTitle": "无障碍与隐私",
-  "queueLabel": "已排队——桌面上线后会自动同步。",
   "reconnectButton": "重连 WebRTC",
   "reconnectFailed": "重连失败（{reason}）。",
   "reconnectInactive": "WebRTC 通道当前未启用。",

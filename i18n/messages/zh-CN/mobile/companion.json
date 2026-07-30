@@ -1,15 +1,45 @@
 {
-  "diagnostics": {
-    "description": "测试桌面服务器在哪些本地 URL 上可达。当手机报告连接错误时，可用来确认局域网或隧道路径是否正常。",
-    "desktopOnly": "仅在 Tauri 桌面版中可用。",
-    "empty": "无可探测地址——请先启动伴侣服务器。",
-    "failed": "失败",
-    "ms": "毫秒",
-    "ok": "正常",
-    "probeFailed": "探测失败：{message}",
-    "probing": "探测中…",
-    "testButton": "测试可达性",
-    "title": "连接诊断"
+  "agentControl": {
+    "blocked": "未启用运行 Agent 权限（{reason}）。",
+    "col": "运行 Agent",
+    "description": "允许此设备在本桌面上启动和停止外部 Agent 进程。启动策略仍会限制可运行的程序、工作目录和环境变量——但在这些限制内由该设备决定运行什么。远程控制是另一项独立且更小的授权。",
+    "disabledToast": "已为 {label} 关闭运行 Agent 权限。",
+    "enabledToast": "已为 {label} 启用运行 Agent 权限。",
+    "reason": "确认允许 {label} 在本桌面运行 Agent",
+    "title": "允许运行 Agent",
+    "toggleAria": "切换 {label} 的运行 Agent 权限"
+  },
+  "channels": {
+    "blocked": {
+      "loopbackOnly": "仅绑定到本机——请把服务器改为局域网绑定。",
+      "noSignaling": "未配置信令服务器。",
+      "serverStopped": "伴侣服务器未运行。"
+    },
+    "channel": {
+      "lan": "局域网",
+      "mdns": "局域网发现",
+      "tunnel": "公网隧道",
+      "webrtc": "直连（WebRTC）"
+    },
+    "description": "已配对设备连到这台桌面的所有路径，以及它们当前是否可用。",
+    "desktopOnly": "只能在桌面端测试可达性。",
+    "noReason": "未提供原因",
+    "probeButton": "测试可达性",
+    "probeFailed": "可达性测试失败：{message}",
+    "probeFailedShort": "不可达——{message}",
+    "probeOk": "可达，耗时 {ms} 毫秒",
+    "probing": "测试中…",
+    "state": {
+      "blocked": "受阻",
+      "live": "开启",
+      "off": "关闭"
+    },
+    "summary": {
+      "blocked": "没有任何路径能连到这台桌面",
+      "none": "未启用任何路径",
+      "reachable": "可达"
+    },
+    "title": "连接路径"
   },
   "groups": {
     "advanced": "高级与诊断",
@@ -22,7 +52,6 @@
     "awaitingCode": "已打开浏览器窗口。授权后，请将完整的回调 URL（或仅 code）粘贴到下方。",
     "cancel": "取消",
     "description": "登录你的 Logto 租户，使此桌面端可作为云端 / 无头 companion 网关的已认证客户端。",
-    "desktopOnly": "云登录仅在桌面应用中可用（会话保存在操作系统钥匙串中）。",
     "errors": {
       "codeMalformed": "无法从输入中解析出 code。请粘贴完整的回调 URL 或 code 值。",
       "missingFields": "Issuer、Client ID、API 资源与回调 URI 均为必填。",
@@ -43,6 +72,7 @@
     "loading": "正在检查云会话…",
     "signIn": "使用 Logto 登录",
     "signOut": "退出登录",
+    "storageFallback": "登录令牌保存在本浏览器/应用内的加密保险库中，而不是操作系统钥匙串。",
     "submitCode": "完成登录",
     "title": "Logto 云登录",
     "toast": {
@@ -136,16 +166,6 @@
     "title": "推送通知"
   },
   "pushTokenFailed": "未能向桌面端上报本机推送 token（{reason}）。",
-  "remoteControl": {
-    "blocked": "远程控制未启用（{reason}）。",
-    "col": "远程控制",
-    "description": "允许此设备驱动并操控本桌面上的实时会话，并批准 computer-use 提示。无论是否开启，只读同步始终可用。",
-    "disabledToast": "已为 {label} 关闭远程控制。",
-    "enabledToast": "已为 {label} 启用远程控制。",
-    "reason": "确认授予 {label} 远程控制权限",
-    "title": "允许远程控制",
-    "toggleAria": "切换 {label} 的远程控制"
-  },
   "remoteBrowser": {
     "description": "在已配对的工作区运行时中启动隔离的 Chromium 会话，并将画面串流到 Cognia。",
     "domains": {
@@ -172,6 +192,16 @@
     "title": "远程浏览器",
     "toggle": "切换远程浏览器",
     "workspaceHint": "请先选择工作区，再管理配置文件或域名。"
+  },
+  "remoteControl": {
+    "blocked": "远程控制未启用（{reason}）。",
+    "col": "远程控制",
+    "description": "允许此设备驱动并操控本桌面上的实时会话，并批准 computer-use 提示。无论是否开启，只读同步始终可用。",
+    "disabledToast": "已为 {label} 关闭远程控制。",
+    "enabledToast": "已为 {label} 启用远程控制。",
+    "reason": "确认授予 {label} 远程控制权限",
+    "title": "允许远程控制",
+    "toggleAria": "切换 {label} 的远程控制"
   },
   "resume": {
     "blocked": "恢复未完成（{reason}）。",
@@ -264,7 +294,7 @@
     "tokenPlaceholder": "eyJ..."
   },
   "webrtc": {
-    "description": "第三层传输通道（ADR-0021）。基于无状态汇合点和 HMAC 签名信封，让已配对的手机在任意网络下都能直连本桌面，无需依赖隧道。",
+    "description": "第三层传输通道（ADR-0021）。使用信令 v2 角色认证和端到端加密信封，汇合服务无法读取 SDP 或 ICE。",
     "deviceTier": {
       "awaiting": "等待对端",
       "connected": "已连接",
@@ -287,6 +317,7 @@
     "invalidUrl": "信令 URL 必须以 ws:// 或 wss:// 开头",
     "noDevices": "暂无启用 WebRTC 的已配对设备。用最新版移动端重新配对一台手机，这里就会出现。",
     "pollFailed": "无法读取信令枢纽状态（{reason}）。下方设备列表可能过期。",
+    "protocolMode": "v2 角色隔离",
     "reconnectButton": "重连",
     "reconnectFailed": "重连失败（{reason}）。",
     "reconnectSuccess": "已发起重连。",
@@ -297,7 +328,7 @@
     "savingButton": "保存中…",
     "signalingUrlHelp": "公共汇合点的 WebSocket 接入地址。自部署时替换为你自己的 URL。",
     "signalingUrlLabel": "信令服务器 URL",
-    "signalingUrlPlaceholder": "wss://signaling.cognia.cn/v1/signaling",
+    "signalingUrlPlaceholder": "wss://signaling.cognia.cn/v2/signaling",
     "title": "WebRTC 远程访问",
     "turnProviderAuthTokenLabel": "Twilio Auth Token",
     "turnProviderCloudflare": "Cloudflare Calls",

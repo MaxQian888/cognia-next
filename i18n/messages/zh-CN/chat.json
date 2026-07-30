@@ -68,9 +68,12 @@
   "branch": {
     "ariaLineage": "跳到「{title}」中创建这条分支的那条消息",
     "cancel": "取消",
+    "childCount": "{count, plural, other {# 个分支}}",
+    "childListLabel": "从这里分出的分支",
     "confirm": "创建分支",
-    "created": "分支已创建",
     "createError": "创建分支失败",
+    "created": "分支已创建",
+    "createdAside": "已分支为旁支",
     "description": "将此对话派生为一个新的独立会话，原会话保持不变。",
     "direct": {
       "hint": "原样复制到这条消息为止的对话。",
@@ -79,6 +82,16 @@
     "lineage": "分叉自 {title}",
     "lineageAnchorMissing": "该分叉点已不在这个对话里。",
     "lineageUnknownParent": "已删除的对话",
+    "pick": {
+      "all": "全选",
+      "empty": "至少勾选一条消息",
+      "label": "带走已选的 {count} 条",
+      "none": "清空",
+      "open": "选择要带走哪些消息…",
+      "roleAssistant": "助手",
+      "roleUser": "你"
+    },
+    "pointCount": "{count, plural, other {此处分出 # 条}}",
     "summary": {
       "generating": "正在生成摘要……",
       "hint": "总结目前为止的对话并作为分支起点（让上下文更精简）。",
@@ -89,6 +102,13 @@
     },
     "summaryEmpty": "请先填写摘要再分支",
     "summaryError": "生成摘要失败",
+    "target": {
+      "aside": "作为本会话的新旁支",
+      "asideHint": "停在右栏本线程旁边。适合你预计会回灌的探索。",
+      "label": "去向",
+      "session": "新建独立会话",
+      "sessionHint": "会出现在侧栏。适合你打算保留的方向。"
+    },
     "title": "分支对话"
   },
   "branchNavigator": {
@@ -603,6 +623,11 @@
       "simplified": "简化",
       "standard": "标准"
     },
+    "branchAria": "分支对话",
+    "branchEmpty": "还没有可分支的内容 —— 这个对话还没有消息。",
+    "branchError": "无法分支该对话。",
+    "branchSuccess": "已分支，已切换到新对话。",
+    "branchTooltip": "分支对话 —— 把当前线程复制成一个可以另走一路的新对话",
     "forkAria": "派生会话",
     "forkSuccess": "已派生新会话，已切换到该分支。",
     "forkTooltip": "派生会话 — 从当前会话的历史新建一条分支",
@@ -851,6 +876,7 @@
     "bookmarkRemoveTooltip": "取消收藏",
     "bookmarkTooltip": "收藏",
     "branchLabel": "分支对话",
+    "branchStreamingTooltip": "等这条回复结束后再分支",
     "branchTooltip": "从这里分支",
     "bringBackDone": "已添加到主对话的输入框",
     "bringBackLabel": "带回主对话",
@@ -929,6 +955,8 @@
     "stopReading": "停止朗读",
     "todoPlanTitle": "计划 · {done}/{total} 已完成",
     "toolCallFailed": "工具调用失败",
+    "truncateFromLabel": "从这里删除",
+    "truncateFromTooltip": "删除这条消息以及其后的全部内容",
     "unknownPart": "未知内容（{type}）",
     "usageCacheHit": "缓存命中：{n}",
     "usageCacheWrite": "缓存写入：{n}",
@@ -1174,6 +1202,10 @@
     "position": "{current}/{total}",
     "previous": "上一个匹配"
   },
+  "selection": {
+    "askError": "无法为这段内容开旁支。",
+    "askInAside": "开旁支追问"
+  },
   "sessionCost": {
     "byModelTitle": "按模型拆分",
     "cache": "缓存",
@@ -1299,6 +1331,14 @@
     "interruptedNotice": "该请求已被中断——工具调用已被拒绝。重新发送消息可重试。",
     "titleFallback": "允许执行 {tool}？",
     "toolLabel": "工具"
+  },
+  "truncateFrom": {
+    "cancel": "保留",
+    "confirm": "永久删除",
+    "description": "{count, plural, =1 {将永久删除这条消息。} other {将永久删除这 # 条消息。}} 挂在它们下面的分支变体也会一并删除。此操作不可撤销。",
+    "done": "{count, plural, other {已删除 # 条消息。}}",
+    "error": "无法删除这些消息。",
+    "title": "从这条消息起全部删除？"
   },
   "twinBadge": {
     "fewShotOff": "风格少样本已关闭",

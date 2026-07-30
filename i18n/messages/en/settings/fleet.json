@@ -36,6 +36,10 @@
       "label": "Placement diagnostics",
       "unavailable": "Island diagnostics are only available in the desktop app."
     },
+    "hideOnFullscreen": {
+      "desc": "Withdraw the island while a full-screen app owns its display, leaving the top strip to that app. A session that needs you still brings it back. macOS only.",
+      "label": "Hide under full-screen apps"
+    },
     "label": "Island overlay",
     "monitor": {
       "label": "Show on display",

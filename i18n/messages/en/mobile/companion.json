@@ -1,15 +1,45 @@
 {
-  "diagnostics": {
-    "description": "Test which local URLs the desktop server is reachable on. Useful when a phone reports a connection error and you want to confirm the LAN / tunnel paths are healthy.",
-    "desktopOnly": "Only available in the Tauri desktop build.",
-    "empty": "No candidates to probe — start the companion server first.",
-    "failed": "Failed",
-    "ms": "ms",
-    "ok": "OK",
-    "probeFailed": "Probe failed: {message}",
-    "probing": "Probing…",
-    "testButton": "Test reachability",
-    "title": "Connection diagnostics"
+  "agentControl": {
+    "blocked": "Agent control not enabled ({reason}).",
+    "col": "Run agents",
+    "description": "Lets this device start and stop external agent processes on this desktop. The spawn policy still limits which programs may run, from which folder, and with which environment — but within those limits the device chooses. Remote control is a separate, lesser grant.",
+    "disabledToast": "Agent control disabled for {label}.",
+    "enabledToast": "Agent control enabled for {label}.",
+    "reason": "Confirm letting {label} run agents on this desktop",
+    "title": "Allow running agents",
+    "toggleAria": "Toggle agent control for {label}"
+  },
+  "channels": {
+    "blocked": {
+      "loopbackOnly": "Bound to this machine only — switch the server to LAN.",
+      "noSignaling": "No rendezvous server configured.",
+      "serverStopped": "The companion server is not running."
+    },
+    "channel": {
+      "lan": "Local network",
+      "mdns": "Local discovery",
+      "tunnel": "Public tunnel",
+      "webrtc": "Direct (WebRTC)"
+    },
+    "description": "Every route a paired device can use to reach this desktop, and whether it currently works.",
+    "desktopOnly": "Reachability can only be tested from the desktop app.",
+    "noReason": "no reason given",
+    "probeButton": "Test reachability",
+    "probeFailed": "Reachability test failed: {message}",
+    "probeFailedShort": "Unreachable — {message}",
+    "probeOk": "Reachable in {ms} ms",
+    "probing": "Testing…",
+    "state": {
+      "blocked": "Blocked",
+      "live": "On",
+      "off": "Off"
+    },
+    "summary": {
+      "blocked": "Nothing can reach this desktop",
+      "none": "No channels enabled",
+      "reachable": "Reachable"
+    },
+    "title": "Channels"
   },
   "groups": {
     "advanced": "Advanced & diagnostics",
@@ -22,7 +52,6 @@
     "awaitingCode": "A browser window opened. After you authorize, paste the full redirect URL (or just the code) below.",
     "cancel": "Cancel",
     "description": "Sign in to your Logto tenant so this desktop can act as an authenticated client of the cloud / headless companion gateway.",
-    "desktopOnly": "Cloud sign-in is only available in the desktop app (the session is stored in the OS keyring).",
     "errors": {
       "codeMalformed": "Could not read a code from that input. Paste the full redirect URL or the code value.",
       "missingFields": "Issuer, client ID, API resource and redirect URI are all required.",
@@ -43,6 +72,7 @@
     "loading": "Checking cloud session…",
     "signIn": "Sign in with Logto",
     "signOut": "Sign out",
+    "storageFallback": "Signed-in tokens are stored in an encrypted vault in this browser or app rather than the operating system keyring.",
     "submitCode": "Finish sign-in",
     "title": "Logto cloud sign-in",
     "toast": {
@@ -136,16 +166,6 @@
     "title": "Push notifications"
   },
   "pushTokenFailed": "Couldn't tell the desktop about this phone's push token ({reason}).",
-  "remoteControl": {
-    "blocked": "Remote control not enabled ({reason}).",
-    "col": "Remote control",
-    "description": "Lets this device drive and steer live agent sessions on this desktop, and approve computer-use prompts. Read-only sync stays available either way.",
-    "disabledToast": "Remote control disabled for {label}.",
-    "enabledToast": "Remote control enabled for {label}.",
-    "reason": "Confirm granting remote control to {label}",
-    "title": "Allow remote control",
-    "toggleAria": "Toggle remote control for {label}"
-  },
   "remoteBrowser": {
     "description": "Run an isolated Chromium session on the paired workspace runtime and stream it to Cognia.",
     "domains": {
@@ -172,6 +192,16 @@
     "title": "Remote browser",
     "toggle": "Toggle remote browser",
     "workspaceHint": "Select a workspace before managing profiles or domains."
+  },
+  "remoteControl": {
+    "blocked": "Remote control not enabled ({reason}).",
+    "col": "Remote control",
+    "description": "Lets this device drive and steer live agent sessions on this desktop, and approve computer-use prompts. Read-only sync stays available either way.",
+    "disabledToast": "Remote control disabled for {label}.",
+    "enabledToast": "Remote control enabled for {label}.",
+    "reason": "Confirm granting remote control to {label}",
+    "title": "Allow remote control",
+    "toggleAria": "Toggle remote control for {label}"
   },
   "resume": {
     "blocked": "Resume not completed ({reason}).",
@@ -264,7 +294,7 @@
     "tokenPlaceholder": "eyJ..."
   },
   "webrtc": {
-    "description": "Third transport tier (ADR-0021). Lets paired phones reach this desktop from anywhere without a tunnel, using a stateless rendezvous and HMAC-signed envelopes.",
+    "description": "Third transport tier (ADR-0021). Uses signaling v2 role authentication and end-to-end encrypted envelopes, so the rendezvous cannot read SDP or ICE.",
     "deviceTier": {
       "awaiting": "Awaiting peer",
       "connected": "Connected",
@@ -287,6 +317,7 @@
     "invalidUrl": "Signaling URL must start with ws:// or wss://",
     "noDevices": "No paired devices with WebRTC enabled yet. Pair a phone running the latest mobile build to populate this list.",
     "pollFailed": "Couldn't read the signaling hub status ({reason}). The device list below may be stale.",
+    "protocolMode": "v2 role-isolated",
     "reconnectButton": "Reconnect",
     "reconnectFailed": "Reconnect failed ({reason}).",
     "reconnectSuccess": "Reconnect requested.",
@@ -297,7 +328,7 @@
     "savingButton": "Saving…",
     "signalingUrlHelp": "WebSocket endpoint for the public rendezvous. Self-hosted deployments swap this for their own URL.",
     "signalingUrlLabel": "Signaling server URL",
-    "signalingUrlPlaceholder": "wss://signaling.cognia.cn/v1/signaling",
+    "signalingUrlPlaceholder": "wss://signaling.cognia.cn/v2/signaling",
     "title": "WebRTC remote access",
     "turnProviderAuthTokenLabel": "Twilio Auth Token",
     "turnProviderCloudflare": "Cloudflare Calls",

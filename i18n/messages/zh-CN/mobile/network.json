@@ -20,5 +20,20 @@
     "description": "用于出站请求的 HTTP/SOCKS 代理在桌面端管理。",
     "title": "代理"
   },
+  "rendezvous": {
+    "description": "不在同一网络时，本设备如何连上已配对的主机。这些配置在主机端设置，并镜像到这里。",
+    "provider": {
+      "cloudflare-calls": "由 Cloudflare Calls 按需签发凭证。",
+      "none": "未配置凭证提供方——只能使用上面的静态列表。",
+      "twilio": "由 Twilio 按需签发凭证。"
+    },
+    "serverCount": "{count, plural, =0 {无} other {# 台}}",
+    "signalingLabel": "信令服务器",
+    "sourceBuiltIn": "内置默认",
+    "sourceHost": "来自主机",
+    "stunLabel": "STUN",
+    "title": "直连",
+    "turnLabel": "TURN 中继"
+  },
   "title": "网络"
 }

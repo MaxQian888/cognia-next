@@ -851,7 +851,8 @@
       "review": "评审",
       "security": "安全"
     },
-    "missingDependencies": "缺失 {count} 项依赖"
+    "missingDependencies": "缺失 {count} 项依赖",
+    "openStudioForBindings": "请打开模板工作室配置必需的绑定。"
   },
   "templatesTab": "模板",
   "trySampleTeam": "试用示例团队",

@@ -213,14 +213,16 @@
       "clearSettled": "清除已结束",
       "collect": "收集",
       "collectAria": "收集后台运行 {runId}",
+      "logTail": "日志",
       "reDispatched": "已重新派发",
-      "rerun": "重新运行"
+      "rerun": "重新运行",
+      "stop": "停止"
     },
     "delivery": {
       "pending": "待投递",
       "pendingHint": "当发起的聊天打开且空闲时投递。"
     },
-    "description": "由 dispatch_agent 启动的后台子代理运行。",
+    "description": "当前主机上的代理运行、受监管后台进程与持久 Monitor。",
     "duration": {
       "minutesSeconds": "{minutes} 分 {seconds} 秒",
       "seconds": "{seconds} 秒"
@@ -229,7 +231,9 @@
       "activeDescription": "仍在运行的分离子代理会显示在这里。",
       "activeTitle": "暂无活动后台任务",
       "historyDescription": "完成、失败和中断的运行会保留在这里，直到被清除。",
-      "historyTitle": "暂无后台历史"
+      "historyTitle": "暂无后台历史",
+      "supervisorDescription": "后台命令与 Monitor 监视会显示在这里。",
+      "supervisorTitle": "暂无受监管任务或 Monitor"
     },
     "fields": {
       "elapsed": "耗时：{value}",
@@ -262,7 +266,32 @@
     "tabs": {
       "active": "活动",
       "history": "历史",
-      "running": "正在运行"
+      "running": "正在运行",
+      "supervisor": "进程"
+    },
+    "supervisor": {
+      "jobs": "后台任务",
+      "jobStatus": {
+        "exited": "已退出",
+        "failed": "失败",
+        "interrupted": "已中断",
+        "killed": "已终止",
+        "running": "运行中"
+      },
+      "monitors": "Monitor",
+      "monitorStatus": {
+        "cancelled": "已取消",
+        "expired": "已过期",
+        "fired": "已触发",
+        "unsatisfiable": "条件不再可满足",
+        "waiting": "等待中"
+      },
+      "noOutput": "暂无输出。",
+      "owner": {
+        "app": "应用",
+        "scheduledTask": "任务 {id}",
+        "session": "会话 {id}"
+      }
     },
     "title": "任务中心",
     "toast": {
@@ -273,6 +302,11 @@
       "collectFailed": "无法收集后台结果：{error}",
       "collectMissing": "这个后台运行已不可用。",
       "collected": "已收集后台结果。",
+      "jobStopFailed": "无法停止后台任务：{error}",
+      "jobStopped": "后台任务已停止。",
+      "logFailed": "无法读取任务输出：{error}",
+      "monitorCancelFailed": "无法取消 Monitor：{error}",
+      "monitorCancelled": "Monitor 已取消。",
       "rerunFailed": "无法重新运行：{reason}",
       "rerunStarted": "已在后台重新运行。"
     },
@@ -521,6 +555,7 @@
     "delete": "删除",
     "deleteConfirmAction": "删除会话",
     "deleteConfirmBody": "将永久删除此会话及其全部消息，且无法撤销。",
+    "deleteConfirmBranches": "{count, plural, other {它的 # 个分支将作为独立会话保留。}}",
     "deleteConfirmTitle": "删除「{title}」？",
     "dragHandle": "拖拽以重新排序或移动到文件夹",
     "moveToFolder": "移动到文件夹",

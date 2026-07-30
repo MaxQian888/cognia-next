@@ -2648,7 +2648,8 @@
         "review": "Review",
         "security": "Security"
       },
-      "missingDependencies": "{count} missing dep(s)"
+      "missingDependencies": "{count} missing dep(s)",
+      "openStudioForBindings": "Open Template Studio to configure the required bindings."
     },
     "templatesTab": "Templates",
     "trySampleTeam": "Try sample team",
@@ -3187,6 +3188,26 @@
       }
     },
     "pictureInPicture": {
+      "actions": {
+        "clickText": "Click text",
+        "cursorPosition": "Read cursor position",
+        "doubleClick": "Double-click",
+        "drag": "Drag",
+        "findText": "Find text",
+        "holdKey": "Hold key",
+        "key": "Press keys",
+        "leftClick": "Left-click",
+        "middleClick": "Middle-click",
+        "mouseDown": "Press mouse button",
+        "mouseMove": "Move pointer",
+        "mouseUp": "Release mouse button",
+        "rightClick": "Right-click",
+        "screenshot": "Capture screen",
+        "scroll": "Scroll",
+        "tripleClick": "Triple-click",
+        "type": "Type text",
+        "wait": "Wait"
+      },
       "activity": "Activity: {action}",
       "close": "Close",
       "done": "Done",
@@ -3194,6 +3215,7 @@
       "hide": "Hide picture in picture",
       "justNow": "Just now",
       "move": "Move picture in picture",
+      "resize": "Resize picture in picture",
       "screenAlt": "Computer Use screen",
       "secondsAgo": "{seconds}s ago",
       "show": "Show picture in picture",
@@ -4064,9 +4086,12 @@
     "branch": {
       "ariaLineage": "Go to the message this branch was created from, in {title}",
       "cancel": "Cancel",
+      "childCount": "{count, plural, =1 {1 branch} other {# branches}}",
+      "childListLabel": "Branches from here",
       "confirm": "Create branch",
       "createError": "Failed to create branch",
       "created": "Branch created",
+      "createdAside": "Branched into an aside",
       "description": "Fork this conversation into a new, independent session. The original is left unchanged.",
       "direct": {
         "hint": "Copy the conversation up to this message verbatim.",
@@ -4075,6 +4100,16 @@
       "lineage": "from {title}",
       "lineageAnchorMissing": "That branch point is no longer in the conversation.",
       "lineageUnknownParent": "a deleted conversation",
+      "pick": {
+        "all": "Select all",
+        "empty": "Pick at least one message",
+        "label": "Carry {count} selected",
+        "none": "Clear",
+        "open": "Choose which messages to carry…",
+        "roleAssistant": "Assistant",
+        "roleUser": "You"
+      },
+      "pointCount": "{count, plural, =1 {1 branch from here} other {# branches from here}}",
       "summary": {
         "generating": "Generating summary…",
         "hint": "Summarize the conversation so far and seed the branch with it (keeps context small).",
@@ -4085,6 +4120,13 @@
       },
       "summaryEmpty": "Add a summary before branching",
       "summaryError": "Failed to generate summary",
+      "target": {
+        "aside": "A new aside on this conversation",
+        "asideHint": "Lives in the dock beside this thread. For something you expect to fold back.",
+        "label": "Where it goes",
+        "session": "A new conversation",
+        "sessionHint": "Appears in the sidebar. For a direction you mean to keep."
+      },
       "title": "Branch conversation"
     },
     "branchNavigator": {
@@ -4575,6 +4617,11 @@
       },
       "ariaSettings": "Session settings",
       "bareMode": "Bare mode",
+      "branchAria": "Branch conversation",
+      "branchEmpty": "Nothing to branch yet — this conversation has no messages.",
+      "branchError": "Couldn't branch this conversation.",
+      "branchSuccess": "Branched. The new conversation is now active.",
+      "branchTooltip": "Branch conversation — copies this thread into a new one you can take elsewhere",
       "briefMode": "Brief output",
       "cancel": "Cancel",
       "compactAria": "Compact",
@@ -4847,6 +4894,7 @@
       "bookmarkRemoveTooltip": "Remove bookmark",
       "bookmarkTooltip": "Bookmark",
       "branchLabel": "Branch conversation",
+      "branchStreamingTooltip": "Wait for this reply to finish before branching",
       "branchTooltip": "Branch from here",
       "bringBackDone": "Added to the main conversation's message box",
       "bringBackLabel": "Bring back to the main conversation",
@@ -4925,6 +4973,8 @@
       "stopReading": "Stop reading",
       "todoPlanTitle": "Plan · {done}/{total} done",
       "toolCallFailed": "Tool call failed",
+      "truncateFromLabel": "Delete from here",
+      "truncateFromTooltip": "Delete this message and everything after it",
       "unknownPart": "Unknown content ({type})",
       "usageCacheHit": "Cache hit: {n}",
       "usageCacheWrite": "Cache write: {n}",
@@ -5170,6 +5220,10 @@
       "position": "{current}/{total}",
       "previous": "Previous match"
     },
+    "selection": {
+      "askError": "Couldn't open an aside for that.",
+      "askInAside": "Ask in an aside"
+    },
     "sessionCost": {
       "byModelTitle": "By model",
       "cache": "Cache",
@@ -5295,6 +5349,14 @@
       "interruptedNotice": "This request was interrupted — the tool was already denied. Resend the message to retry.",
       "titleFallback": "Allow {tool}?",
       "toolLabel": "Tool"
+    },
+    "truncateFrom": {
+      "cancel": "Keep them",
+      "confirm": "Delete permanently",
+      "description": "{count, plural, =1 {This message will be permanently deleted.} other {These # messages will be permanently deleted.}} Branch variants hanging off them go too. This can't be undone.",
+      "done": "{count, plural, =1 {Deleted 1 message.} other {Deleted # messages.}}",
+      "error": "Couldn't delete those messages.",
+      "title": "Delete from this message on?"
     },
     "twinBadge": {
       "fewShotOff": "Style few-shot off",
@@ -5430,6 +5492,7 @@
   "contextWorkbench": {
     "actions": {
       "collapse": "Collapse workbench",
+      "expand": "Expand workbench",
       "focus": "Focus mode",
       "layoutMenu": "Layout options",
       "narrow": "Narrow mode",
@@ -5461,6 +5524,31 @@
       "selectionReady": "This instruction will be scoped to the selected range.",
       "sendToAi": "Send to AI"
     },
+    "asides": {
+      "actionError": "That didn't work.",
+      "cancel": "Cancel",
+      "clear": "Clear",
+      "clearBody": "The messages in this aside will be permanently deleted. The aside itself stays.",
+      "clearTitle": "Clear this aside?",
+      "cleared": "Aside cleared.",
+      "createError": "Couldn't create an aside.",
+      "defaultName": "Aside {n}",
+      "delete": "Delete",
+      "deleteBody": "This aside and its messages will be permanently deleted.",
+      "deleteTitle": "Delete this aside?",
+      "deleted": "Aside deleted.",
+      "fallbackName": "Aside",
+      "listLabel": "Asides",
+      "moreAria": "Aside actions",
+      "nameLabel": "Aside name",
+      "newAria": "New aside",
+      "promote": "Promote to a conversation",
+      "promoted": "Promoted. It's now a conversation of its own.",
+      "rename": "Rename",
+      "renameTitle": "Rename aside",
+      "save": "Save",
+      "switchAria": "Switch aside"
+    },
     "comments": "Comments",
     "commentsPanel": {
       "add": "Add comment",
@@ -5491,6 +5579,8 @@
       "hint": "Hiding an activity removes its rail button only — the panel stays reachable from the command palette and its shortcut.",
       "onRail": "On the rail",
       "onRailEmpty": "No activities on the rail.",
+      "persistentRail": "Keep the icon rail on screen",
+      "persistentRailHint": "Closing the workbench leaves its activity icons in a narrow column you can drag back open. Turn this off to have the whole right column collapse away.",
       "restoreDefaults": "Restore defaults",
       "showItem": "Show"
     },
@@ -5911,14 +6001,16 @@
         "clearSettled": "Clear settled",
         "collect": "Collect",
         "collectAria": "Collect background run {runId}",
+        "logTail": "Log",
         "reDispatched": "re-dispatched",
-        "rerun": "Re-run"
+        "rerun": "Re-run",
+        "stop": "Stop"
       },
       "delivery": {
         "pending": "Pending delivery",
         "pendingHint": "Delivered when the originating chat is open and idle."
       },
-      "description": "Background subagent runs started by dispatch_agent.",
+      "description": "Agent runs, supervised background processes, and durable monitors on the active host.",
       "duration": {
         "minutesSeconds": "{minutes}m {seconds}s",
         "seconds": "{seconds}s"
@@ -5927,7 +6019,9 @@
         "activeDescription": "Detached subagents will appear here while they are still running.",
         "activeTitle": "No active background jobs",
         "historyDescription": "Done, failed, and interrupted runs remain here until cleared.",
-        "historyTitle": "No background history"
+        "historyTitle": "No background history",
+        "supervisorDescription": "Background commands and Monitor watches will appear here.",
+        "supervisorTitle": "No supervised jobs or monitors"
       },
       "fields": {
         "elapsed": "Elapsed: {value}",
@@ -5957,10 +6051,35 @@
         "interrupted": "Interrupted",
         "running": "Running"
       },
+      "supervisor": {
+        "jobStatus": {
+          "exited": "Exited",
+          "failed": "Failed",
+          "interrupted": "Interrupted",
+          "killed": "Killed",
+          "running": "Running"
+        },
+        "jobs": "Background jobs",
+        "monitorStatus": {
+          "cancelled": "Cancelled",
+          "expired": "Expired",
+          "fired": "Fired",
+          "unsatisfiable": "Unsatisfiable",
+          "waiting": "Waiting"
+        },
+        "monitors": "Monitors",
+        "noOutput": "No output yet.",
+        "owner": {
+          "app": "App",
+          "scheduledTask": "Task {id}",
+          "session": "Session {id}"
+        }
+      },
       "tabs": {
         "active": "Active",
         "history": "History",
-        "running": "Running"
+        "running": "Running",
+        "supervisor": "Processes"
       },
       "title": "Job Center",
       "toast": {
@@ -5971,6 +6090,11 @@
         "collectFailed": "Could not collect background result: {error}",
         "collectMissing": "That background run is no longer available.",
         "collected": "Background result collected.",
+        "jobStopFailed": "Could not stop background job: {error}",
+        "jobStopped": "Background job stopped.",
+        "logFailed": "Could not read job output: {error}",
+        "monitorCancelFailed": "Could not cancel monitor: {error}",
+        "monitorCancelled": "Monitor cancelled.",
         "rerunFailed": "Could not re-run: {reason}",
         "rerunStarted": "Re-running in the background."
       },
@@ -6219,6 +6343,7 @@
       "delete": "Delete",
       "deleteConfirmAction": "Delete conversation",
       "deleteConfirmBody": "This permanently removes the conversation and all its messages. This cannot be undone.",
+      "deleteConfirmBranches": "{count, plural, =1 {Its 1 branch will be kept as a conversation of its own.} other {Its # branches will be kept as conversations of their own.}}",
       "deleteConfirmTitle": "Delete “{title}”?",
       "dragHandle": "Drag to reorder or move to a folder",
       "moveToFolder": "Move to folder",
@@ -10528,17 +10653,47 @@
       "uses": "{count, plural, =1 {1 run} other {# runs}}"
     },
     "companion": {
-      "diagnostics": {
-        "description": "Test which local URLs the desktop server is reachable on. Useful when a phone reports a connection error and you want to confirm the LAN / tunnel paths are healthy.",
-        "desktopOnly": "Only available in the Tauri desktop build.",
-        "empty": "No candidates to probe — start the companion server first.",
-        "failed": "Failed",
-        "ms": "ms",
-        "ok": "OK",
-        "probeFailed": "Probe failed: {message}",
-        "probing": "Probing…",
-        "testButton": "Test reachability",
-        "title": "Connection diagnostics"
+      "agentControl": {
+        "blocked": "Agent control not enabled ({reason}).",
+        "col": "Run agents",
+        "description": "Lets this device start and stop external agent processes on this desktop. The spawn policy still limits which programs may run, from which folder, and with which environment — but within those limits the device chooses. Remote control is a separate, lesser grant.",
+        "disabledToast": "Agent control disabled for {label}.",
+        "enabledToast": "Agent control enabled for {label}.",
+        "reason": "Confirm letting {label} run agents on this desktop",
+        "title": "Allow running agents",
+        "toggleAria": "Toggle agent control for {label}"
+      },
+      "channels": {
+        "blocked": {
+          "loopbackOnly": "Bound to this machine only — switch the server to LAN.",
+          "noSignaling": "No rendezvous server configured.",
+          "serverStopped": "The companion server is not running."
+        },
+        "channel": {
+          "lan": "Local network",
+          "mdns": "Local discovery",
+          "tunnel": "Public tunnel",
+          "webrtc": "Direct (WebRTC)"
+        },
+        "description": "Every route a paired device can use to reach this desktop, and whether it currently works.",
+        "desktopOnly": "Reachability can only be tested from the desktop app.",
+        "noReason": "no reason given",
+        "probeButton": "Test reachability",
+        "probeFailed": "Reachability test failed: {message}",
+        "probeFailedShort": "Unreachable — {message}",
+        "probeOk": "Reachable in {ms} ms",
+        "probing": "Testing…",
+        "state": {
+          "blocked": "Blocked",
+          "live": "On",
+          "off": "Off"
+        },
+        "summary": {
+          "blocked": "Nothing can reach this desktop",
+          "none": "No channels enabled",
+          "reachable": "Reachable"
+        },
+        "title": "Channels"
       },
       "groups": {
         "advanced": "Advanced & diagnostics",
@@ -10551,7 +10706,6 @@
         "awaitingCode": "A browser window opened. After you authorize, paste the full redirect URL (or just the code) below.",
         "cancel": "Cancel",
         "description": "Sign in to your Logto tenant so this desktop can act as an authenticated client of the cloud / headless companion gateway.",
-        "desktopOnly": "Cloud sign-in is only available in the desktop app (the session is stored in the OS keyring).",
         "errors": {
           "codeMalformed": "Could not read a code from that input. Paste the full redirect URL or the code value.",
           "missingFields": "Issuer, client ID, API resource and redirect URI are all required.",
@@ -10572,6 +10726,7 @@
         "loading": "Checking cloud session…",
         "signIn": "Sign in with Logto",
         "signOut": "Sign out",
+        "storageFallback": "Signed-in tokens are stored in an encrypted vault in this browser or app rather than the operating system keyring.",
         "submitCode": "Finish sign-in",
         "title": "Logto cloud sign-in",
         "toast": {
@@ -10793,7 +10948,7 @@
         "tokenPlaceholder": "eyJ..."
       },
       "webrtc": {
-        "description": "Third transport tier (ADR-0021). Lets paired phones reach this desktop from anywhere without a tunnel, using a stateless rendezvous and HMAC-signed envelopes.",
+        "description": "Third transport tier (ADR-0021). Uses signaling v2 role authentication and end-to-end encrypted envelopes, so the rendezvous cannot read SDP or ICE.",
         "deviceTier": {
           "awaiting": "Awaiting peer",
           "connected": "Connected",
@@ -10816,6 +10971,7 @@
         "invalidUrl": "Signaling URL must start with ws:// or wss://",
         "noDevices": "No paired devices with WebRTC enabled yet. Pair a phone running the latest mobile build to populate this list.",
         "pollFailed": "Couldn't read the signaling hub status ({reason}). The device list below may be stale.",
+        "protocolMode": "v2 role-isolated",
         "reconnectButton": "Reconnect",
         "reconnectFailed": "Reconnect failed ({reason}).",
         "reconnectSuccess": "Reconnect requested.",
@@ -10826,7 +10982,7 @@
         "savingButton": "Saving…",
         "signalingUrlHelp": "WebSocket endpoint for the public rendezvous. Self-hosted deployments swap this for their own URL.",
         "signalingUrlLabel": "Signaling server URL",
-        "signalingUrlPlaceholder": "wss://signaling.cognia.cn/v1/signaling",
+        "signalingUrlPlaceholder": "wss://signaling.cognia.cn/v2/signaling",
         "title": "WebRTC remote access",
         "turnProviderAuthTokenLabel": "Twilio Auth Token",
         "turnProviderCloudflare": "Cloudflare Calls",
@@ -11234,6 +11390,7 @@
       "biometricUnavailable": "This device has no biometric enrolled.",
       "canvasRow": "Canvas",
       "charactersRow": "Characters",
+      "cloudAccountRow": "Cloud account",
       "commandHistoryRow": "Command history",
       "computerUse": {
         "masterStateOff": "Mobile Computer Use is disabled.",
@@ -11300,6 +11457,7 @@
       "devicesRow": "Paired devices",
       "dexieMaintenance": "Dexie maintenance",
       "diagnosticsRow": "Diagnostics",
+      "evalRow": "Agent evaluation",
       "externalAgentsRow": "External agents",
       "feedback": {
         "copyDescription": "App version, user agent, and current sync snapshot.",
@@ -11548,6 +11706,21 @@
       "proxy": {
         "description": "The HTTP/SOCKS proxy used for outbound requests is managed on the desktop.",
         "title": "Proxy"
+      },
+      "rendezvous": {
+        "description": "How this device reaches the paired host when it is not on the same network. Configured on the host and mirrored here.",
+        "provider": {
+          "cloudflare-calls": "Credentials issued on demand by Cloudflare Calls.",
+          "none": "No credential provider — the static list above is all that is available.",
+          "twilio": "Credentials issued on demand by Twilio."
+        },
+        "serverCount": "{count, plural, =0 {none} one {# server} other {# servers}}",
+        "signalingLabel": "Signaling server",
+        "sourceBuiltIn": "Built-in",
+        "sourceHost": "From host",
+        "stunLabel": "STUN",
+        "title": "Direct connection",
+        "turnLabel": "TURN relays"
       },
       "title": "Network"
     },
@@ -11907,7 +12080,6 @@
       "fontScaleSm": "S",
       "language": "Language",
       "privacyTitle": "Accessibility & privacy",
-      "queueLabel": "Queued — desktop will apply this when online.",
       "reconnectButton": "Reconnect WebRTC",
       "reconnectFailed": "Reconnect failed ({reason}).",
       "reconnectInactive": "WebRTC tier isn't active right now.",
@@ -17269,6 +17441,10 @@
     "footerSuccess": "Success",
     "formatExpression": "Format expression",
     "handler": "Handler",
+    "host": {
+      "local": "Local host",
+      "remote": "Remote host"
+    },
     "importError": "Import failed: {message}",
     "importExport": {
       "exportAll": "Export all tasks",
@@ -17305,6 +17481,7 @@
     "kindFilter": {
       "all": "All",
       "app": "App",
+      "background-command": "Background Command",
       "backup": "Backup",
       "connector": "Connector",
       "plugin": "Plugin",
@@ -17743,6 +17920,7 @@
       "name": "Name",
       "nextRun": "Next Run"
     },
+    "sourceConversationMissing": "The source IM conversation is no longer bound to a chat session.",
     "startedAt": "Started at",
     "statistics": "Statistics",
     "stats": {
@@ -17808,6 +17986,7 @@
       "external-agent": "External Agent (ACP)",
       "goal": "Goal",
       "im-push": "IM Push",
+      "monitor": "Monitor",
       "plan": "Plan",
       "plugin": "Plugin",
       "script": "Script",
@@ -18808,8 +18987,9 @@
         "emptyAll": "No sessions yet. Start a chat to fill this list.",
         "emptyFilter": "No sessions match this filter.",
         "filterPlaceholder": "Filter by title or id…",
-        "fork": "Fork",
-        "forkDisabledTip": "Fork unavailable until the session has at least one completed turn.",
+        "fork": "Fork SDK session",
+        "forkDisabledTip": "Unavailable until this session has an SDK conversation to fork — it needs at least one completed turn, and only providers that issue a session id have one.",
+        "forkFailedToast": "Couldn't fork the SDK session.",
         "forkedToast": "Forked into `{title}`.",
         "rename": "Rename",
         "renameDesc": "Pick a new display title. Changing the title doesn't affect the chat history or SDK conversation.",
@@ -22775,10 +22955,12 @@
       "server": {
         "bearerTokenLabel": "Bearer token (HTTP only)",
         "copyTokenAria": "Copy token",
+        "defaultClientName": "Cognia controller",
         "hide": "Hide",
         "httpPort": "HTTP port",
         "httpPortDiverged": "The listener is still on port {bound}. Restart the bridge to move it.",
         "httpPortHelp": "Port the HTTP transport listens on. Used in the setup snippets below.",
+        "noActiveClientError": "No active External Bridge client.",
         "regenerateWarning": "⚠ Regenerating invalidates the old token immediately.",
         "rotateConfirmAction": "Rotate token",
         "rotateConfirmCancel": "Cancel",
@@ -22790,6 +22972,7 @@
         "statusOff": "Server is off. No external traffic accepted.",
         "statusStdioActive": "Stdio transport active. Tauri HTTP server is offline — toggle off and on to restart.",
         "title": "MCP server",
+        "toastRestartFailed": "Could not restart the MCP server. Check the host status and try again.",
         "toastServerStarted": "MCP HTTP server listening on 127.0.0.1:{port}",
         "toastServerStopped": "MCP server stopped.",
         "toastSidecarMissing": "The MCP sidecar is not installed, so the bridge cannot start.",
@@ -24369,6 +24552,8 @@
           "connectionScheduledDigest": "A scheduled connection digest was published.",
           "custom": "Free-form event — typically posted from external tooling.",
           "goalCompleted": "A goal loop reached a terminal status.",
+          "jobExited": "A supervised background job exited.",
+          "monitorFired": "A durable Monitor condition fired.",
           "planCompleted": "A plan reached a terminal status.",
           "sessionCompleted": "A chat session ended.",
           "sessionCreated": "A new chat session was created.",
@@ -24563,18 +24748,37 @@
         "activeBadge": "Connected",
         "activeBanner": "Driving {label} — new terminals, file, and git operations target this host.",
         "cancel": "Cancel",
+        "capabilitiesUnknown": "Capabilities unknown — connect once to ask this host",
         "capabilityNote": "Reads (open files, git status, diff, log) work once paired. Writing files, commits, and pushes need the host to grant this device control in its allow-list.",
         "connect": "Connect",
         "disconnect": "Disconnect",
         "emptyBody": "Pair a remote Cognia server to drive its terminal, files, and git from here. Add one on the Add host tab.",
         "emptyTitle": "No remote hosts yet",
+        "featureCategory": {
+          "host": "Remote host execution",
+          "proxy": "Controller proxy",
+          "unavailable": "Currently unavailable"
+        },
+        "featureManifest": "Feature contract schema {schema} · host build {build}",
+        "featureManifestUnknown": "Operation-level feature contract unavailable — writes stay disabled until the host reports one",
+        "featurePermissionNote": "Advertised operations still require their command permission; management writes require remote-control, and high-risk writes require an Owner admin lease.",
+        "featureVersion": "{feature} v{version}",
         "neverConnected": "Never connected",
+        "none": "None",
         "remove": "Remove",
         "removeA11y": "Remove {label}",
         "rename": "Rename",
         "renameLabel": "Host name",
         "save": "Save",
-        "serverVersion": "cognia {version}"
+        "serverVersion": "cognia {version}",
+        "state": {
+          "connecting": "Connecting",
+          "degraded": "Degraded",
+          "disconnected": "Disconnected",
+          "ready": "Ready",
+          "revoked": "Revoked",
+          "versionMismatch": "Upgrade required"
+        }
       },
       "tabs": {
         "add": "Add host",
@@ -26638,13 +26842,18 @@
       "codexNotInstalled": "Codex CLI directory not detected; the mirror was created.",
       "desktopOnly": "Sync is only available in the desktop app.",
       "emptyTrash": "Empty trash ({count})",
+      "errored": "{count, plural, =1 {1 errored} other {# errored}}",
       "lastAt": "Last: {when}",
       "mirrorClaude": "Mirror to ~/.claude/skills/",
       "mirrorCodex": "Mirror to ~/.agents/skills/ (Codex)",
       "mirrorTargetsLabel": "Mirror targets",
+      "noChanges": "No changes.",
       "pullAll": "Pull all from native",
+      "pulled": "{count, plural, =1 {1 pulled} other {# pulled}}",
       "pushAll": "Push all to native",
+      "pushed": "{count, plural, =1 {1 pushed} other {# pushed}}",
       "retry": "Retry",
+      "skipped": "{count, plural, =1 {1 skipped} other {# skipped}}",
       "status": {
         "error": "Sync error",
         "never": "Never synced",
@@ -26653,7 +26862,9 @@
       },
       "syncNow": "Sync now",
       "tooLargeForDisk": "Resource {path} is larger than the 2 MB on-disk cap; the mirror skipped it.",
-      "trashEmptied": "{count, plural, =0 {Trash was already empty.} =1 {Removed 1 trashed skill.} other {Removed # trashed skills.}}"
+      "trashEmptied": "{count, plural, =0 {Trash was already empty.} =1 {Removed 1 trashed skill.} other {Removed # trashed skills.}}",
+      "unavailableRead": "Skills are unavailable for the current host.",
+      "unavailableWrite": "Skill writes are unavailable for the current host."
     },
     "syncLabel": "Sync",
     "tabs": {
@@ -27820,6 +28031,157 @@
   },
   "tauriDemo": {
     "buttonLabel": "Call Rust greet()"
+  },
+  "templateStudio": {
+    "actions": {
+      "cancel": "Cancel",
+      "confirmImport": "Import package",
+      "create": "Create draft",
+      "export": "Export",
+      "import": "Import",
+      "instantiate": "Create resources",
+      "newDraft": "New draft",
+      "openEditor": "Open editor",
+      "preflight": "Check plan",
+      "publish": "Publish"
+    },
+    "create": {
+      "description": "Start a portable template definition that you can review and publish.",
+      "domain": "Template type",
+      "name": "Name",
+      "templateDescription": "Description",
+      "title": "Create template draft"
+    },
+    "defaults": {
+      "teamLead": "Team lead"
+    },
+    "description": "Search, inspect, publish, import, and instantiate reusable Cognia templates.",
+    "domains": {
+      "a2ui": "Mini App",
+      "agentTeam": "Agent team",
+      "character": "Character",
+      "customMode": "Custom mode",
+      "document": "Document",
+      "goal": "Goal",
+      "prompt": "Prompt preset",
+      "scheduler": "Scheduled task",
+      "skill": "Skill",
+      "subagent": "Subagent",
+      "subscription": "Subscription preset",
+      "workflow": "Workflow"
+    },
+    "empty": {
+      "noDescription": "No description",
+      "noResults": "No templates match these filters."
+    },
+    "filters": {
+      "allDomains": "All types",
+      "allTrust": "All trust levels",
+      "domain": "Template type",
+      "search": "Search templates",
+      "trust": "Trust level"
+    },
+    "import": {
+      "definitionCount": "{count, plural, one {# definition} other {# definitions}}",
+      "description": "Review this package before adding its inert definitions to your library.",
+      "inert": "Importing does not create resources or run template content.",
+      "title": "Import template package"
+    },
+    "inputKinds": {
+      "boolean": "Enter true or false",
+      "character": "Character ID",
+      "enum": "Select a value",
+      "model": "Model ID",
+      "number": "Enter a number",
+      "provider": "Provider ID",
+      "resource": "Resource ID",
+      "secretRef": "Secret reference",
+      "skill": "Skill ID",
+      "string": "Enter a value",
+      "tool": "Tool ID",
+      "twinSlot": "Twin ID",
+      "workflow": "Workflow ID"
+    },
+    "inspector": {
+      "empty": "Select a template to inspect its definition and available actions.",
+      "hash": "Content hash: {hash}",
+      "payload": "Portable payload",
+      "readOnly": "Catalog only",
+      "required": "(required)",
+      "source": "Source: {source}"
+    },
+    "instances": {
+      "detached": "Detached",
+      "resources": "{count, plural, one {# resource} other {# resources}}"
+    },
+    "issues": {
+      "agent-team": {
+        "task-cycle": "The team task graph contains a dependency cycle."
+      },
+      "binding": {
+        "required": "A required binding has not been selected."
+      },
+      "dependency": {
+        "optional-fallback": "An optional dependency will use its fallback.",
+        "required-missing": "A required dependency is unavailable."
+      },
+      "host-version": {
+        "unsupported": "This template is not compatible with the current host version."
+      },
+      "platform": {
+        "unsupported": "This template is not compatible with this platform."
+      },
+      "plugin": {
+        "permission-missing": "The plugin is missing a required domain permission."
+      },
+      "source": {
+        "unavailable": "This template source is unavailable."
+      }
+    },
+    "messages": {
+      "draftCreated": "Template draft created.",
+      "imported": "Template package imported.",
+      "instantiated": "Template resources created.",
+      "published": "Template version {version} published."
+    },
+    "mobile": {
+      "description": "Browse and instantiate compatible templates here. Authoring, publishing, import, and export remain available on desktop.",
+      "title": "Mobile template access"
+    },
+    "operations": {
+      "bind": "Bind an existing resource",
+      "create": "Create a resource",
+      "enable": "Enable a resource",
+      "permission": "Request permission",
+      "update": "Update a resource"
+    },
+    "preflight": {
+      "blocked": "Plan blocked",
+      "needs-confirmation": "Confirmation required",
+      "ready": "Plan ready"
+    },
+    "status": {
+      "conflict": "Conflict",
+      "deprecated": "Deprecated",
+      "draft": "Draft",
+      "published": "Published",
+      "tombstone": "Removed",
+      "yanked": "Withdrawn"
+    },
+    "tabs": {
+      "drafts": "Drafts",
+      "instances": "Instances",
+      "library": "Library",
+      "packages": "Packages",
+      "published": "Published"
+    },
+    "title": "Template Studio",
+    "trust": {
+      "built-in": "Built in",
+      "signed-unknown": "Signed, unknown publisher",
+      "unsigned": "Unsigned",
+      "verified-publisher": "Verified publisher"
+    }
   },
   "terminal": {
     "commandMenu": {
@@ -33605,6 +33967,19 @@
       "recentHint": "Nodes you've added most recently.",
       "removeFromFavorites": "Remove from favorites",
       "searchPlaceholder": "Search nodes…"
+    },
+    "templateLibrary": {
+      "create": "Create workflow",
+      "creating": "Creating…",
+      "emptyDescription": "Published workflow templates will appear here.",
+      "emptyTitle": "No workflow templates yet",
+      "noDescription": "No description",
+      "trust": {
+        "built-in": "Built in",
+        "signed-unknown": "Signed, unknown publisher",
+        "unsigned": "Unsigned",
+        "verified-publisher": "Verified publisher"
+      }
     },
     "toolbar": {
       "namePlaceholder": "Workflow name",

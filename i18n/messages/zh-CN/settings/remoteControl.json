@@ -23,6 +23,8 @@
       "connectionScheduledDigest": "定时连接摘要已发布。",
       "custom": "自定义事件——通常由外部工具发起。",
       "goalCompleted": "某个目标循环到达终止状态。",
+      "jobExited": "受监管后台任务已退出。",
+      "monitorFired": "持久 Monitor 条件已触发。",
       "planCompleted": "某个计划到达终止状态。",
       "sessionCompleted": "一个会话已结束。",
       "sessionCreated": "新建了一个会话。",

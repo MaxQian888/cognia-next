@@ -422,13 +422,18 @@
     "codexNotInstalled": "Codex CLI directory not detected; the mirror was created.",
     "desktopOnly": "Sync is only available in the desktop app.",
     "emptyTrash": "Empty trash ({count})",
+    "errored": "{count, plural, =1 {1 errored} other {# errored}}",
     "lastAt": "Last: {when}",
     "mirrorClaude": "Mirror to ~/.claude/skills/",
     "mirrorCodex": "Mirror to ~/.agents/skills/ (Codex)",
     "mirrorTargetsLabel": "Mirror targets",
+    "noChanges": "No changes.",
     "pullAll": "Pull all from native",
+    "pulled": "{count, plural, =1 {1 pulled} other {# pulled}}",
     "pushAll": "Push all to native",
+    "pushed": "{count, plural, =1 {1 pushed} other {# pushed}}",
     "retry": "Retry",
+    "skipped": "{count, plural, =1 {1 skipped} other {# skipped}}",
     "status": {
       "error": "Sync error",
       "never": "Never synced",
@@ -437,7 +442,9 @@
     },
     "syncNow": "Sync now",
     "tooLargeForDisk": "Resource {path} is larger than the 2 MB on-disk cap; the mirror skipped it.",
-    "trashEmptied": "{count, plural, =0 {Trash was already empty.} =1 {Removed 1 trashed skill.} other {Removed # trashed skills.}}"
+    "trashEmptied": "{count, plural, =0 {Trash was already empty.} =1 {Removed 1 trashed skill.} other {Removed # trashed skills.}}",
+    "unavailableRead": "Skills are unavailable for the current host.",
+    "unavailableWrite": "Skill writes are unavailable for the current host."
   },
   "syncLabel": "Sync",
   "tabs": {

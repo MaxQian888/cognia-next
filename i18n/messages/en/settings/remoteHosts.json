@@ -1,45 +1,64 @@
 {
-  "title": "Remote hosts",
-  "description": "Drive a remote Cognia host — its terminal, files, and git — from this desktop. Files and git read with pairing; writes need the host to grant this device control.",
-  "tabs": {
-    "hosts": "Hosts",
-    "add": "Add host"
-  },
-  "list": {
-    "emptyTitle": "No remote hosts yet",
-    "emptyBody": "Pair a remote Cognia server to drive its terminal, files, and git from here. Add one on the Add host tab.",
-    "activeBadge": "Connected",
-    "connect": "Connect",
-    "disconnect": "Disconnect",
-    "rename": "Rename",
-    "renameLabel": "Host name",
-    "remove": "Remove",
-    "removeA11y": "Remove {label}",
-    "save": "Save",
-    "cancel": "Cancel",
-    "serverVersion": "cognia {version}",
-    "neverConnected": "Never connected",
-    "activeBanner": "Driving {label} — new terminals, file, and git operations target this host.",
-    "capabilityNote": "Reads (open files, git status, diff, log) work once paired. Writing files, commits, and pushes need the host to grant this device control in its allow-list."
-  },
   "add": {
+    "baseUrlHint": "The remote cognia-server address. Use its public URL (cloudflared or reverse proxy) to reach it across networks.",
     "baseUrlLabel": "Server URL",
     "baseUrlPlaceholder": "https://your-host:27890",
-    "baseUrlHint": "The remote cognia-server address. Use its public URL (cloudflared or reverse proxy) to reach it across networks.",
-    "labelLabel": "Name (optional)",
-    "labelPlaceholder": "My dev box",
-    "payloadLabel": "Pair payload or JWT",
-    "payloadPlaceholder": "Paste the cgnp2 payload from `cognia-server pair`, or a raw pair JWT",
-    "payloadHint": "On the host run `cognia-server pair` and paste what it prints. A full payload fills in the URL for you.",
     "connectAfter": "Connect after pairing",
-    "submit": "Pair host",
-    "submitting": "Pairing…",
-    "success": "Paired {label}.",
     "errBaseUrl": "Enter a URL like https://your-host:27890.",
-    "errPayload": "That doesn't look like a pair payload or JWT.",
+    "errGeneric": "Pairing failed. Please try again.",
+    "errHttp": "Pairing failed (HTTP {status}). Generate a fresh pair token on the host and try again.",
     "errMissing": "Paste a pair payload or a pair JWT.",
     "errNetwork": "Could not reach the host. Check the URL and that its companion server is running.",
-    "errHttp": "Pairing failed (HTTP {status}). Generate a fresh pair token on the host and try again.",
-    "errGeneric": "Pairing failed. Please try again."
-  }
+    "errPayload": "That doesn't look like a pair payload or JWT.",
+    "labelLabel": "Name (optional)",
+    "labelPlaceholder": "My dev box",
+    "payloadHint": "On the host run `cognia-server pair` and paste what it prints. A full payload fills in the URL for you.",
+    "payloadLabel": "Pair payload or JWT",
+    "payloadPlaceholder": "Paste the cgnp2 payload from `cognia-server pair`, or a raw pair JWT",
+    "submit": "Pair host",
+    "submitting": "Pairing…",
+    "success": "Paired {label}."
+  },
+  "description": "Drive a remote Cognia host — its terminal, files, and git — from this desktop. Files and git read with pairing; writes need the host to grant this device control.",
+  "list": {
+    "activeBadge": "Connected",
+    "activeBanner": "Driving {label} — new terminals, file, and git operations target this host.",
+    "cancel": "Cancel",
+    "capabilitiesUnknown": "Capabilities unknown — connect once to ask this host",
+    "capabilityNote": "Reads (open files, git status, diff, log) work once paired. Writing files, commits, and pushes need the host to grant this device control in its allow-list.",
+    "connect": "Connect",
+    "disconnect": "Disconnect",
+    "emptyBody": "Pair a remote Cognia server to drive its terminal, files, and git from here. Add one on the Add host tab.",
+    "emptyTitle": "No remote hosts yet",
+    "neverConnected": "Never connected",
+    "featureCategory": {
+      "host": "Remote host execution",
+      "proxy": "Controller proxy",
+      "unavailable": "Currently unavailable"
+    },
+    "featureManifest": "Feature contract schema {schema} · host build {build}",
+    "featureManifestUnknown": "Operation-level feature contract unavailable — writes stay disabled until the host reports one",
+    "featurePermissionNote": "Advertised operations still require their command permission; management writes require remote-control, and high-risk writes require an Owner admin lease.",
+    "featureVersion": "{feature} v{version}",
+    "none": "None",
+    "remove": "Remove",
+    "removeA11y": "Remove {label}",
+    "rename": "Rename",
+    "renameLabel": "Host name",
+    "save": "Save",
+    "serverVersion": "cognia {version}",
+    "state": {
+      "connecting": "Connecting",
+      "degraded": "Degraded",
+      "disconnected": "Disconnected",
+      "ready": "Ready",
+      "revoked": "Revoked",
+      "versionMismatch": "Upgrade required"
+    }
+  },
+  "tabs": {
+    "add": "Add host",
+    "hosts": "Hosts"
+  },
+  "title": "Remote hosts"
 }

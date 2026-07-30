@@ -851,7 +851,8 @@
       "review": "Review",
       "security": "Security"
     },
-    "missingDependencies": "{count} missing dep(s)"
+    "missingDependencies": "{count} missing dep(s)",
+    "openStudioForBindings": "Open Template Studio to configure the required bindings."
   },
   "templatesTab": "Templates",
   "trySampleTeam": "Try sample team",

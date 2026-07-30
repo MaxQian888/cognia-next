@@ -422,13 +422,18 @@
     "codexNotInstalled": "未检测到 Codex CLI 目录，已自动创建镜像。",
     "desktopOnly": "同步仅在桌面端可用。",
     "emptyTrash": "清空回收站（{count}）",
+    "errored": "{count} 个失败",
     "lastAt": "上次：{when}",
     "mirrorClaude": "镜像到 ~/.claude/skills/",
     "mirrorCodex": "镜像到 ~/.agents/skills/（Codex）",
     "mirrorTargetsLabel": "镜像目标",
+    "noChanges": "没有变更。",
     "pullAll": "全部从本地拉取",
+    "pulled": "已拉取 {count} 个",
     "pushAll": "全部推送到本地",
+    "pushed": "已推送 {count} 个",
     "retry": "重试",
+    "skipped": "已跳过 {count} 个",
     "status": {
       "error": "同步错误",
       "never": "从未同步",
@@ -437,7 +442,9 @@
     },
     "syncNow": "立即同步",
     "tooLargeForDisk": "资源 {path} 超出 2 MB 磁盘上限，已跳过该镜像。",
-    "trashEmptied": "{count, plural, =0 {回收站本就为空。} other {已清理 # 个废弃技能。}}"
+    "trashEmptied": "{count, plural, =0 {回收站本就为空。} other {已清理 # 个废弃技能。}}",
+    "unavailableRead": "当前主机无法使用技能。",
+    "unavailableWrite": "当前主机无法写入技能。"
   },
   "syncLabel": "同步",
   "tabs": {
