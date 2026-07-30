@@ -49,10 +49,10 @@ use super::proxy_common::{generate_token, token_matches, RateLimitOutcome, RateL
 
 use cognia_automation::automation::dispatcher::{run_gated_enf, Enforcement, GateContext};
 use cognia_automation::automation::permission::Surface;
-use cognia_automation::automation::types::{
-    AutomationError, ButtonTransition, ClickOpts, ClickTarget, DragOpts, KeyChord, Locator,
-    MouseButton, Point, ScreenshotOpts, ScrollOpts, ScrollTarget, TreeOpts, TypeOpts, WindowOp,
+use cognia_automation::automation::session::{
+    ActionRequest, AppLocator, ElementHandle, GetAppStateOptions,
 };
+use cognia_automation::automation::types::{AutomationError, Locator};
 use cognia_automation::automation::worker::AutomationHandle;
 
 /// Live proxy handle. Drop aborts the listener task; closing the listener
@@ -371,116 +371,50 @@ async fn run(req: ProxyRequest, handle: &AutomationHandle) -> Result<serde_json:
             let caps = handle.capabilities().await.map_err(stringify_err)?;
             Ok(serde_json::to_value(caps).map_err(|e| e.to_string())?)
         }
-        "desktop_get_focus" => {
-            let info = handle.get_focus().await.map_err(stringify_err)?;
-            Ok(serde_json::to_value(info).map_err(|e| e.to_string())?)
+        "desktop_list_apps" => {
+            let apps = handle.list_apps().await.map_err(stringify_err)?;
+            Ok(serde_json::to_value(apps).map_err(|e| e.to_string())?)
         }
-        "desktop_read_tree" => {
-            let args: ReadTreeArgs = from_value(req.args)?;
-            let info = handle
-                .read_tree(args.root, args.opts.unwrap_or_default())
+        "desktop_get_app_state" => {
+            let args: GetAppStateArgs = from_value(req.args)?;
+            let state = handle
+                .get_app_state(args.session_id, args.turn_key, args.locator, args.options)
                 .await
                 .map_err(stringify_err)?;
-            Ok(serde_json::to_value(info).map_err(|e| e.to_string())?)
+            Ok(serde_json::to_value(state).map_err(|e| e.to_string())?)
         }
-        "desktop_find" => {
-            let args: FindArgs = from_value(req.args)?;
-            let elt = handle.find(args.locator).await.map_err(stringify_err)?;
-            Ok(serde_json::to_value(elt).map_err(|e| e.to_string())?)
-        }
-        "desktop_screenshot" => {
-            let args: ScreenshotArgs = from_value(req.args)?;
-            let shot = handle
-                .screenshot(args.opts.unwrap_or_default())
+        "desktop_query_elements" => {
+            let args: QueryElementsArgs = from_value(req.args)?;
+            let nodes = handle
+                .query_elements(
+                    args.session_id,
+                    args.lineage_id,
+                    args.revision,
+                    args.locator,
+                    args.limit,
+                )
                 .await
                 .map_err(stringify_err)?;
-            Ok(serde_json::to_value(shot).map_err(|e| e.to_string())?)
+            Ok(serde_json::to_value(nodes).map_err(|e| e.to_string())?)
         }
-        "desktop_click" => {
-            let args: ClickArgs = from_value(req.args)?;
-            handle
-                .click(args.target, args.opts.unwrap_or_default())
+        "desktop_expand_element" => {
+            let args: ExpandElementArgs = from_value(req.args)?;
+            let page = handle
+                .expand_element(args.handle, args.continuation_token, args.limit)
                 .await
                 .map_err(stringify_err)?;
-            Ok(serde_json::json!({ "ok": true }))
+            Ok(serde_json::to_value(page).map_err(|e| e.to_string())?)
         }
-        "desktop_type" => {
-            let args: TypeArgs = from_value(req.args)?;
-            handle
-                .type_text(args.text, args.opts.unwrap_or_default())
+        "desktop_perform_action" => {
+            let args: PerformActionArgs = from_value(req.args)?;
+            let result = handle
+                .perform_action(args.request, args.turn_key)
                 .await
                 .map_err(stringify_err)?;
-            Ok(serde_json::json!({ "ok": true }))
-        }
-        "desktop_keys" => {
-            let args: KeysArgs = from_value(req.args)?;
-            handle.send_keys(args.chord).await.map_err(stringify_err)?;
-            Ok(serde_json::json!({ "ok": true }))
-        }
-        "desktop_mouse_move" => {
-            let args: MouseMoveArgs = from_value(req.args)?;
-            handle.mouse_move(args.point).await.map_err(stringify_err)?;
-            Ok(serde_json::json!({ "ok": true }))
-        }
-        "desktop_drag" => {
-            let args: DragArgs = from_value(req.args)?;
-            handle
-                .drag(args.from, args.to, args.opts.unwrap_or_default())
-                .await
-                .map_err(stringify_err)?;
-            Ok(serde_json::json!({ "ok": true }))
-        }
-        "desktop_scroll" => {
-            let args: ScrollArgs = from_value(req.args)?;
-            handle
-                .scroll(args.target, args.opts.unwrap_or_default())
-                .await
-                .map_err(stringify_err)?;
-            Ok(serde_json::json!({ "ok": true }))
-        }
-        "desktop_hold_key" => {
-            let args: HoldKeyArgs = from_value(req.args)?;
-            handle
-                .hold_key(args.chord, args.duration_ms)
-                .await
-                .map_err(stringify_err)?;
-            Ok(serde_json::json!({ "ok": true }))
-        }
-        "desktop_mouse_button" => {
-            let args: MouseButtonArgs = from_value(req.args)?;
-            handle
-                .mouse_button(args.button, args.transition)
-                .await
-                .map_err(stringify_err)?;
-            Ok(serde_json::json!({ "ok": true }))
-        }
-        "desktop_window_op" => {
-            let args: WindowOpArgs = from_value(req.args)?;
-            handle
-                .window_op(args.target, args.op)
-                .await
-                .map_err(stringify_err)?;
-            Ok(serde_json::json!({ "ok": true }))
-        }
-        "desktop_cursor_position" => {
-            let point = handle.cursor_position().await.map_err(stringify_err)?;
-            Ok(serde_json::to_value(point).map_err(|e| e.to_string())?)
-        }
-        "desktop_pick_at_point" => {
-            let args: PickAtPointArgs = from_value(req.args)?;
-            let info = handle
-                .pick_at_point(args.point)
-                .await
-                .map_err(stringify_err)?;
-            Ok(serde_json::to_value(info).map_err(|e| e.to_string())?)
+            Ok(serde_json::to_value(result).map_err(|e| e.to_string())?)
         }
         other => Err(format!("unknown automation command '{other}'")),
     }
-}
-
-#[derive(Deserialize)]
-struct PickAtPointArgs {
-    point: Point,
 }
 
 fn from_value<T: for<'de> Deserialize<'de>>(value: serde_json::Value) -> Result<T, String> {
@@ -492,86 +426,54 @@ fn stringify_err(err: AutomationError) -> String {
 }
 
 // ---------------------------------------------------------------------------
-// Per-command arg shapes — camelCase to match the renderer-side
-// `desktop.*` client and the existing `automation/commands.rs` arg structs.
+// Canonical app-session wire shapes.
 // ---------------------------------------------------------------------------
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct ReadTreeArgs {
+struct GetAppStateArgs {
+    session_id: String,
+    turn_key: String,
+    locator: AppLocator,
     #[serde(default)]
-    root: Option<cognia_automation::automation::types::ElementRef>,
-    #[serde(default)]
-    opts: Option<TreeOpts>,
-}
-
-#[derive(Deserialize)]
-struct FindArgs {
-    locator: Locator,
-}
-
-#[derive(Deserialize)]
-struct ScreenshotArgs {
-    #[serde(default)]
-    opts: Option<ScreenshotOpts>,
-}
-
-#[derive(Deserialize)]
-struct ClickArgs {
-    target: ClickTarget,
-    #[serde(default)]
-    opts: Option<ClickOpts>,
-}
-
-#[derive(Deserialize)]
-struct TypeArgs {
-    text: String,
-    #[serde(default)]
-    opts: Option<TypeOpts>,
-}
-
-#[derive(Deserialize)]
-struct KeysArgs {
-    chord: KeyChord,
-}
-
-#[derive(Deserialize)]
-struct MouseMoveArgs {
-    point: Point,
-}
-
-#[derive(Deserialize)]
-struct DragArgs {
-    from: Point,
-    to: Point,
-    #[serde(default)]
-    opts: Option<DragOpts>,
-}
-
-#[derive(Deserialize)]
-struct ScrollArgs {
-    target: ScrollTarget,
-    #[serde(default)]
-    opts: Option<ScrollOpts>,
+    options: GetAppStateOptions,
 }
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct HoldKeyArgs {
-    chord: KeyChord,
-    duration_ms: u32,
+struct QueryElementsArgs {
+    session_id: String,
+    lineage_id: String,
+    revision: u64,
+    #[serde(default)]
+    locator: Locator,
+    #[serde(default = "default_query_limit")]
+    limit: usize,
+}
+
+fn default_query_limit() -> usize {
+    100
 }
 
 #[derive(Deserialize)]
-struct MouseButtonArgs {
-    button: MouseButton,
-    transition: ButtonTransition,
+#[serde(rename_all = "camelCase")]
+struct ExpandElementArgs {
+    handle: ElementHandle,
+    #[serde(default)]
+    continuation_token: Option<String>,
+    #[serde(default = "default_expand_limit")]
+    limit: usize,
+}
+
+fn default_expand_limit() -> usize {
+    250
 }
 
 #[derive(Deserialize)]
-struct WindowOpArgs {
-    target: cognia_automation::automation::types::ElementRef,
-    op: WindowOp,
+#[serde(rename_all = "camelCase")]
+struct PerformActionArgs {
+    turn_key: String,
+    request: ActionRequest,
 }
 
 // ---------------------------------------------------------------------------
@@ -695,6 +597,27 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn legacy_pixel_commands_are_not_accepted() {
+        let proxy = AutomationProxy::spawn(stub_handle(), stub_enf())
+            .await
+            .unwrap();
+        let mut stream = TcpStream::connect(proxy.addr).await.unwrap();
+        let req = format!(
+            r#"{{"id":"legacy","token":"{}","command":"desktop_click","args":{{}}}}"#,
+            proxy.token
+        );
+        write_line(&mut stream, &req).await;
+        let mut reader = BufReader::new(&mut stream);
+        let response: serde_json::Value =
+            serde_json::from_str(&read_line(&mut reader).await).unwrap();
+        assert_eq!(response["ok"], false);
+        assert!(response["error"]
+            .as_str()
+            .unwrap()
+            .contains("unknown automation command"));
+    }
+
+    #[tokio::test]
     async fn malformed_json_is_reported_per_line() {
         let proxy = AutomationProxy::spawn(stub_handle(), stub_enf())
             .await
@@ -726,7 +649,7 @@ mod tests {
         let proxy = AutomationProxy::spawn(stub_handle(), enf).await.unwrap();
         let mut stream = TcpStream::connect(proxy.addr).await.unwrap();
         let req = format!(
-            r#"{{"id":"req-deny","token":"{}","command":"desktop_click","args":{{"target":{{"kind":"point","x":1,"y":2}}}}}}"#,
+            r#"{{"id":"req-deny","token":"{}","command":"desktop_perform_action","args":{{}}}}"#,
             proxy.token
         );
         write_line(&mut stream, &req).await;
@@ -734,13 +657,13 @@ mod tests {
         let resp_text = read_line(&mut reader).await;
         let resp: serde_json::Value = serde_json::from_str(&resp_text).unwrap();
         assert_eq!(resp["id"], "req-deny");
-        assert_eq!(resp["ok"], false, "tier Off must deny the click");
+        assert_eq!(resp["ok"], false, "tier Off must deny the action");
         // The denial was recorded in the shared audit ring under the
         // un-prefixed command name.
         let entries = audit.snapshot();
         assert!(
-            entries.iter().any(|e| e.command == "click"),
-            "expected an audited 'click' deny row"
+            entries.iter().any(|e| e.command == "perform_action"),
+            "expected an audited 'perform_action' deny row"
         );
     }
 
