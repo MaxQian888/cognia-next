@@ -22,7 +22,10 @@ default-run = "cognia-next"
 
 [lib]
 name = "app_lib"
-crate-type = ["staticlib", "cdylib", "rlib"]
+# Desktop binaries consume the Rust library directly. Mobile ships through the
+# Capacitor workspace (`mobile/`), so producing Tauri's mobile `staticlib` and
+# `cdylib` artifacts here only added a multi-gigabyte archive to every rebuild.
+crate-type = ["rlib"]
 
 # Headless cognia-server binary (Phase D / ADR-0014).
 [[bin]]

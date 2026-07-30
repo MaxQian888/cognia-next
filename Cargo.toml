@@ -75,11 +75,24 @@ exclude = [
 # requires opt-level = 3 even in dev profile — without it, smoke tests crawl.
 # Profile overrides live at the workspace root per Cargo's rules; package-
 # level `[profile.*]` blocks in workspace members are ignored.
+[profile.dev]
+# Keep filename/line information for panic backtraces and breakpoints without
+# making every Tauri edit relink the full type/variable-level DWARF graph.
+debug = "line-tables-only"
+split-debuginfo = "unpacked"
+
 [profile.dev.package.rten]
 opt-level = 3
 
 [profile.dev.package.rten-imageproc]
 opt-level = 3
+
+# Opt-in profile for the rare LLDB session that needs locals and full Rust type
+# information. Normal `cargo build` / `tauri dev` stays on the fast dev profile.
+[profile.dev-full]
+inherits = "dev"
+debug = "full"
+split-debuginfo = "unpacked"
 
 # Keep line-table debug info in release so the crash-report subsystem's
 # minidumps (`crash::monitor`) are symbolicable offline via `minidump-stackwalk`
@@ -104,7 +117,7 @@ strip = true
 # Windows (`rustc-LLVM ERROR: out of memory` → STATUS_STACK_BUFFER_OVERRUN).
 # The test profile keeps line tables only — panic backtraces still carry
 # file:line, but the heavy type debuginfo that blows the memory budget is
-# dropped. This is scoped to the `test` profile, so `pnpm tauri dev`
-# (the `dev` profile) keeps full debuginfo and is unaffected.
+# dropped. Keep this explicit even though the fast `dev` profile now makes the
+# same tradeoff; `dev-full` remains available for full LLDB sessions.
 [profile.test]
 debug = "line-tables-only"

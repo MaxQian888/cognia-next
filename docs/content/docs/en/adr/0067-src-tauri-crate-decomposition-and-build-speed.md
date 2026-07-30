@@ -5,7 +5,7 @@ description: "The Tauri backend is 170k LOC of Rust in a single crate (`app_lib`
 
 # ADR-0067 — src-tauri crate decomposition & build-speed program
 
-**Status**: Accepted (2026-07-13) — **Tier A landed** (7 crates); **Tier B + follow-up landed** (13 more crates, 2026-07-13); app shell (Tier C) remains
+**Status**: Accepted (2026-07-13) — **W1 landed** (2026-07-30); **Tier A landed** (7 crates); **Tier B + follow-up landed** (13 more crates, 2026-07-13); app shell (Tier C) remains
 **Authors**: Max Qian + Claude Opus 4.8
 **Builds on**: the existing workspace split pattern (`crates/cognia-cli`, `crates/cognia-sandbox-runner` — the latter explicitly extracted "so `cargo check -p cognia-sandbox-runner` compiles only a few crates instead of the whole Tauri tree"), the release/test profile overrides in the root `Cargo.toml`, and the per-module `commands.rs` "thin Tauri adapter" convention already present across the backend.
 
@@ -111,6 +111,29 @@ Each step is an independent commit, gated by `cargo test --manifest-path src-tau
 4. **Extract `cognia-vector`** (Tier A, 7k, isolates qdrant) — the **template PR**: proves "library crate defines `#[tauri::command]`, app references it in `generate_handler!`" end-to-end.
 5. Clone the template for `cognia-git` → `cognia-ocr` → the `automation` cluster → the `scheduling` cluster.
 6. Do the **Tier-B** dependency inversions, then extract `connectors`, `terminal`, `subscription`, `plugin_api`.
+
+## Implementation status (W1 — landed 2026-07-30)
+
+The zero-refactor inner-loop batch landed after measuring the Apple Silicon macOS development path.
+A representative app-shell edit took **44.83s** with a warm dependency cache: **36.5s** in `app_lib`
+and **3.97s** in the final `cognia-next` binary. The earlier 143s sample also contained a one-off
+31.6s `tauri-build` rerun caused by configuration changes, so it is not the hot-edit baseline.
+
+- `[profile.dev]` now uses `debug = "line-tables-only"` with unpacked debug info. The opt-in
+  `dev-full` profile restores full LLDB locals/type information, exposed as `pnpm tauri:dev:full`.
+- `app_lib` now emits only an `rlib`. The previous Tauri-mobile template list also produced a
+  **2.7GB static library** on every desktop rebuild. Cognia's iOS and Android shells are Capacitor 8
+  projects under `mobile/`, so no Tauri mobile build consumes that `staticlib` or `cdylib`.
+- Apple Silicon macOS selects the Mach-O LLD bundled with the pinned Rust 1.93 toolchain through a
+  stable, config-relative clang driver; other host targets retain their existing linker.
+- `sccache` remains deferred: it does not cache the final link, overlaps Cargo incremental for this
+  hot-edit goal, and the existing `target/debug` cache had already grown beyond 80GB.
+
+Acceptance is a median of **≤15s** across three representative warm app-shell rebuilds with a
+successful Tauri launch. Tier-C extraction remains the next step only if this batch misses that bar.
+The Tauri-equivalent `--no-default-features` runs completed in **11.61s / 9.40s / 9.43s** (median
+**9.43s**, 79.0% faster than the 44.83s baseline), and `pnpm tauri dev` launched the signed app
+successfully. The one clean compatibility build took 3m48.77s and is not part of the hot-edit result.
 
 ## Implementation status (Tier A — landed 2026-07-13)
 

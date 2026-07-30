@@ -80,6 +80,7 @@ next-env.d.ts
 .claude/settings.local.json
 .claude/scheduled_tasks.lock
 .claude/worktrees/
+/.codex-tmp/
 
 # coverage / build artifact dumps
 coverage_output.txt

@@ -187,6 +187,7 @@
     "plugin:eval": "tsx scripts/plugin-eval/run-eval.ts",
     "plugin:scaffold:test": "node --test scripts/scaffold/*.test.mjs",
     "tauri:dev": "tauri dev",
+    "tauri:dev:full": "tauri dev -- --profile dev-full",
     "tauri:build": "tauri build",
     "tauri:info": "tauri info",
     "dev:sign:setup": "bash src-tauri/scripts/dev-codesign-setup.sh",
