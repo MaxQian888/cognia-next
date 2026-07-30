@@ -6,6 +6,7 @@
 //! Ed25519-signed lease plus the authenticated tool-turn facts checked here.
 
 use std::collections::HashSet;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -14,7 +15,7 @@ use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
-use tokio::sync::mpsc::{self, UnboundedSender};
+use tokio::sync::watch;
 
 use super::input_monitor::{InputMonitor, SafetyInputSubscription};
 
@@ -121,6 +122,7 @@ pub enum LockedUseSafetyError {
 #[derive(Debug, Clone)]
 struct ActiveLease {
     claims: UnlockLeaseClaims,
+    cancellation: watch::Sender<bool>,
 }
 
 pub struct LockedUseController {
@@ -130,24 +132,52 @@ pub struct LockedUseController {
     approved_bundle_ids: HashSet<String>,
     used_nonces: HashSet<String>,
     active: Option<ActiveLease>,
+    safety_wakeup: Option<watch::Sender<u64>>,
 }
 
 pub struct LockedUseSafetyMonitor {
     input_monitor: InputMonitor,
     subscription: Option<SafetyInputSubscription>,
     task: tokio::task::JoinHandle<()>,
+    controller: Arc<Mutex<LockedUseController>>,
+    on_relock: Arc<dyn Fn(RelockCause) + Send + Sync>,
+    alive: Arc<AtomicBool>,
+    stop: watch::Sender<bool>,
 }
 
 #[derive(Clone)]
 pub struct LockedUseSafetyHandle {
-    relock_sender: UnboundedSender<RelockCause>,
+    controller: Arc<Mutex<LockedUseController>>,
+    on_relock: Arc<dyn Fn(RelockCause) + Send + Sync>,
+    alive: Arc<AtomicBool>,
+    stop: watch::Sender<bool>,
 }
 
 impl LockedUseSafetyHandle {
     pub fn relock_now(&self, cause: RelockCause) -> Result<(), LockedUseSafetyError> {
-        self.relock_sender
-            .send(cause)
-            .map_err(|_| LockedUseSafetyError::MonitorStopped)
+        if !claim_and_relock(&self.alive, &self.controller, &self.on_relock, cause) {
+            return Err(LockedUseSafetyError::MonitorStopped);
+        }
+        let _ = self.stop.send(true);
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct LockedUseActionPermit {
+    cancellation: watch::Receiver<bool>,
+}
+
+impl LockedUseActionPermit {
+    pub fn is_cancelled(&self) -> bool {
+        *self.cancellation.borrow()
+    }
+
+    pub async fn cancelled(&mut self) {
+        if self.is_cancelled() {
+            return;
+        }
+        let _ = self.cancellation.changed().await;
     }
 }
 
@@ -173,11 +203,17 @@ impl LockedUseSafetyMonitor {
         on_relock: Arc<dyn Fn(RelockCause) + Send + Sync>,
     ) -> (Self, LockedUseSafetyHandle) {
         let mut receiver = subscription.take_receiver();
-        let (relock_sender, mut relock_receiver) = mpsc::unbounded_channel();
+        let (wakeup_sender, mut wakeup_receiver) = watch::channel(0u64);
+        controller.lock().safety_wakeup = Some(wakeup_sender);
+        let (stop, mut stop_receiver) = watch::channel(false);
+        let alive = Arc::new(AtomicBool::new(true));
+        let task_controller = controller.clone();
+        let task_on_relock = on_relock.clone();
+        let task_alive = alive.clone();
         let task = tokio::spawn(async move {
             loop {
                 let wait = {
-                    let controller = controller.lock();
+                    let controller = task_controller.lock();
                     controller
                         .active
                         .as_ref()
@@ -200,11 +236,21 @@ impl LockedUseSafetyMonitor {
                             RelockCause::DisplayProtectionFailure
                         })
                     }
-                    requested = relock_receiver.recv() => {
-                        Some(requested.unwrap_or(RelockCause::ServiceCrash))
+                    changed = wakeup_receiver.changed() => {
+                        if changed.is_err() {
+                            Some(RelockCause::ServiceCrash)
+                        } else {
+                            None
+                        }
+                    }
+                    changed = stop_receiver.changed() => {
+                        if changed.is_err() || *stop_receiver.borrow() {
+                            break;
+                        }
+                        None
                     }
                     _ = tokio::time::sleep(wait) => {
-                        let expired = controller
+                        let expired = task_controller
                             .lock()
                             .active
                             .as_ref()
@@ -215,19 +261,8 @@ impl LockedUseSafetyMonitor {
                 let Some(cause) = cause else {
                     continue;
                 };
-                let should_relock = {
-                    let mut controller = controller.lock();
-                    if controller.state() != LockedUseState::Active {
-                        false
-                    } else {
-                        controller.relock_and_latch(cause);
-                        true
-                    }
-                };
-                if should_relock {
-                    on_relock(cause);
-                    break;
-                }
+                claim_and_relock(&task_alive, &task_controller, &task_on_relock, cause);
+                break;
             }
         });
         (
@@ -235,14 +270,57 @@ impl LockedUseSafetyMonitor {
                 input_monitor,
                 subscription: Some(subscription),
                 task,
+                controller: controller.clone(),
+                on_relock: on_relock.clone(),
+                alive: alive.clone(),
+                stop: stop.clone(),
             },
-            LockedUseSafetyHandle { relock_sender },
+            LockedUseSafetyHandle {
+                controller,
+                on_relock,
+                alive,
+                stop,
+            },
         )
     }
 }
 
+fn claim_and_relock(
+    alive: &AtomicBool,
+    controller: &Mutex<LockedUseController>,
+    on_relock: &Arc<dyn Fn(RelockCause) + Send + Sync>,
+    cause: RelockCause,
+) -> bool {
+    if alive
+        .compare_exchange(true, false, Ordering::AcqRel, Ordering::Acquire)
+        .is_err()
+    {
+        return false;
+    }
+    let should_relock = {
+        let mut controller = controller.lock();
+        if controller.state() != LockedUseState::Active {
+            false
+        } else {
+            controller.relock_and_latch(cause);
+            true
+        }
+    };
+    if should_relock {
+        on_relock(cause);
+    }
+    true
+}
+
 impl Drop for LockedUseSafetyMonitor {
     fn drop(&mut self) {
+        claim_and_relock(
+            &self.alive,
+            &self.controller,
+            &self.on_relock,
+            RelockCause::ServiceCrash,
+        );
+        let _ = self.stop.send(true);
         self.task.abort();
         self.subscription.take();
         self.input_monitor.stop_if_idle();
@@ -258,6 +336,7 @@ impl LockedUseController {
             approved_bundle_ids: HashSet::new(),
             used_nonces: HashSet::new(),
             active: None,
+            safety_wakeup: None,
         }
     }
 
@@ -268,17 +347,19 @@ impl LockedUseController {
     /// Called only after the privileged installer returns a verified,
     /// administrator-authorized installation receipt.
     pub fn enable_from_verified_install(&mut self, receipt_verified: bool) {
+        self.cancel_active_lease();
         self.state = if receipt_verified {
             LockedUseState::Ready
         } else {
             LockedUseState::Disabled
         };
-        self.active = None;
+        self.notify_safety_monitor();
     }
 
     pub fn disable(&mut self) {
         self.state = LockedUseState::Disabled;
-        self.active = None;
+        self.cancel_active_lease();
+        self.notify_safety_monitor();
     }
 
     /// Persistent approvals may only be edited while macOS is already
@@ -310,10 +391,13 @@ impl LockedUseController {
         self.validate_sender(sender)?;
         self.validate_lease(&lease, turn, now_ms)?;
         self.used_nonces.insert(lease.claims.nonce.clone());
+        let (cancellation, _) = watch::channel(false);
         self.active = Some(ActiveLease {
             claims: lease.claims,
+            cancellation,
         });
         self.state = LockedUseState::Active;
+        self.notify_safety_monitor();
         Ok(())
     }
 
@@ -323,7 +407,7 @@ impl LockedUseController {
         action_digest: &str,
         approved_action_digest: Option<&str>,
         now_ms: i64,
-    ) -> Result<(), LockedUseError> {
+    ) -> Result<LockedUseActionPermit, LockedUseError> {
         let Some(active) = self.active.as_ref() else {
             return Err(LockedUseError::NotReady);
         };
@@ -344,19 +428,35 @@ impl LockedUseController {
                 return Err(LockedUseError::ConfirmationMismatch);
             }
         }
-        Ok(())
+        Ok(LockedUseActionPermit {
+            cancellation: active.cancellation.subscribe(),
+        })
     }
 
     pub fn relock_and_latch(&mut self, _cause: RelockCause) {
-        self.active = None;
+        self.cancel_active_lease();
         self.state = LockedUseState::LatchedUntilManualUnlock;
+        self.notify_safety_monitor();
     }
 
     pub fn manual_unlock_observed(&mut self) {
         if self.state == LockedUseState::LatchedUntilManualUnlock {
             self.state = LockedUseState::Ready;
         }
-        self.active = None;
+        self.cancel_active_lease();
+        self.notify_safety_monitor();
+    }
+
+    fn cancel_active_lease(&mut self) {
+        if let Some(active) = self.active.take() {
+            let _ = active.cancellation.send(true);
+        }
+    }
+
+    fn notify_safety_monitor(&self) {
+        if let Some(wakeup) = &self.safety_wakeup {
+            wakeup.send_modify(|revision| *revision = revision.wrapping_add(1));
+        }
     }
 
     fn validate_sender(&self, sender: &NativeSenderIdentity) -> Result<(), LockedUseError> {
@@ -501,10 +601,10 @@ mod tests {
         controller
             .authorize_action("com.apple.Notes", "digest", Some("digest"), 101)
             .unwrap();
-        assert_eq!(
+        assert!(matches!(
             controller.authorize_action("com.apple.Terminal", "digest", None, 101),
             Err(LockedUseError::TargetOutsideLease)
-        );
+        ));
     }
 
     #[test]
@@ -588,10 +688,10 @@ mod tests {
         controller
             .begin_unlock(&sender, signed_lease(&signing, 200), &turn, 200)
             .unwrap();
-        assert_eq!(
+        assert!(matches!(
             controller.authorize_action("com.apple.Notes", "actual", Some("other"), 201),
             Err(LockedUseError::ConfirmationMismatch)
-        );
+        ));
     }
 
     #[tokio::test]
@@ -668,7 +768,83 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn native_safety_failures_relock_immediately_and_stop_pending_actions() {
+    async fn monitor_started_before_unlock_wakes_for_the_new_lease_deadline() {
+        let (controller, signing, sender, turn) = fixture();
+        let controller = Arc::new(Mutex::new(controller));
+        let input_monitor = InputMonitor::default();
+        let subscription = input_monitor.subscribe_safety_for_test();
+        let callback_fired = Arc::new(tokio::sync::Notify::new());
+        let callback_signal = callback_fired.clone();
+        let (_guard, _safety) = LockedUseSafetyMonitor::from_subscription(
+            input_monitor,
+            subscription,
+            controller.clone(),
+            Arc::new(move |cause| {
+                assert_eq!(cause, RelockCause::LeaseExpired);
+                callback_signal.notify_one();
+            }),
+        );
+
+        let now = unix_time_ms();
+        let mut lease = signed_lease(&signing, now);
+        lease.claims.expires_at_ms = now + 20;
+        let message = serde_json::to_vec(&lease.claims).unwrap();
+        lease.signature = STANDARD_NO_PAD.encode(signing.sign(&message).to_bytes());
+        controller
+            .lock()
+            .begin_unlock(&sender, lease, &turn, now)
+            .unwrap();
+
+        tokio::time::timeout(Duration::from_secs(1), callback_fired.notified())
+            .await
+            .expect("new lease did not reset the safety deadline");
+        assert_eq!(
+            controller.lock().state(),
+            LockedUseState::LatchedUntilManualUnlock
+        );
+    }
+
+    #[tokio::test]
+    async fn dropping_an_active_monitor_relocks_and_cancels_authorized_work() {
+        let (mut unlocked, signing, sender, turn) = fixture();
+        let now = unix_time_ms();
+        unlocked
+            .begin_unlock(&sender, signed_lease(&signing, now), &turn, now)
+            .unwrap();
+        let mut permit = unlocked
+            .authorize_action("com.apple.Notes", "digest", Some("digest"), now)
+            .unwrap();
+        let controller = Arc::new(Mutex::new(unlocked));
+        let input_monitor = InputMonitor::default();
+        let subscription = input_monitor.subscribe_safety_for_test();
+        let (cause_sender, cause_receiver) = tokio::sync::oneshot::channel();
+        let cause_sender = Arc::new(Mutex::new(Some(cause_sender)));
+        let callback_sender = cause_sender.clone();
+        let (guard, _safety) = LockedUseSafetyMonitor::from_subscription(
+            input_monitor,
+            subscription,
+            controller.clone(),
+            Arc::new(move |cause| {
+                if let Some(sender) = callback_sender.lock().take() {
+                    let _ = sender.send(cause);
+                }
+            }),
+        );
+
+        drop(guard);
+        assert_eq!(
+            controller.lock().state(),
+            LockedUseState::LatchedUntilManualUnlock
+        );
+        assert!(permit.is_cancelled());
+        tokio::time::timeout(Duration::from_millis(50), permit.cancelled())
+            .await
+            .expect("cancelled permit did not resolve immediately");
+        assert_eq!(cause_receiver.await.unwrap(), RelockCause::ServiceCrash);
+    }
+
+    #[tokio::test]
+    async fn native_safety_failures_latch_and_cancel_before_returning() {
         for expected in [
             RelockCause::RemoteDisconnect,
             RelockCause::GuardianCrash,
@@ -699,17 +875,25 @@ mod tests {
                 }),
             );
 
+            let mut permit = controller
+                .lock()
+                .authorize_action("com.apple.Notes", "digest", Some("digest"), now)
+                .unwrap();
             safety.relock_now(expected).unwrap();
+            assert_eq!(
+                controller.lock().state(),
+                LockedUseState::LatchedUntilManualUnlock
+            );
+            assert!(permit.is_cancelled());
+            tokio::time::timeout(Duration::from_millis(50), permit.cancelled())
+                .await
+                .expect("cancelled permit did not resolve immediately");
             let actual = tokio::time::timeout(Duration::from_secs(1), cause_receiver)
                 .await
                 .expect("native safety relock callback timed out")
                 .expect("native safety relock callback was dropped");
             assert_eq!(actual, expected);
-            assert_eq!(
-                controller.lock().state(),
-                LockedUseState::LatchedUntilManualUnlock
-            );
-            assert_eq!(
+            assert!(matches!(
                 controller.lock().authorize_action(
                     "com.apple.Notes",
                     "digest",
@@ -717,7 +901,7 @@ mod tests {
                     now
                 ),
                 Err(LockedUseError::NotReady)
-            );
+            ));
         }
     }
 }
