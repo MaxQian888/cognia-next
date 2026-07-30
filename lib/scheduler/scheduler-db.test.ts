@@ -5,7 +5,7 @@
 
 // Mock IndexedDB for tests
 import "fake-indexeddb/auto"
-import { schedulerDb } from "./scheduler-db"
+import { schedulerDb, SCHEDULER_DB_NAME, SCHEDULER_SNAPSHOT_EXCLUDED_TABLES } from "./scheduler-db"
 import type { ScheduledTask, TaskExecution } from "@/types/scheduler"
 
 describe("SchedulerDatabase", () => {
@@ -616,6 +616,29 @@ describe("SchedulerDatabase", () => {
       await schedulerDb.updateTask(retrieved!)
       const again = await schedulerDb.getTask("explicit-policy")
       expect(again?.config.overlapPolicy).toBe("cancel-previous")
+    })
+  })
+
+  // Third axis of the intentional-dormancy label (Working Rule 7): the type
+  // documents the exemption, the headless snapshot source consumes it, and this
+  // pins it. `tasks` MUST stay persistable — dropping it is what made a
+  // restarted `cognia serve` brain reboot with an empty schedule.
+  describe("headless snapshot exclusions", () => {
+    it("excludes only executions, never tasks", () => {
+      expect(SCHEDULER_SNAPSHOT_EXCLUDED_TABLES).toEqual(["executions"])
+      expect(SCHEDULER_SNAPSHOT_EXCLUDED_TABLES).not.toContain("tasks")
+    })
+
+    it("names every excluded table as a real table on this database", () => {
+      const declared = schedulerDb.tables.map((table) => table.name)
+      for (const excluded of SCHEDULER_SNAPSHOT_EXCLUDED_TABLES) {
+        expect(declared).toContain(excluded)
+      }
+    })
+
+    it("pins the database name the snapshot files it under", () => {
+      expect(SCHEDULER_DB_NAME).toBe("CogniaSchedulerDB")
+      expect(schedulerDb.name).toBe(SCHEDULER_DB_NAME)
     })
   })
 })

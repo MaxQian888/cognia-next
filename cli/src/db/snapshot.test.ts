@@ -2,10 +2,13 @@
  * @jest-environment node
  */
 import {
+  parseMultiSnapshot,
   parseSnapshot,
+  restoreMultiSnapshot,
   restoreSnapshot,
   serializeDb,
   serializeSnapshot,
+  serializeSources,
   type DbLike,
 } from "./snapshot"
 
@@ -99,5 +102,141 @@ describe("serializeSnapshot", () => {
   it("round-trips through parseSnapshot", () => {
     const snap = { version: 82, tables: { goals: [{ id: "g" }] } }
     expect(parseSnapshot(serializeSnapshot(snap))).toEqual({ kind: "valid", snapshot: snap })
+  })
+})
+
+describe("serializeDb — excludeTables", () => {
+  it("omits excluded tables entirely rather than writing them empty", async () => {
+    const db = fakeDb([new FakeTable("tasks", [{ id: "t" }]), new FakeTable("executions", [{}])])
+    const snap = await serializeDb(db, { excludeTables: ["executions"] })
+    expect(snap.tables.tasks).toEqual([{ id: "t" }])
+    expect(snap.tables).not.toHaveProperty("executions")
+  })
+})
+
+describe("serializeSources", () => {
+  it("keys each database by name and honours its own exclusions", async () => {
+    const goals = new FakeTable("goals", [{ id: "g" }])
+    const tasks = new FakeTable("tasks", [{ id: "t" }])
+    const executions = new FakeTable("executions", [{ id: "run" }])
+    const snap = await serializeSources([
+      { name: "CogniaDB", db: fakeDb([goals]) },
+      {
+        name: "CogniaSchedulerDB",
+        db: fakeDb([tasks, executions], 2),
+        excludeTables: ["executions"],
+      },
+    ])
+    expect(snap.snapshotFormat).toBe(2)
+    expect(snap.dbs.CogniaDB).toEqual({ version: 82, tables: { goals: [{ id: "g" }] } })
+    expect(snap.dbs.CogniaSchedulerDB).toEqual({ version: 2, tables: { tasks: [{ id: "t" }] } })
+  })
+})
+
+describe("restoreMultiSnapshot", () => {
+  it("restores each source from its own key", async () => {
+    const goals = new FakeTable("goals", [{ id: "seed" }])
+    const tasks = new FakeTable("tasks", [])
+    await restoreMultiSnapshot(
+      [
+        { name: "CogniaDB", db: fakeDb([goals]) },
+        { name: "CogniaSchedulerDB", db: fakeDb([tasks], 2) },
+      ],
+      {
+        snapshotFormat: 2,
+        dbs: {
+          CogniaDB: { version: 82, tables: { goals: [{ id: "g" }] } },
+          CogniaSchedulerDB: { version: 2, tables: { tasks: [{ id: "t" }] } },
+        },
+      }
+    )
+    expect(goals.rows).toEqual([{ id: "g" }])
+    expect(tasks.rows).toEqual([{ id: "t" }])
+  })
+
+  it("skips a database the envelope omits, leaving its rows untouched", async () => {
+    const tasks = new FakeTable("tasks", [{ id: "kept" }])
+    await restoreMultiSnapshot([{ name: "CogniaSchedulerDB", db: fakeDb([tasks], 2) }], {
+      snapshotFormat: 2,
+      dbs: { CogniaDB: { version: 82, tables: {} } },
+    })
+    expect(tasks.rows).toEqual([{ id: "kept" }])
+  })
+
+  it("names the database in a per-db version mismatch", async () => {
+    const tasks = new FakeTable("tasks", [])
+    await expect(
+      restoreMultiSnapshot([{ name: "CogniaSchedulerDB", db: fakeDb([tasks], 2) }], {
+        snapshotFormat: 2,
+        dbs: { CogniaSchedulerDB: { version: 1, tables: { tasks: [] } } },
+      })
+    ).rejects.toThrow("database CogniaSchedulerDB")
+  })
+})
+
+describe("parseMultiSnapshot", () => {
+  it("normalises a legacy single-database snapshot onto the primary name", () => {
+    expect(parseMultiSnapshot('{"version":82,"tables":{"goals":[]}}', "CogniaDB")).toEqual({
+      kind: "valid",
+      snapshot: { snapshotFormat: 2, dbs: { CogniaDB: { version: 82, tables: { goals: [] } } } },
+    })
+  })
+
+  it("parses a multi-database envelope", () => {
+    const text = JSON.stringify({
+      snapshotFormat: 2,
+      dbs: { CogniaSchedulerDB: { version: 2, tables: { tasks: [{ id: "t" }] } } },
+    })
+    expect(parseMultiSnapshot(text, "CogniaDB")).toEqual({
+      kind: "valid",
+      snapshot: {
+        snapshotFormat: 2,
+        dbs: { CogniaSchedulerDB: { version: 2, tables: { tasks: [{ id: "t" }] } } },
+      },
+    })
+  })
+
+  it("round-trips serializeSources output", async () => {
+    const snap = await serializeSources([
+      { name: "CogniaDB", db: fakeDb([new FakeTable("goals")]) },
+    ])
+    expect(parseMultiSnapshot(serializeSnapshot(snap), "CogniaDB")).toEqual({
+      kind: "valid",
+      snapshot: snap,
+    })
+  })
+
+  it("distinguishes absent from corrupt and rejects unknown formats", () => {
+    expect(parseMultiSnapshot(null, "CogniaDB")).toEqual({ kind: "absent" })
+    expect(parseMultiSnapshot(undefined, "CogniaDB")).toEqual({ kind: "absent" })
+    expect(parseMultiSnapshot("not json", "CogniaDB")).toMatchObject({ kind: "corrupt" })
+    expect(parseMultiSnapshot("[1,2]", "CogniaDB")).toMatchObject({ kind: "corrupt" })
+    // Legacy path still validated by parseSnapshot's rules.
+    expect(parseMultiSnapshot('{"version":1}', "CogniaDB")).toMatchObject({ kind: "corrupt" })
+    expect(parseMultiSnapshot('{"snapshotFormat":3,"dbs":{}}', "CogniaDB")).toMatchObject({
+      kind: "corrupt",
+      reason: "unsupported snapshot format 3",
+    })
+    expect(parseMultiSnapshot('{"snapshotFormat":2,"dbs":[]}', "CogniaDB")).toMatchObject({
+      kind: "corrupt",
+      reason: "snapshot dbs are not an object",
+    })
+  })
+
+  it("rejects a malformed per-database entry and says which one", () => {
+    const cases = [
+      '{"snapshotFormat":2,"dbs":{"X":null}}',
+      '{"snapshotFormat":2,"dbs":{"X":[]}}',
+      '{"snapshotFormat":2,"dbs":{"X":{"tables":{}}}}',
+      '{"snapshotFormat":2,"dbs":{"X":{"version":1}}}',
+      '{"snapshotFormat":2,"dbs":{"X":{"version":1,"tables":[]}}}',
+      '{"snapshotFormat":2,"dbs":{"X":{"version":1,"tables":{"t":"nope"}}}}',
+    ]
+    for (const text of cases) {
+      expect(parseMultiSnapshot(text, "CogniaDB")).toEqual({
+        kind: "corrupt",
+        reason: "snapshot for database X is malformed",
+      })
+    }
   })
 })

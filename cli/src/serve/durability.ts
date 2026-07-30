@@ -15,6 +15,7 @@
 import { getDb } from "@/lib/db/schema"
 
 import { ensureCliDb, type CliDbHandle } from "../db/bootstrap"
+import type { DbLike } from "../db/snapshot"
 
 /** The Dexie surface the middleware needs (kept loose for tests). */
 export interface DexieLike {
@@ -34,8 +35,17 @@ interface DbCoreTableLike {
 /**
  * Install the write-triggered flush middleware. Every table mutation
  * (add/put/delete/deleteRange) schedules `onWrite` after it settles.
+ *
+ * `ignoreTables` names tables whose mutations must NOT schedule a flush —
+ * pass the same set the snapshot excludes, or an append-heavy excluded table
+ * would drive full re-dumps that contain none of its rows.
  */
-export function installWriteFlush(db: DexieLike, onWrite: () => void): void {
+export function installWriteFlush(
+  db: DexieLike,
+  onWrite: () => void,
+  opts: { ignoreTables?: readonly string[] } = {}
+): void {
+  const ignored = new Set(opts.ignoreTables ?? [])
   db.use({
     stack: "dbcore",
     name: "headless-write-flush",
@@ -44,6 +54,7 @@ export function installWriteFlush(db: DexieLike, onWrite: () => void): void {
         ...down,
         table(name: string) {
           const table = down.table(name)
+          if (ignored.has(name)) return table
           return {
             ...table,
             mutate(req: unknown) {
@@ -107,10 +118,25 @@ export async function startDurability(opts: DurabilityOptions): Promise<Durabili
     home: opts.home,
     fileName: `db-${opts.accountId}.json`,
     debounceMs: opts.debounceMs,
-    getDatabase: () => {
-      const dexie = getDb()
-      installWriteFlush(dexie as unknown as DexieLike, notifyDbWrite)
-      return dexie as unknown as ReturnType<typeof getDb>
+    // BOTH databases: `CogniaDB` and the scheduler's separate
+    // `CogniaSchedulerDB`. Without the second one a restarted brain reboots with
+    // an empty schedule while still reporting the scheduler runtime as running.
+    getDatabases: async () => {
+      const { schedulerDb, SCHEDULER_DB_NAME, SCHEDULER_SNAPSHOT_EXCLUDED_TABLES } =
+        await import("@/lib/scheduler/scheduler-db")
+      const primary = getDb()
+      installWriteFlush(primary as unknown as DexieLike, notifyDbWrite)
+      installWriteFlush(schedulerDb as unknown as DexieLike, notifyDbWrite, {
+        ignoreTables: SCHEDULER_SNAPSHOT_EXCLUDED_TABLES,
+      })
+      return [
+        { name: primary.name, db: primary as unknown as DbLike },
+        {
+          name: SCHEDULER_DB_NAME,
+          db: schedulerDb as unknown as DbLike,
+          excludeTables: SCHEDULER_SNAPSHOT_EXCLUDED_TABLES,
+        },
+      ]
     },
   })
   handleRef.current = db

@@ -21,12 +21,13 @@ import { installFakeIndexedDb } from "@/lib/headless/node-indexeddb"
 
 import { resolveHome } from "../config/load"
 import {
-  parseSnapshot,
-  restoreSnapshot,
-  serializeDb,
+  parseMultiSnapshot,
+  restoreMultiSnapshot,
   serializeSnapshot,
+  serializeSources,
   SnapshotVersionMismatchError,
   type DbLike,
+  type SnapshotSource,
 } from "./snapshot"
 
 export { installFakeIndexedDb }
@@ -40,7 +41,18 @@ export interface EnsureCliDbOptions {
   debounceMs?: number
   // ── Injected seams (tests) ──────────────────────────────────────────────────
   installGlobals?: () => void | Promise<void>
+  /**
+   * Single-database seam. Kept for callers that only care about `CogniaDB`;
+   * `getDatabases` wins when both are supplied.
+   */
   getDatabase?: () => DbLike
+  /**
+   * Every database this host persists, in order — the FIRST entry is the
+   * primary, i.e. the database a legacy single-database snapshot is restored
+   * into. Middleware that must attach before Dexie opens (see
+   * `cli/src/serve/durability.ts`) belongs inside this callback.
+   */
+  getDatabases?: () => readonly SnapshotSource[] | Promise<readonly SnapshotSource[]>
   whenReady?: () => Promise<void>
   readSnapshot?: (path: string) => string | null
   writeSnapshot?: (path: string, data: string) => void
@@ -170,38 +182,75 @@ function preserveUnsafeSnapshot(
   }
 }
 
+/**
+ * Normalise the two database seams into one source factory.
+ *
+ * Default: `CogniaDB` (whose Dexie name is per-account, so it is read off the
+ * instance rather than hardcoded) plus the scheduler's separate
+ * `CogniaSchedulerDB`, minus the tables that database excludes on purpose.
+ * The scheduler module is imported lazily so `chat`/`run` — which never open a
+ * database — keep paying nothing for it.
+ */
+function resolveSourcesFactory(opts: EnsureCliDbOptions): () => Promise<readonly SnapshotSource[]> {
+  if (opts.getDatabases) return async () => opts.getDatabases!()
+  if (opts.getDatabase) {
+    return async () => {
+      const db = opts.getDatabase!()
+      return [{ name: db.name ?? "CogniaDB", db }]
+    }
+  }
+  return async () => {
+    const [{ schedulerDb, SCHEDULER_DB_NAME, SCHEDULER_SNAPSHOT_EXCLUDED_TABLES }] =
+      await Promise.all([import("@/lib/scheduler/scheduler-db")])
+    const primary = getDb() as unknown as DbLike
+    return [
+      { name: primary.name ?? "CogniaDB", db: primary },
+      {
+        name: SCHEDULER_DB_NAME,
+        db: schedulerDb as unknown as DbLike,
+        excludeTables: SCHEDULER_SNAPSHOT_EXCLUDED_TABLES,
+      },
+    ]
+  }
+}
+
 function create(opts: EnsureCliDbOptions): CliDbHandle {
   const home = opts.home ?? resolveHome(process.env, os.homedir())
   const file = path.join(home, opts.fileName ?? "db.json")
   const debounceMs = opts.debounceMs ?? 400
   const installGlobals = opts.installGlobals ?? (() => installFakeIndexedDb())
-  const getDatabase = opts.getDatabase ?? (() => getDb() as unknown as DbLike)
+  const getDatabases = resolveSourcesFactory(opts)
   const waitReady = opts.whenReady ?? whenSeeded
   const read = opts.readSnapshot ?? ((p) => (fs.existsSync(p) ? fs.readFileSync(p, "utf8") : null))
   const write = opts.writeSnapshot ?? writeSnapshotAtomically
   const schedule = opts.schedule ?? defaultSchedule
 
-  let db: DbLike
+  let sources: readonly SnapshotSource[] = []
   let cancelTimer: (() => void) | null = null
   let disposed = false
 
   const ready = (async () => {
     await installGlobals()
-    db = getDatabase()
+    sources = await getDatabases()
     await waitReady()
-    const parsed = parseSnapshot(read(file))
+    // `whenSeeded` only covers the primary database. Open the rest explicitly so
+    // their `tables` are live before restore/serialize touch them, and so an
+    // open failure surfaces here rather than inside the first debounced flush.
+    for (const source of sources) await source.db.open?.()
+    const parsed = parseMultiSnapshot(read(file), sources[0]?.name ?? "CogniaDB")
     if (parsed.kind === "corrupt") {
       throw preserveUnsafeSnapshot(file, "corrupt", `corrupt (${parsed.reason})`)
     }
     if (parsed.kind === "valid") {
       try {
-        await restoreSnapshot(db, parsed.snapshot)
+        await restoreMultiSnapshot(sources, parsed.snapshot)
       } catch (error) {
         if (error instanceof SnapshotVersionMismatchError) {
           throw preserveUnsafeSnapshot(
             file,
             "incompatible",
-            `incompatible: snapshot schema version ${error.snapshotVersion} does not match database schema version ${error.databaseVersion}`
+            `incompatible: snapshot schema version ${error.snapshotVersion} does not match database schema version ${error.databaseVersion}` +
+              (error.databaseName ? ` for database ${error.databaseName}` : "")
           )
         }
         throw error
@@ -215,7 +264,7 @@ function create(opts: EnsureCliDbOptions): CliDbHandle {
       cancelTimer = null
     }
     await ready
-    const snapshot = await serializeDb(db)
+    const snapshot = await serializeSources(sources)
     write(file, serializeSnapshot(snapshot))
   }
 

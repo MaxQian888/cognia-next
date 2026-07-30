@@ -63,13 +63,35 @@ interface DBTaskExecution {
   logs: string // JSON serialized TaskExecutionLog[]
 }
 
+/**
+ * Tables this database deliberately does NOT persist on a headless host.
+ *
+ * `cli/src/db/bootstrap.ts` snapshots Dexie to a JSON file; every mutation
+ * schedules a re-dump, so a high-churn table makes the snapshot cost grow with
+ * uptime. `tasks` is low-churn configuration and MUST survive a restart —
+ * without it a `cognia serve` brain reboots with an empty schedule and silently
+ * stops firing. `executions` is append-heavy history the brain does not need
+ * across restarts: failures are already durable in `connectorAudit` and the
+ * Notification Center, and `interruptStaleExecutions()` has nothing to reconcile
+ * when the table starts empty.
+ *
+ * This is intentional dormancy, so it is labelled on all three axes: here at
+ * the type, in the snapshot source that consumes it, and pinned by
+ * `scheduler-db.test.ts` / `bootstrap.test.ts`. Do not "fix" it by adding
+ * `executions` to the snapshot — measure the flush cost first (see W3.1).
+ */
+export const SCHEDULER_SNAPSHOT_EXCLUDED_TABLES: readonly string[] = ["executions"]
+
+/** Dexie database name — the key this database occupies in a host snapshot. */
+export const SCHEDULER_DB_NAME = "CogniaSchedulerDB"
+
 // Database class
 class SchedulerDatabase extends Dexie {
   tasks!: EntityTable<DBScheduledTask, "id">
   executions!: EntityTable<DBTaskExecution, "id">
 
   constructor() {
-    super("CogniaSchedulerDB")
+    super(SCHEDULER_DB_NAME)
 
     this.version(1).stores({
       tasks: "id, name, type, status, nextRunAt, createdAt, [status+nextRunAt]",
