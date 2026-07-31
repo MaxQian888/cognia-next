@@ -131,7 +131,7 @@ jobs:
       # falls back to a full check.
       - name: Cache TypeScript incremental state
         if: matrix.group == 'types'
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: |
             tsconfig.tsbuildinfo
