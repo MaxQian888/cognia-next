@@ -47,6 +47,16 @@ const SECTION_ICON: Record<string, IconName> = {
  * sits directly on top of a three-line subtitle inside `max-w-3xl` of a 1480px
  * shell — the same crowding as the old hero, repeated three or four times per
  * page.
+ *
+ * The vertical rhythm alternates as well, and that is the more important half.
+ * Tone alone gives a boundary between two blocks; it does not give the page a
+ * cadence, because both blocks are still the same size. Measured against four
+ * peer sites (`docs/research/cognia-official-website-motion-craft-2026-08-01.md`),
+ * the mechanism that reads as rhythm is alternation between a generous value
+ * and a much smaller one — Raycast runs 168px against 0 — not an even ramp
+ * across three similar values. With `/product` growing from four capability
+ * sections to six, a page of six identically-spaced blocks is exactly the
+ * failure this alternation exists to avoid.
  */
 export function CapabilitySections({
   sections,
@@ -58,9 +68,20 @@ export function CapabilitySections({
     <>
       {sections.map((section, index) => {
         const tone = index % 2 === 0 ? "paper" : "surface"
+        // The first block sets the page's upper bound; after it the rhythm
+        // alternates, so no two adjacent sections are the same height.
+        const density = index === 0 ? "open" : index % 2 === 1 ? "tight" : "normal"
         const icon = section.id ? SECTION_ICON[section.id] : undefined
         return (
-          <Section key={section.title} id={section.id} tone={tone}>
+          <Section
+            key={section.title}
+            id={section.id}
+            tone={tone}
+            density={density}
+            // Only on the opening block: the rhythm lines are a structural mark
+            // for where the page begins its index, not a texture to repeat.
+            rule={index === 0}
+          >
             <div className="lg:grid lg:grid-cols-[minmax(0,7fr)_minmax(0,5fr)] lg:gap-16">
               <div>
                 {/* Derived from position, not authored — a numbered index is

@@ -40,11 +40,30 @@ interface HairlineProps {
  * of the layout, and the gesture is the instrument's, not the interface's.
  *
  * Only `transform` animates, which is the spec's performance rule. It is
- * deliberately **not** built on `animation-timeline: view()`: in Chrome 147
- * `CSS.supports` reports that syntax as supported while the resulting
- * `ViewTimeline` sits at `currentTime: null` and never applies, and a
- * scroll-driven animation would in any case escape the `prefers-reduced-motion`
- * belt in `globals.css`, which only collapses time-driven ones.
+ * deliberately **not** built on `animation-timeline: view()`, for two reasons
+ * that were re-checked on 2026-08-01
+ * (`docs/research/cognia-official-website-motion-craft-2026-08-01.md` §4):
+ *
+ * 1. **Firefox stable still gates it behind
+ *    `layout.css.scroll-driven-animations.enabled`** — caniuse puts global
+ *    support near 82.6%, short of Baseline. This animation starts at
+ *    `scaleX(0)`, so without an `@supports` branch plus a fallback, a Firefox
+ *    reader sees a rule that never exists. Shipping both paths is strictly more
+ *    code than shipping this one.
+ * 2. **A scroll-driven animation escapes the reduced-motion belt.** The belt in
+ *    `globals.css` collapses `animation-duration`, while a scroll-driven
+ *    animation requires `animation-duration: auto` — its progress comes from
+ *    `animation-range`, and the default `0s` makes it invisible. Overwriting
+ *    `auto` with `0.01ms` is neither "hold the end state" nor "play normally".
+ *    It would need its own `prefers-reduced-motion` guard, which is exactly
+ *    what `useReducedMotion()` below already is.
+ *
+ * An earlier revision of this comment also asserted that Chrome 147 reports the
+ * syntax as supported while leaving `ViewTimeline.currentTime` at `null`. That
+ * claim could not be reproduced cleanly (the check ran in a hidden pane, where
+ * `requestAnimationFrame` is throttled and the existing `motion` entrances
+ * freeze mid-flight too), so it is recorded as unverified rather than kept as
+ * an architectural reason. The two reasons above stand on their own.
  *
  * Decorative, so it is always `aria-hidden`: a rule is not content, and the
  * blocks it separates carry their own headings.

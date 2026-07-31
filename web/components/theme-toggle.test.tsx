@@ -5,90 +5,119 @@ import { ThemeToggle } from "./theme-toggle"
 
 const setTheme = jest.fn()
 let currentTheme: string | undefined = "system"
+let mounted = true
 
 jest.mock("next-themes", () => ({
   useTheme: () => ({ theme: currentTheme, setTheme }),
 }))
 
+// A mutable module mock rather than `jest.isolateModules` + `require`: the
+// isolated registry hands the component a *second* React copy, and the moment
+// this component started calling a real hook of its own (`useDismissable`),
+// that second copy made `useState` null. See the repo's jest-gotchas notes.
+jest.mock("@web/hooks/use-has-mounted", () => ({ useHasMounted: () => mounted }))
+
+function openMenu() {
+  fireEvent.click(screen.getByRole("button", { name: en.nav.themeToggle }))
+}
+
 describe("ThemeToggle", () => {
   beforeEach(() => {
     currentTheme = "system"
+    mounted = true
+    setTheme.mockClear()
   })
 
-  it("exposes the three modes as a labelled radio group", () => {
+  it("collapses to a single trigger rather than three always-visible options", () => {
+    // The segmented version measured 168px, and with the language switcher the
+    // pair took 291px of a 1480px bar. Everything below verifies that the
+    // compaction did not cost what the segmented control was protecting.
     render(<ThemeToggle copy={en.nav} />)
-    expect(screen.getByRole("radiogroup", { name: en.nav.themeToggle })).toBeInTheDocument()
-    expect(screen.getAllByRole("radio")).toHaveLength(3)
+    expect(screen.getAllByRole("button")).toHaveLength(1)
+    expect(screen.queryByRole("menu")).toBeNull()
+  })
+
+  it("names the trigger, which is otherwise only a glyph", () => {
+    render(<ThemeToggle copy={en.nav} />)
+    const trigger = screen.getByRole("button", { name: en.nav.themeToggle })
+    expect(trigger).toHaveAttribute("aria-haspopup", "menu")
+    expect(trigger).toHaveAttribute("aria-expanded", "false")
+  })
+
+  it("opens the three modes as a labelled menu", () => {
+    render(<ThemeToggle copy={en.nav} />)
+    openMenu()
+    expect(screen.getByRole("menu", { name: en.nav.themeToggle })).toBeInTheDocument()
+    expect(screen.getAllByRole("menuitemradio")).toHaveLength(3)
+  })
+
+  it("keeps every mode labelled in words, not icon-only", () => {
+    render(<ThemeToggle copy={en.nav} />)
+    openMenu()
+    for (const label of [en.nav.themeLight, en.nav.themeDark, en.nav.themeSystem]) {
+      expect(screen.getByRole("menuitemradio", { name: new RegExp(label) })).toBeInTheDocument()
+    }
   })
 
   it("marks the active mode as checked", () => {
     render(<ThemeToggle copy={en.nav} />)
-    expect(screen.getByRole("radio", { name: en.nav.themeSystem })).toBeChecked()
-    expect(screen.getByRole("radio", { name: en.nav.themeLight })).not.toBeChecked()
+    openMenu()
+    expect(
+      screen.getByRole("menuitemradio", { name: new RegExp(en.nav.themeSystem) })
+    ).toBeChecked()
+    expect(
+      screen.getByRole("menuitemradio", { name: new RegExp(en.nav.themeLight) })
+    ).not.toBeChecked()
   })
 
-  it("keeps 'system' as a reachable choice rather than collapsing to a binary switch", () => {
+  it("keeps 'system' reachable rather than collapsing to a binary switch", () => {
+    // A visitor who has never touched this is on `system`; a two-state toggle
+    // would spend that choice on the first click.
     currentTheme = "dark"
     render(<ThemeToggle copy={en.nav} />)
-    expect(screen.getByRole("radio", { name: en.nav.themeSystem })).toBeInTheDocument()
-    expect(screen.getByRole("radio", { name: en.nav.themeDark })).toBeChecked()
+    openMenu()
+    expect(
+      screen.getByRole("menuitemradio", { name: new RegExp(en.nav.themeSystem) })
+    ).toBeInTheDocument()
+    expect(screen.getByRole("menuitemradio", { name: new RegExp(en.nav.themeDark) })).toBeChecked()
   })
 
-  it("sets the chosen mode", () => {
+  it("sets the chosen mode and closes", () => {
     render(<ThemeToggle copy={en.nav} />)
-    fireEvent.click(screen.getByRole("radio", { name: en.nav.themeDark }))
+    openMenu()
+    fireEvent.click(screen.getByRole("menuitemradio", { name: new RegExp(en.nav.themeDark) }))
     expect(setTheme).toHaveBeenCalledWith("dark")
+    expect(screen.queryByRole("menu")).toBeNull()
   })
 
   it("treats an unset theme as system rather than leaving nothing selected", () => {
     currentTheme = undefined
     render(<ThemeToggle copy={en.nav} />)
-    expect(screen.getByRole("radio", { name: en.nav.themeSystem })).toBeChecked()
+    openMenu()
+    expect(
+      screen.getByRole("menuitemradio", { name: new RegExp(en.nav.themeSystem) })
+    ).toBeChecked()
   })
 
-  it("is one tab stop that lands on the active mode", async () => {
-    // The reason this control is a Radix ToggleGroup rather than three buttons:
-    // the hand-rolled version made every mode its own tab stop and handled no
-    // arrow keys at all. Roving focus makes the group a single stop, and Tab
-    // enters it on whichever mode is currently selected.
+  it("closes on Escape and returns focus to the trigger", async () => {
+    // Same dismissal model as the Product menu beside it — one behaviour in the
+    // header, not two.
     const user = userEvent.setup()
-    currentTheme = "light"
     render(<ThemeToggle copy={en.nav} />)
+    const trigger = screen.getByRole("button", { name: en.nav.themeToggle })
+    openMenu()
+    expect(screen.getByRole("menu")).toBeInTheDocument()
 
-    await user.tab()
-    expect(screen.getByRole("radio", { name: en.nav.themeLight })).toHaveFocus()
-
-    await user.tab()
-    for (const radio of screen.getAllByRole("radio")) {
-      expect(radio).not.toHaveFocus()
-    }
+    await user.keyboard("{Escape}")
+    expect(screen.queryByRole("menu")).toBeNull()
+    expect(trigger).toHaveFocus()
   })
 
-  it("moves focus with the arrow keys and commits on Space", async () => {
-    // Focus-then-activate, not select-on-arrow. Radix's keyboard model for a
-    // toggle group is that arrows move focus and Space/Enter commits, and that
-    // is the behaviour worth having here: select-on-arrow would strobe the
-    // whole page through every theme as the user walks the group.
+  it("is one tab stop while closed", async () => {
     const user = userEvent.setup()
-    currentTheme = "light"
     render(<ThemeToggle copy={en.nav} />)
-
     await user.tab()
-    await user.keyboard("{ArrowRight}")
-    expect(screen.getByRole("radio", { name: en.nav.themeDark })).toHaveFocus()
-    expect(setTheme).not.toHaveBeenCalled()
-
-    await user.keyboard(" ")
-    expect(setTheme).toHaveBeenCalledWith("dark")
-  })
-
-  it("ignores a deselect so the control never lands in a themeless state", () => {
-    // Radix reports "" when the pressed item is pressed again. A visitor who
-    // taps the active mode twice must not end up with no theme selected.
-    currentTheme = "dark"
-    render(<ThemeToggle copy={en.nav} />)
-    fireEvent.click(screen.getByRole("radio", { name: en.nav.themeDark }))
-    expect(setTheme).not.toHaveBeenCalled()
+    expect(screen.getByRole("button", { name: en.nav.themeToggle })).toHaveFocus()
   })
 })
 
@@ -97,16 +126,12 @@ describe("ThemeToggle", () => {
 // reserves the exact footprint instead.
 describe("ThemeToggle before mount", () => {
   it("reserves the control's footprint without announcing anything", () => {
-    jest.isolateModules(() => {
-      jest.doMock("@web/hooks/use-has-mounted", () => ({ useHasMounted: () => false }))
-      // eslint-disable-next-line @typescript-eslint/no-require-imports
-      const { ThemeToggle: Subject } = require("./theme-toggle")
-      const { container } = render(<Subject copy={en.nav} />)
-      expect(screen.queryByRole("radiogroup")).toBeNull()
-      const placeholder = container.firstElementChild as HTMLElement
-      expect(placeholder).toHaveAttribute("aria-hidden", "true")
-      expect(placeholder.className).toContain("h-8")
-    })
-    jest.dontMock("@web/hooks/use-has-mounted")
+    mounted = false
+    const { container } = render(<ThemeToggle copy={en.nav} />)
+    expect(screen.queryByRole("button")).toBeNull()
+    const placeholder = container.firstElementChild as HTMLElement
+    expect(placeholder).toHaveAttribute("aria-hidden", "true")
+    expect(placeholder.className).toContain("size-8")
+    mounted = true
   })
 })

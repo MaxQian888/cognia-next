@@ -197,6 +197,90 @@ light-reading / dark-execution contrast is preserved inside each mode.
   trigger in place would have meant rewriting those expressions on jobs that deploy Workers and Fly
   apps.
 
+## Amendment, 2026-08-01 — one canvas moment, one pinned section, and a re-drawn-chrome exception
+
+Three narrow exceptions, each recorded here so none becomes a precedent by accident. The
+supporting measurements are in
+`docs/research/cognia-official-website-motion-craft-2026-08-01.md`.
+
+### A. Exactly one canvas surface, and it is the provenance rail
+
+The design spec §6 allows the site two motion languages (cinematic fade-through, image scale) plus
+the sticky task rail. That budget stands. It gains **one** named exception: the provenance rail in
+the Trust section — the site's only second-read moment under spec §2.4 — may render its
+Source → Action → Permission → Result thread on a `<canvas>` as a signal that travels the path and
+**stops at the Permission node**, which is the same narrative beat as the hero halting at
+`Waiting for approval` (spec §6.1).
+
+The boundaries are the point:
+
+- **One surface, site-wide.** A second canvas is a spec change, not a judgement call.
+- **Below the fold**, so spec §8's "no above-the-fold WebGL" is untouched.
+- **`--action` only**, inside spec §3.1's ≤5% cyan budget. No new colour, no gradient.
+- **Canvas 2D, not WebGL/three**, unless a later decision says otherwise in writing. `three` +
+  `@react-three/fiber` + `drei` is ~43 MB on disk against `motion`'s 772 KB, and the repository has
+  no `three` Jest mock — the product's one 3D component mocks it locally in its own suite.
+- **Three fallbacks, all to the same static `<ol>` that ships today**: `prefers-reduced-motion`, no
+  2D context, and the static-export first paint (the DOM renders first; the canvas layers on after
+  mount, because a static export has no SSR fallback path).
+- **The canvas is `aria-hidden`**; the `<ol>` keeps the semantics. This is the §8 amendment's
+  "visual layer hidden, semantic layer intact" rule applied to a second surface.
+
+The reduced-motion fallback is not optional politeness. The belt in `web/app/globals.css` collapses
+`animation-duration` and `transition-duration`; it has no effect on a `requestAnimationFrame` loop.
+Any continuous motion added to this site must gate itself on `useReducedMotion()`, exactly as
+`Hairline` and `Reveal` already do.
+
+This applies to `requestAnimationFrame` work specifically. It is *not* a general hole in the belt:
+`scroll-behavior`, for instance, is explicitly covered — `globals.css` sets it back to `auto` on
+both `html` and `*` under `prefers-reduced-motion: reduce`. The belt's blind spot is the JS
+animation loop, and only that.
+
+### B. Exactly one scroll-pinned section, and it never intercepts scrolling
+
+The signature demo (`#task`) may hold the viewport while the reader's own scrolling advances its
+six steps, then release. This is spec §6.6, and it is the scroll-driven form of the sticky task
+rail §6.3 already describes — the same six states in the same order, with the pacing handed back to
+the reader instead of run on a 2600ms timer.
+
+The constraint that matters most is *how*: a tall wrapper with a `position: sticky` child, where
+the code only **reads** the scroll position the page already has. Nothing listens for `wheel` or
+`touchmove`. Taking over the wheel would break scroll speed, momentum, keyboard paging,
+find-in-page and scrollbar dragging all at once, and would leave a reader who wants past the
+section with no way through. `position: sticky` costs none of that.
+
+The rest of the boundary:
+
+- **Above `lg` only.** Mobile browsers change viewport height as their chrome hides and shows,
+  which silently rewrites the travel distance mid-scroll; §7 wants one primary visual per screen on
+  mobile regardless.
+- **Scroll position is the single source of truth while pinned.** Autoplay is off — the reader is
+  already driving — and the rail buttons scroll rather than set state, or the rail would drift from
+  the page the moment the wheel moved.
+- **Three complete modes, not one effect with degradations**: scroll-pinned; the existing sticky
+  rail with autoplay (narrow viewports and the server render); and, under `prefers-reduced-motion`,
+  the static stepper §6.3 mandates — no tall wrapper is rendered at all, so there is nothing to
+  scroll through.
+- **Keyboard operability is unchanged.** The rail entries stay buttons.
+
+### C. Hallmark gate 47 does not apply to `web/components/product/**`
+
+The Hallmark design skill forbids hand-built browser bars, phone frames and IDE chrome, on the
+stated grounds that "the user's environment already supplies real chrome" and that the alternative
+is a real screenshot in a `<figure>`.
+
+That premise does not hold here. A website visitor has not installed the application, so no chrome
+exists in their environment to borrow; and §8's amendment already establishes that the capture
+matrix is empty, so there is no screenshot to use instead. Removing the frame would leave the
+depicted diff, plan, permission checkpoint and artifact floating with no indication of what
+application they belong to — which is the failure §8 was written to prevent.
+
+So `AppFrame` keeps its window chrome **and** its required `label` prop, and the gate is skipped
+for `web/components/product/**` only. The honesty mechanism §8 installed is doing the work that
+gate 47 exists to do: every reconstruction is labelled in its own title bar, `ProductStage` repeats
+the "not a screenshot" note in the figure caption, and a real capture still wins the moment one
+exists. Gate 47 continues to apply everywhere else on the site.
+
 ## Consequences
 
 **Positive.** The website can iterate without rebuilding MDX collections or touching documented

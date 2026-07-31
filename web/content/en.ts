@@ -564,6 +564,24 @@ export const en: SiteCopy = {
       ],
       catalogueNote:
         "The full provider, MCP, plugin and connector catalogs live in the documentation rather than on this page.",
+      agents: {
+        label: "Agent interop",
+        note: "Run these agents inside the workspace over ACP, or import their existing session history. Each runs with the tools and permissions you grant it, and its steps land in the same reviewable thread.",
+        runLabel: "Run",
+        importLabel: "Import history",
+        items: [
+          { id: "claude-code", name: "Claude Code", run: true, import: true },
+          { id: "codex", name: "Codex", run: true, import: true },
+          { id: "gemini-cli", name: "Gemini CLI", run: true, import: true },
+          { id: "opencode", name: "OpenCode", run: true, import: true },
+          { id: "cursor", name: "Cursor CLI", run: true, import: false },
+          { id: "copilot", name: "Copilot CLI", run: true, import: false },
+          { id: "qwen", name: "Qwen Code", run: true, import: false },
+          { id: "kiro", name: "Kiro", run: true, import: false },
+          { id: "aider", name: "Aider", run: false, import: true },
+          { id: "continue", name: "Continue", run: false, import: true },
+        ],
+      },
     },
 
     trust: {

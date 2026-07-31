@@ -34,6 +34,61 @@ describe("Section", () => {
     expect(shell).toHaveClass("max-w-shell")
     expect(shell?.className).toMatch(/lg:py-40/)
   })
+
+  it.each([
+    ["flush", "py-0"],
+    ["tight", "py-12"],
+    ["normal", "py-24"],
+    ["open", "py-32"],
+  ] as const)("gives %s sections their own vertical rhythm", (density, expected) => {
+    const { container } = render(<Section density={density}>content</Section>)
+    expect(container.querySelector("section > div")).toHaveClass(expected)
+  })
+
+  it("makes `flush` genuinely zero rather than a smaller ramp step", () => {
+    // The whole point of the density scale is alternation: a section that reads
+    // as a breath between two tall ones has to be able to drop its padding
+    // entirely, not merely take the smallest rung.
+    const { container } = render(<Section density="flush">content</Section>)
+    const shell = container.querySelector("section > div")
+    expect(shell?.className).not.toMatch(/py-(?!0\b)/)
+    expect(shell?.className).not.toMatch(/(md|lg):py-/)
+  })
+
+  it("opens a left channel only from lg when offset", () => {
+    const { container } = render(<Section align="offset">content</Section>)
+    const tokens = container.querySelector("section > div")!.className.split(/\s+/)
+    expect(tokens.some((t) => t.startsWith("lg:pl-["))).toBe(true)
+    // Below lg the section is already narrow; indenting it there would only
+    // cost line length, so no unprefixed `pl-` may appear.
+    expect(tokens.some((t) => t.startsWith("pl-"))).toBe(false)
+  })
+
+  it("stays centred by default", () => {
+    const { container } = render(<Section>content</Section>)
+    const tokens = container.querySelector("section > div")!.className.split(/\s+/)
+    expect(tokens.some((t) => t.startsWith("lg:pl-["))).toBe(false)
+  })
+
+  it("draws the rhythm lines only when asked, and hides them from assistive tech", () => {
+    const { container: without } = render(<Section>content</Section>)
+    expect(without.querySelector(".rhythm-lines")).toBeNull()
+
+    const { container: with_ } = render(<Section rule>content</Section>)
+    const lines = with_.querySelector(".rhythm-lines")
+    expect(lines).toBeInTheDocument()
+    expect(lines).toHaveAttribute("aria-hidden")
+    // Decorative and behind the content — it must never swallow a click.
+    expect(lines).toHaveClass("pointer-events-none")
+  })
+
+  it("keeps the shell above the rhythm lines", () => {
+    // Both are positioned; without `relative` on the shell the absolutely
+    // positioned rule layer would paint over the content.
+    const { container } = render(<Section rule>content</Section>)
+    expect(container.querySelector("section")).toHaveClass("relative")
+    expect(container.querySelector("section > div")).toHaveClass("relative")
+  })
 })
 
 describe("SectionHeading", () => {

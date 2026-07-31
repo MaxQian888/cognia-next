@@ -38,6 +38,46 @@ describe("CapabilitySections", () => {
     }
   })
 
+  it("alternates the vertical rhythm so no two adjacent sections match", () => {
+    const { container } = render(
+      <CapabilitySections
+        sections={en.product.sections}
+        learnMore={en.common.learnMore}
+        locale="en"
+        docsOrigin={DOCS}
+      />
+    )
+    const shells = [...container.querySelectorAll("section > div")]
+    expect(shells.length).toBeGreaterThan(1)
+
+    // Tone alone gives a boundary; it does not give a cadence, because both
+    // blocks stay the same height. The rhythm has to alternate too.
+    const rhythm = shells.map((shell) => {
+      const base = [...shell.classList].find((c) => /^py-\d+$/.test(c))
+      if (!base) throw new Error(`section shell carries no base rhythm: ${shell.className}`)
+      return base
+    })
+    for (let i = 1; i < rhythm.length; i += 1) {
+      expect(rhythm[i]).not.toBe(rhythm[i - 1])
+    }
+    // The opening block is the page's upper bound.
+    expect(rhythm[0]).toBe("py-32")
+  })
+
+  it("draws the rhythm lines on the opening block only", () => {
+    const { container } = render(
+      <CapabilitySections
+        sections={en.product.sections}
+        learnMore={en.common.learnMore}
+        locale="en"
+        docsOrigin={DOCS}
+      />
+    )
+    // A structural mark for where the index begins, not a texture to repeat.
+    expect(container.querySelectorAll(".rhythm-lines")).toHaveLength(1)
+    expect(container.querySelector("section")?.querySelector(".rhythm-lines")).toBeInTheDocument()
+  })
+
   it("links every documented entry to the docs site with the locale prefix", () => {
     render(
       <CapabilitySections

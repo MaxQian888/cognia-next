@@ -4,6 +4,7 @@ import { getCopy } from "@web/content"
 import { type Evidence, releaseState } from "@web/lib/evidence"
 import type { Locale } from "@web/lib/locale"
 import { RELEASES_URL, docsUrl } from "@web/lib/site"
+import { PointerCompanion } from "./pointer-companion"
 import { SiteFooter } from "./site-footer"
 import { SiteNav } from "./site-nav"
 
@@ -40,6 +41,10 @@ export function SiteShell({ locale, route, children }: SiteShellProps) {
       />
       <main id="main">{children}</main>
       <SiteFooter locale={locale} copy={copy} docsOrigin={docsOrigin} />
+      {/* Mounted once, at the shell, so every page gets it and no page can
+       * mount two. Renders nothing on a coarse pointer or under reduced
+       * motion — see `pointer-companion.tsx`. */}
+      <PointerCompanion />
     </>
   )
 }

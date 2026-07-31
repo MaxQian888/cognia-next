@@ -169,6 +169,74 @@ notes」*——在演示项目中真实发生。没有任何页面替换成另�
   依据 `inputs.target` 做门禁，直接在原文件加 `schedule` 等于要改写那些部署 Workers 与 Fly 应用的
   job 的判断表达式。
 
+## 修订，2026-08-01 —— 一处 canvas、一处滚动钉住，以及一条重绘外壳的例外
+
+三条很窄的例外，都记在这里，免得哪一条被顺手当成先例。支撑数据见
+`docs/research/cognia-official-website-motion-craft-2026-08-01.md`。
+
+### A. 全站只有一处 canvas，就是 provenance rail
+
+设计方案 §6 给全站两套运动语言（cinematic fade-through、image scale）外加 sticky task rail。这个
+预算不变，只增加**一条**具名例外：Trust 章节的 provenance rail——也就是方案 §2.4 认定的全站唯一
+second-read moment——允许把 Source → Action → Permission → Result 这条线渲染在 `<canvas>` 上，画成
+一束沿路径行进、**在 Permission 节点停住**的信号。这与 hero 停在 `Waiting for approval`（方案 §6.1）
+是同一个叙事拍点。
+
+边界本身才是重点：
+
+- **全站一处。** 出现第二处 canvas 属于改规范，不是临场判断。
+- **位于首屏之外**，因此方案 §8「避免首屏 WebGL」原封不动。
+- **只用 `--action`**，受方案 §3.1 的 cyan ≤5% 面积约束。不新增颜色，不加渐变。
+- **用 Canvas 2D，不用 WebGL/three**，除非后续有书面决定改变这一点。`three` + `@react-three/fiber`
+  + `drei` 磁盘体积约 43MB，对照 `motion` 的 772KB；且本仓库**没有** `three` 的 Jest mock——产品侧
+  那唯一一个 3D 组件是在自己的测试里就地 mock 的。
+- **三层降级，全部回退到今天已经在跑的静态 `<ol>`**：`prefers-reduced-motion`、拿不到 2D context、
+  以及静态导出的首帧（DOM 先渲染，canvas 在 mount 之后叠加——静态导出没有 SSR 兜底路径）。
+- **canvas 为 `aria-hidden`**，语义仍由 `<ol>` 承担。这就是 §8 修订案那条「视觉层隐藏、语义层保留」
+  的规则应用到第二块表面上。
+
+reduced-motion 兜底不是可选的礼貌。`web/app/globals.css` 里那条安全带压的是 `animation-duration` 与
+`transition-duration`，对 `requestAnimationFrame` 循环**完全无效**。此后本站任何持续性动效都必须自己
+走 `useReducedMotion()`，和 `Hairline`、`Reveal` 现在的做法一致。
+
+这一条**只针对 `requestAnimationFrame` 循环**，不是说安全带普遍失效：例如 `scroll-behavior` 就被明确
+覆盖了——`globals.css` 在 `prefers-reduced-motion: reduce` 下把 `html` 与 `*` 两处都设回 `auto`。安全带
+的盲区就是 JS 动画循环，仅此而已。
+
+### B. 全站只有一处滚动钉住，且绝不劫持滚动
+
+Signature demo（`#task`）可以钉住视口，由读者自己的滚动推进六个步骤，推完释放。这是方案 §6.6，也是
+§6.3 sticky task rail 的滚动驱动形态——同样六个状态、同样顺序，只是把节奏从 2600ms 定时器交还给读者。
+
+最要紧的约束是**实现方式**：高容器 + `position: sticky` 子元素，代码只**读取**页面本来就有的滚动位置。
+不监听 `wheel`，也不监听 `touchmove`。接管滚轮会一次性破坏滚动速度、惯性、键盘翻页、页内查找和滚动条
+拖拽，还会让想快速略过这一节的读者无路可走。`position: sticky` 没有这些代价。
+
+其余边界：
+
+- **仅 `lg` 以上。** 移动端浏览器的视口高度会随工具栏收放变化，在滚动中途悄悄改写行程距离；何况 §7
+  本就要求移动端每屏只放一个主要视觉。
+- **钉住期间以滚动位置为唯一真相源。** 自动播放关闭（读者已在驱动），rail 按钮改为滚动而非直接设状态，
+  否则滚轮一动 rail 就会和页面脱节。
+- **三种完整形态，而不是一个效果加几层降级**：滚动钉住；现有的 sticky rail + 自动播放（窄视口与服务端
+  渲染）；以及 `prefers-reduced-motion` 下 §6.3 规定的静态 stepper——此时高容器根本不渲染，也就没有
+  东西可滚。
+- **键盘可达性不变。** rail 条目仍然是 `button`。
+
+### C. Hallmark gate 47 不适用于 `web/components/product/**`
+
+Hallmark 设计技能禁止手工搭建浏览器栏、手机框和 IDE 外壳，理由是「用户环境已经提供真实外壳」，替代
+方案是把真实截图包进 `<figure>`。
+
+这个前提在这里不成立。官网访客没有安装过这个应用，环境里不存在任何可借用的外壳；而 §8 的修订案已经
+确认拍摄矩阵是空的，也就没有截图可用。去掉外壳只会让画出来的 diff、plan、permission checkpoint 和
+artifact 悬空，读者无从判断它们属于哪个应用——那正是 §8 当初要防的失败。
+
+因此 `AppFrame` 保留窗口外壳**并**保留必填的 `label` 属性，该门禁**仅**对
+`web/components/product/**` 跳过。§8 装上的诚实机制正在做 gate 47 想做的事：每个复刻都在自己的标题栏
+里被标注，`ProductStage` 在图注里再说一遍「这不是截图」，而真实拍摄一旦存在仍然优先。gate 47 在本站
+其余所有位置继续生效。
+
 ## 后果
 
 **正面。** 官网可以在不重建 MDX collections、不触碰已被文档化的 docs URL 的前提下迭代。它的视觉系统

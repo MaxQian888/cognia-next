@@ -4,7 +4,8 @@ import { useEffect } from "react"
 import type { SiteCopy } from "@web/content/types"
 import type { ReleaseState } from "@web/lib/evidence"
 import { useDismissable } from "@web/hooks/use-dismissable"
-import { Icon } from "./icon"
+import { BrandMark } from "./brand-mark"
+import { Icon, type IconName } from "./icon"
 import type { Locale } from "@web/lib/locale"
 import { REPO_URL } from "@web/lib/site"
 import { cn } from "@web/lib/utils"
@@ -63,6 +64,23 @@ export function SiteNav({ locale, route, copy, releaseState, docsOrigin }: SiteN
 
   const primaryLinks = copy.nav.links
 
+  /**
+   * One mark per destination, keyed by the route the content already carries.
+   *
+   * Presentation rather than content — a translator has nothing to say about
+   * them — so they live here, the same split `capability-sections.tsx` makes. A
+   * route with no entry renders without a mark instead of falling back to a
+   * generic one, because a generic icon carries less than no icon.
+   */
+  const NAV_ICON: Record<string, IconName> = {
+    "/product#chat": "chat",
+    "/product#agents": "agents",
+    "/product#knowledge": "knowledge",
+    "/workflows": "workflow",
+    "/plugins": "plugin",
+    "/trust": "trust",
+  }
+
   return (
     <header className="sticky top-0 z-50 border-b border-hairline bg-paper/85 backdrop-blur-sm">
       <a
@@ -80,8 +98,11 @@ export function SiteNav({ locale, route, copy, releaseState, docsOrigin }: SiteN
           target={{ label: copy.nav.brand, route: "/" }}
           locale={locale}
           docsOrigin={docsOrigin}
-          className="font-mono text-sm tracking-tight text-ink"
-        />
+          className="inline-flex items-center gap-2 font-mono text-sm tracking-tight text-ink"
+        >
+          <BrandMark className="text-ink" />
+          {copy.nav.brand}
+        </SiteLink>
 
         <div className="hidden items-center gap-1 lg:flex">
           <div className="relative">
@@ -112,11 +133,20 @@ export function SiteNav({ locale, route, copy, releaseState, docsOrigin }: SiteN
                         target={item}
                         locale={locale}
                         docsOrigin={docsOrigin}
-                        className="block rounded-control px-3 py-2 transition-colors hover:bg-paper"
+                        className="flex gap-3 rounded-control px-3 py-2 transition-colors hover:bg-paper"
                       >
-                        <span className="block text-sm text-ink">{item.label}</span>
-                        <span className="mt-0.5 block text-xs leading-relaxed text-muted">
-                          {item.description}
+                        {NAV_ICON[item.route] ? (
+                          <Icon
+                            name={NAV_ICON[item.route]}
+                            size={16}
+                            className="mt-0.5 shrink-0 text-muted"
+                          />
+                        ) : null}
+                        <span className="block">
+                          <span className="block text-sm text-ink">{item.label}</span>
+                          <span className="mt-0.5 block text-xs leading-relaxed text-muted">
+                            {item.description}
+                          </span>
                         </span>
                       </SiteLink>
                     </li>
@@ -132,8 +162,11 @@ export function SiteNav({ locale, route, copy, releaseState, docsOrigin }: SiteN
               target={link}
               locale={locale}
               docsOrigin={docsOrigin}
-              className="rounded-control px-3 py-2 text-sm text-muted transition-colors hover:text-ink"
-            />
+              className="inline-flex items-center gap-1.5 rounded-control px-3 py-2 text-sm text-muted transition-colors hover:text-ink"
+            >
+              {NAV_ICON[link.route] ? <Icon name={NAV_ICON[link.route]} size={14} /> : null}
+              {link.label}
+            </SiteLink>
           ))}
         </div>
 
@@ -142,14 +175,20 @@ export function SiteNav({ locale, route, copy, releaseState, docsOrigin }: SiteN
             target={{ label: copy.nav.docsLabel, docsPath: "/docs" }}
             locale={locale}
             docsOrigin={docsOrigin}
-            className="rounded-control px-3 py-2 text-sm text-muted transition-colors hover:text-ink"
-          />
+            className="inline-flex items-center gap-1.5 rounded-control px-3 py-2 text-sm text-muted transition-colors hover:text-ink"
+          >
+            <Icon name="files" size={14} />
+            {copy.nav.docsLabel}
+          </SiteLink>
           <SiteLink
             target={{ label: copy.nav.sourceLabel, href: REPO_URL }}
             locale={locale}
             docsOrigin={docsOrigin}
-            className="hidden rounded-control px-3 py-2 text-sm text-muted transition-colors hover:text-ink sm:inline-flex"
-          />
+            className="hidden items-center gap-1.5 rounded-control px-3 py-2 text-sm text-muted transition-colors hover:text-ink sm:inline-flex"
+          >
+            <Icon name="source" size={14} />
+            {copy.nav.sourceLabel}
+          </SiteLink>
           <div className="hidden items-center gap-2 lg:flex">
             <LanguageSwitcher
               locale={locale}

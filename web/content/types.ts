@@ -259,6 +259,23 @@ export interface ConnectionItem {
   requiresApproval: string
 }
 
+/**
+ * One external coding agent Cognia interoperates with.
+ *
+ * `id` selects the vendored brand mark in `content/generated/agent-icons.json`;
+ * an id with no mark renders the site's own generic glyph rather than another
+ * brand's. `run` and `import` are the two real capabilities — an external-agent
+ * preset in `lib/ai/agent/external/presets.ts`, and a session-history adapter in
+ * `lib/session-import/adapters/` — and at least one is always true, or the row
+ * would be claiming a connection that does not exist.
+ */
+export interface AgentInterop {
+  id: string
+  name: string
+  run: boolean
+  import: boolean
+}
+
 export interface ConnectionsCopy {
   eyebrow: string
   title: string
@@ -270,6 +287,13 @@ export interface ConnectionsCopy {
   }
   items: ConnectionItem[]
   catalogueNote: string
+  agents: {
+    label: string
+    note: string
+    runLabel: string
+    importLabel: string
+    items: AgentInterop[]
+  }
 }
 
 export interface TrustCard {

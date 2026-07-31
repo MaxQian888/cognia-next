@@ -135,11 +135,11 @@ describe("SiteNav locale controls", () => {
     expect(screen.getAllByRole("link", { name: "中文" })[0]).toHaveAttribute("href", "/zh/trust")
   })
 
-  it("offers the theme control", () => {
+  it("offers the theme control as a single compact trigger", () => {
+    // Collapsed from a 168px segmented control: with the language switcher the
+    // pair took 291px of a 1480px bar.
     renderNav()
-    expect(screen.getAllByRole("radiogroup", { name: en.nav.themeToggle }).length).toBeGreaterThan(
-      0
-    )
+    expect(screen.getAllByRole("button", { name: en.nav.themeToggle }).length).toBeGreaterThan(0)
   })
 
   it("localises the whole bar", () => {

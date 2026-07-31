@@ -11,7 +11,8 @@
     "typecheck": "tsc --noEmit",
     "evidence": "node scripts/build-evidence.mjs",
     "test:scripts": "node --test scripts/*.test.mjs",
-    "capture": "node scripts/capture-product.mjs"
+    "capture": "node scripts/capture-product.mjs",
+    "agent-icons": "node scripts/sync-agent-icons.mjs"
   },
   "dependencies": {
     "class-variance-authority": "^0.7.1",
@@ -27,6 +28,7 @@
     "tailwind-merge": "^3.6.0"
   },
   "devDependencies": {
+    "@lobehub/icons-static-svg": "^1.94.0",
     "@tailwindcss/postcss": "^4.3.3",
     "@types/node": "^25.6.0",
     "@types/react": "^19.2.17",

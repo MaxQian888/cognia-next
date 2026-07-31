@@ -1,4 +1,5 @@
 import type { NavCopy } from "@web/content/types"
+import { Icon } from "./icon"
 import { type Locale, HTML_LANG, otherLocale } from "@web/lib/locale"
 import { SiteLink } from "./site-link"
 
@@ -27,8 +28,13 @@ export function LanguageSwitcher({ locale, route, copy, docsOrigin }: LanguageSw
       locale={target}
       hrefLang={HTML_LANG[target]}
       docsOrigin={docsOrigin}
-      className="inline-flex h-8 items-center rounded-control border border-hairline px-3 text-xs text-muted transition-colors hover:text-ink"
+      className="inline-flex h-8 items-center gap-1.5 rounded-control border border-hairline px-2.5 text-xs text-muted transition-colors hover:text-ink"
     >
+      {/* The glyph is what makes this scannable at a glance; the target
+       * language stays in words beside it, because "中文" / "English" is the
+       * only thing that actually says where the link goes. A globe alone would
+       * not. */}
+      <Icon name="language" size={14} />
       <span lang={HTML_LANG[target]}>{copy.switchLanguageTo}</span>
     </SiteLink>
   )

@@ -528,6 +528,24 @@ export const zh: SiteCopy = {
         },
       ],
       catalogueNote: "完整的 provider、MCP、插件与连接器目录在文档里，不在这一页。",
+      agents: {
+        label: "Agent 互通",
+        note: "通过 ACP 在工作空间内运行这些 agent，或导入它们已有的会话历史。每个 agent 只在你授予的工具与权限内运行，其步骤进入同一条可审阅的线程。",
+        runLabel: "运行",
+        importLabel: "导入历史",
+        items: [
+          { id: "claude-code", name: "Claude Code", run: true, import: true },
+          { id: "codex", name: "Codex", run: true, import: true },
+          { id: "gemini-cli", name: "Gemini CLI", run: true, import: true },
+          { id: "opencode", name: "OpenCode", run: true, import: true },
+          { id: "cursor", name: "Cursor CLI", run: true, import: false },
+          { id: "copilot", name: "Copilot CLI", run: true, import: false },
+          { id: "qwen", name: "Qwen Code", run: true, import: false },
+          { id: "kiro", name: "Kiro", run: true, import: false },
+          { id: "aider", name: "Aider", run: false, import: true },
+          { id: "continue", name: "Continue", run: false, import: true },
+        ],
+      },
     },
 
     trust: {

@@ -146,9 +146,98 @@ describe("SignatureDemo", () => {
   })
 })
 
+describe("SignatureDemo when scroll-pinned", () => {
+  const originalMatchMedia = window.matchMedia
+  const scrollTo = jest.fn()
+
+  beforeEach(() => {
+    reduced = false
+    scrollTo.mockClear()
+    Object.defineProperty(window, "scrollTo", { value: scrollTo, writable: true })
+    // The hook pins only above `lg`; the shared jsdom stub reports no match.
+    window.matchMedia = ((query: string) => ({
+      matches: true,
+      media: query,
+      addEventListener: () => {},
+      removeEventListener: () => {},
+    })) as unknown as typeof window.matchMedia
+  })
+
+  afterEach(() => {
+    window.matchMedia = originalMatchMedia
+  })
+
+  it("gives the section travel to scroll through, one screen per step", () => {
+    const { container } = render(
+      <SignatureDemo copy={en.home.signature} reconstruction={en.reconstruction} />
+    )
+    const wrapper = container.querySelector<HTMLElement>("[style*='vh']")
+    expect(wrapper).toBeInTheDocument()
+    expect(wrapper?.style.height).toBe(`${en.home.signature.steps.length * 100}vh`)
+  })
+
+  it("drops autoplay, because the reader is already driving", () => {
+    // A play button that fights the scroll position is a control that visibly
+    // does nothing.
+    render(<SignatureDemo copy={en.home.signature} reconstruction={en.reconstruction} />)
+    expect(screen.queryByRole("button", { name: en.home.signature.playLabel })).toBeNull()
+    expect(screen.queryByRole("button", { name: en.home.signature.pauseLabel })).toBeNull()
+  })
+
+  it("scrolls instead of setting state when a rail entry is chosen", () => {
+    render(<SignatureDemo copy={en.home.signature} reconstruction={en.reconstruction} />)
+    fireEvent.click(screen.getByRole("button", { name: /Approval/i }))
+    // Scroll position stays the single source of truth: setting the index
+    // directly would desynchronise the rail from the page on the next scroll.
+    expect(scrollTo).toHaveBeenCalled()
+  })
+
+  it("keeps Previous and Next, wired to scroll", () => {
+    render(<SignatureDemo copy={en.home.signature} reconstruction={en.reconstruction} />)
+    fireEvent.click(screen.getByRole("button", { name: en.home.signature.nextLabel }))
+    expect(scrollTo).toHaveBeenCalled()
+  })
+
+  it("still disables Previous on the first step", () => {
+    render(<SignatureDemo copy={en.home.signature} reconstruction={en.reconstruction} />)
+    expect(screen.getByRole("button", { name: en.home.signature.previousLabel })).toBeDisabled()
+  })
+
+  it("keeps every step reachable by keyboard", () => {
+    // The pin must not cost keyboard operability (spec §8) — the rail entries
+    // are still buttons, not scroll-only affordances.
+    render(<SignatureDemo copy={en.home.signature} reconstruction={en.reconstruction} />)
+    const rail = screen.getByRole("list", { name: en.home.signature.stepperLabel })
+    const buttons = rail.querySelectorAll("button")
+    expect(buttons).toHaveLength(en.home.signature.steps.length)
+    for (const button of buttons) expect(button).not.toBeDisabled()
+  })
+})
+
 describe("SignatureDemo under reduced motion", () => {
+  const originalMatchMedia = window.matchMedia
+
   beforeEach(() => {
     reduced = true
+    // Even on a wide viewport, reduced motion must win: spec §6.3 forbids pin,
+    // scrub and autoplay outright.
+    window.matchMedia = ((query: string) => ({
+      matches: true,
+      media: query,
+      addEventListener: () => {},
+      removeEventListener: () => {},
+    })) as unknown as typeof window.matchMedia
+  })
+
+  afterEach(() => {
+    window.matchMedia = originalMatchMedia
+  })
+
+  it("renders no scroll travel at all", () => {
+    const { container } = render(
+      <SignatureDemo copy={en.home.signature} reconstruction={en.reconstruction} />
+    )
+    expect(container.querySelector("[style*='vh']")).toBeNull()
   })
 
   it("renders every state at once as a static stepper", () => {
