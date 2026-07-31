@@ -114,6 +114,22 @@ pnpm mobile:sync:ios          # iOS (build + sync, then mobile:open:ios)
 
 Optional: TURN credentials for self-hosted WebRTC, CMake/C++ for the `ocr-tesseract` Cargo feature.
 
+**Fail-closed agent proxy (macOS)** — launch any HTTP-proxy-aware CLI agent while Seatbelt limits
+its entire process tree to one local proxy port:
+
+```bash
+AGENT_PROXY_URL=http://127.0.0.1:7890 pnpm agent:proxy -- claude
+AGENT_PROXY_URL=http://127.0.0.1:7890 pnpm agent:proxy -- codex
+AGENT_PROXY_URL=http://127.0.0.1:7890 pnpm agent:proxy -- gemini
+AGENT_PROXY_URL=http://127.0.0.1:7890 pnpm agent:proxy --check
+```
+
+The launcher injects upper- and lower-case `HTTP_PROXY`, `HTTPS_PROXY`, and `ALL_PROXY`, clears
+`NO_PROXY`, validates an HTTP CONNECT tunnel, and verifies that a second local port is blocked.
+Agents that ignore HTTP proxy variables fail closed instead of connecting directly. Use
+`AGENT_PROXY_CHECK_TARGET=host:port` to change the TLS-capable preflight destination. SOCKS and
+remote proxy endpoints are intentionally rejected.
+
 ## Development
 
 <p align="center">

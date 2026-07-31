@@ -109,6 +109,21 @@ pnpm mobile:sync:ios          # iOS（构建并同步，再用 mobile:open:ios �
 可选：自托管 WebRTC 时的 TURN 凭据、
 构建 `ocr-tesseract` Cargo 特性时的 CMake/C++ 工具链。
 
+**Agent 强制代理（macOS）** —— 启动任意支持 HTTP 代理变量的 CLI Agent，并由 Seatbelt 将其
+整个进程树的网络出口限制到一个本地代理端口：
+
+```bash
+AGENT_PROXY_URL=http://127.0.0.1:7890 pnpm agent:proxy -- claude
+AGENT_PROXY_URL=http://127.0.0.1:7890 pnpm agent:proxy -- codex
+AGENT_PROXY_URL=http://127.0.0.1:7890 pnpm agent:proxy -- gemini
+AGENT_PROXY_URL=http://127.0.0.1:7890 pnpm agent:proxy --check
+```
+
+启动器会同时注入大小写形式的 `HTTP_PROXY`、`HTTPS_PROXY`、`ALL_PROXY`，清空 `NO_PROXY`，
+验证 HTTP CONNECT 隧道，并确认另一个本地端口已被阻断。不读取代理变量的 Agent 会失败关闭，
+不会回退直连。可用 `AGENT_PROXY_CHECK_TARGET=host:port` 修改支持 TLS 的预检目标。工具有意拒绝
+SOCKS 和远程代理端点。
+
 ## 开发
 
 <p align="center">

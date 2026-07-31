@@ -17,7 +17,7 @@
 export const DEV_SITE_URL = "http://localhost:3001"
 
 /** Matches the nav title in `lib/layout.shared.tsx`. */
-export const SITE_NAME = "cognia-next"
+export const SITE_NAME = "Cognia"
 
 type SiteEnv = {
   NEXT_PUBLIC_DOCS_SITE_URL?: string

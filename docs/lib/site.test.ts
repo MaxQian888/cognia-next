@@ -1,4 +1,10 @@
-import { DEV_SITE_URL, resolveSiteUrl } from "./site"
+import { DEV_SITE_URL, SITE_NAME, resolveSiteUrl } from "./site"
+
+describe("site branding", () => {
+  it("uses the Cognia product name", () => {
+    expect(SITE_NAME).toBe("Cognia")
+  })
+})
 
 describe("resolveSiteUrl", () => {
   it("prefers the explicit override over the Cloudflare-injected URL", () => {
