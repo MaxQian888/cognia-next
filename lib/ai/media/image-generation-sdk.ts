@@ -10,7 +10,7 @@
  *    one explicitly via their `ImageProcessingOptions`.
  *
  * Default model ids are kept current with the provider catalog snapshot
- * (`lib/ai/providers/models-dev-snapshot.json`), which is the authority for
+ * (the sharded models.dev bundle), which is the authority for
  * which models actually exist upstream. When in doubt the matchers below let a
  * user-configured (newer) model id pass through untouched, so the defaults are
  * only ever the *last* fallback.

@@ -1,5 +1,5 @@
 // Multimodal helpers for the core `read` tool. Node-safe: imports only the
-// bundled models.dev JSON snapshot (no Dexie/Tauri/TS from lib/). Lets `read`
+// compact models.dev capability index (no Dexie/Tauri/TS from lib/). Lets `read`
 // return a real image content block to vision-capable models and render
 // Jupyter notebooks as readable text. PDFs are intentionally NOT inlined here
 // (MCP tool results have no document content type, and the Anthropic in-process
@@ -9,12 +9,15 @@ import path from "node:path"
 import fsp from "node:fs/promises"
 import crypto from "node:crypto"
 
-import snapshot from "../../../lib/ai/providers/models-dev-snapshot.json" with { type: "json" }
+import capabilities from "../../../lib/ai/providers/models-dev-capabilities.json" with { type: "json" }
 
-const SNAPSHOT =
-  /** @type {Record<string, { models?: Record<string, { modalities?: { input?: string[] } }> }>} */ (
-    snapshot
-  )
+const SNAPSHOT = /** @type {Record<string, Record<string, { i?: string[] }>>} */ (capabilities)
+const MODEL_BY_ID = new Map()
+for (const provider of Object.values(SNAPSHOT)) {
+  for (const [modelId, model] of Object.entries(provider)) {
+    if (!MODEL_BY_ID.has(modelId)) MODEL_BY_ID.set(modelId, model)
+  }
+}
 
 /** Image extensions `read` will encode as a content block (excludes .svg — that's text). */
 export const IMAGE_MIME = Object.freeze({
@@ -41,20 +44,16 @@ export const PDF_MAX_CHARS = 200_000
  * @returns {string[]}
  */
 export function modelInputModalities(provider, model) {
-  const direct = SNAPSHOT[provider]?.models?.[model]?.modalities?.input
+  const direct = SNAPSHOT[provider]?.[model]?.i
   if (direct) return direct
   if (typeof model === "string" && model.includes("/")) {
     const slash = model.indexOf("/")
     const org = model.slice(0, slash)
     const id = model.slice(slash + 1)
-    const viaOrg = SNAPSHOT[org]?.models?.[id]?.modalities?.input
+    const viaOrg = SNAPSHOT[org]?.[id]?.i
     if (viaOrg) return viaOrg
   }
-  for (const p of Object.values(SNAPSHOT)) {
-    const hit = p.models?.[model]?.modalities?.input
-    if (hit) return hit
-  }
-  return []
+  return MODEL_BY_ID.get(model)?.i ?? []
 }
 
 /** Does this model accept image input? */
