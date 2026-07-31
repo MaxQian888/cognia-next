@@ -20,6 +20,7 @@ import { getPluginRateLimiter, RateLimitError } from "@/lib/plugin/security/rate
 import { loggers } from "@cognia/logging"
 import { useProjectStore } from "@/stores/project/project-store"
 import { useChatStore } from "@/stores/chat"
+import { registerProjectBucketPurger } from "@/lib/project/project-bucket-purge"
 // Pure diff → hunk → apply engine (no `ai`/provider imports — safe for this
 // persisted, widely-imported store). See lib/ai/generation/canvas-review.ts.
 import {
@@ -2399,6 +2400,10 @@ export const useArtifactStore = create<ArtifactState & ArtifactActions>()(
     }
   )
 )
+
+registerProjectBucketPurger("artifacts", (projectId) => {
+  useArtifactStore.getState().purgeProject(projectId)
+})
 
 export function activateArtifactAccountStorage(accountId: string): void {
   const storageKey = artifactAccountStorageKey(accountId)

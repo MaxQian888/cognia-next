@@ -357,21 +357,24 @@ function WorkspaceEditorBody({
 
   return (
     <div
-      className="flex h-full min-h-0 flex-col"
+      className="flex h-full w-full min-h-0 min-w-0 max-w-full flex-col overflow-x-hidden"
       data-testid="dock-workspace"
       onKeyDown={workbench.onKeyDown}
     >
-      <div className="flex shrink-0 items-center gap-2 border-b px-2 py-1">
-        <ProjectRootSwitcher
-          roots={roots}
-          rootKey={rootKey}
-          onSelect={selectRoot}
-          density={layout === "mobile" ? "touch" : "compact"}
-        />
-        <div className="ml-auto flex items-center gap-2">
-          {hasTaskScope && (
+      {roots.length > 1 || hasTaskScope ? (
+        <div
+          className="flex shrink-0 items-center gap-2 border-b px-2 py-1"
+          data-testid="dock-workspace-toolbar"
+        >
+          <ProjectRootSwitcher
+            roots={roots}
+            rootKey={rootKey}
+            onSelect={selectRoot}
+            density={layout === "mobile" ? "touch" : "compact"}
+          />
+          {hasTaskScope ? (
             <div
-              className="flex rounded-md border bg-muted/30 p-0.5"
+              className="ml-auto flex rounded-md border bg-muted/30 p-0.5"
               role="group"
               aria-label={t("scopeLabel")}
             >
@@ -398,17 +401,9 @@ function WorkspaceEditorBody({
                 {t("allWorkspace")}
               </button>
             </div>
-          )}
-          {proIdeAllowed && visibleScope === "workspace" && (
-            <EditorEngineToggle
-              value={engine}
-              onChange={setEngine}
-              proIdeSupport={proIdeSupport}
-              projectRoot={rootPath}
-            />
-          )}
+          ) : null}
         </div>
-      </div>
+      ) : null}
       {visibleScope === "task" ? (
         <div className="min-h-0 flex-1">
           <TaskResourcesPanel sessionId={sessionId} layout={layout} />
@@ -417,6 +412,16 @@ function WorkspaceEditorBody({
         <>
           <ProjectEditorTabs
             density={layout === "mobile" ? "touch" : "compact"}
+            trailingContent={
+              proIdeAllowed && visibleScope === "workspace" ? (
+                <EditorEngineToggle
+                  value={engine}
+                  onChange={setEngine}
+                  proIdeSupport={proIdeSupport}
+                  projectRoot={rootPath}
+                />
+              ) : undefined
+            }
             fixedTabs={
               hasReview
                 ? [
@@ -444,6 +449,22 @@ function WorkspaceEditorBody({
             onClose={closeFile}
             onSaveAll={workbench.saveAll}
           />
+
+          {engine === "codeserver" ? (
+            <div
+              className={cn("min-h-0 flex-1", visibleSurface !== "file" && "hidden")}
+              data-testid="workspace-code-server-host"
+              data-active={visibleSurface === "file"}
+            >
+              <CodeServerPane
+                root={rootPath}
+                ownerId={scopeKey}
+                beforeOpen={showFileSurface}
+                onRevoked={() => setEngine("monaco")}
+                onCancelled={() => setEngine("monaco")}
+              />
+            </div>
+          ) : null}
 
           {visibleSurface === "review" && hasReview ? (
             <div className="min-h-0 flex-1" data-testid="workspace-review-layout">
@@ -496,26 +517,20 @@ function WorkspaceEditorBody({
                 reviewEmpty
               )}
             </div>
-          ) : (
-            <div className="min-h-0 flex-1" data-testid="workspace-file-layout">
-              {engine === "codeserver" ? (
-                <CodeServerPane
-                  root={rootPath}
-                  ownerId={scopeKey}
-                  onRevoked={() => setEngine("monaco")}
-                  onCancelled={() => setEngine("monaco")}
-                />
-              ) : (
-                <ProjectEditorFileWorkbench
-                  workbench={workbench}
-                  sidebarPosition="right"
-                  panelIdPrefix="workspace"
-                  showContextWorkbench={false}
-                  layout={layout === "mobile" ? "mobile" : "split"}
-                />
-              )}
+          ) : engine === "monaco" ? (
+            <div
+              className="min-h-0 min-w-0 max-w-full flex-1 overflow-hidden"
+              data-testid="workspace-file-layout"
+            >
+              <ProjectEditorFileWorkbench
+                workbench={workbench}
+                sidebarPosition="right"
+                panelIdPrefix="workspace"
+                showContextWorkbench={false}
+                layout={layout === "mobile" ? "mobile" : "split"}
+              />
             </div>
-          )}
+          ) : null}
         </>
       )}
     </div>

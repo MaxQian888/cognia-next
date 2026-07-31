@@ -14,7 +14,7 @@
 // every session in the profile.
 
 import type { ChatSession, SessionSurfaceBinding } from "@cognia/agent-config-types"
-import { getDb } from "./schema"
+import { getDb, withDbReopenRetry } from "./schema"
 import { deleteSession, updateSession } from "./sessions"
 import { invalidatePersistSnapshot } from "./messages"
 import { resolveScopeProjectId } from "./project-scope"
@@ -146,6 +146,30 @@ export async function promoteResourceWorkbenchSession(id: string): Promise<ChatS
   // A promoted aside must land in a workspace or it is unreachable from the
   // sidebar — the exact failure the v131 backfill exists to repair.
   const projectId = existing.projectId ?? (await resolveScopeProjectId())
-  await updateSession(id, { ...patch, projectId })
+  try {
+    await withDbReopenRetry(() =>
+      getDb()
+        .sessions.where("id")
+        .equals(id)
+        .modify((session) => {
+          session.kind = "direct"
+          session.projectId = projectId
+          session.updatedAt = Date.now()
+          delete session.visibility
+          delete session.surfaceBinding
+          delete session.surfaceBindingKey
+        })
+        .then(() => undefined)
+    )
+  } catch (error) {
+    const durable = await getDb().sessions.get(id)
+    const promotedDurably =
+      durable?.kind === "direct" &&
+      durable.projectId === projectId &&
+      durable.visibility === undefined &&
+      durable.surfaceBinding === undefined &&
+      durable.surfaceBindingKey === undefined
+    if (!promotedDurably) throw error
+  }
   return { ...existing, ...patch, projectId }
 }

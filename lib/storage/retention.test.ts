@@ -99,12 +99,16 @@ describe("pruneRetainedTables", () => {
       span("fresh", now - 1 * MS_PER_DAY),
     ])
     const out = await pruneRetainedTables(30)
-    expect(out).toEqual([{ id: "agentTraces", removed: 1 }])
+    expect(out).toEqual([
+      { id: "agentTraces", removed: 1 },
+      { id: "evalArtifacts", removed: 0 },
+    ])
     expect((await getDb().agentTraces.toArray()).map((r) => r.id)).toEqual(["fresh"])
   })
 
   it("exposes agentTraces as a default target", () => {
     expect(RETENTION_TARGETS.map((t) => t.id)).toContain("agentTraces")
+    expect(RETENTION_TARGETS.map((t) => t.id)).toContain("evalArtifacts")
   })
 })
 

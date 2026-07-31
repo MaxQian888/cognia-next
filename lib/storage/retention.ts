@@ -20,6 +20,8 @@
  */
 
 import { pruneOlderThan as pruneAgentTraces } from "@/lib/db/agent-traces"
+import { deleteExpiredEvalArtifacts } from "@/lib/db/eval-lab"
+import { recoverEvalQueueOnStartup } from "@/lib/ai/eval/recovery"
 import { getSettings, DEFAULTS } from "@/lib/db/settings"
 
 const MS_PER_DAY = 86_400_000
@@ -39,6 +41,13 @@ export interface RetentionTarget {
  * bring another unbounded table under the same time-window policy. */
 export const RETENTION_TARGETS: RetentionTarget[] = [
   { id: "agentTraces", prune: (cutoff) => pruneAgentTraces(cutoff) },
+  {
+    id: "evalArtifacts",
+    prune: async () => {
+      const removed = await deleteExpiredEvalArtifacts()
+      return removed.samplesDeleted + removed.assetsDeleted
+    },
+  },
 ]
 
 export interface RetentionResult {
@@ -94,6 +103,9 @@ async function sweepOnce(): Promise<void> {
  * and the timer keeps running for the next window.
  */
 export async function startStorageRetentionSweeper(): Promise<Unsubscribe> {
+  await recoverEvalQueueOnStartup().catch((err) =>
+    console.warn("evaluation queue recovery failed", err)
+  )
   await sweepOnce().catch((err) => console.warn("storage retention sweep failed", err))
   const id = setInterval(() => {
     void sweepOnce().catch((err) => console.warn("storage retention sweep failed", err))

@@ -77,6 +77,7 @@ import {
 } from "@/types/context-workbench"
 import { WORKBENCH_RAIL_WIDTH_PX } from "@/types/shell/workbench-rail"
 import { PANEL_SNAP_MAGNET_PX, snapPanelSize } from "@/lib/ui/panel-snap"
+import { ShellLayoutDialog } from "@/components/shell/shell-layout-dialog"
 
 interface ContextWorkbenchValue {
   workbenchInstanceId: string
@@ -293,7 +294,7 @@ export function ContextWorkbenchMobileSheet({
         forceMount
         side="bottom"
         showCloseButton={false}
-        className="h-[92dvh] max-h-[92dvh] gap-0 overflow-hidden rounded-t-2xl p-0 pb-[env(safe-area-inset-bottom)] data-[state=open]:[animation-duration:calc(300ms*var(--motion-duration-scale,1))] data-[state=closed]:[animation-duration:calc(200ms*var(--motion-duration-scale,1))]"
+        className="h-[92dvh] max-h-[92dvh] gap-0 overflow-hidden rounded-t-2xl p-0 pb-[env(safe-area-inset-bottom)] data-[state=closed]:translate-y-full data-[state=open]:[animation-duration:calc(300ms*var(--motion-duration-scale,1))] data-[state=closed]:[animation-duration:calc(200ms*var(--motion-duration-scale,1))]"
         inert={!open}
         aria-hidden={!open}
         data-testid="context-workbench-mobile-sheet"
@@ -354,6 +355,7 @@ export function ContextWorkbench({
   const lifecyclePanelsRef = useRef(new Map<string, Set<string>>())
   const lastActivePanelRef = useRef(new Map<string, string | null>())
   const t = useTranslations()
+  const [customizeRailOpen, setCustomizeRailOpen] = useState(false)
   useSyncExternalStore(
     contextPanelRegistry.subscribe,
     contextPanelRegistry.getRevision,
@@ -839,7 +841,7 @@ export function ContextWorkbench({
         role={layout.mode === "focus" ? "dialog" : undefined}
         aria-modal={layout.mode === "focus" ? true : undefined}
         className={cn(
-          "relative flex h-full min-h-0 overflow-hidden border-l bg-card/40",
+          "relative flex h-full min-h-0 min-w-0 max-w-full overflow-hidden border-l bg-card/40",
           // A phone can't spare 48px of its width for a vertical rail, so the
           // sheet stacks: rail across the top, panel body beneath it.
           placement === "mobile-sheet" && "w-full flex-col border-l-0",
@@ -887,7 +889,7 @@ export function ContextWorkbench({
             role="separator"
             aria-orientation="vertical"
             aria-label={t("contextWorkbench.actions.resize")}
-            className="absolute inset-y-0 left-0 z-10 w-1 cursor-col-resize touch-none"
+            className="absolute inset-y-0 left-0 z-20 w-5 -translate-x-1/2 cursor-col-resize touch-none"
             onPointerDown={handleResizeStart}
             // Editor-splitter convention: double-click restores the default
             // width — and, because it is attributed to the active panel like a
@@ -998,6 +1000,23 @@ export function ContextWorkbench({
                 </TooltipTrigger>
                 <TooltipContent side={railIsHorizontal ? "bottom" : "left"}>
                   {t("contextWorkbench.actions.pinHint")}
+                </TooltipContent>
+              </Tooltip>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    type="button"
+                    size="icon-sm"
+                    variant="ghost"
+                    aria-label={t("desktop.shellLayout.title")}
+                    data-testid="context-workbench-customize-rail"
+                    onClick={() => setCustomizeRailOpen(true)}
+                  >
+                    <SlidersHorizontalIcon className="size-4" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent side={railIsHorizontal ? "bottom" : "left"}>
+                  {t("desktop.shellLayout.title")}
                 </TooltipContent>
               </Tooltip>
               {/* Flips with the surface. On a persistent rail the panel body is
@@ -1331,6 +1350,11 @@ export function ContextWorkbench({
           </div>
         ) : null}
       </section>
+      <ShellLayoutDialog
+        open={customizeRailOpen}
+        onOpenChange={setCustomizeRailOpen}
+        surface="workbench"
+      />
     </ContextWorkbenchContext.Provider>
   )
 }

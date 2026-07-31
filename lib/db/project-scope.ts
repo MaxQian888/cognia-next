@@ -10,6 +10,7 @@ import type { Project } from "@/types"
 import { getDb } from "./schema"
 import { getSettings, saveSettings } from "./settings"
 import { buildDefaultProject, DEFAULT_PROJECT_ID } from "./project-defaults"
+import { purgeProjectBuckets } from "@/lib/project/project-bucket-purge"
 
 export { DEFAULT_PROJECT_ID } from "./project-defaults"
 
@@ -166,7 +167,7 @@ export async function deleteProjectCascade(projectId: string): Promise<void> {
     }
   })
 
-  await purgeStoreBuckets(projectId)
+  purgeProjectBuckets(projectId)
   await purgeProjectVectorCollection(projectId)
 }
 
@@ -194,21 +195,5 @@ async function purgeProjectVectorCollection(projectId: string): Promise<void> {
   } catch {
     // Non-fatal — the local rows are already dropped; a remote purge failure
     // must never block workspace deletion.
-  }
-}
-
-/** Best-effort purge of localStorage-backed per-project state. Never throws. */
-async function purgeStoreBuckets(projectId: string): Promise<void> {
-  try {
-    const { useArtifactStore } = await import("@/stores/artifact/artifact-store")
-    useArtifactStore.getState().purgeProject?.(projectId)
-  } catch {
-    // Store not available (SSR/test) or method absent — non-fatal.
-  }
-  try {
-    const { useAgentTeamStore } = await import("@/stores/agent/agent-team-store")
-    useAgentTeamStore.getState().purgeProject?.(projectId)
-  } catch {
-    // Non-fatal.
   }
 }

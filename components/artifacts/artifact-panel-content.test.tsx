@@ -103,6 +103,19 @@ describe("ArtifactPanelContent", () => {
     expect(screen.getByTestId("code")).toBeInTheDocument()
   })
 
+  it("contains content layers inside the artifact body", () => {
+    makeArtifact("html")
+    render(<ArtifactPanelContent panelMode="desktop" />)
+
+    expect(screen.getByTestId("artifact-content")).toHaveClass(
+      "relative",
+      "isolate",
+      "min-w-0",
+      "w-full",
+      "overflow-hidden"
+    )
+  })
+
   it("offers a split tab for previewable types on desktop", () => {
     makeArtifact("html")
     render(<ArtifactPanelContent panelMode="desktop" />)

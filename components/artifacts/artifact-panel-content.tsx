@@ -486,7 +486,10 @@ export function ArtifactPanelContent({ panelMode }: { panelMode: ArtifactPanelMo
             )}
           </ArtifactHeader>
 
-          <ArtifactContent className="min-h-0 flex-1 overflow-hidden p-0">
+          <ArtifactContent
+            data-testid="artifact-content"
+            className="relative isolate min-h-0 min-w-0 w-full flex-1 overflow-hidden p-0"
+          >
             {renderContentBody()}
           </ArtifactContent>
 

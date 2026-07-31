@@ -20,6 +20,8 @@ import {
   MessagesSquareIcon,
   PanelsTopLeftIcon,
   SearchCodeIcon,
+  FileSearchIcon,
+  FolderKanbanIcon,
   InfoIcon,
   GlobeIcon,
   CornerUpLeftIcon,
@@ -28,6 +30,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useTranslations } from "next-intl"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
+import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
 import { Textarea } from "@/components/ui/textarea"
 import { hasWorkspaceFsBackend } from "@/lib/files/workspace-backend"
 import { isRunnableArtifactType } from "@/lib/artifacts/constants"
@@ -64,6 +67,10 @@ import { ContextCapabilityUnavailable } from "@/components/context-workbench/con
 import { resolveContextCapabilities } from "@/lib/context-workbench/capabilities"
 import { useContextCommentBadge } from "@/hooks/context-workbench/use-context-comment-badge"
 import { BrowserPreviewPane } from "@/components/browser/browser-preview-pane"
+import { SessionSourcesPanel } from "@/components/context-workbench/session-sources-panel"
+import { ProjectOverviewPanel } from "./workspace-mode/project-overview-panel"
+import { useProjectStore } from "@/stores/project/project-store"
+import type { UIMessage } from "ai"
 
 /**
  * The activity that carries the dock's unread dot, per surface.
@@ -117,7 +124,7 @@ function useDockWidthHint() {
       // extra room matters most. Only the header buttons, which name no panel,
       // fall back to the settled profile.
       const profile = panelId
-        ? panelId === WORKSPACE_PANEL_ID
+        ? panelId === WORKSPACE_PANEL_ID || panelId === PROJECT_OVERVIEW_PANEL_ID
           ? "workspace"
           : "compact"
         : dockProfile
@@ -135,12 +142,12 @@ function useDockWidthHint() {
 }
 
 /**
- * The one panel whose surface needs the wider sizing profile (file tree +
- * Monaco + git diff). Named because three separate places key off it: the
- * profile sync below, the width-preset lookup above, and the panel definition
- * itself.
+ * The two project surfaces need the wider sizing profile: the editor carries a
+ * file tree + Monaco + Git diff, while the overview carries analysis and a
+ * compact Source Control changes list.
  */
 const WORKSPACE_PANEL_ID = "workspace"
+const PROJECT_OVERVIEW_PANEL_ID = "project-overview"
 
 /**
  * The scope key standing in for "this conversation". Built in one place because
@@ -202,7 +209,11 @@ function useDockPanelSync(
 
   useEffect(() => {
     if (!activePanelId) return
-    setDockProfile(activePanelId === WORKSPACE_PANEL_ID ? "workspace" : "compact")
+    setDockProfile(
+      activePanelId === WORKSPACE_PANEL_ID || activePanelId === PROJECT_OVERVIEW_PANEL_ID
+        ? "workspace"
+        : "compact"
+    )
   }, [activePanelId, setDockProfile])
 
   // Focus is a full-screen takeover that outlives the dock it was opened from.
@@ -233,6 +244,7 @@ function useDockPanelSync(
 
 /** Stable identity so the sync effects don't re-run on every render. */
 const EMPTY_PANEL_IDS: string[] = []
+const EMPTY_SESSION_MESSAGES: UIMessage[] = []
 
 /**
  * Set by the Sheet host (`<ArtifactPanel />`). `panelMode` is the host's own
@@ -261,6 +273,14 @@ export function ArtifactContextWorkbench({
   const pendingReview = useArtifactStore((state) => state.pendingReviews[artifactId] ?? null)
   const hadPendingReview = useRef(false)
   const activeSessionId = useChatStore((state) => state.activeSessionId)
+  const sessionProjectId = useSessionStore((state) =>
+    activeSessionId
+      ? state.sessions.find((session) => session.id === activeSessionId)?.projectId
+      : undefined
+  )
+  const sessionProject = useProjectStore((state) =>
+    sessionProjectId ? state.projects.find((project) => project.id === sessionProjectId) : undefined
+  )
   const setDockCollapsed = useArtifactDockLayoutStore((state) => state.setDockCollapsed)
   // Something arrived while the dock was dismissed. With a persistent rail the
   // marker belongs on the rail itself — that is now the thing the user is
@@ -357,45 +377,6 @@ export function ArtifactContextWorkbench({
                 onSubmit={setPendingSelectionComment}
               />
             }
-          />
-        ),
-      },
-      {
-        // Sidechat: an aside bound to the conversation itself, for checking
-        // something adjacent without spending turns in — or adding noise to —
-        // the main thread. Shares the `ai` activity with the artifact chat
-        // above; only one of the two ever applies, since a resource is either
-        // an artifact or the session.
-        id: "session-sidechat",
-        activity: "ai",
-        labelKey: "contextWorkbench.sessionSidechat",
-        icon: MessagesSquareIcon,
-        order: 25,
-        appliesTo: (resource) =>
-          resource.kind === "session" &&
-          // No conversation open, or the "conversation" IS an aside — an aside
-          // of an aside has no surface to render and would nest forever.
-          resource.sessionId !== "none" &&
-          !resource.sessionId.startsWith("resource-workbench:"),
-        retention: "stateful",
-        requiresChatScope: true,
-        renderer: () => (
-          <ResourceWorkbenchChatPanel
-            // Re-resolved on every send, so the aside always sees the main
-            // thread as it stands now rather than a snapshot from when the
-            // panel opened.
-            getResourceContext={() =>
-              buildAsideContext(
-                activeSessionId
-                  ? (useChatStore.getState().sessions[activeSessionId]?.messages ?? [])
-                  : []
-              )
-            }
-            asideTargetSessionId={activeSessionId ?? undefined}
-            // A conversation can own several named asides; an artifact / canvas
-            // / project-file chat is a property OF that resource and stays
-            // single.
-            multiAside
           />
         ),
       },
@@ -528,6 +509,30 @@ export function ArtifactContextWorkbench({
           ) : null,
       },
       {
+        id: PROJECT_OVERVIEW_PANEL_ID,
+        activity: "workspace",
+        labelKey: "projectOverview.panelTitle",
+        icon: FolderKanbanIcon,
+        order: 25,
+        appliesTo: (resource) =>
+          resource.kind === "artifact" && Boolean(sessionProject?.roots.length),
+        retention: "stateful",
+        scope: "session",
+        preferredMode: "wide",
+        renderer: () =>
+          sessionProject ? (
+            <ProjectOverviewPanel
+              projectId={sessionProject.id}
+              onOpenWorkspace={() => {
+                useContextWorkbenchStore
+                  .getState()
+                  .navigatePanel(scopeKey, WORKSPACE_PANEL_ID, "wide")
+                dockWidthHint("wide", WORKSPACE_PANEL_ID)
+              }}
+            />
+          ) : null,
+      },
+      {
         id: WORKSPACE_PANEL_ID,
         activity: "workspace",
         labelKey: "artifacts.dock.workspaceMode",
@@ -551,10 +556,13 @@ export function ArtifactContextWorkbench({
       activeSessionId,
       artifact,
       artifactId,
+      dockWidthHint,
       hostLayout,
       workspaceLayout,
       pendingReview,
       pendingSelectionComment,
+      sessionProject,
+      scopeKey,
       tWorkbench,
       textSelection,
       unresolvedCommentCount,
@@ -718,8 +726,18 @@ export function SessionContextWorkbench({
   const session = useSessionStore((state) =>
     activeSessionId ? (state.sessions.find((s) => s.id === activeSessionId) ?? null) : null
   )
+  const sessionProject = useProjectStore((state) =>
+    session?.projectId
+      ? state.projects.find((project) => project.id === session.projectId)
+      : undefined
+  )
   const messageCount = useChatStore((state) =>
     activeSessionId ? (state.sessions[activeSessionId]?.messages.length ?? 0) : 0
+  )
+  const sessionMessages = useChatStore((state) =>
+    activeSessionId
+      ? (state.sessions[activeSessionId]?.messages ?? EMPTY_SESSION_MESSAGES)
+      : EMPTY_SESSION_MESSAGES
   )
   const unresolvedCommentCount = useContextCommentBadge("session", activeSessionId)
   const setDockCollapsed = useArtifactDockLayoutStore((state) => state.setDockCollapsed)
@@ -758,6 +776,44 @@ export function SessionContextWorkbench({
         ),
       },
       {
+        // Sidechat belongs on the session surface: it is an aside to the main
+        // conversation, not a property of whichever artifact happens to be
+        // open. `useResourceWorkbenchSession` ensures the primary aside as soon
+        // as this panel activates.
+        id: "session-sidechat",
+        activity: "ai",
+        labelKey: "contextWorkbench.sessionSidechat",
+        icon: MessagesSquareIcon,
+        order: 15,
+        appliesTo: (resource) =>
+          resource.kind === "session" && !resource.sessionId.startsWith("resource-workbench:"),
+        retention: "stateful",
+        requiresChatScope: Boolean(activeSessionId),
+        renderer: () =>
+          activeSessionId ? (
+            <ResourceWorkbenchChatPanel
+              // Re-resolved on every send, so the aside always sees the main
+              // thread as it stands now rather than a snapshot from when the
+              // panel opened.
+              getResourceContext={() => buildAsideContext(sessionMessages)}
+              asideTargetSessionId={activeSessionId}
+              multiAside
+            />
+          ) : (
+            <Empty className="h-full rounded-none">
+              <EmptyHeader>
+                <EmptyMedia variant="icon">
+                  <MessagesSquareIcon />
+                </EmptyMedia>
+                <EmptyTitle className="text-base">
+                  {tWorkbench("sidechatPlaceholder.title")}
+                </EmptyTitle>
+                <EmptyDescription>{tWorkbench("sidechatPlaceholder.description")}</EmptyDescription>
+              </EmptyHeader>
+            </Empty>
+          ),
+      },
+      {
         id: "browser",
         activity: "preview-run",
         labelKey: "browser.title",
@@ -768,6 +824,30 @@ export function SessionContextWorkbench({
         scope: "session",
         preferredMode: "wide",
         renderer: () => <BrowserPreviewPane sessionId={activeSessionId ?? undefined} />,
+      },
+      {
+        id: PROJECT_OVERVIEW_PANEL_ID,
+        activity: "workspace",
+        labelKey: "projectOverview.panelTitle",
+        icon: FolderKanbanIcon,
+        order: 25,
+        appliesTo: (resource) =>
+          resource.kind === "session" && Boolean(sessionProject?.roots.length),
+        retention: "stateful",
+        scope: "session",
+        preferredMode: "wide",
+        renderer: () =>
+          sessionProject ? (
+            <ProjectOverviewPanel
+              projectId={sessionProject.id}
+              onOpenWorkspace={() => {
+                useContextWorkbenchStore
+                  .getState()
+                  .navigatePanel(scopeKey, WORKSPACE_PANEL_ID, "wide")
+                dockWidthHint("wide", WORKSPACE_PANEL_ID)
+              }}
+            />
+          ) : null,
       },
       {
         id: WORKSPACE_PANEL_ID,
@@ -807,6 +887,16 @@ export function SessionContextWorkbench({
               revision={String(session?.updatedAt ?? 0)}
             />
           ) : null,
+      },
+      {
+        id: "session-sources",
+        activity: "inspect",
+        labelKey: "contextWorkbench.sessionSources.title",
+        icon: FileSearchIcon,
+        order: 45,
+        appliesTo: (resource) => resource.kind === "session",
+        retention: "stateful",
+        renderer: () => <SessionSourcesPanel messages={sessionMessages} />,
       },
       {
         // Fills the `inspect` rail slot, which stood empty on this surface while
@@ -849,8 +939,12 @@ export function SessionContextWorkbench({
     ],
     [
       activeSessionId,
+      dockWidthHint,
       messageCount,
       session,
+      sessionMessages,
+      sessionProject,
+      scopeKey,
       tWorkbench,
       unresolvedCommentCount,
       workspaceAvailable,

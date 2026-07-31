@@ -79,7 +79,7 @@ jest.mock("@/components/chat/chat-view", () => ({
     onCreate: () => void
     onOpenSettings: () => void
   }) => (
-    <div>
+    <div data-testid="chat-pane">
       <button
         type="button"
         onClick={() => void onSend("hello", attachmentManifest).catch(() => undefined)}
@@ -117,6 +117,19 @@ describe("ResourceWorkbenchChatPanel", () => {
     ;(useChatStore.getState().setPendingArtifactEditTarget as jest.Mock).mockClear()
     mockResource = { kind: "project-file", relPath: "src/a.ts" }
   })
+
+  it("provides a bounded flex column so the composer stays visible below suggestions", async () => {
+    render(<ResourceWorkbenchChatPanel />)
+
+    expect((await screen.findByTestId("chat-pane")).parentElement).toHaveClass(
+      "flex",
+      "min-h-0",
+      "flex-1",
+      "flex-col",
+      "overflow-hidden"
+    )
+  })
+
   it("dispatches through its scoped embedded session", async () => {
     render(<ResourceWorkbenchChatPanel />)
     await userEvent.click(await screen.findByRole("button", { name: "send" }))

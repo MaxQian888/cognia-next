@@ -37,11 +37,17 @@ jest.mock("@/components/ui/resizable", () => {
     ResizablePanelGroup: ({
       children,
       onLayoutChanged,
+      resizeTargetMinimumSize,
     }: {
       children: React.ReactNode
       onLayoutChanged?: (layout: Record<string, number>) => void
+      resizeTargetMinimumSize?: { coarse: number; fine: number }
     }) => (
-      <div>
+      <div
+        data-testid="resizable-panel-group"
+        data-resize-target-coarse={resizeTargetMinimumSize?.coarse}
+        data-resize-target-fine={resizeTargetMinimumSize?.fine}
+      >
         {children}
         <button
           type="button"
@@ -618,7 +624,12 @@ describe("ArtifactWorkspaceDock", () => {
   it("pins the dock body's width so collapsing wipes it instead of squashing it", async () => {
     // jsdom reports every offsetWidth as 0, so the pin is unreachable without
     // stubbing the two measurements it derives from.
-    const offsetWidth = jest.spyOn(HTMLElement.prototype, "offsetWidth", "get").mockReturnValue(400)
+    let bodyWidth = 48
+    const offsetWidth = jest
+      .spyOn(HTMLElement.prototype, "offsetWidth", "get")
+      .mockImplementation(function (this: HTMLElement) {
+        return this.dataset.testid === "artifact-dock-wrapper" ? bodyWidth : 400
+      })
     try {
       render(
         <ArtifactWorkspaceDock>
@@ -635,12 +646,45 @@ describe("ArtifactWorkspaceDock", () => {
       expect(body.style.width).toBe("136px")
       await waitFor(() => expect(body.style.width).toBe(""))
 
+      bodyWidth = 400
       act(() => useArtifactDockLayoutStore.getState().setDockCollapsed(true))
 
       // Collapsing: hold what is on screen. The activity rail is shrink-0 while
       // the panel body is not, so an unpinned body gets crushed alone.
       expect(body.style.width).toBe("400px")
       await waitFor(() => expect(body.style.width).toBe(""))
+    } finally {
+      offsetWidth.mockRestore()
+    }
+  })
+
+  it("keeps wide content geometry while a width preset shrinks the dock", () => {
+    act(() => {
+      useArtifactDockLayoutStore.getState().setDockCollapsed(false)
+      useArtifactDockLayoutStore.getState().setDockSize(50)
+    })
+    const offsetWidth = jest
+      .spyOn(HTMLElement.prototype, "offsetWidth", "get")
+      .mockImplementation(function (this: HTMLElement) {
+        if (this.dataset.testid === "resizable-panel-artifact-dock") return 500
+        if (this.dataset.testid === "artifact-dock-wrapper") return 500
+        return 1000
+      })
+    try {
+      render(
+        <ArtifactWorkspaceDock>
+          <div data-testid="chat" />
+        </ArtifactWorkspaceDock>
+      )
+      const body = screen.getByTestId("artifact-dock-wrapper")
+
+      act(() => useArtifactDockLayoutStore.getState().requestDockSize(34))
+
+      // The shell starts at 500px and animates down to 340px. Reflowing the
+      // body to 340px before the shell has moved makes responsive controls jump
+      // first, producing the visible wide-to-narrow layout bump. Hold the
+      // current geometry and let the shrinking shell wipe it instead.
+      expect(body.style.width).toBe("500px")
     } finally {
       offsetWidth.mockRestore()
     }
@@ -701,7 +745,17 @@ describe("ArtifactWorkspaceDock", () => {
     // fading or disabling it here would make that impossible.
     expect(handle.className).not.toContain("opacity-0")
     expect(handle.className).toContain("transition-[width,opacity]")
+    expect(handle.className).toContain("after:w-5")
+    expect(handle.className).toContain("z-20")
     expect(handle.className).not.toContain("hidden")
+    expect(screen.getByTestId("resizable-panel-group")).toHaveAttribute(
+      "data-resize-target-coarse",
+      "28"
+    )
+    expect(screen.getByTestId("resizable-panel-group")).toHaveAttribute(
+      "data-resize-target-fine",
+      "20"
+    )
 
     act(() => useArtifactDockLayoutStore.getState().setDockCollapsed(false))
 

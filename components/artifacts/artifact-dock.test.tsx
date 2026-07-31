@@ -3,6 +3,7 @@
  */
 
 import { render, screen, fireEvent, act } from "@testing-library/react"
+import { useEffect } from "react"
 
 let workspaceAvailable = true
 
@@ -24,19 +25,33 @@ jest.mock("@/components/context-workbench/resource-workbench-chat-panel", () => 
     getResourceContext,
     onPendingPromptConsumed,
     selectionHeader,
+    asideTargetSessionId,
+    multiAside,
   }: {
     pendingPrompt?: string | null
-    getResourceContext: () => string
-    onPendingPromptConsumed: () => void
+    getResourceContext?: () => string
+    onPendingPromptConsumed?: () => void
     selectionHeader?: React.ReactNode
+    asideTargetSessionId?: string
+    multiAside?: boolean
   }) => (
-    <div data-testid="resource-workbench-chat" data-context={getResourceContext()}>
+    <div
+      data-testid="resource-workbench-chat"
+      data-context={getResourceContext?.() ?? ""}
+      data-aside-target={asideTargetSessionId ?? ""}
+      data-multi-aside={multiAside ? "true" : "false"}
+    >
       {selectionHeader}
       {pendingPrompt}
       <button type="button" data-testid="consume-prompt" onClick={onPendingPromptConsumed}>
         consume
       </button>
     </div>
+  ),
+}))
+jest.mock("@/components/context-workbench/session-sources-panel", () => ({
+  SessionSourcesPanel: ({ messages }: { messages: unknown[] }) => (
+    <div data-testid="session-sources-panel" data-count={messages.length} />
   ),
 }))
 jest.mock("@/hooks/chat/use-resource-workbench-session", () => ({
@@ -53,6 +68,22 @@ jest.mock("@/lib/files/workspace-backend", () => ({
 jest.mock("./workspace-mode/dock-workspace", () => ({
   DockWorkspace: ({ activeSessionId }: { activeSessionId: string | null }) => (
     <div data-testid="workspace" data-session={activeSessionId ?? ""} />
+  ),
+}))
+
+jest.mock("./workspace-mode/project-overview-panel", () => ({
+  ProjectOverviewPanel: ({
+    projectId,
+    onOpenWorkspace,
+  }: {
+    projectId: string
+    onOpenWorkspace: () => void
+  }) => (
+    <div data-testid="project-overview" data-project={projectId}>
+      <button type="button" onClick={onOpenWorkspace}>
+        open-project-workspace
+      </button>
+    </div>
   ),
 }))
 
@@ -78,10 +109,17 @@ jest.mock("@/components/context-workbench/context-comments-panel", () => ({
   ),
 }))
 
+const mockBrowserPreviewCleanup = jest.fn()
 jest.mock("@/components/browser/browser-preview-pane", () => ({
-  BrowserPreviewPane: ({ sessionId }: { sessionId?: string }) => (
-    <div data-testid="browser-preview" data-session={sessionId ?? ""} />
-  ),
+  BrowserPreviewPane: ({ sessionId }: { sessionId?: string }) => {
+    useEffect(
+      () => () => {
+        mockBrowserPreviewCleanup()
+      },
+      []
+    )
+    return <div data-testid="browser-preview" data-session={sessionId ?? ""} />
+  },
 }))
 
 const artifactListProps: Array<{ sessionId?: string }> = []
@@ -95,13 +133,18 @@ jest.mock("./artifact-list", () => ({
 // `sessions` is the per-session message slice map, always initialised in the
 // real store — the session surface's metadata panel reads a message count off it.
 let mockActiveSessionId: string | null = "sess-1"
+let mockSessionMessages: unknown[] = []
 jest.mock("@/stores/chat", () => ({
   useChatStore: (
     selector: (s: {
       activeSessionId: string | null
       sessions: Record<string, { messages: unknown[] }>
     }) => unknown
-  ) => selector({ activeSessionId: mockActiveSessionId, sessions: { "sess-1": { messages: [] } } }),
+  ) =>
+    selector({
+      activeSessionId: mockActiveSessionId,
+      sessions: { "sess-1": { messages: mockSessionMessages } },
+    }),
 }))
 
 // The conversation record behind the metadata panel. Absent by default; tests
@@ -110,6 +153,15 @@ let mockSessionRecord: unknown = null
 jest.mock("@/stores/chat/session-store", () => ({
   useSessionStore: (selector: (s: { sessions: unknown[] }) => unknown) =>
     selector({ sessions: mockSessionRecord ? [mockSessionRecord] : [] }),
+}))
+
+let mockProjects: Array<{ id: string; roots: Array<{ id: string; path: string }> }> = []
+jest.mock("@/stores/project/project-store", () => ({
+  useProjectStore: (
+    selector: (state: {
+      projects: Array<{ id: string; roots: Array<{ id: string; path: string }> }>
+    }) => unknown
+  ) => selector({ projects: mockProjects }),
 }))
 
 import { toast } from "sonner"
@@ -151,6 +203,8 @@ function activateArtifact(version = 1) {
 beforeEach(() => {
   jest.clearAllMocks()
   mockActiveSessionId = "sess-1"
+  mockSessionMessages = []
+  mockProjects = []
   localStorage.clear()
   workspaceAvailable = true
   artifactListProps.length = 0
@@ -200,6 +254,18 @@ describe("ArtifactDock — converged workbench shell", () => {
       "data-rail-only",
       "true"
     )
+  })
+
+  it("unmounts the browser renderer when the entire workspace collapses to rail-only", () => {
+    act(() => useArtifactDockLayoutStore.getState().openBrowser())
+    const { rerender } = render(<ArtifactDock />)
+    expect(screen.getByTestId("browser-preview")).toBeInTheDocument()
+    mockBrowserPreviewCleanup.mockClear()
+
+    rerender(<ArtifactDock railOnly />)
+
+    expect(screen.queryByTestId("browser-preview")).not.toBeInTheDocument()
+    expect(mockBrowserPreviewCleanup).toHaveBeenCalledTimes(1)
   })
 
   it("shows an attention marker on the rail only while something is unread", () => {
@@ -279,6 +345,28 @@ describe("ArtifactDock — converged workbench shell", () => {
 
     expect(activePanelId("artifact:artifact-1")).toBe("workspace")
     expect(screen.getByTestId("workspace")).toHaveAttribute("data-session", "sess-1")
+  })
+
+  it("keeps the conversation project overview reachable while an artifact is open", () => {
+    mockSessionRecord = {
+      id: "sess-1",
+      projectId: "project-b",
+      createdAt: 0,
+      updatedAt: 0,
+    }
+    mockProjects = [
+      {
+        id: "project-b",
+        roots: [{ id: "root-b", path: "/repo/b" }],
+      },
+    ]
+    activateArtifact()
+    render(<ArtifactDock />)
+
+    fireEvent.click(screen.getByRole("button", { name: "projectOverview.panelTitle" }))
+
+    expect(screen.getByTestId("project-overview")).toHaveAttribute("data-project", "project-b")
+    expect(activePanelId("artifact:artifact-1")).toBe("project-overview")
   })
 
   it("opens the session workspace panel scoped to the active chat session", () => {
@@ -444,6 +532,39 @@ describe("ArtifactDock — converged workbench shell", () => {
       expect(screen.getByText("sess-1")).toBeInTheDocument()
     })
 
+    it("opens a searchable source explorer for the active conversation", () => {
+      mockSessionMessages = [
+        {
+          id: "assistant-1",
+          role: "assistant",
+          parts: [{ type: "source-url", sourceId: "docs", url: "https://example.com" }],
+        },
+      ]
+      render(<SessionContextWorkbench />)
+      act(() => {
+        useContextWorkbenchStore
+          .getState()
+          .navigatePanel(SESSION_SCOPE, "session-sources", "narrow")
+      })
+
+      expect(screen.getByTestId("session-sources-panel")).toHaveAttribute("data-count", "1")
+    })
+
+    it("opens a default sidechat beside the active conversation", () => {
+      render(<SessionContextWorkbench />)
+
+      fireEvent.click(screen.getByRole("button", { name: "contextWorkbench.sessionSidechat" }))
+
+      expect(screen.getByTestId("resource-workbench-chat")).toHaveAttribute(
+        "data-aside-target",
+        "sess-1"
+      )
+      expect(screen.getByTestId("resource-workbench-chat")).toHaveAttribute(
+        "data-multi-aside",
+        "true"
+      )
+    })
+
     it("comments on the conversation itself, not on an artifact", () => {
       mockSessionRecord = {
         id: "sess-1",
@@ -468,6 +589,45 @@ describe("ArtifactDock — converged workbench shell", () => {
       })
       // `session` is null here; the panel must not invent fields for it.
       expect(screen.queryByText("claude-opus-5")).not.toBeInTheDocument()
+    })
+
+    it("adds a project overview for a conversation with a workspace and opens its editor", () => {
+      mockSessionRecord = {
+        id: "sess-1",
+        projectId: "project-b",
+        createdAt: 0,
+        updatedAt: 0,
+      }
+      mockProjects = [
+        {
+          id: "project-b",
+          roots: [{ id: "root-b", path: "/repo/b" }],
+        },
+      ]
+      render(<SessionContextWorkbench />)
+
+      fireEvent.click(screen.getByRole("button", { name: "projectOverview.panelTitle" }))
+
+      expect(screen.getByTestId("project-overview")).toHaveAttribute("data-project", "project-b")
+      fireEvent.click(screen.getByRole("button", { name: "open-project-workspace" }))
+      expect(activePanelId("session:sess-1")).toBe("workspace")
+      expect(screen.getByTestId("workspace")).toHaveAttribute("data-session", "sess-1")
+    })
+
+    it("does not add a project overview for a rootless conversation", () => {
+      mockSessionRecord = {
+        id: "sess-1",
+        projectId: "project-empty",
+        createdAt: 0,
+        updatedAt: 0,
+      }
+      mockProjects = [{ id: "project-empty", roots: [] }]
+
+      render(<SessionContextWorkbench />)
+
+      expect(
+        screen.queryByRole("button", { name: "projectOverview.panelTitle" })
+      ).not.toBeInTheDocument()
     })
   })
 
@@ -889,6 +1049,16 @@ describe("ArtifactDock — with no conversation open", () => {
     // sessionId handed to the embedded panels.
     mockActiveSessionId = null
     expect(() => render(<SessionContextWorkbench />)).not.toThrow()
+  })
+
+  it("shows a clear sidechat placeholder instead of an empty panel", () => {
+    mockActiveSessionId = null
+    render(<SessionContextWorkbench />)
+
+    fireEvent.click(screen.getByRole("button", { name: "contextWorkbench.sessionSidechat" }))
+
+    expect(screen.getByText("sidechatPlaceholder.title")).toBeInTheDocument()
+    expect(screen.getByText("sidechatPlaceholder.description")).toBeInTheDocument()
   })
 })
 

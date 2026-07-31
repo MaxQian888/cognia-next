@@ -55,6 +55,7 @@ import {
   selectOpenArtifactIds,
   useArtifactStore,
 } from "./artifact-store"
+import { purgeProjectBuckets } from "@/lib/project/project-bucket-purge"
 
 const initial = {
   artifacts: {},
@@ -108,6 +109,13 @@ beforeEach(() => {
   resetPluginRateLimiter()
   mockActiveProjectId = null
   mockActiveSessionId = null
+})
+
+it("registers the live artifact store with project bucket purge", () => {
+  const purge = jest.spyOn(useArtifactStore.getState(), "purgeProject").mockImplementation(() => {})
+  purgeProjectBuckets("project-1")
+  expect(purge).toHaveBeenCalledWith("project-1")
+  purge.mockRestore()
 })
 
 describe("openArtifactIds (the dock's tab strip)", () => {

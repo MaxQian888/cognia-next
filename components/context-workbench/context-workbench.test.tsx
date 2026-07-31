@@ -25,6 +25,11 @@ jest.mock("@/hooks/chat/use-resource-workbench-session", () => ({
   useResourceWorkbenchSession: (...args: unknown[]) => mockUseResourceWorkbenchSession(...args),
 }))
 
+jest.mock("@/components/shell/shell-layout-dialog", () => ({
+  ShellLayoutDialog: ({ open, surface }: { open: boolean; surface: string }) =>
+    open ? <div data-testid={`shell-layout-dialog-${surface}`} /> : null,
+}))
+
 const resource: ContextResource = {
   kind: "canvas-document",
   documentId: "doc-1",
@@ -287,7 +292,7 @@ describe("ContextWorkbench", () => {
     consoleError.mockRestore()
   })
 
-  it("force-mounts the closed mobile sheet while disabling focus and interaction", () => {
+  it("force-mounts the closed mobile sheet off-canvas while disabling focus and interaction", () => {
     render(
       <NextIntlClientProvider locale="en" messages={messages}>
         <ContextWorkbenchMobileSheet
@@ -300,6 +305,7 @@ describe("ContextWorkbench", () => {
       </NextIntlClientProvider>
     )
     const sheet = screen.getByTestId("context-workbench-mobile-sheet")
+    expect(sheet).toHaveClass("data-[state=closed]:translate-y-full")
     expect(sheet).toHaveAttribute("inert")
     expect(sheet).toHaveAttribute("aria-hidden", "true")
     expect(screen.queryByRole("button", { name: "Wide" })).not.toBeInTheDocument()
@@ -416,6 +422,7 @@ describe("ContextWorkbench", () => {
     )
 
     const handle = screen.getByRole("separator", { name: "Resize workbench" })
+    expect(handle).toHaveClass("w-5", "-translate-x-1/2", "z-20")
     fireEvent(handle, new MouseEvent("pointerdown", { bubbles: true, clientX: 500 }))
     act(() => {
       window.dispatchEvent(new MouseEvent("pointermove", { clientX: 300 }))
@@ -1032,6 +1039,20 @@ describe("ContextWorkbench", () => {
 
       expect(onModeWidthHint.mock.calls.map(([mode]) => mode)).toEqual(["wide", "narrow", "focus"])
     })
+
+    it("caps managed narrow and wide modes to the host width", () => {
+      renderWorkbench(twoPanels)
+
+      const section = screen.getByTestId("context-workbench")
+      expect(section.className).toContain("max-w-full")
+      expect(section.className).toContain("min-w-0")
+
+      fireEvent.click(screen.getByRole("button", { name: "Wide mode" }))
+      expect(section).toHaveStyle({ width: "clamp(640px, 50%, 960px)" })
+
+      fireEvent.click(screen.getByRole("button", { name: "Narrow mode" }))
+      expect(section).toHaveStyle({ width: "360px" })
+    })
   })
 })
 
@@ -1112,6 +1133,14 @@ describe("ContextWorkbench — customizable activity rail", () => {
       useContextWorkbenchStore.getState().navigatePanel("window-a::artifact:a1", "ai", "narrow")
     })
     expect(screen.getByText("ai-panel")).toBeInTheDocument()
+  })
+
+  it("opens the shared Workbench customizer from the activity rail", () => {
+    renderWorkbench(PANELS)
+
+    fireEvent.click(screen.getByTestId("context-workbench-customize-rail"))
+
+    expect(screen.getByTestId("shell-layout-dialog-workbench")).toBeInTheDocument()
   })
 })
 

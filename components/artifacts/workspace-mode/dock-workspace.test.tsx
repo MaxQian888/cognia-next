@@ -22,6 +22,7 @@ const mockUseProjectEditor = jest.fn()
 let activePath: string | null = null
 let editorRootKey = "/repo"
 let editorRootPath = "/repo"
+let editorRoots = [{ key: "/repo", label: "main", path: "/repo", isMain: true }]
 interface TestOpenFile {
   absolutePath: string
   relPath: string
@@ -69,8 +70,21 @@ jest.mock("@/components/editor/project/editor-engine-toggle", () => ({
   ),
 }))
 jest.mock("@/components/editor/project/code-server-pane", () => ({
-  CodeServerPane: ({ root, ownerId }: { root: string; ownerId: string }) => (
-    <div data-testid="mock-code-server" data-root={root} data-owner={ownerId} />
+  CodeServerPane: ({
+    root,
+    ownerId,
+    beforeOpen,
+  }: {
+    root: string
+    ownerId: string
+    beforeOpen?: () => void
+  }) => (
+    <button
+      data-testid="mock-code-server"
+      data-root={root}
+      data-owner={ownerId}
+      onClick={beforeOpen}
+    />
   ),
   joinProjectPath: (root: string, relative: string) => {
     const base = root.replace(/[/\\]+$/, "")
@@ -100,7 +114,7 @@ jest.mock("@/components/editor/project/use-project-editor", () => ({
     mockUseProjectEditor(args)
     return {
       deps: {},
-      roots: [{ key: "/repo", label: "main", path: "/repo", isMain: true }],
+      roots: editorRoots,
       rootKey: editorRootKey,
       rootPath: editorRootPath,
       openFiles,
@@ -129,11 +143,13 @@ jest.mock("@/components/editor/project/project-root-switcher", () => ({
 jest.mock("@/components/editor/project/project-editor-tabs", () => ({
   ProjectEditorTabs: ({
     fixedTabs = [],
+    trailingContent,
     onSelect,
     onClose,
     onSaveAll,
   }: {
     fixedTabs?: Array<{ id: string; onSelect: () => void }>
+    trailingContent?: React.ReactNode
     onSelect: (path: string) => void
     onClose: (path: string) => void
     onSaveAll: () => void
@@ -153,6 +169,7 @@ jest.mock("@/components/editor/project/project-editor-tabs", () => ({
       <button data-testid="save-all" onClick={onSaveAll}>
         save all
       </button>
+      {trailingContent}
     </div>
   ),
 }))
@@ -261,6 +278,7 @@ beforeEach(() => {
   activePath = null
   editorRootKey = "/repo"
   editorRootPath = "/repo"
+  editorRoots = [{ key: "/repo", label: "main", path: "/repo", isMain: true }]
   activeFile = null
   openFiles = []
   act(() => useArtifactDockLayoutStore.getState().resetLayout())
@@ -287,6 +305,28 @@ describe("DockWorkspace", () => {
     projects = [{ id: "missing-project", roots: [] }]
     rerender(<DockWorkspace activeSessionId="session-1" />)
     expect(screen.getByTestId("workspace-root-missing")).toBeInTheDocument()
+  })
+
+  it("omits the workspace toolbar when it has no controls to show", () => {
+    render(<DockWorkspace activeSessionId="session-1" />)
+
+    expect(screen.queryByTestId("dock-workspace-toolbar")).not.toBeInTheDocument()
+  })
+
+  it("keeps the workspace surfaces inside a resized workbench", () => {
+    render(<DockWorkspace activeSessionId="session-1" />)
+
+    expect(screen.getByTestId("dock-workspace")).toHaveClass(
+      "w-full",
+      "min-w-0",
+      "max-w-full",
+      "overflow-x-hidden"
+    )
+    expect(screen.getByTestId("workspace-file-layout")).toHaveClass(
+      "min-w-0",
+      "max-w-full",
+      "overflow-hidden"
+    )
   })
 
   it("consumes a queued file reveal after mounting the editor", async () => {
@@ -334,6 +374,14 @@ describe("DockWorkspace", () => {
     expect(screen.getByTestId("review-changes")).toBeInTheDocument()
     expect(screen.getByTestId("review-diff")).toBeInTheDocument()
     expect(screen.queryByTestId("file-tree")).not.toBeInTheDocument()
+  })
+
+  it("keeps the review tab and engine toggle on the same toolbar row", () => {
+    render(<DockWorkspace activeSessionId="session-1" />)
+
+    expect(screen.getByTestId("editor-tabs")).toContainElement(
+      screen.getByTestId("mock-engine-toggle")
+    )
   })
 
   it("preselects a requested working-tree file in the review surface", async () => {
@@ -460,6 +508,10 @@ describe("DockWorkspace", () => {
   })
 
   it("wires editor tabs, sidebar, file actions, and keyboard saves", async () => {
+    editorRoots = [
+      { key: "/repo", label: "main", path: "/repo", isMain: true },
+      { key: "/other", label: "other", path: "/other", isMain: false },
+    ]
     activePath = "src/a.ts"
     activeFile = {
       absolutePath: "/repo/src/a.ts",
@@ -558,5 +610,30 @@ describe("DockWorkspace", () => {
     expect(gotoListener).not.toHaveBeenCalled()
     expect(clearReveal).toHaveBeenCalled()
     window.removeEventListener(PROJECT_EDITOR_GOTO_EVENT, gotoListener)
+  })
+
+  it("keeps the Pro IDE capability host mounted while review is active", async () => {
+    act(() =>
+      useProjectEditorSessionStore.getState().setSession("session:session-1", {
+        editorMode: "codeserver",
+      })
+    )
+    act(() => {
+      useArtifactDockLayoutStore.getState().revealWorkspaceReview({
+        sessionId: "session-1",
+        rootPath: "/repo",
+      })
+    })
+
+    render(<DockWorkspace activeSessionId="session-1" />)
+
+    expect(await screen.findByTestId("workspace-review-layout")).toBeInTheDocument()
+    expect(screen.getByTestId("mock-code-server")).toBeInTheDocument()
+    expect(screen.getByTestId("workspace-code-server-host")).toHaveAttribute("data-active", "false")
+
+    fireEvent.click(screen.getByTestId("mock-code-server"))
+
+    expect(screen.queryByTestId("workspace-review-layout")).not.toBeInTheDocument()
+    expect(screen.getByTestId("workspace-code-server-host")).toHaveAttribute("data-active", "true")
   })
 })

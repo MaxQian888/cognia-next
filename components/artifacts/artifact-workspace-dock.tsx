@@ -102,13 +102,15 @@ function animateDockResize(
     return () => {}
   }
 
-  // Collapsing: hold what is on screen. Expanding: the panel is at ~0, so hold
-  // the width it is heading for — the content is then laid out correctly from
-  // the first frame and the widening panel reveals it.
-  const frozenWidth =
-    targetPercent === null
-      ? (content?.offsetWidth ?? 0)
-      : ((panel.parentElement?.offsetWidth ?? 0) * targetPercent) / 100
+  // Freeze whichever geometry is wider. Expanding lays the body out at its
+  // destination from the first frame; shrinking keeps the current wide layout
+  // and lets the shell wipe it. Pinning every preset to its destination treated
+  // wide → narrow like an expansion, so responsive content reflowed before the
+  // outer panel moved and produced a visible two-step bump.
+  const currentWidth = content?.offsetWidth ?? 0
+  const targetWidth =
+    targetPercent === null ? 0 : ((panel.parentElement?.offsetWidth ?? 0) * targetPercent) / 100
+  const frozenWidth = Math.max(currentWidth, targetWidth)
 
   const reset = () => {
     panel.style.transitionProperty = ""
@@ -416,6 +418,7 @@ function ArtifactWorkspaceDockDesktop({ children }: { children: ReactNode }) {
       <ResizablePanelGroup
         key={layoutVersion}
         orientation="horizontal"
+        resizeTargetMinimumSize={{ coarse: 28, fine: 20 }}
         className="flex-1 min-h-0"
         onLayoutChanged={(layout) => {
           const dock = layout["artifact-dock"]
@@ -469,7 +472,10 @@ function ArtifactWorkspaceDockDesktop({ children }: { children: ReactNode }) {
           className={cn(
             // Literal twin of DOCK_RESIZE_DURATION_MS / DOCK_RESIZE_EASE — see
             // their declaration for why this cannot read them directly.
-            "transition-[width,opacity] duration-[calc(280ms*var(--motion-duration-scale,1))] ease-[cubic-bezier(0.32,0.72,0,1)]",
+            // Keep a real 20px hit target above the workbench border. The
+            // library's default proximity target is only about 10px total, so
+            // grabbing the visible edge a few pixels inside the panel missed.
+            "z-20 after:w-5 transition-[width,opacity] duration-[calc(280ms*var(--motion-duration-scale,1))] ease-[cubic-bezier(0.32,0.72,0,1)]",
             dockCollapsed && !railPersistent && "w-0 opacity-0 [&>div]:opacity-0"
           )}
           disabled={dockCollapsed && !railPersistent}
