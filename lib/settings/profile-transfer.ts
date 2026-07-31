@@ -64,7 +64,7 @@ function isSecretValue(value: unknown): boolean {
  * Recursively drop any key whose normalized name matches the secret pattern AND
  * whose value actually looks like a secret (string / string[]).
  */
-function deepStripSecrets(value: unknown): unknown {
+export function deepStripSecrets(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(deepStripSecrets)
   if (isPlainObject(value)) {
     const out: Record<string, unknown> = {}

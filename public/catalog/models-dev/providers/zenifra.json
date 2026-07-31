@@ -1,0 +1,31 @@
+{
+  "zenifra": {
+    "id": "zenifra",
+    "env": ["ZENIFRA_AI_KEY"],
+    "npm": "@ai-sdk/openai-compatible",
+    "api": "https://ai.zenifra.com/v1",
+    "name": "Zenifra",
+    "doc": "https://docs.zenifra.com",
+    "models": {
+      "alibaba/qwen3.6-35b-a3b": {
+        "id": "alibaba/qwen3.6-35b-a3b",
+        "name": "Qwen3.6 35B-A3B",
+        "description": "Open multimodal Qwen MoE for local agents that need vision, audio, and code",
+        "family": "qwen",
+        "attachment": true,
+        "reasoning": true,
+        "reasoning_options": [],
+        "tool_call": true,
+        "structured_output": true,
+        "temperature": true,
+        "release_date": "2026-04-17",
+        "last_updated": "2026-04-17",
+        "modalities": { "input": ["text"], "output": ["text"] },
+        "open_weights": true,
+        "limit": { "context": 262144, "output": 65536 },
+        "provider": { "shape": "completions" },
+        "cost": { "input": 0.19, "output": 0.48 }
+      }
+    }
+  }
+}

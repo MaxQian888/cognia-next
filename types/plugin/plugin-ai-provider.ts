@@ -21,6 +21,15 @@
  */
 
 import type { PluginContributionBackend } from "@/types/plugin/plugin"
+import type {
+  AdapterFamily,
+  CatalogModality,
+  CatalogModelCapabilities,
+  ModelDataModality,
+  ModelLimits,
+  ModelLifecycle,
+  ProviderOffering,
+} from "@cognia/provider-types/model-catalog"
 
 /**
  * Discriminated union of provider definitions in `manifest.aiProviders[]`.
@@ -41,6 +50,40 @@ interface BasePluginAiProviderDef {
   entry?: string
   export?: string
   description?: string
+  /**
+   * Declarative catalog overlay. IDs are namespaced by the host with the
+   * plugin id; Certified is deliberately unavailable to plugins.
+   */
+  catalog?: PluginAiProviderCatalogDef
+}
+
+export interface PluginCatalogModelDef {
+  id: string
+  name: string
+  creator?: string
+  family?: string
+  modalities: { input: ModelDataModality[]; output: ModelDataModality[] }
+  capabilities?: CatalogModelCapabilities
+  limits?: ModelLimits
+  lifecycle?: ModelLifecycle
+}
+
+export interface PluginCatalogOfferingDef {
+  id: string
+  modelRef: string
+  upstreamId: string
+  endpointType: ProviderOffering["endpointType"]
+  lifecycle?: ModelLifecycle
+  capabilities?: CatalogModelCapabilities
+  limits?: ModelLimits
+}
+
+export interface PluginAiProviderCatalogDef {
+  tier?: "verified" | "experimental"
+  modalities: CatalogModality[]
+  adapterFamily: AdapterFamily
+  models?: PluginCatalogModelDef[]
+  offerings: PluginCatalogOfferingDef[]
 }
 
 export interface PluginLlmProviderDef extends BasePluginAiProviderDef {

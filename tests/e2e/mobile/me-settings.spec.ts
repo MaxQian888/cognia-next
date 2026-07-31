@@ -26,6 +26,7 @@ test.describe("mobile — me page", () => {
     await expect(page.getByTestId("account-card")).toBeVisible()
     // Data-driven settings rows from me-entries.ts — profile is unconditional.
     await expect(page.getByTestId("me-row-profile")).toBeVisible()
+    await expect(page.getByTestId("me-row-model-catalog")).toBeVisible()
     // A freshly reset device is unpaired → the account section offers /pair.
     await expect(page.getByTestId("me-row-pair")).toBeVisible()
   })

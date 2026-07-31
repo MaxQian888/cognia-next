@@ -1,21 +1,21 @@
 import { render } from "@testing-library/react"
 
-const refreshMock = jest.fn().mockResolvedValue(undefined)
+const initializeMock = jest.fn().mockResolvedValue(undefined)
 jest.mock("@/lib/ai/providers/models-dev-sync", () => ({
-  refreshModelsDevCatalogIfStale: (...a: unknown[]) => refreshMock(...a),
+  initializeProviderCatalog: (...a: unknown[]) => initializeMock(...a),
 }))
 
 import { ModelsDevCatalogInitializer } from "./models-dev-catalog-initializer"
 
-beforeEach(() => refreshMock.mockClear())
+beforeEach(() => initializeMock.mockClear())
 
 describe("ModelsDevCatalogInitializer", () => {
   it("kicks off a stale-refresh once on mount and renders nothing", () => {
     const { container, rerender } = render(<ModelsDevCatalogInitializer />)
     expect(container).toBeEmptyDOMElement()
-    expect(refreshMock).toHaveBeenCalledTimes(1)
+    expect(initializeMock).toHaveBeenCalledTimes(1)
     // Re-render must not fire a second refresh (guarded by the ref).
     rerender(<ModelsDevCatalogInitializer />)
-    expect(refreshMock).toHaveBeenCalledTimes(1)
+    expect(initializeMock).toHaveBeenCalledTimes(1)
   })
 })

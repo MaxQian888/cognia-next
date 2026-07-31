@@ -1,0 +1,48 @@
+{
+  "moark": {
+    "id": "moark",
+    "env": ["MOARK_API_KEY"],
+    "npm": "@ai-sdk/openai-compatible",
+    "api": "https://moark.com/v1",
+    "name": "Moark",
+    "doc": "https://moark.com/docs/openapi/v1#tag/%E6%96%87%E6%9C%AC%E7%94%9F%E6%88%90",
+    "models": {
+      "MiniMax-M2.1": {
+        "id": "MiniMax-M2.1",
+        "name": "MiniMax-M2.1",
+        "description": "MiniMax model for chat, coding, office work, and agentic tasks",
+        "family": "minimax",
+        "attachment": false,
+        "reasoning": true,
+        "reasoning_options": [],
+        "tool_call": true,
+        "temperature": true,
+        "release_date": "2025-12-23",
+        "last_updated": "2025-12-23",
+        "modalities": { "input": ["text"], "output": ["text"] },
+        "open_weights": true,
+        "limit": { "context": 204800, "output": 131072 },
+        "cost": { "input": 2.1, "output": 8.4 }
+      },
+      "GLM-4.7": {
+        "id": "GLM-4.7",
+        "name": "GLM-4.7",
+        "description": "Flagship GLM model for hybrid reasoning, coding, and agentic engineering",
+        "family": "glm",
+        "attachment": false,
+        "reasoning": true,
+        "reasoning_options": [],
+        "tool_call": true,
+        "interleaved": { "field": "reasoning_content" },
+        "temperature": true,
+        "knowledge": "2025-04",
+        "release_date": "2025-12-22",
+        "last_updated": "2025-12-22",
+        "modalities": { "input": ["text"], "output": ["text"] },
+        "open_weights": true,
+        "limit": { "context": 204800, "output": 131072 },
+        "cost": { "input": 3.5, "output": 14 }
+      }
+    }
+  }
+}

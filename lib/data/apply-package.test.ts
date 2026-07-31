@@ -39,6 +39,85 @@ beforeEach(async () => {
 })
 
 describe("applyBackupPackage — merge strategies", () => {
+  it("validates and restores the secret-free Provider Profile Store", async () => {
+    const db = getDb()
+    const summary = await applyBackupPackage(
+      pkg({
+        providerProfileStore: {
+          schemaVersion: 2,
+          profileVersion: 4,
+          providerProfiles: [{ id: "openai", displayName: "OpenAI", deploymentRefs: ["openai"] }],
+          deploymentProfiles: [
+            {
+              id: "openai",
+              providerRef: "openai",
+              endpoint: "https://api.openai.com/v1",
+              transportProfileRef: "tp-openai",
+              credentialProfileRef: {
+                kind: "legacy-provider-settings",
+                providerId: "openai",
+              },
+              models: [
+                {
+                  id: "gpt-5",
+                  upstreamId: "gpt-5",
+                  canonicalModelRef: "openai:gpt-5",
+                  offeringRef: "openai:gpt-5",
+                },
+              ],
+            },
+          ],
+          transportProfiles: [{ id: "tp-openai", protocol: "openai", auth: { scheme: "bearer" } }],
+          legacyAliases: { openai: "openai" },
+        },
+      }),
+      { mergeStrategy: "overwrite", includeSessions: false, includeApiKey: false }
+    )
+
+    expect(await db.providerProfiles.get("openai")).toMatchObject({ displayName: "OpenAI" })
+    expect(await db.deploymentProfiles.get("openai")).toMatchObject({
+      providerRef: "openai",
+      models: [{ upstreamId: "gpt-5", offeringRef: "openai:gpt-5" }],
+    })
+    expect(await db.transportProfiles.get("tp-openai")).toBeDefined()
+    expect(await db.profileStoreMeta.get("singleton")).toMatchObject({
+      schemaVersion: 2,
+    })
+    expect(summary.added).toMatchObject({
+      providerProfiles: 1,
+      deploymentProfiles: 1,
+      transportProfiles: 1,
+    })
+  })
+
+  it("rejects Provider Profile Store payloads containing secret material", async () => {
+    const db = getDb()
+
+    await expect(
+      applyBackupPackage(
+        pkg({
+          providerProfileStore: {
+            schemaVersion: 2,
+            profileVersion: 1,
+            providerProfiles: [
+              {
+                id: "unsafe",
+                displayName: "Unsafe",
+                deploymentRefs: [],
+                apiKey: "sk-should-not-import",
+              } as never,
+            ],
+            deploymentProfiles: [],
+            transportProfiles: [],
+            legacyAliases: {},
+          },
+        }),
+        { mergeStrategy: "overwrite", includeSessions: false, includeApiKey: false }
+      )
+    ).rejects.toThrow("secret material is not allowed")
+    expect(await db.providerProfiles.get("unsafe")).toBeUndefined()
+  })
+
   it("restores portable template rows without accepting device bindings", async () => {
     const db = getDb()
     await applyBackupPackage(

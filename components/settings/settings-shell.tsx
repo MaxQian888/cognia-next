@@ -34,6 +34,10 @@ const ProvidersSection = dynamic(
   () => import("./provider/provider-settings").then((m) => m.ProviderSettings),
   { ssr: false, loading: () => <SectionLoading /> }
 )
+const ModelCatalogSection = dynamic(
+  () => import("./provider/model-catalog-section").then((m) => m.ModelCatalogSection),
+  { ssr: false, loading: () => <SectionLoading /> }
+)
 const SearchSettings = dynamic(
   () => import("./search/search-settings").then((m) => m.SearchSettings),
   { ssr: false, loading: () => <SectionLoading /> }
@@ -275,17 +279,19 @@ const VALID_SECTIONS = new Set<SettingsSectionId>(SETTINGS_NAV.map((n) => n.id))
 // break. (The account section embeds the profile editor.)
 const DEPRECATED_REDIRECT: Record<string, SettingsSectionId> = {
   general: "agent-runtime",
-  "api-key": "providers",
+  "api-key": "ai-connections",
+  providers: "ai-connections",
   profile: "account",
 }
 
 /** Default landing section when the URL has no (valid) `?section=`. */
-const DEFAULT_SECTION: SettingsSectionId = "providers"
+const DEFAULT_SECTION: SettingsSectionId = "ai-connections"
 
 // Sections that own a list+detail layout and manage their own internal scroll.
 // These bypass the outer ScrollArea so the frame stays fixed while inner panes scroll.
 const FILL_HEIGHT_SECTIONS = new Set<SettingsSectionId>([
-  "providers",
+  "ai-connections",
+  "model-catalog",
   "ocr",
   "diagnostics",
   "connections",
@@ -470,8 +476,10 @@ function SectionContent({ section, onClose }: { section: SettingsSectionId; onCl
   switch (section) {
     case "account":
       return <AccountOverviewSection />
-    case "providers":
+    case "ai-connections":
       return <ProvidersSection />
+    case "model-catalog":
+      return <ModelCatalogSection />
     case "subscription":
       return <SubscriptionSection />
     case "ccswitch":

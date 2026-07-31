@@ -267,6 +267,14 @@ export const ME_ENTRIES: MeEntry[] = [
     keywords: ["api key", "provider", "byok", "anthropic", "openai", "密钥", "提供商", "模型"],
   },
   {
+    id: "model-catalog",
+    icon: DatabaseIcon,
+    labelKey: "modelCatalogRow",
+    href: "/me/model-catalog",
+    section: "connection",
+    keywords: ["model", "catalog", "offering", "alias", "模型", "目录", "提供方"],
+  },
+  {
     id: "connectors",
     icon: LinkIcon,
     spotIcon: "connectors",

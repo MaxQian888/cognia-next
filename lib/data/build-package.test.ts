@@ -199,6 +199,79 @@ async function seedAll() {
 }
 
 describe("buildBackupPackage", () => {
+  it("exports the secret-free Provider Profile Store and strips nested provider keys", async () => {
+    const db = getDb()
+    await saveSettings({
+      providerSettings: {
+        openai: {
+          providerId: "openai",
+          apiKey: "sk-nested",
+          apiKeys: ["sk-one", "sk-two"],
+          defaultModel: "gpt-5",
+          enabled: true,
+        },
+      },
+    })
+    await db.providerProfiles.put({
+      id: "openai",
+      displayName: "OpenAI",
+      deploymentRefs: ["openai"],
+    })
+    await db.deploymentProfiles.put({
+      id: "openai",
+      providerRef: "openai",
+      endpoint: "https://api.openai.com/v1",
+      transportProfileRef: "tp-openai",
+      credentialProfileRef: { kind: "legacy-provider-settings", providerId: "openai" },
+      models: [
+        {
+          id: "gpt-5",
+          upstreamId: "gpt-5",
+          canonicalModelRef: "openai:gpt-5",
+          offeringRef: "openai:gpt-5",
+        },
+      ],
+    })
+    await db.transportProfiles.put({
+      id: "tp-openai",
+      protocol: "openai",
+      auth: { scheme: "bearer" },
+    })
+    await db.profileStoreMeta.put({
+      id: "singleton",
+      profileVersion: 7,
+      schemaVersion: 2,
+    })
+
+    const backup = await buildBackupPackage({
+      includeSessions: false,
+      includeApiKey: false,
+    })
+
+    expect(backup.payload.providerProfileStore).toMatchObject({
+      schemaVersion: 2,
+      profileVersion: 7,
+      providerProfiles: [{ id: "openai" }],
+      deploymentProfiles: [{ id: "openai" }],
+    })
+    expect(backup.payload.providerProfileStore?.transportProfiles).toEqual(
+      expect.arrayContaining([expect.objectContaining({ id: "tp-openai" })])
+    )
+    expect(backup.payload.settings?.providerSettings?.openai?.apiKey).toBeUndefined()
+    expect(backup.payload.settings?.providerSettings?.openai?.apiKeys).toBeUndefined()
+    expect(JSON.stringify(backup.payload.providerProfileStore)).not.toContain("sk-nested")
+  })
+
+  it("omits the Provider Profile Store from settings-free exports", async () => {
+    const backup = await buildBackupPackage({
+      includeSessions: false,
+      includeApiKey: false,
+      includeSettings: false,
+    })
+
+    expect(backup.payload.providerProfileStore).toBeUndefined()
+  })
+
   it("filters built-ins by default and excludes the API key", async () => {
     await seedAll()
     const pkg = await buildBackupPackage({ includeSessions: true, includeApiKey: false })
@@ -334,7 +407,7 @@ describe("buildBackupPackage", () => {
       },
       { storage: null }
     )
-    expect(Object.keys(settingsOnly.payload)).toEqual(["settings"])
+    expect(Object.keys(settingsOnly.payload).sort()).toEqual(["providerProfileStore", "settings"])
 
     const sessionsOnly = await buildBackupPackage(
       {

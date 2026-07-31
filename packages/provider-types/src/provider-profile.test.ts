@@ -23,7 +23,14 @@ const deployment: DeploymentProfile = {
   endpoint: "https://open.bigmodel.cn/api/anthropic",
   transportProfileRef: "tp-anthropic-x-api-key",
   credentialProfileRef: { kind: "legacy-provider-settings", providerId: "glm-anthropic" },
-  models: [{ id: "glm-4.6" }],
+  models: [
+    {
+      id: "glm-4.6",
+      upstreamId: "glm-4.6",
+      offeringRef: "glm-anthropic:glm-4.6",
+      canonicalModelRef: "zhipu:glm-4.6",
+    },
+  ],
   modelRoles: { primary: "glm-4.6" },
   legacyProviderId: "glm-anthropic",
 }
@@ -36,6 +43,29 @@ describe("parse round-trips", () => {
     ).toBe(true)
     expect(parseDeploymentProfile(deployment).ok).toBe(true)
     expect(parseTransportProfile(transport).ok).toBe(true)
+  })
+
+  it("accepts v2 catalog references and bounded user overrides", () => {
+    const result = parseDeploymentProfile({
+      ...deployment,
+      models: [
+        {
+          ...deployment.models[0],
+          userOverride: {
+            displayName: "Team GLM",
+            enabled: false,
+            limits: { context: 100_000 },
+            capabilities: { tools: false },
+          },
+        },
+      ],
+    })
+
+    expect(result.ok).toBe(true)
+  })
+
+  it("keeps v1 deployment models readable during migration", () => {
+    expect(parseDeploymentProfile({ ...deployment, models: [{ id: "glm-4.6" }] }).ok).toBe(true)
   })
 
   it("accepts every credential reference kind and custom-header auth", () => {

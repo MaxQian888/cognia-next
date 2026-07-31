@@ -17,7 +17,7 @@
 import { z } from "zod"
 
 /** Bump when a document shape changes incompatibly. Readers refuse newer. */
-export const PROFILE_STORE_SCHEMA_VERSION = 1
+export const PROFILE_STORE_SCHEMA_VERSION = 2
 
 // ---- Credential references --------------------------------------------------
 
@@ -69,8 +69,41 @@ export type TransportProfile = z.infer<typeof transportProfileSchema>
 export const deploymentModelSchema = z.object({
   id: z.string().min(1),
   displayName: z.string().optional(),
-  /** Upstream model id when it differs from the catalog id. */
+  /** Exact id sent to the selected deployment. */
   upstreamId: z.string().optional(),
+  /** ProviderOffering id in the active catalog revision. Optional for v1 reads. */
+  offeringRef: z.string().min(1).optional(),
+  /** Canonical ModelDefinition id. Optional for v1 reads. */
+  canonicalModelRef: z.string().min(1).optional(),
+  /** User-owned metadata layered over catalog data without mutating the catalog. */
+  userOverride: z
+    .object({
+      displayName: z.string().min(1).optional(),
+      enabled: z.boolean().optional(),
+      limits: z
+        .object({
+          context: z.number().int().positive().optional(),
+          output: z.number().int().positive().optional(),
+          dimensions: z.number().int().positive().optional(),
+        })
+        .optional(),
+      capabilities: z
+        .object({
+          streaming: z.boolean().optional(),
+          tools: z.boolean().optional(),
+          structuredOutput: z.boolean().optional(),
+          reasoning: z.boolean().optional(),
+          attachments: z.boolean().optional(),
+          temperature: z.boolean().optional(),
+          openWeights: z.boolean().optional(),
+          embeddings: z.boolean().optional(),
+          rerank: z.boolean().optional(),
+          imageGeneration: z.boolean().optional(),
+          speechGeneration: z.boolean().optional(),
+        })
+        .optional(),
+    })
+    .optional(),
 })
 export type DeploymentModel = z.infer<typeof deploymentModelSchema>
 

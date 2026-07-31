@@ -27,6 +27,8 @@ import type {
   PluginEmbeddingProvider,
   AiMessage,
 } from "@/types/plugin/plugin-ai-provider"
+import type { CatalogContribution } from "@cognia/provider-types/model-catalog"
+import type { CatalogRepository } from "@cognia/provider-core/providers/catalog-repository"
 import type {
   AIProviderDefinition,
   AIChatMessage,
@@ -40,6 +42,7 @@ import {
   isPythonBackedContribution,
 } from "@/lib/plugin/bridge/_shared/python-backed-proxy"
 import { createAIProviderAPI } from "@/lib/plugin/api/ai-provider-api"
+import { providerCatalogRepository } from "@/lib/db/provider-catalog"
 
 const unregistrarsByPlugin = new Map<string, Array<() => void>>()
 
@@ -58,6 +61,7 @@ export interface AiProvidersBridgeOptions {
   importer?: (entry: string) => Promise<Record<string, unknown>>
   getConfig?: (pluginId: string, key: string) => unknown
   getSecret?: (pluginId: string, key: string) => Promise<string | undefined>
+  catalogRepository?: CatalogRepository
 }
 
 const DEFAULT_IMPORTER: NonNullable<AiProvidersBridgeOptions["importer"]> = (entry) =>
@@ -84,19 +88,31 @@ export async function registerAiProvidersForPlugin(
   let registered = 0
 
   for (const def of defs) {
+    const entryUnregistrars: Array<() => void> = []
     try {
-      const adapted = await adaptProvider(
-        def,
-        pluginId,
-        manifest.type,
-        installRoot,
-        importer,
-        options
-      )
-      const unregister = api.registerProvider(adapted)
-      unregistrars.push(unregister)
+      if (def.catalog) {
+        const repository = options.catalogRepository ?? providerCatalogRepository
+        entryUnregistrars.push(
+          repository.registerContribution(pluginId, catalogContribution(pluginId, def))
+        )
+      }
+      const hasExecutableAdapter =
+        Boolean(def.entry || def.export || def.backend) || manifest.type === "python"
+      if (hasExecutableAdapter || !def.catalog) {
+        const adapted = await adaptProvider(
+          def,
+          pluginId,
+          manifest.type,
+          installRoot,
+          importer,
+          options
+        )
+        entryUnregistrars.push(api.registerProvider(adapted))
+      }
+      unregistrars.push(...entryUnregistrars)
       registered++
     } catch (err) {
+      for (const unregister of entryUnregistrars.reverse()) unregister()
       const message = err instanceof Error ? err.message : String(err)
       errors.push({ pluginId, providerId: def.id, message })
       loggers.manager.error(`[ai-providers-bridge] failed to register ${pluginId}:${def.id}`, err)
@@ -107,6 +123,49 @@ export async function registerAiProvidersForPlugin(
     unregistrarsByPlugin.set(pluginId, unregistrars)
   }
   return { registered, errors }
+}
+
+function catalogContribution(pluginId: string, def: PluginAiProviderDef): CatalogContribution {
+  if (!def.catalog) throw new Error("catalog contribution is missing")
+  const providerId = `${pluginId}:${def.id}`
+  const localModelIds = new Set((def.catalog.models ?? []).map((model) => model.id))
+  const modelRef = (ref: string) => (localModelIds.has(ref) ? `${pluginId}:${ref}` : ref)
+  return {
+    providers: [
+      {
+        id: providerId,
+        name: def.label,
+        tier: def.catalog.tier ?? "experimental",
+        source: { kind: "plugin", id: pluginId },
+        modalities: def.catalog.modalities,
+        adapterFamilies: [def.catalog.adapterFamily],
+        connectionSchema: { fields: [] },
+      },
+    ],
+    models: (def.catalog.models ?? []).map((model) => ({
+      id: `${pluginId}:${model.id}`,
+      name: model.name,
+      creator: model.creator ?? pluginId,
+      family: model.family,
+      modalities: model.modalities,
+      capabilities: model.capabilities ?? {},
+      limits: model.limits,
+      lifecycle: model.lifecycle ?? "active",
+      provenance: { definition: { kind: "plugin", id: pluginId } },
+    })),
+    offerings: def.catalog.offerings.map((offering) => ({
+      id: `${pluginId}:${def.id}:${offering.id}`,
+      providerRef: providerId,
+      modelRef: modelRef(offering.modelRef),
+      upstreamId: offering.upstreamId,
+      endpointType: offering.endpointType,
+      lifecycle: offering.lifecycle ?? "active",
+      available: true,
+      capabilities: offering.capabilities,
+      limits: offering.limits,
+      source: { kind: "plugin", id: pluginId },
+    })),
+  }
 }
 
 async function adaptProvider(

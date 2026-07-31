@@ -36,6 +36,7 @@ import {
 import {
   getBuiltInProviderCatalogEntry,
   getBuiltInProviderDefaultBaseURL,
+  getBuiltInProviderDefaultModel,
 } from "@cognia/provider-types/built-in-provider-catalog"
 import type {
   ApiFlavor,
@@ -548,7 +549,7 @@ export function createFeatureProviderModel(
     const bedrock = resolved.bedrock
     return protectRawAnalysis(
       createBedrockSidecarLanguageModel({
-        modelId: resolved.model ?? defaultModelForProtocol("bedrock"),
+        modelId: resolved.model ?? catalogDefaultModel("bedrock", resolved.providerId),
         providerId: resolved.providerId,
         credentials: {
           protocol: "bedrock",
@@ -560,7 +561,7 @@ export function createFeatureProviderModel(
           roleSessionName: bedrock.roleSessionName,
         },
       }),
-      resolved.model ?? defaultModelForProtocol("bedrock")
+      resolved.model ?? catalogDefaultModel("bedrock", resolved.providerId)
     )
   }
   const client = createFeatureProviderClient({
@@ -576,7 +577,7 @@ export function createFeatureProviderModel(
     headers: transport?.headers,
   })
 
-  const modelId = resolved.model ?? defaultModelForProtocol(resolved.protocol)
+  const modelId = resolved.model ?? catalogDefaultModel(resolved.protocol, resolved.providerId)
   // Cast through `any` so we can dispatch on either the function-call
   // form (`client(modelId)`) or the namespace form (`client.chat(modelId)`)
   // without TS narrowing the union to `never` after the first branch.
@@ -606,20 +607,24 @@ export function createFeatureProviderModel(
   )
 }
 
-function defaultModelForProtocol(protocol: ResolvedProvider["protocol"]): string {
-  switch (protocol) {
-    case "anthropic":
-      return "claude-sonnet-4-6"
-    case "google":
-      return "gemini-1.5-flash"
-    case "cohere":
-      return "command-r"
-    case "mistral":
-      return "mistral-small-latest"
-    case "azure":
-      return "gpt-5"
-    case "openai":
-    default:
-      return "gpt-4o-mini"
+const FALLBACK_PROVIDER_BY_PROTOCOL: Partial<Record<ResolvedProvider["protocol"], string>> = {
+  anthropic: "anthropic",
+  google: "google",
+  cohere: "cohere",
+  mistral: "mistral",
+  azure: "azure",
+  bedrock: "bedrock",
+  openai: "openai",
+}
+
+function catalogDefaultModel(protocol: ResolvedProvider["protocol"], providerId: string): string {
+  const model =
+    getBuiltInProviderDefaultModel(providerId) ??
+    getBuiltInProviderDefaultModel(FALLBACK_PROVIDER_BY_PROTOCOL[protocol] ?? "")
+  if (!model) {
+    throw new Error(
+      `createFeatureProviderModel: no catalog default model for ${providerId} (${protocol})`
+    )
   }
+  return model
 }

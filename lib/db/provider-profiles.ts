@@ -12,6 +12,7 @@ import type {
   ProviderProfile,
   TransportProfile,
 } from "@cognia/provider-types/provider-profile"
+import { PROFILE_STORE_SCHEMA_VERSION } from "@cognia/provider-types/provider-profile"
 import type { DerivedProfiles, ProfilesExport } from "@cognia/provider-types/profile-migration"
 import {
   exportProfilesRedacted,
@@ -80,7 +81,7 @@ export async function putDerivedProfiles(derived: DerivedProfiles): Promise<numb
       await db.profileStoreMeta.put({
         id: META_ID,
         profileVersion: nextVersion,
-        schemaVersion: meta?.schemaVersion ?? 1,
+        schemaVersion: PROFILE_STORE_SCHEMA_VERSION,
         migratedAt: new Date().toISOString(),
       })
       return nextVersion

@@ -46,6 +46,11 @@ import { browserSnapshotStorage, SNAPSHOT_MODULES } from "./snapshots/registry"
 import { readAllSnapshots, restoreFromPreSnap, writeAllSnapshots } from "./snapshots/helpers"
 import type { LocalStorageSnapshot, SnapshotEnv, SnapshotStorage } from "./snapshots/types"
 import { projectMcpToAllAgents } from "./sync-projection"
+import {
+  importProfiles as validateProfilesImport,
+  PROFILE_STORE_SCHEMA_VERSION,
+} from "@cognia/provider-types"
+import { deepStripSecrets } from "@/lib/settings/profile-transfer"
 
 interface BuiltInRow {
   id: string
@@ -90,6 +95,12 @@ export async function applyBackupPackage(
   const summary = emptySummary()
   const db = getDb()
   const env = pkg.payload
+  const importedProfiles = env.providerProfileStore
+    ? validateProfilesImport(env.providerProfileStore)
+    : undefined
+  if (importedProfiles && !importedProfiles.ok) {
+    throw new Error(`provider profile import failed: ${importedProfiles.errors.join("; ")}`)
+  }
 
   // Stage 1: snapshot localStorage face *before* Dexie writes so we can
   // roll it back if something blows up after the Dexie commit. Tauri/web
@@ -138,13 +149,20 @@ export async function applyBackupPackage(
       db.templateDefinitions,
       db.templatePackages,
       db.templateInstances,
+      db.providerProfiles,
+      db.deploymentProfiles,
+      db.transportProfiles,
+      db.profileStoreMeta,
     ],
     async () => {
       // --- settings (singleton) -------------------------------------------
       if (env.settings) {
         const existing = await db.settings.get("singleton")
-        const incoming: AppSettings = { ...env.settings, id: "singleton" }
-        if (!opts.includeApiKey) delete incoming.apiKey
+        const incoming = (
+          opts.includeApiKey
+            ? { ...env.settings, id: "singleton" }
+            : { ...(deepStripSecrets(env.settings) as AppSettings), id: "singleton" }
+        ) as AppSettings
         if (!existing) {
           await db.settings.put(incoming)
           incrementCounter(summary.added, "settings")
@@ -217,6 +235,49 @@ export async function applyBackupPackage(
         summary,
         keyOf: (row) => row.id,
       })
+
+      // Provider Profile Store documents are a referential bundle. A
+      // duplicate import cannot safely rename ids without rewriting every
+      // reference, so conflicts use the conservative skip behavior while
+      // non-conflicting documents are still added.
+      if (importedProfiles?.ok) {
+        const profileOpts =
+          opts.mergeStrategy === "duplicate" ? { ...opts, mergeStrategy: "skip" as const } : opts
+        await applyCollection({
+          rows: importedProfiles.value.providerProfiles,
+          table: db.providerProfiles,
+          kind: "providerProfiles",
+          opts: profileOpts,
+          summary,
+          idPrefix: "provider",
+          respectBuiltIn: false,
+        })
+        await applyCollection({
+          rows: importedProfiles.value.deploymentProfiles,
+          table: db.deploymentProfiles,
+          kind: "deploymentProfiles",
+          opts: profileOpts,
+          summary,
+          idPrefix: "deployment",
+          respectBuiltIn: false,
+        })
+        await applyCollection({
+          rows: importedProfiles.value.transportProfiles,
+          table: db.transportProfiles,
+          kind: "transportProfiles",
+          opts: profileOpts,
+          summary,
+          idPrefix: "transport",
+          respectBuiltIn: false,
+        })
+        const currentMeta = await db.profileStoreMeta.get("singleton")
+        await db.profileStoreMeta.put({
+          id: "singleton",
+          profileVersion: (currentMeta?.profileVersion ?? 0) + 1,
+          schemaVersion: PROFILE_STORE_SCHEMA_VERSION,
+          migratedAt: new Date().toISOString(),
+        })
+      }
 
       // --- presets / MCP servers / trusted workspaces / tts keys ---------
       await applyCollection<SystemPromptPreset>({

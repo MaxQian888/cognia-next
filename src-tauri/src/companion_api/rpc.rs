@@ -336,6 +336,9 @@ const KNOWN_COMMANDS: &[&str] = &[
     "integration_ingress_unregister",
     "integration_ingress_get_url",
     "integration_ingress_poll",
+    // Catalog status/search are pure reads over the active SQLite revision.
+    "provider_catalog_status",
+    "provider_catalog_search",
     "integration_ingress_ack",
     "integration_ingress_nack",
     // ADR-0090 Phase 1 — Provider Profile Store admin plane (service scope;
@@ -343,6 +346,9 @@ const KNOWN_COMMANDS: &[&str] = &[
     "provider_profiles_list",
     "provider_profiles_import",
     "provider_profiles_version",
+    "provider_catalog_status",
+    "provider_catalog_search",
+    "provider_catalog_refresh",
     // ADR-0059 T-A5 — connector command plane for the headless brain's
     // connector-runtime. Same names as the Tauri commands; each arm
     // delegates to the same free function the command wraps.
@@ -1366,6 +1372,9 @@ const SERVICE_ONLY_COMMANDS: &[&str] = &[
     "provider_profiles_list",
     "provider_profiles_import",
     "provider_profiles_version",
+    "provider_catalog_status",
+    "provider_catalog_search",
+    "provider_catalog_refresh",
     // Lark dual-entry (plan 2026-07-24): token minting binds principals to
     // accounts, intent completion feeds browser-visible results, and metric
     // names are allowlisted — none of it is a paired-device capability.
@@ -3718,6 +3727,69 @@ pub(super) async fn dispatch(
                 .map_err(|e| RpcError::internal(format!("profiles version join: {e}")))?
                 .map_err(|e| RpcError::internal(format!("profiles version: {e}")))?;
             Ok(serde_json::json!({ "profileVersion": version }))
+        }
+
+        "provider_catalog_status" => {
+            let services = host
+                .headless()
+                .ok_or_else(|| RpcError::headless_unsupported(name))?;
+            let profiles = std::sync::Arc::clone(&services.profiles);
+            let status = tokio::task::spawn_blocking(move || profiles.catalog_status())
+                .await
+                .map_err(|e| RpcError::internal(format!("catalog status join: {e}")))?
+                .map_err(|e| RpcError::internal(format!("catalog status: {e}")))?;
+            serde_json::to_value(status)
+                .map_err(|e| RpcError::internal(format!("catalog status serialization: {e}")))
+        }
+
+        "provider_catalog_search" => {
+            let services = host
+                .headless()
+                .ok_or_else(|| RpcError::headless_unsupported(name))?;
+            let query = args
+                .get("query")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_string();
+            if query.len() > 512 {
+                return Err(RpcError::malformed(
+                    "catalog search query exceeds 512 bytes".to_string(),
+                ));
+            }
+            let limit = args
+                .get("limit")
+                .and_then(Value::as_u64)
+                .unwrap_or(50)
+                .try_into()
+                .unwrap_or(200);
+            let profiles = std::sync::Arc::clone(&services.profiles);
+            let results =
+                tokio::task::spawn_blocking(move || profiles.catalog_search(&query, limit))
+                    .await
+                    .map_err(|e| RpcError::internal(format!("catalog search join: {e}")))?
+                    .map_err(|e| RpcError::internal(format!("catalog search: {e}")))?;
+            Ok(serde_json::json!({ "results": results }))
+        }
+
+        "provider_catalog_refresh" => {
+            let services = host
+                .headless()
+                .ok_or_else(|| RpcError::headless_unsupported(name))?;
+            let payload = args
+                .get("payload")
+                .cloned()
+                .ok_or_else(|| RpcError::malformed("missing 'payload'".to_string()))?;
+            let snapshot: crate::provider_profiles::CatalogSnapshotDoc =
+                serde_json::from_value(payload)
+                    .map_err(|e| RpcError::malformed(format!("catalog refresh payload: {e}")))?;
+            let profiles = std::sync::Arc::clone(&services.profiles);
+            let status =
+                tokio::task::spawn_blocking(move || profiles.catalog_refresh(&snapshot))
+                    .await
+                    .map_err(|e| RpcError::internal(format!("catalog refresh join: {e}")))?
+                    .map_err(|e| RpcError::malformed(format!("catalog refresh: {e}")))?;
+            serde_json::to_value(status)
+                .map_err(|e| RpcError::internal(format!("catalog refresh serialization: {e}")))
         }
 
         // ── Connector command plane for the headless brain (ADR-0059 T-A5) ──
@@ -8743,6 +8815,21 @@ rl.on("line", (line) => {
     #[tokio::test]
     async fn dispatch_coverage_provider_profiles_version() {
         assert_not_404!("provider_profiles_version", json!({}));
+    }
+
+    #[tokio::test]
+    async fn dispatch_coverage_provider_catalog_status() {
+        assert_not_404!("provider_catalog_status", json!({}));
+    }
+
+    #[tokio::test]
+    async fn dispatch_coverage_provider_catalog_search() {
+        assert_not_404!("provider_catalog_search", json!({ "query": "gpt" }));
+    }
+
+    #[tokio::test]
+    async fn dispatch_coverage_provider_catalog_refresh() {
+        assert_not_404!("provider_catalog_refresh", json!({ "payload": {} }));
     }
 
     #[tokio::test]

@@ -98,13 +98,55 @@ function sanitizedStaticHeaders(
 
 function normalizedModels(
   entry: BuiltInProviderCatalogEntry | undefined,
-  row: LegacyProviderSettingsRow | undefined
+  row: LegacyProviderSettingsRow | undefined,
+  deploymentId: string,
+  providerRef: string
 ): DeploymentProfile["models"] {
   const ids = new Set<string>()
   for (const model of entry?.models ?? []) ids.add(model.id)
   if (row?.defaultModel) ids.add(row.defaultModel)
   if (entry?.defaultModel) ids.add(entry.defaultModel)
-  return [...ids].sort().map((id) => ({ id }))
+  return [...ids].sort().map((id) => catalogLinkedDeploymentModel(deploymentId, providerRef, id))
+}
+
+function canonicalModelRef(providerRef: string, upstreamId: string): string {
+  const slash = upstreamId.indexOf("/")
+  if (slash > 0 && slash < upstreamId.length - 1) {
+    return `${upstreamId.slice(0, slash)}:${upstreamId.slice(slash + 1)}`
+  }
+  return upstreamId.startsWith(`${providerRef}:`) ? upstreamId : `${providerRef}:${upstreamId}`
+}
+
+function catalogLinkedDeploymentModel(
+  deploymentId: string,
+  providerRef: string,
+  upstreamId: string
+): DeploymentProfile["models"][number] {
+  return {
+    id: upstreamId,
+    upstreamId,
+    offeringRef: `${deploymentId}:${upstreamId}`,
+    canonicalModelRef: canonicalModelRef(providerRef, upstreamId),
+  }
+}
+
+/** Idempotently upgrade one v1 deployment document to the v2 model links. */
+export function upgradeDeploymentProfileCatalogRefs(
+  deployment: DeploymentProfile
+): DeploymentProfile {
+  return {
+    ...deployment,
+    models: deployment.models.map((model) => {
+      const upstreamId = model.upstreamId ?? model.id
+      return {
+        ...model,
+        upstreamId,
+        offeringRef: model.offeringRef ?? `${deployment.id}:${upstreamId}`,
+        canonicalModelRef:
+          model.canonicalModelRef ?? canonicalModelRef(deployment.providerRef, upstreamId),
+      }
+    }),
+  }
 }
 
 interface VendorAccumulator {
@@ -176,7 +218,7 @@ export function deriveProfiles(input: DeriveProfilesInput): DerivedProfiles {
       endpoint,
       transportProfileRef: ensureTransport(providerId, protocol, row.customHeaders),
       credentialProfileRef: credential,
-      models: normalizedModels(entry, row),
+      models: normalizedModels(entry, row, providerId, vendorId),
       ...(primary ? { modelRoles: { primary } } : {}),
       legacyProviderId: providerId,
       enabled: row.enabled !== false,
@@ -207,7 +249,7 @@ export function deriveProfiles(input: DeriveProfilesInput): DerivedProfiles {
       endpoint: row.baseURL?.trim() || builtinEndpointSentinel(row.id),
       transportProfileRef: ensureTransport(row.id, protocol, row.customHeaders),
       credentialProfileRef: { kind: "legacy-provider-settings", providerId: row.id },
-      models: [...modelIds].sort().map((id) => ({ id })),
+      models: [...modelIds].sort().map((id) => catalogLinkedDeploymentModel(row.id, row.id, id)),
       ...(row.defaultModel ? { modelRoles: { primary: row.defaultModel } } : {}),
       legacyProviderId: row.id,
       enabled: row.enabled !== false,

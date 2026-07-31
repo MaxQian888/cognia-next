@@ -63,6 +63,8 @@ export type SettingsSectionId =
   | "profile"
   | "api-key"
   | "providers"
+  | "ai-connections"
+  | "model-catalog"
   | "ocr"
   | "subscription"
   | "ccswitch"
@@ -134,18 +136,26 @@ export interface NavItem {
 export const SETTINGS_NAV: NavItem[] = [
   // === AI ===
   // NOTE: the standalone "general", "api-key", and "profile" sections were
-  // merged — general → agent-runtime (defaults/behavior), api-key → providers
+  // merged — general → agent-runtime (defaults/behavior), api-key/providers →
+  // ai-connections
   // (Anthropic key + official subscription reuse), and profile → account (the
   // account section already embeds the profile editor). Their ids stay in
   // `SettingsSectionId` + the redirect map in `settings-shell.tsx` (and their
   // keywords are folded into the target section's bucket), but they no longer
   // appear as navigable entries.
   {
-    id: "providers",
-    labelKey: "providers",
-    descriptionKey: "providers",
+    id: "ai-connections",
+    labelKey: "aiConnections",
+    descriptionKey: "aiConnections",
     group: "ai",
     icon: ServerCogIcon,
+  },
+  {
+    id: "model-catalog",
+    labelKey: "modelCatalog",
+    descriptionKey: "modelCatalog",
+    group: "ai",
+    icon: DatabaseIcon,
   },
   {
     id: "ocr",
@@ -622,7 +632,7 @@ export const SETTINGS_SEARCH_KEYWORDS: Partial<Record<SettingsSectionId, string[
     "头像",
     "时区",
   ],
-  providers: [
+  "ai-connections": [
     "providers",
     "openai",
     "anthropic",
@@ -642,6 +652,23 @@ export const SETTINGS_SEARCH_KEYWORDS: Partial<Record<SettingsSectionId, string[
     "key",
     "secret",
     "claude",
+  ],
+  "model-catalog": [
+    "models",
+    "canonical id",
+    "upstream id",
+    "alias",
+    "offering",
+    "capabilities",
+    "lifecycle",
+    "deprecated",
+    "embedding",
+    "rerank",
+    "image",
+    "speech",
+    "模型目录",
+    "能力",
+    "生命周期",
   ],
   ccswitch: [
     "cc-switch",

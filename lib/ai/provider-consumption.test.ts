@@ -7,6 +7,7 @@ import { createXai } from "@ai-sdk/xai"
 import { createTogetherAI } from "@ai-sdk/togetherai"
 import { createFireworks } from "@ai-sdk/fireworks"
 import { createDeepInfra } from "@ai-sdk/deepinfra"
+import { getBuiltInProviderDefaultModel } from "@cognia/provider-types/built-in-provider-catalog"
 
 import {
   createProviderSettingsSnapshot,
@@ -747,8 +748,8 @@ describe("createFeatureProviderClient / createFeatureProviderModel", () => {
       isCustomProvider: false,
       useProxy: false,
     }
-    const model = createFeatureProviderModel(resolved)
-    expect(model).toBeDefined()
+    const model = createFeatureProviderModel(resolved) as { id?: string }
+    expect(model.id).toBe(getBuiltInProviderDefaultModel("openai"))
   })
 
   it("builds an anthropic model handle for an explicit model id", () => {

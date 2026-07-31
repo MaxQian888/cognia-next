@@ -1,0 +1,63 @@
+{
+  "lmstudio": {
+    "id": "lmstudio",
+    "env": ["LMSTUDIO_API_KEY"],
+    "npm": "@ai-sdk/openai-compatible",
+    "api": "http://127.0.0.1:1234/v1",
+    "name": "LMStudio",
+    "doc": "https://lmstudio.ai/models",
+    "models": {
+      "openai/gpt-oss-20b": {
+        "id": "openai/gpt-oss-20b",
+        "name": "GPT OSS 20B",
+        "description": "Open-weight GPT model for self-hosted reasoning and instruction-following workloads",
+        "family": "gpt-oss",
+        "attachment": false,
+        "reasoning": true,
+        "reasoning_options": [{ "type": "effort", "values": ["low", "medium", "high"] }],
+        "tool_call": true,
+        "temperature": true,
+        "release_date": "2025-08-05",
+        "last_updated": "2025-08-05",
+        "modalities": { "input": ["text"], "output": ["text"] },
+        "open_weights": true,
+        "limit": { "context": 131072, "output": 32768 },
+        "cost": { "input": 0, "output": 0 }
+      },
+      "qwen/qwen3-coder-30b": {
+        "id": "qwen/qwen3-coder-30b",
+        "name": "Qwen3 Coder 30B",
+        "description": "Qwen coding model for software agents, repository edits, and code reasoning",
+        "family": "qwen",
+        "attachment": false,
+        "reasoning": false,
+        "tool_call": true,
+        "temperature": true,
+        "knowledge": "2025-04",
+        "release_date": "2025-07-23",
+        "last_updated": "2025-07-23",
+        "modalities": { "input": ["text"], "output": ["text"] },
+        "open_weights": true,
+        "limit": { "context": 262144, "output": 65536 },
+        "cost": { "input": 0, "output": 0 }
+      },
+      "qwen/qwen3-30b-a3b-2507": {
+        "id": "qwen/qwen3-30b-a3b-2507",
+        "name": "Qwen3 30B A3B 2507",
+        "description": "Qwen instruction model for multilingual chat, reasoning, and tool use",
+        "family": "qwen",
+        "attachment": false,
+        "reasoning": false,
+        "tool_call": true,
+        "temperature": true,
+        "knowledge": "2025-04",
+        "release_date": "2025-07-30",
+        "last_updated": "2025-07-30",
+        "modalities": { "input": ["text"], "output": ["text"] },
+        "open_weights": true,
+        "limit": { "context": 262144, "output": 16384 },
+        "cost": { "input": 0, "output": 0 }
+      }
+    }
+  }
+}

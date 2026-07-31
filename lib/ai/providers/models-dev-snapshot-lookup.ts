@@ -7,24 +7,27 @@
  *   - the CLI attachment modality gate
  *     (`cli/src/agent/attachments/model-modalities.ts`).
  *
- * Node-safe: imports ONLY the JSON snapshot (no Dexie/Tauri), so it resolves in
+ * Node-safe: imports ONLY the compact capability index (no Dexie/Tauri), so it resolves in
  * the CLI's headless Node runtime and the browser bundle alike. A model the
  * snapshot doesn't carry resolves to `undefined` / `[]` so callers degrade
  * conservatively (a heuristic fallback, or OCR for an attachment).
  *
- * Snapshot shape: `snapshot[providerOrg].models[modelId]`.
+ * Capability index shape: `capabilities[providerOrg][modelId]`.
  */
-import snapshot from "./models-dev-snapshot.json"
+import capabilities from "./models-dev-capabilities.json"
 
 interface SnapshotModel {
-  reasoning?: boolean
-  modalities?: { input?: string[]; output?: string[] }
-}
-interface SnapshotProvider {
-  models?: Record<string, SnapshotModel>
+  r?: boolean
+  i?: string[]
 }
 
-const SNAPSHOT = snapshot as unknown as Record<string, SnapshotProvider>
+const SNAPSHOT = capabilities as Record<string, Record<string, SnapshotModel>>
+const MODEL_BY_ID = new Map<string, SnapshotModel>()
+for (const provider of Object.values(SNAPSHOT)) {
+  for (const [modelId, model] of Object.entries(provider)) {
+    if (!MODEL_BY_ID.has(modelId)) MODEL_BY_ID.set(modelId, model)
+  }
+}
 
 /**
  * Resolve a model entry from the snapshot, trying in order:
@@ -34,20 +37,15 @@ const SNAPSHOT = snapshot as unknown as Record<string, SnapshotProvider>
  * Returns `undefined` when nothing matches.
  */
 export function lookupSnapshotModel(provider: string, model: string): SnapshotModel | undefined {
-  const direct = SNAPSHOT[provider]?.models?.[model]
+  const direct = SNAPSHOT[provider]?.[model]
   if (direct) return direct
   // Gateway-style ids carry the org: "google/gemini-2.5-pro".
   if (model.includes("/")) {
     const slash = model.indexOf("/")
-    const viaOrg = SNAPSHOT[model.slice(0, slash)]?.models?.[model.slice(slash + 1)]
+    const viaOrg = SNAPSHOT[model.slice(0, slash)]?.[model.slice(slash + 1)]
     if (viaOrg) return viaOrg
   }
-  // Last resort: an exact model-id match under any provider org.
-  for (const p of Object.values(SNAPSHOT)) {
-    const hit = p.models?.[model]
-    if (hit) return hit
-  }
-  return undefined
+  return MODEL_BY_ID.get(model)
 }
 
 /**
@@ -56,10 +54,10 @@ export function lookupSnapshotModel(provider: string, model: string): SnapshotMo
  * (an id pattern) rather than guessing.
  */
 export function snapshotModelReasoning(provider: string, model: string): boolean | undefined {
-  return lookupSnapshotModel(provider, model)?.reasoning
+  return lookupSnapshotModel(provider, model)?.r
 }
 
 /** The model's accepted input modalities per models.dev (`[]` when unknown). */
 export function snapshotInputModalities(provider: string, model: string): string[] {
-  return lookupSnapshotModel(provider, model)?.modalities?.input ?? []
+  return lookupSnapshotModel(provider, model)?.i ?? []
 }

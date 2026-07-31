@@ -133,6 +133,15 @@ import type {
 // declarations below and re-exported at the bottom for `@/lib/db/schema`
 // import-site stability. See `lib/db/CONVENTIONS.md`.
 import type { ModelsDevCatalogRow } from "./models-dev-catalog"
+import type {
+  ProviderCatalogAliasRow,
+  ProviderCatalogModelRow,
+  ProviderCatalogOfferingRow,
+  ProviderCatalogProviderRow,
+  ProviderCatalogRevisionRow,
+  ProviderCatalogStateRow,
+  ProviderConnectionInventoryRow,
+} from "./provider-catalog"
 import type { OpenRouterCatalogRow } from "./openrouter-catalog"
 import type { SessionStateRow } from "./session-state"
 import type { TrustedPublisherRow } from "./trusted-publishers"
@@ -388,6 +397,14 @@ export class CogniaDB extends Dexie {
   // See `lib/db/chat-search-text.ts`.
   chatSearchText!: Table<import("./chat-search-text").ChatSearchTextRow, string>
   chatSearchState!: Table<import("./chat-search-text").ChatSearchStateRow, "singleton">
+  // v135 — normalized provider/model catalog + deployment-local availability.
+  providerCatalogRevisions!: Table<ProviderCatalogRevisionRow, string>
+  providerCatalogProviders!: Table<ProviderCatalogProviderRow, [string, string]>
+  providerCatalogModels!: Table<ProviderCatalogModelRow, [string, string]>
+  providerCatalogOfferings!: Table<ProviderCatalogOfferingRow, [string, string]>
+  providerCatalogAliases!: Table<ProviderCatalogAliasRow, [string, string]>
+  providerCatalogState!: Table<ProviderCatalogStateRow, "singleton">
+  providerConnectionInventory!: Table<ProviderConnectionInventoryRow, string>
   // v121 — Provider Profile Store (ADR-0090 Phase 1). See `lib/db/provider-profiles.ts`.
   providerProfiles!: Table<ProviderProfile, string>
   deploymentProfiles!: Table<DeploymentProfile, string>
@@ -2962,6 +2979,39 @@ export class CogniaDB extends Dexie {
       chatSearchState: "id",
     })
 
+    // v135 — Unified multimodal provider/model catalog. Complete revisions
+    // stage into normalized tables and activate through one pointer; deployment
+    // inventory is local evidence and never mutates global certification.
+    this.version(135)
+      .stores({
+        providerCatalogRevisions: "&id, status, generatedAt, integrity",
+        providerCatalogProviders: "&[revisionId+id], revisionId, id, tier, *modalities",
+        providerCatalogModels: "&[revisionId+id], revisionId, id, creator, family, lifecycle",
+        providerCatalogOfferings:
+          "&[revisionId+id], revisionId, id, [revisionId+providerRef], [revisionId+modelRef], providerRef, modelRef, lifecycle, available",
+        providerCatalogAliases: "&[revisionId+id], revisionId, id, kind",
+        providerCatalogState: "&id",
+        providerConnectionInventory:
+          "&id, &deploymentRef, providerRef, status, checkedAt, *availableUpstreamIds",
+      })
+      .upgrade(async (tx) => {
+        const { PROFILE_STORE_SCHEMA_VERSION, upgradeDeploymentProfileCatalogRefs } =
+          await import("@cognia/provider-types")
+        await tx
+          .table<DeploymentProfile, string>("deploymentProfiles")
+          .toCollection()
+          .modify((deployment) => {
+            Object.assign(deployment, upgradeDeploymentProfileCatalogRefs(deployment))
+          })
+        const meta = await tx.table("profileStoreMeta").get("singleton")
+        if (meta) {
+          await tx.table("profileStoreMeta").update("singleton", {
+            schemaVersion: PROFILE_STORE_SCHEMA_VERSION,
+            migratedAt: new Date().toISOString(),
+          })
+        }
+      })
+
     // First full-chain construction under Jest: cache the merged spec so every
     // later construction in this worker takes the collapsed fast path above.
     if (isSchemaCollapseEnabled() && !collapsedSchemaCacheSlot().__cogniaCollapsedSchema) {
@@ -3059,6 +3109,15 @@ export class CogniaDB extends Dexie {
 // `*-types.ts` file) per `lib/db/CONVENTIONS.md`. They are re-exported here so
 // `@/lib/db/schema` remains the stable import surface for existing call sites.
 export type { ModelsDevCatalogRow } from "./models-dev-catalog"
+export type {
+  ProviderCatalogAliasRow,
+  ProviderCatalogModelRow,
+  ProviderCatalogOfferingRow,
+  ProviderCatalogProviderRow,
+  ProviderCatalogRevisionRow,
+  ProviderCatalogStateRow,
+  ProviderConnectionInventoryRow,
+} from "./provider-catalog"
 export type { OpenRouterCatalogRow } from "./openrouter-catalog"
 export type { SessionStateRow } from "./session-state"
 export type { TrustedPublisherRow } from "./trusted-publishers"

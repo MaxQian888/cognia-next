@@ -17,9 +17,11 @@ import {
   getCatalogModelsForProvider,
   getCatalogModelMetadata,
   resolveProviderAdapter,
+  setProviderCatalogRepository,
   primeModelsDevCatalogCache,
   __resetModelsDevCatalogCacheForTesting,
 } from "./models-dev-sync"
+import { InMemoryCatalogRepository } from "./catalog-repository"
 import type { ModelsDevApi } from "./models-dev"
 import {
   resetProviderCoreRuntimeAdaptersForTesting,
@@ -95,11 +97,13 @@ beforeEach(async () => {
   fakeDb.saveModelsDevCatalog.mockClear()
   fakeDb.isModelsDevCatalogStale.mockClear()
   setModelsDevCatalogDb(fakeDb)
+  setProviderCatalogRepository(null)
   setModelsDevSnapshotLoader(async () => bundledSnapshot)
   setProviderCoreRuntimeAdapters({ proxyFetch: proxyFetchMock })
 })
 
 afterEach(() => {
+  setProviderCatalogRepository(null)
   resetProviderCoreRuntimeAdaptersForTesting()
 })
 
@@ -123,9 +127,43 @@ describe("syncModelsDevCatalog", () => {
     expect(proxyFetchMock).toHaveBeenCalledTimes(1)
   })
 
+  it("publishes the validated revision through the shared catalog repository", async () => {
+    const repository = new InMemoryCatalogRepository()
+    setProviderCatalogRepository(repository)
+    mockOk(liveApi)
+
+    await syncModelsDevCatalog(1_775_000_000_000)
+
+    expect(repository.listProviders()).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: "anthropic", tier: "certified" }),
+        expect.objectContaining({ id: "fireworks", tier: "verified" }),
+      ])
+    )
+    expect(repository.resolveOffering("anthropic", "claude-sonnet-4-5")).toBeDefined()
+  })
+
   it("throws on a non-ok response", async () => {
     proxyFetchMock.mockResolvedValue({ ok: false, status: 503, statusText: "Unavailable" })
     await expect(syncModelsDevCatalog()).rejects.toThrow(/503/)
+  })
+
+  it("keeps last-known-good when an upstream refresh is empty", async () => {
+    mockOk(liveApi)
+    const previous = await syncModelsDevCatalog(1000)
+    mockOk({})
+
+    await expect(syncModelsDevCatalog(2000)).rejects.toThrow(/empty/)
+    expect(storedRow).toEqual(previous)
+  })
+
+  it("keeps last-known-good when an upstream refresh shrinks abnormally", async () => {
+    mockOk(liveApi)
+    const previous = await syncModelsDevCatalog(1000)
+    mockOk({ anthropic: liveApi.anthropic })
+
+    await expect(syncModelsDevCatalog(2000)).rejects.toThrow(/shrank/)
+    expect(storedRow).toEqual(previous)
   })
 })
 
@@ -171,6 +209,29 @@ describe("refreshModelsDevCatalogIfStale", () => {
 })
 
 describe("synchronous reads", () => {
+  it("projects runtime metadata from the shared CatalogRepository first", async () => {
+    const repository = new InMemoryCatalogRepository()
+    setProviderCatalogRepository(repository)
+    mockOk(liveApi)
+    await syncModelsDevCatalog(1_775_000_000_000)
+
+    const metadata = getCatalogModelMetadata("anthropic", "claude-sonnet-4-5")
+    expect(metadata).toMatchObject({
+      id: "claude-sonnet-4-5",
+      name: "Claude Sonnet 4.5",
+      contextLength: 200000,
+      maxOutputTokens: 64000,
+      supportsTools: true,
+      supportsVision: true,
+      supportsReasoning: true,
+      pricing: {
+        promptPer1M: 3,
+        completionPer1M: 15,
+        currency: "USD",
+      },
+    })
+  })
+
   it("getCatalogModelMetadata finds a single model", async () => {
     mockOk(liveApi)
     await syncModelsDevCatalog(1)

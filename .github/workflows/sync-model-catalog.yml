@@ -1,0 +1,88 @@
+name: Sync model catalog
+
+on:
+  schedule:
+    - cron: "23 3 * * 1"
+  workflow_dispatch:
+
+concurrency:
+  group: sync-model-catalog
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Preserve previous catalog statistics
+        run: cp public/catalog/models-dev/manifest.json /tmp/models-dev-manifest-before.json
+
+      - name: Generate reviewed catalog artifacts
+        run: |
+          revision="$(git ls-remote https://github.com/anomalyco/models.dev.git refs/heads/dev | cut -f1)"
+          node scripts/sync/sync-models-dev.mjs --revision "$revision"
+
+      - name: Build catalog diff report
+        run: |
+          node <<'NODE'
+          const fs = require("node:fs")
+          const before = JSON.parse(fs.readFileSync("/tmp/models-dev-manifest-before.json", "utf8"))
+          const after = JSON.parse(fs.readFileSync("public/catalog/models-dev/manifest.json", "utf8"))
+          const beforeById = new Map(before.providers.map((entry) => [entry.id, entry]))
+          const afterById = new Map(after.providers.map((entry) => [entry.id, entry]))
+          const added = [...afterById.keys()].filter((id) => !beforeById.has(id)).sort()
+          const removed = [...beforeById.keys()].filter((id) => !afterById.has(id)).sort()
+          const changed = [...afterById.keys()]
+            .filter((id) => beforeById.has(id) && beforeById.get(id).checksum !== afterById.get(id).checksum)
+            .sort()
+          const report = [
+            "## Model catalog sync",
+            "",
+            `- Providers: ${before.stats.providers} → ${after.stats.providers}`,
+            `- Offerings: ${before.stats.models} → ${after.stats.models}`,
+            `- Search index gzip: ${after.stats.searchIndexGzipBytes} bytes`,
+            `- Added providers: ${added.length ? added.join(", ") : "none"}`,
+            `- Removed providers: ${removed.length ? removed.join(", ") : "none"}`,
+            `- Changed providers: ${changed.length ? changed.join(", ") : "none"}`,
+          ].join("\n")
+          fs.writeFileSync("/tmp/models-dev-pr-body.md", `${report}\n`)
+          fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, `${report}\n`)
+          NODE
+
+      - name: Validate generated artifacts
+        run: |
+          node -e 'const m=require("./public/catalog/models-dev/manifest.json"); if(!m.providers.length || !m.stats.models) process.exit(1)'
+          test "$(find public/catalog/models-dev/providers -name '*.json' | wc -l)" -eq "$(node -p 'require("./public/catalog/models-dev/manifest.json").providers.length')"
+
+      - name: Open review pull request
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if git diff --quiet; then
+            echo "Catalog is already current."
+            exit 0
+          fi
+          branch="chore/model-catalog-sync-${GITHUB_RUN_ID}"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git switch -c "$branch"
+          git add lib/ai/providers/models-dev-capabilities.json public/catalog/models-dev
+          git commit -m "chore(catalog): sync models.dev baseline"
+          git push --set-upstream origin "$branch"
+          gh pr create \
+            --title "chore(catalog): sync models.dev baseline" \
+            --body-file /tmp/models-dev-pr-body.md \
+            --base "${GITHUB_REF_NAME}" \
+            --head "$branch"

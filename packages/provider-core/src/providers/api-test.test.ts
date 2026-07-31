@@ -7,6 +7,7 @@ jest.mock("@tauri-apps/api/core", () => ({
 }))
 
 import { invoke } from "@tauri-apps/api/core"
+import { getBuiltInProviderDefaultModel } from "@cognia/provider-types/built-in-provider-catalog"
 import {
   resetProviderCoreRuntimeAdaptersForTesting,
   setProviderCoreRuntimeAdapters,
@@ -178,7 +179,9 @@ describe("testCustomProviderConnectionByProtocol", () => {
   it("(anthropic) falls back to a Claude model when the caller supplies none", async () => {
     proxyFetchMock.mockResolvedValue(jsonResponse({}, { status: 200 }))
     await testCustomProviderConnectionByProtocol("https://api.anthropic.com", "key", "anthropic")
-    expect(JSON.parse(proxyFetchMock.mock.calls[0][1].body).model).toBe("claude-3-haiku-20240307")
+    expect(JSON.parse(proxyFetchMock.mock.calls[0][1].body).model).toBe(
+      getBuiltInProviderDefaultModel("anthropic")
+    )
   })
 
   it("(anthropic) returns failure for non-400 API errors", async () => {

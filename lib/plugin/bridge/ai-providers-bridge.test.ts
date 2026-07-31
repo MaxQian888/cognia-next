@@ -131,6 +131,66 @@ describe("ai-providers-bridge", () => {
     ])
   })
 
+  it("registers and unregisters a namespaced declarative catalog contribution", async () => {
+    const unregisterCatalog = jest.fn()
+    const registerContribution = jest.fn(() => unregisterCatalog)
+    const result = await registerAiProvidersForPlugin(
+      manifest({
+        id: "weather",
+        aiProviders: [
+          {
+            id: "models",
+            label: "Weather Models",
+            kind: "llm",
+            catalog: {
+              tier: "experimental",
+              modalities: ["language"],
+              adapterFamily: "openai-compatible",
+              models: [
+                {
+                  id: "forecast-small",
+                  name: "Forecast Small",
+                  modalities: { input: ["text"], output: ["text"] },
+                },
+              ],
+              offerings: [
+                {
+                  id: "forecast",
+                  modelRef: "forecast-small",
+                  upstreamId: "forecast-v1",
+                  endpointType: "chat-completions",
+                },
+              ],
+            },
+          },
+        ],
+      }),
+      "/plugins/weather",
+      {
+        importer: jest.fn(),
+        catalogRepository: { registerContribution } as never,
+      }
+    )
+
+    expect(result).toEqual({ registered: 1, errors: [] })
+    expect(registerContribution).toHaveBeenCalledWith(
+      "weather",
+      expect.objectContaining({
+        providers: [expect.objectContaining({ id: "weather:models" })],
+        models: [expect.objectContaining({ id: "weather:forecast-small" })],
+        offerings: [
+          expect.objectContaining({
+            id: "weather:models:forecast",
+            providerRef: "weather:models",
+            modelRef: "weather:forecast-small",
+          }),
+        ],
+      })
+    )
+    unregisterAiProvidersForPlugin("weather")
+    expect(unregisterCatalog).toHaveBeenCalledTimes(1)
+  })
+
   it("collects errors per failing entry", async () => {
     const m = manifest({
       aiProviders: [{ id: "bad", label: "Bad", entry: "b.js", export: "missing", kind: "llm" }],

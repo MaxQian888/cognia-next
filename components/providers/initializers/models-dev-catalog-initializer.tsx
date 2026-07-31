@@ -7,7 +7,7 @@
 
 import { useEffect, useRef } from "react"
 
-import { refreshModelsDevCatalogIfStale } from "@/lib/ai/providers/models-dev-sync"
+import { initializeProviderCatalog } from "@/lib/ai/providers/models-dev-sync"
 
 export function ModelsDevCatalogInitializer() {
   const hasInitialized = useRef(false)
@@ -15,7 +15,7 @@ export function ModelsDevCatalogInitializer() {
   useEffect(() => {
     if (hasInitialized.current) return
     hasInitialized.current = true
-    void refreshModelsDevCatalogIfStale()
+    void initializeProviderCatalog()
   }, [])
 
   return null

@@ -308,6 +308,59 @@ describe("getDb", () => {
     expect(db.chatSearchState.schema.primKey.name).toBe("id")
   })
 
+  it("v135 opens the versioned provider catalog stores and indexes", async () => {
+    const db = getDb()
+    await db.open()
+    expect(db.verno).toBeGreaterThanOrEqual(135)
+
+    expect(db.providerCatalogRevisions.schema.primKey.name).toBe("id")
+    expect(db.providerCatalogModels.schema.primKey.name).toBe("[revisionId+id]")
+    expect(db.providerCatalogOfferings.schema.indexes.map((index) => index.name)).toEqual(
+      expect.arrayContaining(["revisionId", "[revisionId+providerRef]", "[revisionId+modelRef]"])
+    )
+    expect(db.providerConnectionInventory.schema.indexes.map((index) => index.name)).toEqual(
+      expect.arrayContaining(["deploymentRef", "providerRef", "status", "checkedAt"])
+    )
+  })
+
+  it("v135 upgrades v1 deployment model references and profile metadata", async () => {
+    const name = `cognia-v135-provider-catalog-${Date.now()}`
+    const legacy = new Dexie(name)
+    legacy.version(134).stores({
+      deploymentProfiles: "&id, providerRef, legacyProviderId",
+      profileStoreMeta: "&id",
+    })
+    await legacy.open()
+    await legacy.table("deploymentProfiles").put({
+      id: "openrouter-main",
+      providerRef: "openrouter",
+      endpoint: "https://openrouter.ai/api/v1",
+      transportProfileRef: "tp-openai-bearer",
+      models: [{ id: "openai/gpt-test" }],
+    })
+    await legacy.table("profileStoreMeta").put({
+      id: "singleton",
+      profileVersion: 4,
+      schemaVersion: 1,
+    })
+    legacy.close()
+
+    const upgraded = new CogniaDB(name)
+    await upgraded.open()
+
+    expect((await upgraded.deploymentProfiles.get("openrouter-main"))?.models[0]).toEqual({
+      id: "openai/gpt-test",
+      upstreamId: "openai/gpt-test",
+      offeringRef: "openrouter-main:openai/gpt-test",
+      canonicalModelRef: "openai:gpt-test",
+    })
+    expect((await upgraded.profileStoreMeta.get("singleton"))?.schemaVersion).toBe(2)
+    expect((await upgraded.profileStoreMeta.get("singleton"))?.profileVersion).toBe(4)
+
+    upgraded.close()
+    await Dexie.delete(name)
+  })
+
   it("v128 opens the content-addressed chat media store", async () => {
     const db = getDb()
     await db.open()

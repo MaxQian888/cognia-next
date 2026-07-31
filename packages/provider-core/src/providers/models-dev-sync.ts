@@ -17,7 +17,10 @@
  * code-split out of the main bundle.
  */
 
-import { getBuiltInProviderAdapter } from "@cognia/provider-types/built-in-provider-catalog"
+import {
+  getBuiltInProviderAdapter,
+  getBuiltInProviderCatalog,
+} from "@cognia/provider-types/built-in-provider-catalog"
 import type { BuiltInProviderAdapterId } from "@cognia/provider-types/built-in-provider-catalog"
 import {
   getModelsDevCatalog,
@@ -28,12 +31,15 @@ import {
   type ModelsDevCatalogRow,
 } from "./models-dev-catalog-db"
 import {
+  buildCatalogSnapshotFromModelsDev,
   deriveAdapterFromNpm,
   fetchModelsDevApi,
   normalizeModelsDevApi,
   type ModelsDevApi,
   type ModelsDevCatalogModel,
 } from "./models-dev"
+import type { CatalogRepository } from "./catalog-repository"
+import { BUNDLED_CERTIFIED_PROVIDER_IDS } from "./catalog-baseline"
 import { resolveModelsDevProviderId } from "./models-dev-id-map"
 
 // =============================================================================
@@ -41,6 +47,22 @@ import { resolveModelsDevProviderId } from "./models-dev-id-map"
 // =============================================================================
 
 let cachedCatalog: ModelsDevCatalogRow | null = null
+let catalogRepository: CatalogRepository | null = null
+let includeExperimentalProviders = true
+
+/**
+ * Wire the single catalog repository used by the host runtime. Optional for
+ * headless package consumers that only need the legacy normalized projection.
+ */
+export function setProviderCatalogRepository(repository: CatalogRepository | null): void {
+  catalogRepository = repository
+}
+
+export function setProviderCatalogRollout(options: {
+  includeExperimentalProviders: boolean
+}): void {
+  includeExperimentalProviders = options.includeExperimentalProviders
+}
 
 /** Prime the synchronous in-memory cache (called by the liveQuery hook). */
 export function primeModelsDevCatalogCache(row: ModelsDevCatalogRow | null | undefined): void {
@@ -62,6 +84,79 @@ export function __resetModelsDevCatalogCacheForTesting(): void {
 
 let inFlightSync: Promise<ModelsDevCatalogRow> | null = null
 
+/** Guard against upstream truncation replacing a healthy local revision. */
+export const MODELS_DEV_MIN_RETENTION_RATIO = 0.75
+
+function catalogSize(providers: ModelsDevCatalogRow["providers"]): {
+  providers: number
+  models: number
+} {
+  const entries = Object.values(providers)
+  return {
+    providers: entries.length,
+    models: entries.reduce((total, provider) => total + provider.models.length, 0),
+  }
+}
+
+function validateRefreshCandidate(
+  candidate: ModelsDevCatalogRow["providers"],
+  previous: ModelsDevCatalogRow | undefined
+): void {
+  const nextSize = catalogSize(candidate)
+  if (nextSize.providers === 0 || nextSize.models === 0) {
+    throw new Error("models.dev refresh is empty; keeping last-known-good catalog")
+  }
+  if (!previous) return
+
+  const previousSize = catalogSize(previous.providers)
+  const providerRatio = nextSize.providers / Math.max(previousSize.providers, 1)
+  const modelRatio = nextSize.models / Math.max(previousSize.models, 1)
+  if (
+    providerRatio < MODELS_DEV_MIN_RETENTION_RATIO ||
+    modelRatio < MODELS_DEV_MIN_RETENTION_RATIO
+  ) {
+    throw new Error(
+      `models.dev refresh shrank abnormally ` +
+        `(${nextSize.providers}/${previousSize.providers} providers, ` +
+        `${nextSize.models}/${previousSize.models} models); keeping last-known-good catalog`
+    )
+  }
+}
+
+async function checksumApi(api: ModelsDevApi): Promise<string> {
+  const subtle = globalThis.crypto?.subtle
+  if (!subtle) throw new Error("Web Crypto is unavailable; catalog checksum cannot be verified")
+  const bytes = new TextEncoder().encode(JSON.stringify(api))
+  const digest = await subtle.digest("SHA-256", bytes)
+  const hex = [...new Uint8Array(digest)]
+    .map((value) => value.toString(16).padStart(2, "0"))
+    .join("")
+  return `sha256:${hex}`
+}
+
+async function publishUnifiedCatalog(api: ModelsDevApi, now: number): Promise<void> {
+  if (!catalogRepository) return
+  const checksum = await checksumApi(api)
+  const revisionId = `${now}-${checksum.slice("sha256:".length, "sha256:".length + 12)}`
+  const snapshot = buildCatalogSnapshotFromModelsDev(api, {
+    revisionId,
+    generatedAt: new Date(now).toISOString(),
+    checksum,
+    builtInCatalog: getBuiltInProviderCatalog(),
+    certifiedProviderIds: BUNDLED_CERTIFIED_PROVIDER_IDS,
+    includeExperimentalProviders,
+  })
+  await catalogRepository.stageRevision(snapshot)
+  await catalogRepository.activateRevision(revisionId)
+}
+
+/** Seed Catalog v2 from the bundled shard when no active revision is loaded. */
+export async function ensureUnifiedProviderCatalog(now: number = Date.now()): Promise<void> {
+  if (!catalogRepository || catalogRepository.listProviders().length > 0) return
+  const api = await loadBundledSnapshot()
+  await publishUnifiedCatalog(api, now)
+}
+
 /** Fetch the live models.dev catalog, normalize, persist, and prime the cache. */
 export async function syncModelsDevCatalog(now: number = Date.now()): Promise<ModelsDevCatalogRow> {
   // Coalesce concurrent syncs (manual button + stale auto-refresh racing).
@@ -69,7 +164,10 @@ export async function syncModelsDevCatalog(now: number = Date.now()): Promise<Mo
   inFlightSync = (async () => {
     const api = await fetchModelsDevApi()
     const providers = normalizeModelsDevApi(api)
+    const previous = await getModelsDevCatalog()
+    validateRefreshCandidate(providers, previous)
     const row = await saveModelsDevCatalog({ providers, fetchedAt: now, source: "remote" })
+    await publishUnifiedCatalog(api, now)
     cachedCatalog = row
     return row
   })()
@@ -95,6 +193,7 @@ export async function ensureModelsDevCatalog(
   const api = await loadBundledSnapshot()
   const providers = normalizeModelsDevApi(api)
   const row = await saveModelsDevCatalog({ providers, fetchedAt: now, source: "bundled" })
+  await publishUnifiedCatalog(api, now)
   cachedCatalog = row
   return row
 }
@@ -134,6 +233,55 @@ async function loadBundledSnapshot(): Promise<ModelsDevApi> {
 
 /** models.dev models for a provider, from the in-memory cache. */
 export function getCatalogModelsForProvider(providerId: string): ModelsDevCatalogModel[] {
+  if (catalogRepository) {
+    const offerings = catalogRepository
+      .listOfferings()
+      .filter((offering) => offering.providerRef === providerId)
+    const seen = new Set<string>()
+    const projected: ModelsDevCatalogModel[] = []
+    for (const offering of offerings) {
+      if (seen.has(offering.upstreamId)) continue
+      const model = catalogRepository.getModel(offering.modelRef)
+      if (!model) continue
+      seen.add(offering.upstreamId)
+      projected.push({
+        id: offering.upstreamId,
+        name: model.name,
+        provider: providerId,
+        family: model.family,
+        releaseDate: model.releasedAt,
+        status: model.lifecycle,
+        contextLength: offering.limits?.context ?? model.limits?.context,
+        maxOutputTokens: offering.limits?.output ?? model.limits?.output,
+        supportsTools: offering.capabilities?.tools ?? model.capabilities.tools,
+        supportsVision: model.modalities.input.includes("image"),
+        supportsAudio:
+          model.modalities.input.includes("audio") || model.modalities.output.includes("audio"),
+        supportsVideo:
+          model.modalities.input.includes("video") || model.modalities.output.includes("video"),
+        supportsStreaming: offering.capabilities?.streaming ?? model.capabilities.streaming,
+        supportsReasoning: offering.capabilities?.reasoning ?? model.capabilities.reasoning,
+        supportsImageGeneration:
+          offering.capabilities?.imageGeneration ?? model.capabilities.imageGeneration,
+        supportsEmbedding: offering.capabilities?.embeddings ?? model.capabilities.embeddings,
+        supportsStructuredOutput:
+          offering.capabilities?.structuredOutput ?? model.capabilities.structuredOutput,
+        supportsAttachment: offering.capabilities?.attachments ?? model.capabilities.attachments,
+        openWeights: offering.capabilities?.openWeights ?? model.capabilities.openWeights,
+        supportsTemperature: offering.capabilities?.temperature ?? model.capabilities.temperature,
+        pricing: offering.pricing
+          ? {
+              promptPer1M: offering.pricing.inputPer1M,
+              completionPer1M: offering.pricing.outputPer1M,
+              cachedInputPer1M: offering.pricing.cachedInputPer1M,
+              cacheCreationPer1M: offering.pricing.cacheWritePer1M,
+              currency: offering.pricing.currency,
+            }
+          : undefined,
+      })
+    }
+    if (projected.length > 0) return projected
+  }
   return cachedCatalog?.providers[providerId]?.models ?? []
 }
 

@@ -1,0 +1,32 @@
+{
+  "meta": {
+    "id": "meta",
+    "env": ["META_MODEL_API_KEY"],
+    "npm": "@ai-sdk/openai",
+    "api": "https://api.meta.ai/v1",
+    "name": "Meta",
+    "doc": "https://dev.meta.ai/docs",
+    "models": {
+      "muse-spark-1.1": {
+        "id": "muse-spark-1.1",
+        "name": "Muse Spark 1.1",
+        "description": "Muse Spark is a natively multimodal reasoning model with support for tool-use, visual chain of thought, and multi-agent orchestration.",
+        "family": "muse",
+        "attachment": true,
+        "reasoning": true,
+        "reasoning_options": [
+          { "type": "effort", "values": ["minimal", "low", "medium", "high", "xhigh"] }
+        ],
+        "tool_call": true,
+        "structured_output": true,
+        "temperature": true,
+        "release_date": "2026-04-08",
+        "last_updated": "2026-07-09",
+        "modalities": { "input": ["text", "image", "pdf", "video"], "output": ["text"] },
+        "open_weights": false,
+        "limit": { "context": 1000000, "output": 32000 },
+        "cost": { "input": 1.25, "output": 4.25, "cache_read": 0.15 }
+      }
+    }
+  }
+}

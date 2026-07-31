@@ -111,10 +111,16 @@ describe("SettingsShell reset row", () => {
     expect(replace).toHaveBeenCalledWith("/settings?section=agent-runtime", { scroll: false })
   })
 
-  it("redirects the deprecated ?section=api-key deep link to providers", () => {
+  it("redirects the deprecated ?section=api-key deep link to AI Connections", () => {
     mockSection = "api-key"
     render(<SettingsShell />)
-    expect(replace).toHaveBeenCalledWith("/settings?section=providers", { scroll: false })
+    expect(replace).toHaveBeenCalledWith("/settings?section=ai-connections", { scroll: false })
+  })
+
+  it("redirects the legacy ?section=providers deep link to AI Connections", () => {
+    mockSection = "providers"
+    render(<SettingsShell />)
+    expect(replace).toHaveBeenCalledWith("/settings?section=ai-connections", { scroll: false })
   })
 
   it("redirects the merged ?section=profile deep link to account", () => {

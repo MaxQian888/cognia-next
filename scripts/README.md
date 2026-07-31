@@ -42,12 +42,12 @@ scripts/
 
 ## `sync/` — sync / generation scripts
 
-| Script                         | Purpose                                                                                                       | Trigger                                                             | Test                                              |
-| ------------------------------ | ------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------- | ------------------------------------------------- |
-| `sync/sync-models-dev.mjs`     | Download the models.dev catalog into `lib/ai/providers/models-dev-snapshot.json` (bundled fallback).          | `pnpm sync:models-dev`                                              | —                                                 |
-| `sync/sync-plugin-sdk-wit.mjs` | Copy the canonical WIT contract into the `plugin-sdk` mirror (fixes drift flagged by `check-plugin-sdk-wit`). | `pnpm sync:plugin-sdk-wit`                                          | —                                                 |
-| `sync/release-sync-keys.mjs`   | Propagate the Ed25519 release public key from `crates/cognia-cli` into its Rust + TS mirrors.                 | `pnpm release:sync-keys`; `pnpm release:sync-keys:check` (CI drift) | —                                                 |
-| `sync/sort-i18n.mjs`           | Recursively key-sort `en.json`/`zh-CN.json` (values untouched, ICU-safe); `--check` for CI.                   | `pnpm i18n:sort`; `pnpm i18n:sort:check`                            | `sync/sort-i18n.test.mjs` (`pnpm i18n:sort:test`) |
+| Script                         | Purpose                                                                                                       | Trigger                                                             | Test                                               |
+| ------------------------------ | ------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------- | -------------------------------------------------- |
+| `sync/sync-models-dev.mjs`     | Generate the models.dev manifest, search index, provider shards, and compact capability fallback.             | `pnpm sync:models-dev`                                              | `lib/ai/providers/models-dev-shard-loader.test.ts` |
+| `sync/sync-plugin-sdk-wit.mjs` | Copy the canonical WIT contract into the `plugin-sdk` mirror (fixes drift flagged by `check-plugin-sdk-wit`). | `pnpm sync:plugin-sdk-wit`                                          | —                                                  |
+| `sync/release-sync-keys.mjs`   | Propagate the Ed25519 release public key from `crates/cognia-cli` into its Rust + TS mirrors.                 | `pnpm release:sync-keys`; `pnpm release:sync-keys:check` (CI drift) | —                                                  |
+| `sync/sort-i18n.mjs`           | Recursively key-sort `en.json`/`zh-CN.json` (values untouched, ICU-safe); `--check` for CI.                   | `pnpm i18n:sort`; `pnpm i18n:sort:check`                            | `sync/sort-i18n.test.mjs` (`pnpm i18n:sort:test`)  |
 
 ## `smoke/` — smoke scripts
 

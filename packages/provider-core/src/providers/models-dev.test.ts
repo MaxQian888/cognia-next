@@ -2,6 +2,7 @@ const proxyFetchMock = jest.fn()
 
 import {
   deriveAdapterFromNpm,
+  buildCatalogSnapshotFromModelsDev,
   computeModelVariants,
   expandModelModes,
   fetchModelsDevApi,
@@ -253,15 +254,134 @@ describe("normalizeModelsDevApi", () => {
     },
   }
 
-  it("keys the catalog by our internal provider ids (mapping differences resolved)", () => {
+  it("keys known providers by internal ids and namespaces the dynamic long tail", () => {
     const norm = normalizeModelsDevApi(api)
-    expect(Object.keys(norm).sort()).toEqual(["anthropic", "fireworks"])
+    expect(Object.keys(norm).sort()).toEqual([
+      "anthropic",
+      "fireworks",
+      "models-dev:some-untracked-provider",
+    ])
     expect(norm.fireworks.modelsDevId).toBe("fireworks-ai")
     expect(norm.anthropic.models[0].id).toBe("claude-sonnet-4-5")
   })
 
-  it("drops providers with no config path in the app", () => {
+  it("keeps providers without a built-in config path as namespaced experimental entries", () => {
     const norm = normalizeModelsDevApi(api)
-    expect(norm["some-untracked-provider"]).toBeUndefined()
+    expect(norm["models-dev:some-untracked-provider"]).toMatchObject({
+      modelsDevId: "some-untracked-provider",
+      name: "Untracked",
+    })
+  })
+})
+
+describe("buildCatalogSnapshotFromModelsDev", () => {
+  it("applies manual provider wiring over models.dev and keeps long-tail providers experimental", () => {
+    const snapshot = buildCatalogSnapshotFromModelsDev(
+      {
+        anthropic: {
+          ...anthropicProvider,
+          models: { "claude-sonnet-4-5": sonnet },
+        },
+        tail: {
+          name: "Tail Provider",
+          npm: "@ai-sdk/openai-compatible",
+          models: {
+            "tail/image-1": {
+              id: "tail/image-1",
+              status: "beta",
+              modalities: { input: ["text"], output: ["image"] },
+            },
+          },
+        },
+      },
+      {
+        revisionId: "2026-07-31-test",
+        generatedAt: "2026-07-31T00:00:00.000Z",
+        checksum: "sha256:test",
+        certifiedProviderIds: new Set(["anthropic"]),
+        builtInCatalog: [
+          {
+            id: "anthropic",
+            name: "Anthropic",
+            type: "cloud",
+            protocol: "anthropic",
+            adapter: "anthropic",
+            apiKeyRequired: true,
+            baseURLRequired: false,
+            defaultModel: "claude-sonnet-4-5",
+            defaultEnabled: true,
+            models: [],
+          },
+        ],
+      }
+    )
+
+    expect(snapshot.providers).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: "anthropic", tier: "certified" }),
+        expect.objectContaining({ id: "models-dev:tail", tier: "experimental" }),
+      ])
+    )
+    expect(snapshot.models).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: "anthropic:claude-sonnet-4-5",
+          lifecycle: "active",
+        }),
+        expect.objectContaining({
+          id: "tail:image-1",
+          lifecycle: "preview",
+          capabilities: expect.objectContaining({ imageGeneration: true }),
+        }),
+      ])
+    )
+    expect(snapshot.offerings).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          providerRef: "anthropic",
+          upstreamId: "claude-sonnet-4-5",
+          endpointType: "messages",
+        }),
+        expect.objectContaining({
+          providerRef: "models-dev:tail",
+          upstreamId: "tail/image-1",
+          endpointType: "images",
+        }),
+      ])
+    )
+  })
+
+  it("keeps every built-in default resolvable through an active fallback offering", () => {
+    const snapshot = buildCatalogSnapshotFromModelsDev(
+      {},
+      {
+        revisionId: "fallback",
+        generatedAt: "2026-07-31T00:00:00.000Z",
+        checksum: "sha256:fallback",
+        certifiedProviderIds: new Set(),
+        builtInCatalog: [
+          {
+            id: "local-test",
+            name: "Local Test",
+            type: "local",
+            protocol: "openai",
+            adapter: "local-openai-compatible",
+            apiKeyRequired: false,
+            baseURLRequired: true,
+            defaultModel: "local-model",
+            defaultEnabled: false,
+            models: [],
+          },
+        ],
+      }
+    )
+
+    expect(snapshot.offerings).toContainEqual(
+      expect.objectContaining({
+        id: "local-test:local-model",
+        upstreamId: "local-model",
+        lifecycle: "active",
+      })
+    )
   })
 })

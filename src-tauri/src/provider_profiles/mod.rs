@@ -17,7 +17,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 /// Bump together with `PROFILE_STORE_SCHEMA_VERSION` on the TS side.
-pub const PROFILE_STORE_SCHEMA_VERSION: i64 = 1;
+pub const PROFILE_STORE_SCHEMA_VERSION: i64 = 2;
 
 #[derive(Debug, thiserror::Error)]
 pub enum ProfileStoreError {
@@ -43,6 +43,22 @@ pub struct ProviderProfileDoc {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
+pub struct DeploymentModelDoc {
+    pub id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub display_name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub upstream_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub offering_ref: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub canonical_model_ref: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub user_override: Option<Value>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
 pub struct DeploymentProfileDoc {
     pub id: String,
     pub provider_ref: String,
@@ -52,7 +68,7 @@ pub struct DeploymentProfileDoc {
     pub transport_profile_ref: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub credential_profile_ref: Option<Value>,
-    pub models: Vec<Value>,
+    pub models: Vec<DeploymentModelDoc>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub model_roles: Option<Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -81,6 +97,256 @@ pub struct ProfileDocs {
     pub transport_profiles: Vec<TransportProfileDoc>,
     #[serde(default)]
     pub legacy_aliases: std::collections::BTreeMap<String, String>,
+}
+
+// ---- Model catalog mirror ---------------------------------------------------
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CatalogRevisionDoc {
+    pub id: String,
+    pub schema_version: i64,
+    pub generated_at: String,
+    pub sources: Vec<Value>,
+    pub checksum: String,
+    pub integrity: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CatalogSnapshotDoc {
+    pub revision: CatalogRevisionDoc,
+    pub providers: Vec<Value>,
+    pub models: Vec<Value>,
+    pub offerings: Vec<Value>,
+    pub aliases: Vec<Value>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct CatalogStatus {
+    pub active_revision_id: Option<String>,
+    pub previous_revision_id: Option<String>,
+    pub provider_count: usize,
+    pub model_count: usize,
+    pub offering_count: usize,
+    pub alias_count: usize,
+}
+
+fn required_id<'a>(value: &'a Value, kind: &str) -> Result<&'a str, ProfileStoreError> {
+    value
+        .get("id")
+        .and_then(Value::as_str)
+        .filter(|id| !id.is_empty())
+        .ok_or_else(|| ProfileStoreError::Validation(format!("{kind} is missing id")))
+}
+
+fn catalog_string<'a>(
+    value: &'a Value,
+    field: &str,
+    kind: &str,
+) -> Result<&'a str, ProfileStoreError> {
+    value
+        .get(field)
+        .and_then(Value::as_str)
+        .filter(|item| !item.is_empty())
+        .ok_or_else(|| ProfileStoreError::Validation(format!("{kind} is missing {field}")))
+}
+
+fn catalog_enum(
+    value: &Value,
+    field: &str,
+    kind: &str,
+    allowed: &[&str],
+) -> Result<(), ProfileStoreError> {
+    let item = catalog_string(value, field, kind)?;
+    if allowed.contains(&item) {
+        Ok(())
+    } else {
+        Err(ProfileStoreError::Validation(format!(
+            "{kind} has invalid {field} \"{item}\""
+        )))
+    }
+}
+
+fn validate_catalog_snapshot(snapshot: &CatalogSnapshotDoc) -> Result<(), ProfileStoreError> {
+    if snapshot.revision.schema_version != 1 {
+        return Err(ProfileStoreError::Validation(format!(
+            "unsupported catalog schemaVersion {}",
+            snapshot.revision.schema_version
+        )));
+    }
+    if snapshot.revision.id.is_empty()
+        || snapshot.revision.generated_at.is_empty()
+        || snapshot.revision.sources.is_empty()
+        || snapshot.revision.checksum.is_empty()
+        || snapshot.revision.integrity != "verified"
+    {
+        return Err(ProfileStoreError::Validation(
+            "catalog revision must be complete and verified".into(),
+        ));
+    }
+
+    let as_value = serde_json::to_value(snapshot)?;
+    let mut secret_paths = Vec::new();
+    find_secret_paths(&as_value, "", &mut secret_paths);
+    if !secret_paths.is_empty() {
+        return Err(ProfileStoreError::Validation(format!(
+            "catalog secret material is not allowed at: {}",
+            secret_paths.join(", ")
+        )));
+    }
+
+    let provider_ids = snapshot
+        .providers
+        .iter()
+        .map(|provider| required_id(provider, "provider"))
+        .collect::<Result<std::collections::HashSet<_>, _>>()?;
+    if provider_ids.len() != snapshot.providers.len() {
+        return Err(ProfileStoreError::Validation(
+            "catalog contains duplicate provider ids".into(),
+        ));
+    }
+    const ADAPTER_FAMILIES: &[&str] = &[
+        "openai-compatible",
+        "anthropic",
+        "gemini",
+        "bedrock",
+        "azure-openai",
+        "vertex-ai",
+        "openrouter",
+        "local-openai-compatible",
+    ];
+    for provider in &snapshot.providers {
+        catalog_enum(
+            provider,
+            "tier",
+            "provider",
+            &["certified", "verified", "experimental"],
+        )?;
+        let adapters = provider
+            .get("adapterFamilies")
+            .and_then(Value::as_array)
+            .filter(|items| !items.is_empty())
+            .ok_or_else(|| {
+                ProfileStoreError::Validation("provider requires non-empty adapterFamilies".into())
+            })?;
+        if adapters.iter().any(|adapter| match adapter.as_str() {
+            Some(value) => !ADAPTER_FAMILIES.contains(&value),
+            None => true,
+        }) {
+            return Err(ProfileStoreError::Validation(
+                "provider contains an adapter family outside the local allowlist".into(),
+            ));
+        }
+    }
+    let model_ids = snapshot
+        .models
+        .iter()
+        .map(|model| required_id(model, "model"))
+        .collect::<Result<std::collections::HashSet<_>, _>>()?;
+    if model_ids.len() != snapshot.models.len() {
+        return Err(ProfileStoreError::Validation(
+            "catalog contains duplicate model ids".into(),
+        ));
+    }
+    for model in &snapshot.models {
+        catalog_enum(
+            model,
+            "lifecycle",
+            "model",
+            &["preview", "active", "deprecated", "retired"],
+        )?;
+    }
+    let offering_ids = snapshot
+        .offerings
+        .iter()
+        .map(|offering| required_id(offering, "offering"))
+        .collect::<Result<std::collections::HashSet<_>, _>>()?;
+    if offering_ids.len() != snapshot.offerings.len() {
+        return Err(ProfileStoreError::Validation(
+            "catalog contains duplicate offering ids".into(),
+        ));
+    }
+    for offering in &snapshot.offerings {
+        let id = required_id(offering, "offering")?;
+        let provider_ref = offering
+            .get("providerRef")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        let model_ref = offering
+            .get("modelRef")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        if !provider_ids.contains(provider_ref) || !model_ids.contains(model_ref) {
+            return Err(ProfileStoreError::Validation(format!(
+                "offering {id} has unresolved provider/model references"
+            )));
+        }
+        catalog_enum(
+            offering,
+            "lifecycle",
+            "offering",
+            &["preview", "active", "deprecated", "retired"],
+        )?;
+        if offering.get("available").and_then(Value::as_bool).is_none() {
+            return Err(ProfileStoreError::Validation(format!(
+                "offering {id} is missing available"
+            )));
+        }
+    }
+
+    let aliases_by_id = snapshot
+        .aliases
+        .iter()
+        .map(|alias| required_id(alias, "alias").map(|id| (id, alias)))
+        .collect::<Result<std::collections::HashMap<_, _>, _>>()?;
+    if aliases_by_id.len() != snapshot.aliases.len() {
+        return Err(ProfileStoreError::Validation(
+            "catalog contains duplicate alias ids".into(),
+        ));
+    }
+    for (alias_id, alias) in &aliases_by_id {
+        let target_type = alias
+            .pointer("/target/type")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        let target_ref = alias
+            .pointer("/target/ref")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        let resolved = match target_type {
+            "model" => model_ids.contains(target_ref),
+            "offering" => offering_ids.contains(target_ref),
+            "alias" => aliases_by_id.contains_key(target_ref),
+            _ => false,
+        };
+        if !resolved {
+            return Err(ProfileStoreError::Validation(format!(
+                "alias {alias_id} has an unresolved target"
+            )));
+        }
+
+        let mut visited = std::collections::HashSet::new();
+        let mut current = Some(*alias);
+        while let Some(value) = current {
+            let current_id = required_id(value, "alias")?;
+            if !visited.insert(current_id) {
+                return Err(ProfileStoreError::Validation(format!(
+                    "catalog alias cycle detected at {current_id}"
+                )));
+            }
+            current = if value.pointer("/target/type").and_then(Value::as_str) == Some("alias") {
+                value
+                    .pointer("/target/ref")
+                    .and_then(Value::as_str)
+                    .and_then(|id| aliases_by_id.get(id).copied())
+            } else {
+                None
+            };
+        }
+    }
+    Ok(())
 }
 
 // ---- Validation -------------------------------------------------------------
@@ -176,6 +442,12 @@ pub trait ProviderProfileStore: Send + Sync {
     fn subscribe(&self) -> tokio::sync::watch::Receiver<u64>;
     fn export_redacted(&self) -> Result<Value, ProfileStoreError>;
     fn import(&self, payload: &Value) -> Result<u64, ProfileStoreError>;
+    fn catalog_status(&self) -> Result<CatalogStatus, ProfileStoreError>;
+    fn catalog_search(&self, query: &str, limit: usize) -> Result<Vec<Value>, ProfileStoreError>;
+    fn catalog_refresh(
+        &self,
+        snapshot: &CatalogSnapshotDoc,
+    ) -> Result<CatalogStatus, ProfileStoreError>;
 }
 
 // ---- SQLite implementation --------------------------------------------------
@@ -193,6 +465,17 @@ const SCHEMA_SQL: &str = "
         profile_version INTEGER NOT NULL,
         schema_version INTEGER NOT NULL,
         migrated_at TEXT
+    );
+    CREATE TABLE IF NOT EXISTS provider_catalog_revisions (
+        id TEXT PRIMARY KEY,
+        status TEXT NOT NULL,
+        snapshot TEXT NOT NULL,
+        activated_at INTEGER NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS provider_catalog_meta (
+        id TEXT PRIMARY KEY,
+        active_revision_id TEXT,
+        previous_revision_id TEXT
     );
 ";
 
@@ -390,6 +673,169 @@ impl ProviderProfileStore for SqliteProfileStore {
         let docs: ProfileDocs = serde_json::from_value(payload.clone())?;
         self.replace_all(&docs, None)
     }
+
+    fn catalog_status(&self) -> Result<CatalogStatus, ProfileStoreError> {
+        let conn = self.conn.lock();
+        catalog_status_from_conn(&conn)
+    }
+
+    fn catalog_search(&self, query: &str, limit: usize) -> Result<Vec<Value>, ProfileStoreError> {
+        let conn = self.conn.lock();
+        let snapshot = load_active_catalog(&conn)?;
+        let Some(snapshot) = snapshot else {
+            return Ok(Vec::new());
+        };
+        let query = query.trim().to_lowercase();
+        let limit = limit.clamp(1, 200);
+        let offerings_by_model = snapshot.offerings.iter().fold(
+            std::collections::HashMap::new(),
+            |mut map, offering| {
+                if let Some(model_ref) = offering.get("modelRef").and_then(Value::as_str) {
+                    map.entry(model_ref.to_string())
+                        .or_insert_with(Vec::new)
+                        .push(offering.clone());
+                }
+                map
+            },
+        );
+        let aliases_by_model =
+            snapshot
+                .aliases
+                .iter()
+                .fold(std::collections::HashMap::new(), |mut map, alias| {
+                    if alias.pointer("/target/type").and_then(Value::as_str) == Some("model") {
+                        if let Some(model_ref) =
+                            alias.pointer("/target/ref").and_then(Value::as_str)
+                        {
+                            map.entry(model_ref.to_string())
+                                .or_insert_with(Vec::new)
+                                .push(alias.clone());
+                        }
+                    }
+                    map
+                });
+
+        let mut matches = Vec::new();
+        for model in snapshot.models {
+            let id = required_id(&model, "model")?;
+            let offerings = offerings_by_model.get(id).cloned().unwrap_or_default();
+            let aliases = aliases_by_model.get(id).cloned().unwrap_or_default();
+            let mut searchable = serde_json::to_string(&model)?.to_lowercase();
+            searchable.push_str(&serde_json::to_string(&offerings)?.to_lowercase());
+            searchable.push_str(&serde_json::to_string(&aliases)?.to_lowercase());
+            if query.is_empty() || searchable.contains(&query) {
+                matches.push(serde_json::json!({
+                    "model": model,
+                    "offerings": offerings,
+                    "aliases": aliases,
+                }));
+            }
+            if matches.len() >= limit {
+                break;
+            }
+        }
+        Ok(matches)
+    }
+
+    fn catalog_refresh(
+        &self,
+        snapshot: &CatalogSnapshotDoc,
+    ) -> Result<CatalogStatus, ProfileStoreError> {
+        validate_catalog_snapshot(snapshot)?;
+        let mut conn = self.conn.lock();
+        let tx = conn.transaction()?;
+        let (active, _previous): (Option<String>, Option<String>) = tx
+            .query_row(
+                "SELECT active_revision_id, previous_revision_id
+                 FROM provider_catalog_meta WHERE id = 'singleton'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap_or((None, None));
+        if active.as_deref() == Some(snapshot.revision.id.as_str()) {
+            return catalog_status_from_conn(&tx);
+        }
+
+        tx.execute(
+            "INSERT INTO provider_catalog_revisions (id, status, snapshot, activated_at)
+             VALUES (?1, 'active', ?2, ?3)
+             ON CONFLICT(id) DO UPDATE SET
+               status = excluded.status,
+               snapshot = excluded.snapshot,
+               activated_at = excluded.activated_at",
+            params![
+                snapshot.revision.id,
+                serde_json::to_string(snapshot)?,
+                now_ms()
+            ],
+        )?;
+        if let Some(previous) = &active {
+            tx.execute(
+                "UPDATE provider_catalog_revisions SET status = 'previous' WHERE id = ?1",
+                params![previous],
+            )?;
+        }
+        tx.execute(
+            "INSERT INTO provider_catalog_meta (id, active_revision_id, previous_revision_id)
+             VALUES ('singleton', ?1, ?2)
+             ON CONFLICT(id) DO UPDATE SET
+               active_revision_id = excluded.active_revision_id,
+               previous_revision_id = excluded.previous_revision_id",
+            params![snapshot.revision.id, active],
+        )?;
+        tx.execute(
+            "DELETE FROM provider_catalog_revisions
+             WHERE id != ?1 AND (?2 IS NULL OR id != ?2)",
+            params![snapshot.revision.id, active],
+        )?;
+        tx.commit()?;
+        catalog_status_from_conn(&conn)
+    }
+}
+
+fn load_active_catalog(conn: &Connection) -> Result<Option<CatalogSnapshotDoc>, ProfileStoreError> {
+    let raw: Option<String> = conn
+        .query_row(
+            "SELECT revisions.snapshot
+             FROM provider_catalog_revisions revisions
+             JOIN provider_catalog_meta meta
+               ON meta.active_revision_id = revisions.id
+             WHERE meta.id = 'singleton'",
+            [],
+            |row| row.get(0),
+        )
+        .map(Some)
+        .or_else(|error| match error {
+            rusqlite::Error::QueryReturnedNoRows => Ok(None),
+            other => Err(other),
+        })?;
+    raw.map(|value| serde_json::from_str(&value).map_err(ProfileStoreError::from))
+        .transpose()
+}
+
+fn catalog_status_from_conn(conn: &Connection) -> Result<CatalogStatus, ProfileStoreError> {
+    let revisions: Option<(Option<String>, Option<String>)> = conn
+        .query_row(
+            "SELECT active_revision_id, previous_revision_id
+             FROM provider_catalog_meta WHERE id = 'singleton'",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .map(Some)
+        .or_else(|error| match error {
+            rusqlite::Error::QueryReturnedNoRows => Ok(None),
+            other => Err(other),
+        })?;
+    let (active_revision_id, previous_revision_id) = revisions.unwrap_or((None, None));
+    let snapshot = load_active_catalog(conn)?;
+    Ok(CatalogStatus {
+        active_revision_id,
+        previous_revision_id,
+        provider_count: snapshot.as_ref().map_or(0, |value| value.providers.len()),
+        model_count: snapshot.as_ref().map_or(0, |value| value.models.len()),
+        offering_count: snapshot.as_ref().map_or(0, |value| value.offerings.len()),
+        alias_count: snapshot.as_ref().map_or(0, |value| value.aliases.len()),
+    })
 }
 
 // ---- Gateway snapshot projection (ADR-0090 Phase 2) -------------------------
@@ -486,7 +932,7 @@ pub fn gateway_snapshot_json(
             let models: Vec<Value> = deployment
                 .models
                 .iter()
-                .filter_map(|m| m.get("id").cloned())
+                .map(|model| Value::from(model.id.clone()))
                 .collect();
             Some(serde_json::json!({
                 "id": deployment.id,
@@ -536,7 +982,14 @@ mod tests {
                 credential_profile_ref: Some(serde_json::json!({
                     "kind": "secret-store", "secretId": "sec-glm"
                 })),
-                models: vec![serde_json::json!({ "id": "glm-4.6" })],
+                models: vec![DeploymentModelDoc {
+                    id: "glm-4.6".into(),
+                    display_name: None,
+                    upstream_id: Some("glm-4.6".into()),
+                    offering_ref: Some("glm-anthropic:glm-4.6".into()),
+                    canonical_model_ref: Some("zhipu:glm-4.6".into()),
+                    user_override: None,
+                }],
                 model_roles: Some(serde_json::json!({ "primary": "glm-4.6" })),
                 legacy_provider_id: Some("glm-anthropic".into()),
                 enabled: Some(true),
@@ -549,6 +1002,52 @@ mod tests {
                 forwarded_semantic_headers: None,
             }],
             legacy_aliases: Default::default(),
+        }
+    }
+
+    fn catalog(revision_id: &str, model_name: &str) -> CatalogSnapshotDoc {
+        CatalogSnapshotDoc {
+            revision: CatalogRevisionDoc {
+                id: revision_id.into(),
+                schema_version: 1,
+                generated_at: "2026-07-31T00:00:00.000Z".into(),
+                sources: vec![serde_json::json!({ "kind": "bundled", "id": "test" })],
+                checksum: format!("sha256:{revision_id}"),
+                integrity: "verified".into(),
+            },
+            providers: vec![serde_json::json!({
+                "id": "openai",
+                "name": "OpenAI",
+                "tier": "certified",
+                "source": { "kind": "bundled", "id": "test" },
+                "modalities": ["language"],
+                "adapterFamilies": ["openai-compatible"],
+                "connectionSchema": { "fields": [] }
+            })],
+            models: vec![serde_json::json!({
+                "id": "openai:gpt-test",
+                "name": model_name,
+                "creator": "openai",
+                "modalities": { "input": ["text"], "output": ["text"] },
+                "capabilities": { "tools": true },
+                "lifecycle": "active",
+                "provenance": {}
+            })],
+            offerings: vec![serde_json::json!({
+                "id": "openai:gpt-test",
+                "providerRef": "openai",
+                "modelRef": "openai:gpt-test",
+                "upstreamId": "gpt-test",
+                "endpointType": "responses",
+                "lifecycle": "active",
+                "available": true,
+                "source": { "kind": "bundled", "id": "test" }
+            })],
+            aliases: vec![serde_json::json!({
+                "id": "fast",
+                "kind": "role",
+                "target": { "type": "model", "ref": "openai:gpt-test" }
+            })],
         }
     }
 
@@ -573,6 +1072,21 @@ mod tests {
         let v2 = store.replace_all(&fewer, None).unwrap();
         assert_eq!(v2, 2);
         assert!(store.load_all().unwrap().transport_profiles.is_empty());
+    }
+
+    #[test]
+    fn deployment_model_contract_matches_typescript_v2_and_reads_v1() {
+        let model = &docs().deployment_profiles[0].models[0];
+        let json = serde_json::to_value(model).unwrap();
+        assert_eq!(json["upstreamId"], "glm-4.6");
+        assert_eq!(json["offeringRef"], "glm-anthropic:glm-4.6");
+        assert_eq!(json["canonicalModelRef"], "zhipu:glm-4.6");
+
+        let legacy: DeploymentModelDoc =
+            serde_json::from_value(serde_json::json!({ "id": "glm-4.6" })).unwrap();
+        assert_eq!(legacy.id, "glm-4.6");
+        assert!(legacy.offering_ref.is_none());
+        assert!(legacy.canonical_model_ref.is_none());
     }
 
     #[test]
@@ -654,6 +1168,117 @@ mod tests {
         assert_eq!(*rx.borrow(), 0);
         store.replace_all(&docs(), None).unwrap();
         assert_eq!(*rx.borrow(), 1);
+    }
+
+    #[test]
+    fn catalog_refresh_search_and_last_known_good_are_atomic() {
+        let store = SqliteProfileStore::in_memory().unwrap();
+        assert_eq!(
+            store.catalog_status().unwrap(),
+            CatalogStatus {
+                active_revision_id: None,
+                previous_revision_id: None,
+                provider_count: 0,
+                model_count: 0,
+                offering_count: 0,
+                alias_count: 0,
+            }
+        );
+
+        let first = store.catalog_refresh(&catalog("r1", "GPT Test")).unwrap();
+        assert_eq!(first.active_revision_id.as_deref(), Some("r1"));
+        assert_eq!(first.model_count, 1);
+        let matches = store.catalog_search("gpt-test", 10).unwrap();
+        assert_eq!(matches.len(), 1);
+        assert_eq!(matches[0]["model"]["name"], "GPT Test");
+        assert_eq!(matches[0]["offerings"][0]["upstreamId"], "gpt-test");
+
+        store.catalog_refresh(&catalog("r2", "GPT Next")).unwrap();
+        let third = store
+            .catalog_refresh(&catalog("r3", "GPT Current"))
+            .unwrap();
+        assert_eq!(third.active_revision_id.as_deref(), Some("r3"));
+        assert_eq!(third.previous_revision_id.as_deref(), Some("r2"));
+        let count: i64 = store
+            .conn
+            .lock()
+            .query_row(
+                "SELECT COUNT(*) FROM provider_catalog_revisions",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(count, 2);
+
+        let mut invalid = catalog("bad", "Broken");
+        invalid.offerings[0]["providerRef"] = Value::from("missing");
+        assert!(matches!(
+            store.catalog_refresh(&invalid),
+            Err(ProfileStoreError::Validation(_))
+        ));
+        assert_eq!(
+            store
+                .catalog_status()
+                .unwrap()
+                .active_revision_id
+                .as_deref(),
+            Some("r3")
+        );
+    }
+
+    #[test]
+    fn catalog_refresh_rejects_unverified_or_secret_bearing_payloads() {
+        let store = SqliteProfileStore::in_memory().unwrap();
+        let mut unverified = catalog("r1", "GPT Test");
+        unverified.revision.integrity = "pending".into();
+        assert!(matches!(
+            store.catalog_refresh(&unverified),
+            Err(ProfileStoreError::Validation(_))
+        ));
+
+        let mut secret = catalog("r2", "GPT Test");
+        secret.providers[0]["apiKey"] = Value::from("sk-live");
+        assert!(matches!(
+            store.catalog_refresh(&secret),
+            Err(ProfileStoreError::Validation(_))
+        ));
+    }
+
+    #[test]
+    fn catalog_refresh_enforces_adapter_lifecycle_and_alias_invariants() {
+        let store = SqliteProfileStore::in_memory().unwrap();
+
+        let mut unsafe_adapter = catalog("r1", "GPT Test");
+        unsafe_adapter.providers[0]["adapterFamilies"] = serde_json::json!(["remote-code-adapter"]);
+        assert!(matches!(
+            store.catalog_refresh(&unsafe_adapter),
+            Err(ProfileStoreError::Validation(_))
+        ));
+
+        let mut invalid_lifecycle = catalog("r2", "GPT Test");
+        invalid_lifecycle.models[0]["lifecycle"] = Value::from("unknown");
+        assert!(matches!(
+            store.catalog_refresh(&invalid_lifecycle),
+            Err(ProfileStoreError::Validation(_))
+        ));
+
+        let mut alias_cycle = catalog("r3", "GPT Test");
+        alias_cycle.aliases = vec![
+            serde_json::json!({
+                "id": "first",
+                "kind": "friendly",
+                "target": { "type": "alias", "ref": "second" }
+            }),
+            serde_json::json!({
+                "id": "second",
+                "kind": "friendly",
+                "target": { "type": "alias", "ref": "first" }
+            }),
+        ];
+        assert!(matches!(
+            store.catalog_refresh(&alias_cycle),
+            Err(ProfileStoreError::Validation(_))
+        ));
     }
 
     #[test]

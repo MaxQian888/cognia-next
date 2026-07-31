@@ -108,6 +108,16 @@ describe("me-entries registry", () => {
     expect(byId("search")).toMatchObject({ href: "/search", section: "connection" })
   })
 
+  it("surfaces the shared model catalog on mobile", () => {
+    const entry = ME_ENTRIES.find((item) => item.id === "model-catalog")
+    expect(entry).toMatchObject({
+      href: "/me/model-catalog",
+      labelKey: "modelCatalogRow",
+      section: "connection",
+    })
+    expect(matchMeEntry(entry as MeEntry, "offering", echo)).toBe(true)
+  })
+
   it("surfaces the ADR-0056 plugins, subagents, and workflow-settings entries", () => {
     const byId = (id: string) => ME_ENTRIES.find((e) => e.id === id)
     expect(byId("plugins")).toMatchObject({ href: "/me/plugins", section: "connection" })

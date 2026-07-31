@@ -35,6 +35,19 @@ describe("settings-nav-config", () => {
       expect(item?.descriptionKey).toBe("agentTeams")
     })
 
+    it("splits AI Connections and Model Catalog without reusing generic Connections", () => {
+      expect(SETTINGS_NAV.find((item) => item.id === "ai-connections")).toMatchObject({
+        group: "ai",
+        labelKey: "aiConnections",
+      })
+      expect(SETTINGS_NAV.find((item) => item.id === "model-catalog")).toMatchObject({
+        group: "ai",
+        labelKey: "modelCatalog",
+      })
+      expect(SETTINGS_NAV.find((item) => item.id === "connections")).toBeDefined()
+      expect(SETTINGS_NAV.find((item) => item.id === "providers")).toBeUndefined()
+    })
+
     it("plugins sits in the Extensions group", () => {
       const item = SETTINGS_NAV.find((n) => n.id === "plugins")
       expect(item).toBeDefined()

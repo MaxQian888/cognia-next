@@ -4,6 +4,7 @@ import {
   deriveProfiles,
   exportProfilesRedacted,
   importProfiles,
+  upgradeDeploymentProfileCatalogRefs,
   type DeriveProfilesInput,
 } from "./profile-migration"
 
@@ -132,6 +133,42 @@ describe("deriveProfiles", () => {
     for (const deployment of derived.deploymentProfiles) {
       expect(derived.legacyAliases[deployment.id]).toBe(deployment.id)
     }
+  })
+
+  it("writes catalog references for every migrated deployment model", () => {
+    const derived = deriveProfiles(fixtureInput())
+    for (const deployment of derived.deploymentProfiles) {
+      for (const model of deployment.models) {
+        expect(model).toMatchObject({
+          upstreamId: model.id,
+          offeringRef: `${deployment.id}:${model.id}`,
+          canonicalModelRef: expect.any(String),
+        })
+      }
+    }
+
+    const glm = derived.deploymentProfiles.find((item) => item.id === "glm-anthropic")
+    expect(glm?.models.find((model) => model.id === "glm-4.6")?.canonicalModelRef).toBe(
+      "zhipu:glm-4.6"
+    )
+  })
+
+  it("idempotently upgrades v1 deployment models without replacing existing references", () => {
+    const v1 = {
+      id: "openrouter-main",
+      providerRef: "openrouter",
+      endpoint: "https://openrouter.ai/api/v1",
+      transportProfileRef: "tp-openai-bearer",
+      models: [{ id: "openai/gpt-test" }],
+    }
+    const upgraded = upgradeDeploymentProfileCatalogRefs(v1)
+    expect(upgraded.models[0]).toEqual({
+      id: "openai/gpt-test",
+      upstreamId: "openai/gpt-test",
+      offeringRef: "openrouter-main:openai/gpt-test",
+      canonicalModelRef: "openai:gpt-test",
+    })
+    expect(upgradeDeploymentProfileCatalogRefs(upgraded)).toEqual(upgraded)
   })
 })
 

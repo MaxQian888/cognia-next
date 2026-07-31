@@ -1172,6 +1172,45 @@
       "outputSchema": "#/components/schemas/RpcResult"
     },
     {
+      "name": "provider_catalog_status",
+      "since": 1,
+      "target": "service",
+      "operation": "read",
+      "capability": "service.internal",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "structural",
+      "transports": ["internal"],
+      "inputSchema": "#/components/schemas/RpcArgs",
+      "outputSchema": "#/components/schemas/RpcResult"
+    },
+    {
+      "name": "provider_catalog_search",
+      "since": 1,
+      "target": "service",
+      "operation": "read",
+      "capability": "service.internal",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "structural",
+      "transports": ["internal"],
+      "inputSchema": "#/components/schemas/RpcArgs",
+      "outputSchema": "#/components/schemas/RpcResult"
+    },
+    {
+      "name": "provider_catalog_refresh",
+      "since": 1,
+      "target": "service",
+      "operation": "side-effect",
+      "capability": "service.internal",
+      "risk": "critical",
+      "approval": "signed-policy",
+      "idempotency": "required",
+      "transports": ["internal"],
+      "inputSchema": "#/components/schemas/RpcArgs",
+      "outputSchema": "#/components/schemas/RpcResult"
+    },
+    {
       "name": "connectors_health",
       "since": 1,
       "target": "service",

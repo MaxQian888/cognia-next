@@ -66,7 +66,7 @@ export const LOCAL_PROVIDER_TEST_CONFIGS: Record<
  * correct for Anthropic itself — every third-party host (Kimi, GLM, MiniMax)
  * rejects it, so callers should pass the model they actually intend to use.
  */
-const ANTHROPIC_PROBE_FALLBACK_MODEL = "claude-3-haiku-20240307"
+const ANTHROPIC_PROBE_FALLBACK_MODEL = getBuiltInProviderDefaultModel("anthropic")
 
 /**
  * The Anthropic Messages API is served at `<base>/v1/messages`. Hosts publish

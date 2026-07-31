@@ -22,6 +22,8 @@ import { readAllSnapshots } from "./snapshots/helpers"
 import type { SnapshotEnv, SnapshotStorage } from "./snapshots/types"
 import { filterExposedSessions } from "@/lib/chat/session-exposure"
 import { listAllCanvasCommentRows } from "@/lib/db/context-comments"
+import { exportStoredProfilesRedacted } from "@/lib/db/provider-profiles"
+import { deepStripSecrets } from "@/lib/settings/profile-transfer"
 
 const APP_VERSION = "0.1.0"
 
@@ -95,6 +97,7 @@ export async function buildBackupPackage(
     templateDefinitions,
     templatePackages,
     templateInstances,
+    providerProfileStore,
   ] = await Promise.all([
     getSettings(),
     db.characters.toArray(),
@@ -131,13 +134,14 @@ export async function buildBackupPackage(
     db.templateDefinitions.toArray(),
     db.templatePackages.toArray(),
     db.templateInstances.toArray(),
+    exportStoredProfilesRedacted(),
   ])
 
-  // Strip the API key unless the user opted in.
-  const settings = { ...settingsRow }
-  if (!opts.includeApiKey) {
-    delete settings.apiKey
-  }
+  // The setting face contains nested provider credentials. Reuse the settings
+  // transfer scrubber so `includeApiKey: false` covers every nested key.
+  const settings = (
+    opts.includeApiKey ? { ...settingsRow } : deepStripSecrets(settingsRow)
+  ) as typeof settingsRow
 
   const filteredCharacters = includeBuiltIns ? characters : characters.filter((c) => !c.isBuiltIn)
   const filteredSkills = includeBuiltIns ? skills : skills.filter((s) => !s.isBuiltIn)
@@ -187,6 +191,7 @@ export async function buildBackupPackage(
     templateDefinitions,
     templatePackages,
     templateInstances,
+    providerProfileStore,
   }
   if (opts.includeSessions) {
     const exportedSessions = filterExposedSessions(sessions, "standard-export")
@@ -197,6 +202,7 @@ export async function buildBackupPackage(
   }
 
   if (!includeSettings) delete payload.settings
+  if (!includeSettings) delete payload.providerProfileStore
   if (!includeCoreData) {
     for (const key of [
       "characters",

@@ -1,100 +1,59 @@
 /**
- * Default Model Mappings Generator
- *
- * Generates default model alias mappings (fast/balanced/powerful/reasoning)
- * based on which providers the user has enabled and configured.
+ * Default mappings materialized from the active catalog's versioned
+ * capability policies. This module intentionally contains no production model
+ * ids.
  */
 
 import { nanoid } from "nanoid"
-import type { ModelMapping, ModelMappingEntry } from "@cognia/provider-types/model-mapping"
+import type { ModelMapping } from "@cognia/provider-types/model-mapping"
+import {
+  listRoutingCandidates,
+  ROUTING_CANDIDATE_POLICIES,
+  getBundledCatalogRepository,
+  type CatalogRepository,
+  type CatalogRoutingRole,
+} from "@cognia/provider-core"
 
-/** Provider model catalog for each tier */
-const TIER_MODELS: Record<string, ModelMappingEntry[]> = {
-  fast: [
-    { providerId: "groq", modelId: "llama-3.3-70b-versatile" },
-    { providerId: "cerebras", modelId: "llama-3.3-70b" },
-    { providerId: "sambanova", modelId: "Meta-Llama-3.3-70B-Instruct" },
-    { providerId: "deepseek", modelId: "deepseek-v4-flash" },
-    { providerId: "openai", modelId: "gpt-4o-mini" },
-    { providerId: "anthropic", modelId: "claude-haiku-4-5" },
-    { providerId: "google", modelId: "gemini-2.0-flash" },
-    { providerId: "mistral", modelId: "mistral-small-latest" },
-  ],
-  balanced: [
-    { providerId: "openai", modelId: "gpt-4o" },
-    { providerId: "anthropic", modelId: "claude-sonnet-4-6" },
-    { providerId: "google", modelId: "gemini-2.0-flash" },
-    { providerId: "deepseek", modelId: "deepseek-v4-flash" },
-    { providerId: "mistral", modelId: "mistral-large-latest" },
-    { providerId: "xai", modelId: "grok-2" },
-  ],
-  powerful: [
-    { providerId: "anthropic", modelId: "claude-opus-4-8" },
-    { providerId: "openai", modelId: "gpt-4o" },
-    { providerId: "google", modelId: "gemini-2.5-pro-preview-05-06" },
-    { providerId: "xai", modelId: "grok-2" },
-    { providerId: "mistral", modelId: "mistral-large-latest" },
-  ],
-  reasoning: [
-    { providerId: "openai", modelId: "o3" },
-    { providerId: "anthropic", modelId: "claude-opus-4-8" },
-    { providerId: "google", modelId: "gemini-2.5-pro-preview-05-06" },
-    { providerId: "deepseek", modelId: "deepseek-v4-pro" },
-  ],
-}
-
-/** Tier display names */
-const TIER_NAMES: Record<string, string> = {
+const TIER_NAMES: Record<CatalogRoutingRole, string> = {
   fast: "Fast",
   balanced: "Balanced",
   powerful: "Powerful",
   reasoning: "Reasoning",
+  coding: "Coding",
 }
 
-/**
- * Generate default model mappings filtered by enabled providers.
- *
- * @param enabledProviderIds - Set or array of provider IDs the user has configured
- * @returns Array of ModelMapping objects for each tier that has at least one provider
- */
+let defaultCatalogRepository: CatalogRepository | undefined
+
+export function setDefaultMappingCatalogRepository(repository: CatalogRepository): void {
+  defaultCatalogRepository = repository
+}
+
 export function generateDefaultMappings(
-  enabledProviderIds: string[] | Set<string>
+  enabledProviderIds: string[] | Set<string>,
+  repository: CatalogRepository | undefined = defaultCatalogRepository ??
+    getBundledCatalogRepository()
 ): ModelMapping[] {
   const enabled =
     enabledProviderIds instanceof Set ? enabledProviderIds : new Set(enabledProviderIds)
-
   const now = Date.now()
-  const mappings: ModelMapping[] = []
-
-  for (const [tier, entries] of Object.entries(TIER_MODELS)) {
-    const filtered = entries.filter((e) => enabled.has(e.providerId))
-    if (filtered.length === 0) continue
-
-    mappings.push({
+  return (Object.keys(ROUTING_CANDIDATE_POLICIES) as CatalogRoutingRole[])
+    .map((alias) => ({
       id: nanoid(),
-      alias: tier,
-      providers: filtered,
-      distribution: "priority",
+      alias,
+      providers: listRoutingCandidates(repository, alias, enabled),
+      distribution: "priority" as const,
       enabled: true,
       isDefault: true,
       createdAt: now,
       updatedAt: now,
-    })
-  }
-
-  return mappings
+    }))
+    .filter((mapping) => mapping.providers.length > 0)
 }
 
-/**
- * Get the display name for a tier alias.
- */
 export function getTierDisplayName(alias: string): string {
-  return TIER_NAMES[alias] ?? alias
+  return TIER_NAMES[alias as CatalogRoutingRole] ?? alias
 }
 
-/**
- * Get all known tier aliases.
- */
 export function getDefaultTierAliases(): string[] {
-  return Object.keys(TIER_MODELS)
+  return Object.keys(ROUTING_CANDIDATE_POLICIES)
 }

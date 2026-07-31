@@ -11540,6 +11540,7 @@
       "mcpRow": "MCP servers",
       "memoryRow": "Memory",
       "memorySettingsRow": "Memory settings",
+      "modelCatalogRow": "Model catalog",
       "networkRow": "Network",
       "notificationsRow": "Notifications",
       "ocrRow": "OCR providers",
@@ -12560,6 +12561,54 @@
     "workspace": {
       "activeLabel": "Workspace: {name}"
     }
+  },
+  "modelCatalog": {
+    "advanced": "Advanced catalog",
+    "backAria": "Back to Me",
+    "capabilities": {
+      "reasoning": "Reasoning",
+      "structuredOutput": "Structured output",
+      "tools": "Tools"
+    },
+    "closeDetails": "Close model details",
+    "conflict": "A newer catalog revision is being activated. The current revision remains available.",
+    "deprecated": "This model is no longer recommended for new configurations. Existing sessions keep their frozen offering.",
+    "description": "Explore canonical models and every provider-specific offering without hiding the routed upstream ID.",
+    "emptyDescription": "Try a broader query, enable Advanced catalog, or change the capability filters.",
+    "emptyTitle": "No matching models",
+    "lifecycleLabel": "Lifecycle",
+    "lifecycles": {
+      "active": "Active",
+      "deprecated": "Deprecated",
+      "preview": "Preview",
+      "recommended": "Recommended",
+      "retired": "Retired"
+    },
+    "loading": "Loading the last-known-good model catalog…",
+    "modalities": {
+      "all": "All modalities",
+      "embedding": "Embedding",
+      "image": "Image",
+      "language": "Language",
+      "rerank": "Rerank",
+      "speech": "Speech"
+    },
+    "modalityLabel": "Modality",
+    "offerings": "Provider offerings",
+    "offline": "Offline: showing the cached last-known-good revision.",
+    "recoveryDescription": "The bundled catalog will be restored automatically. Existing provider settings remain unchanged.",
+    "recoveryTitle": "Model catalog is recovering",
+    "replacement": "Suggested replacement",
+    "routedId": "Routed ID",
+    "searchLabel": "Search the model catalog",
+    "searchPlaceholder": "Search name, canonical ID, upstream ID, alias, or provider…",
+    "selectModel": "Select a model to inspect its offerings.",
+    "tiers": {
+      "certified": "Certified",
+      "experimental": "Experimental",
+      "verified": "Verified"
+    },
+    "title": "Model Catalog"
   },
   "notFound": {
     "description": "We couldn't find the page you were looking for. It may have been moved, renamed, or deleted.",
@@ -22700,6 +22749,7 @@
       "agentRuntime": "Built-in Anthropic SDK sidecar — defaults, permission mode, always-allow tools, built-in tool categories, sidecar diagnostics, and the A2UI bridge.",
       "agentTeams": "Multi-agent team templates — manager-worker, parallel specialists, research squad. Browse built-ins, duplicate to fork, or create new templates.",
       "agents": "External agents — Claude Code CLI, Codex, Gemini CLI, Cursor and any custom command speaking ACP / OpenCode / HTTP.",
+      "aiConnections": "Configure AI accounts, endpoints, credentials, deployments, verification, health, and import or export.",
       "apiKey": "Anthropic API key (used by the local sidecar).",
       "appearance": "Theme, font scale, language and motion.",
       "artifacts": "Auto-detect code, HTML, React, SVG, Mermaid, charts, math and Jupyter notebooks into a side-panel workspace.",
@@ -22725,6 +22775,7 @@
       "lsp": "Configure LSP language servers shared by the agent runtime and editor",
       "mcp": "Model Context Protocol servers (stdio / SSE / HTTP).",
       "memory": "Autonomous long-term memory — what the assistant remembers about you across sessions, plus extraction, recall, and privacy controls.",
+      "modelCatalog": "Search canonical models, provider offerings, aliases, capabilities, lifecycle, and routed IDs.",
       "network": "HTTP / HTTPS / SOCKS5 proxy for all outbound network traffic. Auto-detect Clash Verge, Mihomo, V2Ray and other local proxy tools.",
       "notifications": "Notification center channels, quiet hours, per-source mute, and retention.",
       "ocr": "OCR providers (Mistral OCR, Google Vision, AWS Textract, Azure DI, Claude / GPT / Gemini vision, Mathpix, OCR.space, ABBYY, Nanonets, Lark) plus on-device engines (Tesseract WASM/native, Windows.Media.Ocr, Apple Vision, Android ML Kit, ocrs, PaddleOCR) and the self-hosted HTTP adapter. Includes auto-router, PDF fast-path, and result cache.",
@@ -25632,6 +25683,7 @@
       "agentRuntime": "Built-in agent runtime",
       "agentTeams": "Agent teams",
       "agents": "Agents",
+      "aiConnections": "AI Connections",
       "apiKey": "API key",
       "appearance": "Appearance",
       "artifacts": "Artifacts",
@@ -25657,6 +25709,7 @@
       "lsp": "Language Servers",
       "mcp": "MCP",
       "memory": "Memory",
+      "modelCatalog": "Model Catalog",
       "network": "Network Proxy",
       "notifications": "Notifications",
       "ocr": "OCR",

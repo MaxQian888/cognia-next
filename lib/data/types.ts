@@ -32,6 +32,7 @@ import type { MemoryAuditEvent, MemoryEvidence, MemoryJob } from "@/types/memory
 import type { LocalStorageSnapshot } from "./snapshots/types"
 import type { TemplateDefinitionRow, TemplatePackageRow } from "@/lib/db/template-platform"
 import type { TemplateInstanceRecord } from "@/lib/templates/repository"
+import type { ProfilesExport } from "@cognia/provider-types/profile-migration"
 
 /** Schema version currently emitted by `buildBackupPackage`. */
 export const EXPORT_SCHEMA_VERSION = 3 as const
@@ -103,6 +104,12 @@ export interface BackupPayloadV3 {
   templateDefinitions?: TemplateDefinitionRow[]
   templatePackages?: TemplatePackageRow[]
   templateInstances?: TemplateInstanceRecord[]
+  /**
+   * Secret-free Provider Profile Store documents. Catalog revisions and live
+   * connection inventory are host caches and are intentionally rehydrated
+   * instead of being carried between devices.
+   */
+  providerProfileStore?: ProfilesExport
   /**
    * Zustand-persist faces that live in `localStorage` (external agents,
    * custom modes, agent teams, custom themes, artifacts, canvas prefs, …).

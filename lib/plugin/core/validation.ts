@@ -1850,6 +1850,8 @@ export function validatePluginManifest(
     m.aiProviders,
     {
       field: "aiProviders",
+      moduleOptional: (entry) =>
+        isPlainObject(entry.catalog) && entry.entry === undefined && entry.export === undefined,
       extra: (entry, _i, push) => {
         if (entry.kind !== "llm" && entry.kind !== "embedding") {
           push("error", "kind.invalid", `aiProviders entry "kind" must be "llm" or "embedding"`)
@@ -1874,6 +1876,55 @@ export function validatePluginManifest(
             !(entry.models as unknown[]).every((s) => typeof s === "string")
           ) {
             push("error", "models.invalid", `aiProviders llm entry "models" must be string[]`)
+          }
+        }
+        if (entry.catalog !== undefined) {
+          if (!isPlainObject(entry.catalog)) {
+            push("error", "catalog.invalid", `aiProviders "catalog" must be an object`)
+            return
+          }
+          const catalog = entry.catalog as Record<string, unknown>
+          if (
+            catalog.tier !== undefined &&
+            catalog.tier !== "verified" &&
+            catalog.tier !== "experimental"
+          ) {
+            push(
+              "error",
+              "catalog.tier.invalid",
+              `aiProviders catalog tier must be "verified" or "experimental"`
+            )
+          }
+          const adapterFamilies = new Set([
+            "openai-compatible",
+            "anthropic",
+            "gemini",
+            "bedrock",
+            "azure-openai",
+            "vertex-ai",
+            "openrouter",
+            "local-openai-compatible",
+          ])
+          if (!adapterFamilies.has(String(catalog.adapterFamily))) {
+            push(
+              "error",
+              "catalog.adapterFamily.invalid",
+              `aiProviders catalog adapterFamily is not allowed`
+            )
+          }
+          if (!Array.isArray(catalog.modalities) || catalog.modalities.length === 0) {
+            push(
+              "error",
+              "catalog.modalities.invalid",
+              `aiProviders catalog requires non-empty "modalities"`
+            )
+          }
+          if (!Array.isArray(catalog.offerings)) {
+            push(
+              "error",
+              "catalog.offerings.invalid",
+              `aiProviders catalog requires an "offerings" array`
+            )
           }
         }
       },

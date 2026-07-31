@@ -1,0 +1,55 @@
+{
+  "abliteration-ai": {
+    "id": "abliteration-ai",
+    "env": ["ABLIT_KEY"],
+    "npm": "@ai-sdk/openai-compatible",
+    "api": "https://api.abliteration.ai/v1",
+    "name": "abliteration.ai",
+    "doc": "https://docs.abliteration.ai/models",
+    "models": {
+      "abliterated-model-large": {
+        "id": "abliterated-model-large",
+        "name": "Abliterated Model Large",
+        "description": "GLM-5.2 model abliterated and finetuned for cyber, ML red teaming, and agent testing",
+        "attachment": false,
+        "reasoning": true,
+        "reasoning_options": [
+          { "type": "effort", "values": ["none", "high", "max"] },
+          { "type": "toggle" }
+        ],
+        "tool_call": true,
+        "structured_output": true,
+        "temperature": true,
+        "release_date": "2026-07-25",
+        "last_updated": "2026-07-28",
+        "modalities": { "input": ["text"], "output": ["text"] },
+        "open_weights": false,
+        "limit": { "context": 1000000, "input": 1000000, "output": 999990 },
+        "cost": { "input": 5, "output": 5 }
+      },
+      "abliterated-model": {
+        "id": "abliterated-model",
+        "name": "Abliterated Model",
+        "description": "Multimodal model for analyzing text, images, documents, and rich media",
+        "attachment": true,
+        "reasoning": true,
+        "reasoning_options": [
+          {
+            "type": "effort",
+            "values": ["none", "minimal", "low", "medium", "high", "xhigh", "max"]
+          },
+          { "type": "toggle" }
+        ],
+        "tool_call": true,
+        "structured_output": false,
+        "temperature": true,
+        "release_date": "2026-01-06",
+        "last_updated": "2026-07-28",
+        "modalities": { "input": ["text", "image"], "output": ["text"] },
+        "open_weights": true,
+        "limit": { "context": 150000, "input": 150000, "output": 8192 },
+        "cost": { "input": 3, "output": 3 }
+      }
+    }
+  }
+}

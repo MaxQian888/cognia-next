@@ -2543,6 +2543,53 @@ describe("Plugin Validation", () => {
         ).toBe(true)
       })
 
+      it("aiProviders accepts catalog-only declarations but rejects Certified and unknown adapters", () => {
+        const valid = withLazy({
+          aiProviders: [
+            {
+              id: "catalog",
+              label: "Catalog",
+              kind: "llm",
+              catalog: {
+                tier: "experimental",
+                adapterFamily: "openai-compatible",
+                modalities: ["language"],
+                offerings: [],
+              },
+            },
+          ],
+        })
+        expect(validatePluginManifest(valid).valid).toBe(true)
+
+        const invalid = withLazy({
+          aiProviders: [
+            {
+              id: "catalog",
+              label: "Catalog",
+              kind: "llm",
+              catalog: {
+                tier: "certified",
+                adapterFamily: "remote-code",
+                modalities: ["language"],
+                offerings: [],
+              },
+            },
+          ],
+        })
+        const result = validatePluginManifest(invalid)
+        expect(result.valid).toBe(false)
+        expect(
+          result.diagnostics!.some(
+            (diagnostic) => diagnostic.code === "manifest.aiProviders.catalog.tier.invalid"
+          )
+        ).toBe(true)
+        expect(
+          result.diagnostics!.some(
+            (diagnostic) => diagnostic.code === "manifest.aiProviders.catalog.adapterFamily.invalid"
+          )
+        ).toBe(true)
+      })
+
       it("chatMiddlewares rejects out-of-range priority and timeout", () => {
         const manifest = withLazy({
           chatMiddlewares: [

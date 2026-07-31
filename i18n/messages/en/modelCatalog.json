@@ -1,0 +1,48 @@
+{
+  "advanced": "Advanced catalog",
+  "backAria": "Back to Me",
+  "capabilities": {
+    "reasoning": "Reasoning",
+    "structuredOutput": "Structured output",
+    "tools": "Tools"
+  },
+  "closeDetails": "Close model details",
+  "conflict": "A newer catalog revision is being activated. The current revision remains available.",
+  "deprecated": "This model is no longer recommended for new configurations. Existing sessions keep their frozen offering.",
+  "description": "Explore canonical models and every provider-specific offering without hiding the routed upstream ID.",
+  "emptyDescription": "Try a broader query, enable Advanced catalog, or change the capability filters.",
+  "emptyTitle": "No matching models",
+  "lifecycleLabel": "Lifecycle",
+  "lifecycles": {
+    "active": "Active",
+    "deprecated": "Deprecated",
+    "preview": "Preview",
+    "recommended": "Recommended",
+    "retired": "Retired"
+  },
+  "loading": "Loading the last-known-good model catalog…",
+  "modalities": {
+    "all": "All modalities",
+    "embedding": "Embedding",
+    "image": "Image",
+    "language": "Language",
+    "rerank": "Rerank",
+    "speech": "Speech"
+  },
+  "modalityLabel": "Modality",
+  "offline": "Offline: showing the cached last-known-good revision.",
+  "offerings": "Provider offerings",
+  "recoveryDescription": "The bundled catalog will be restored automatically. Existing provider settings remain unchanged.",
+  "recoveryTitle": "Model catalog is recovering",
+  "replacement": "Suggested replacement",
+  "routedId": "Routed ID",
+  "searchLabel": "Search the model catalog",
+  "searchPlaceholder": "Search name, canonical ID, upstream ID, alias, or provider…",
+  "selectModel": "Select a model to inspect its offerings.",
+  "tiers": {
+    "certified": "Certified",
+    "experimental": "Experimental",
+    "verified": "Verified"
+  },
+  "title": "Model Catalog"
+}
