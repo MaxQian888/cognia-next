@@ -14,6 +14,29 @@ jest.mock("@/lib/telemetry/events/track-event", () => ({
   trackEvent: (...args: unknown[]) => mockTrackEvent(...args),
 }))
 
+jest.mock("@/lib/perf/chat-turn-performance", () => ({
+  chatTurnPerformance: {
+    begin: jest.fn(),
+    markDispatched: jest.fn(),
+    markFirstResponse: jest.fn(),
+    beginFinalPersistence: jest.fn(),
+    endFinalPersistence: jest.fn(),
+    finish: jest.fn(),
+  },
+}))
+const chatTurnPerformanceMock = (
+  jest.requireMock("@/lib/perf/chat-turn-performance") as {
+    chatTurnPerformance: {
+      begin: jest.Mock
+      markDispatched: jest.Mock
+      markFirstResponse: jest.Mock
+      beginFinalPersistence: jest.Mock
+      endFinalPersistence: jest.Mock
+      finish: jest.Mock
+    }
+  }
+).chatTurnPerformance
+
 // `stores/index.ts` calls `isTauri()` at module top-level; declaring the
 // jest.fn inside the factory dodges the TDZ that closures over an outer
 // const would otherwise hit during ES import hoisting.
@@ -562,6 +585,7 @@ beforeEach(() => {
   checkDelegationMock.mockReset().mockReturnValue({ shouldDelegate: false })
   setDelegationRulesMock.mockReset()
   mockTrackEvent.mockClear()
+  for (const method of Object.values(chatTurnPerformanceMock)) method.mockClear()
 })
 
 async function flush() {
@@ -619,6 +643,8 @@ describe("useClaudeChat — actions", () => {
     expect(persistMessagesMock).toHaveBeenCalled()
     expect(sendPromptMock).toHaveBeenCalled()
     expect(touchSessionMock).toHaveBeenCalledWith("sess-1")
+    expect(chatTurnPerformanceMock.begin).toHaveBeenCalledWith("sess-1")
+    expect(chatTurnPerformanceMock.markDispatched).toHaveBeenCalledWith("sess-1")
     // Plugin bus: the committed send announces MESSAGE_SENT + AGENT_STARTED.
     expect(busEmitMock).toHaveBeenCalledWith(BusEvents.MESSAGE_SENT, { sessionId: "sess-1" })
     expect(busEmitMock).toHaveBeenCalledWith(BusEvents.AGENT_STARTED, { sessionId: "sess-1" })
@@ -995,6 +1021,34 @@ describe("useClaudeChat — actions", () => {
       await result.current.stop()
     })
     expect(interruptSessionMock).toHaveBeenCalledWith("sess-1")
+    expect(chatTurnPerformanceMock.finish).toHaveBeenCalledWith("sess-1", "cancelled")
+  })
+
+  it("stop() releases the GUI before a slow interrupt acknowledgement returns", async () => {
+    chatState.status = "streaming"
+    let acknowledgeInterrupt: (() => void) | undefined
+    interruptSessionMock.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          acknowledgeInterrupt = resolve
+        })
+    )
+    const { result } = renderHook(() => useClaudeChat())
+    await flush()
+
+    let stopPromise: Promise<void> | undefined
+    act(() => {
+      stopPromise = result.current.stop()
+    })
+
+    expect(interruptSessionMock).toHaveBeenCalledWith("sess-1")
+    expect(chatState.setSessionStatus).toHaveBeenCalledWith("sess-1", "idle")
+    expect(chatState.status).toBe("idle")
+
+    acknowledgeInterrupt?.()
+    await act(async () => {
+      await stopPromise
+    })
   })
 
   it("stop() is a no-op without an active session", async () => {
@@ -1014,6 +1068,7 @@ describe("useClaudeChat — actions", () => {
       await result.current.close("sess-1")
     })
     expect(closeSessionIpcMock).toHaveBeenCalledWith("sess-1")
+    expect(chatTurnPerformanceMock.finish).toHaveBeenCalledWith("sess-1", "cancelled")
   })
 
   it("close() clears Computer Use session grants even when sidecar close fails", async () => {
@@ -1265,6 +1320,7 @@ describe("useClaudeChat — actions", () => {
       _messageCallback?.({ type: "session_ended", sessionId: "sess-1" })
     })
     expect(chatState.setSessionStatus).toHaveBeenCalledWith("sess-1", "idle")
+    expect(chatTurnPerformanceMock.finish).toHaveBeenCalledWith("sess-1", "completed")
     expect(mockTrackEvent).toHaveBeenCalledWith(
       "chat.turn.completed",
       expect.objectContaining({
@@ -1299,6 +1355,7 @@ describe("useClaudeChat — actions", () => {
       })
     )
     expect(JSON.stringify(mockTrackEvent.mock.calls)).not.toContain("private upstream response")
+    expect(chatTurnPerformanceMock.finish).toHaveBeenCalledWith("sess-1", "failed")
   })
 
   it("classifies a permanent provider failure without an HTTP status", async () => {
@@ -1351,6 +1408,7 @@ describe("useClaudeChat — actions", () => {
         errorType: "sidecar_exited",
       })
     )
+    expect(chatTurnPerformanceMock.finish).toHaveBeenCalledWith("sess-1", "failed")
     chatState.status = "idle"
   })
 
@@ -1659,6 +1717,10 @@ describe("useClaudeChat — goal loop wiring (ADR-0019)", () => {
     expect(
       mockTrackEvent.mock.calls.filter(([name]) => name === "chat.turn.completed")
     ).toHaveLength(1)
+    expect(chatTurnPerformanceMock.markFirstResponse).toHaveBeenCalledWith("sess-1")
+    expect(chatTurnPerformanceMock.beginFinalPersistence).toHaveBeenCalledWith("sess-1")
+    expect(chatTurnPerformanceMock.endFinalPersistence).toHaveBeenCalledWith("sess-1")
+    expect(chatTurnPerformanceMock.finish).toHaveBeenCalledWith("sess-1", "completed")
   })
 
   it("passes the sealed assistant message id to long-term memory extraction", async () => {
@@ -2111,6 +2173,37 @@ describe("useClaudeChat — agent-trace wiring (Phase B4)", () => {
 
 describe("useClaudeChat — concurrent sessions", () => {
   const adapterMock = jest.requireMock("@/lib/claude/adapter") as { applySdkEvent: jest.Mock }
+
+  it("does not expose an idle turn until the unchanged final snapshot is durable", async () => {
+    chatState.activeSessionId = "sess-1"
+    chatState.openSessionIds = ["sess-1"]
+    let releasePersist: (() => void) | undefined
+    persistMessagesMock.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          releasePersist = resolve
+        })
+    )
+    renderHook(() => useClaudeChat())
+    await flush()
+    subscribers.forEach((sub) => sub(chatState))
+    adapterMock.applySdkEvent.mockReturnValueOnce({
+      messages: [],
+      turnComplete: true,
+    })
+
+    act(() => {
+      _messageCallback?.({ type: "event", sessionId: "sess-1", event: { type: "result" } })
+    })
+    await flush()
+
+    expect(persistMessagesMock).toHaveBeenCalledWith("sess-1", [])
+    expect(chatState.setSessionStatus).not.toHaveBeenCalledWith("sess-1", "idle")
+
+    releasePersist?.()
+    await flush()
+    expect(chatState.setSessionStatus).toHaveBeenCalledWith("sess-1", "idle")
+  })
 
   it("routes streaming events to a background OPEN session's own slice, not the focused one", async () => {
     // Focus sess-other; sess-1 is open in another pane and mid-stream.

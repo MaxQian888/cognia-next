@@ -216,6 +216,26 @@ describe("web-mode rejection", () => {
 })
 
 describe("Claude session commands", () => {
+  it("gates the complete provider-visible prompt before any send", async () => {
+    callSpy.mockResolvedValueOnce(undefined)
+    await sendPrompt("sess-1", "hello", {
+      systemPrompt: "system",
+      appendSystemPrompt: "append",
+    })
+
+    expect(mockHasNoLeakingPiiDeep).toHaveBeenCalledWith({
+      prompt: "hello",
+      systemPrompt: "system",
+      appendSystemPrompt: "append",
+    })
+
+    mockHasNoLeakingPiiDeep.mockReturnValue(false)
+    await expect(sendPrompt("sess-1", "secret")).rejects.toThrow(
+      "prompt rejected by the renderer PII gate"
+    )
+    expect(callSpy).toHaveBeenCalledTimes(1)
+  })
+
   it("sendPrompt forwards sessionId / prompt / options", async () => {
     callSpy.mockResolvedValueOnce(undefined)
     await sendPrompt("sess-1", "hello", { model: "claude-opus-4-7" })

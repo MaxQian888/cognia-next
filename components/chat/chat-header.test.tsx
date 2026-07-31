@@ -179,6 +179,37 @@ describe("ChatHeader", () => {
     expect(useArtifactDockLayoutStore.getState().dockCollapsed).toBe(false)
   })
 
+  it("shows a compact exit action only for the secondary split pane", () => {
+    const onExitSplit = jest.fn()
+    const Wrapper = withAdapter(makeAdapter())
+    const { rerender } = render(
+      <Wrapper>
+        <ChatHeader session={mkSession()} />
+      </Wrapper>
+    )
+    expect(screen.queryByRole("button", { name: /exit split view/i })).not.toBeInTheDocument()
+
+    rerender(
+      <Wrapper>
+        <ChatHeader session={mkSession()} onExitSplit={onExitSplit} />
+      </Wrapper>
+    )
+    fireEvent.click(screen.getByRole("button", { name: /exit split view/i }))
+    expect(onExitSplit).toHaveBeenCalledTimes(1)
+  })
+
+  it("shows a compact split action when another conversation is open", () => {
+    const onSplitView = jest.fn()
+    const Wrapper = withAdapter(makeAdapter())
+    render(
+      <Wrapper>
+        <ChatHeader session={mkSession()} onSplitView={onSplitView} />
+      </Wrapper>
+    )
+    fireEvent.click(screen.getByRole("button", { name: /^split view$/i }))
+    expect(onSplitView).toHaveBeenCalledTimes(1)
+  })
+
   it("shows an unread dot + hint when an artifact arrived while the dock is dismissed", () => {
     act(() => useArtifactDockLayoutStore.setState({ dockCollapsed: true, unreadArtifact: true }))
     const Wrapper = withAdapter(makeAdapter())

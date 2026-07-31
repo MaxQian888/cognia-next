@@ -224,7 +224,7 @@ export function EmptyChatState({
   const showStarters = !hideSamples && !hiddenSections?.tryPrompt && starters.length > 0
 
   return (
-    <div className="relative flex flex-1 flex-col overflow-x-hidden overflow-y-auto px-4 py-6 sm:px-8 sm:py-10">
+    <div className="@container relative flex flex-1 flex-col overflow-x-hidden overflow-y-auto px-4 py-6 sm:px-8 sm:py-10">
       {/* Inline rich/minimal switch (desktop only — the pane omits the handler
           on mobile, where the style is force-minimal). */}
       {onToggleStyle ? (
@@ -263,7 +263,7 @@ export function EmptyChatState({
           className={cn(
             "w-full",
             rich
-              ? "grid items-center gap-6 overflow-hidden rounded-3xl border bg-card/70 p-5 shadow-sm sm:p-7 md:grid-cols-[minmax(0,1fr)_minmax(16rem,0.9fr)] md:gap-8"
+              ? "grid items-center gap-6 overflow-hidden rounded-3xl border bg-card/70 p-5 shadow-sm sm:p-7 @3xl:grid-cols-[minmax(0,1fr)_minmax(16rem,0.9fr)] @3xl:gap-8"
               : "flex flex-col items-center text-center"
           )}
           variants={STAGGER_CHILD}
@@ -319,7 +319,7 @@ export function EmptyChatState({
                 width={1536}
                 height={1024}
                 sizes="(max-width: 767px) 82vw, 360px"
-                priority={variant === "fullscreen"}
+                loading="eager"
                 className="size-full object-contain p-2"
               />
             </div>

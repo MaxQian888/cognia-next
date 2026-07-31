@@ -13,7 +13,7 @@ import { LongPress } from "@/components/interactions/long-press"
 import { MessageActionSheet } from "@/components/mobile/chat/message-action-sheet"
 import { selectionFeedback } from "@/lib/capacitor/haptics"
 import { deleteMessage as deleteMessageOnDesktop } from "@/lib/claude/ipc"
-import { getDb } from "@/lib/db/schema"
+import { deleteStoredMessage } from "@/lib/db/messages"
 import { useChatStore } from "@/stores/chat"
 import { useSettingsStore } from "@/stores/settings"
 import { ConversationTimeline } from "./minimap/conversation-timeline"
@@ -203,7 +203,7 @@ export function MessageList({
       )
     }
     try {
-      await getDb().messages.delete(message.id)
+      await deleteStoredMessage(message.id)
     } catch {
       // Local mirror miss (e.g. not yet persisted) — the store removal above
       // already updated the visible list.

@@ -1,8 +1,8 @@
 "use client"
 
 /**
- * Concurrent-chat pane layout. Renders the open-session tab strip plus one or
- * two live `ChatPane`s (split view), each bound to its own session slice so
+ * Concurrent-chat pane layout. Renders one or two live `ChatPane`s (split
+ * view), each bound to its own session slice so
  * sessions stream simultaneously and a focus switch never pauses a background
  * stream. Every pane wires its own send / stop / regenerate / edit + an inline
  * tool-approval gate scoped to that session — a gate in pane B can never block
@@ -11,7 +11,6 @@
 
 import { useCallback, type Ref } from "react"
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from "@/components/ui/resizable"
-import { ChatTabStrip, type ChatTabInfo } from "./chat-tab-strip"
 import { ChatPane } from "./chat-view"
 import { ToolApprovalDialog } from "./tool-approval-dialog"
 import type { ComposerHandle } from "./composer"
@@ -45,14 +44,14 @@ export interface ChatPaneGroupProps {
     approval: import("@cognia/agent-config-types").PendingApproval,
     decision: ApprovalDecision
   ) => Promise<void> | void
-  /** Close a session's pane (sidecar teardown + store slice removal). */
-  closePane: (sessionId: string) => void
   onCreate: () => void
   onUseSample: (text: string) => void
   onOpenSettings: (tab?: string) => void
   recentSessions?: readonly RecentSessionEntry[]
   onResumeSession?: (id: string) => void
   composerRef?: Ref<ComposerHandle>
+  /** Disable every pane composer without hiding cached conversation data. */
+  composerDisabled?: boolean
   mobileMentionMembers?: readonly Character[]
   /** Per-session plan-approval resume (switch mode + send the resume turn). */
   onResumeAfterPlanApproval?: (
@@ -104,45 +103,25 @@ export function ChatPaneGroup({
   regenerate,
   editResend,
   respondToApproval,
-  closePane,
   onCreate,
   onUseSample,
   onOpenSettings,
   recentSessions,
   onResumeSession,
   composerRef,
+  composerDisabled,
   mobileMentionMembers,
   onResumeAfterPlanApproval,
 }: ChatPaneGroupProps) {
   const activeSessionId = useChatStore((s) => s.activeSessionId)
   const openSessionIds = useChatStore((s) => s.openSessionIds)
   const splitSessionId = useChatStore((s) => s.splitSessionId)
-  const setActiveSession = useChatStore((s) => s.setActiveSession)
   const setSplitSessionId = useChatStore((s) => s.setSplitSessionId)
 
   const sessionById = useCallback(
     (id: string | null): ChatSession | null =>
       id ? (sessions.find((s) => s.id === id) ?? null) : null,
     [sessions]
-  )
-
-  const tabs: ChatTabInfo[] = openSessionIds
-    .map((id) => sessionById(id))
-    .filter((s): s is ChatSession => Boolean(s))
-    .map((s) => ({ id: s.id, title: s.title }))
-
-  const handleToggleSplit = useCallback(
-    (id: string) => {
-      if (splitSessionId) {
-        setSplitSessionId(null)
-        return
-      }
-      // Open the split with a *different* open session than the focused one so
-      // the two panes show distinct conversations.
-      const other = openSessionIds.find((sid) => sid !== id)
-      if (other) setSplitSessionId(other)
-    },
-    [splitSessionId, setSplitSessionId, openSessionIds]
   )
 
   // A split pane that points at a no-longer-open session collapses back to a
@@ -152,7 +131,12 @@ export function ChatPaneGroup({
       ? splitSessionId
       : null
 
-  const renderPane = (sessionId: string | null, withComposerRef: boolean) => {
+  const renderPane = (
+    sessionId: string | null,
+    withComposerRef: boolean,
+    onSplitView?: () => void,
+    onExitSplit?: () => void
+  ) => {
     const session = sessionById(sessionId)
     return (
       <ChatPane
@@ -171,9 +155,12 @@ export function ChatPaneGroup({
         onCreate={onCreate}
         onUseSample={onUseSample}
         onOpenSettings={onOpenSettings}
+        onSplitView={onSplitView}
+        onExitSplit={onExitSplit}
         recentSessions={recentSessions}
         onResumeSession={onResumeSession}
         composerRef={withComposerRef ? composerRef : undefined}
+        composerDisabled={composerDisabled}
         mobileMentionMembers={mobileMentionMembers}
         onResumeAfterPlanApproval={
           onResumeAfterPlanApproval && sessionId
@@ -189,26 +176,10 @@ export function ChatPaneGroup({
     )
   }
 
-  // A strip of one tab is a band of chrome that says nothing: the tab repeats
-  // the chat header's title, and its close / split / new controls all have
-  // other homes (⌘W, the split control appears with the second pane, ⌘N and
-  // the welcome CTA). It earns its row once there is something to switch
-  // between — a second tab, or an active split.
-  const showTabStrip = tabs.length > 1 || effectiveSplitId !== null
+  const splitTargetId = openSessionIds.find((id) => id !== activeSessionId) ?? null
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      {showTabStrip && (
-        <ChatTabStrip
-          tabs={tabs}
-          activeId={activeSessionId}
-          splitId={effectiveSplitId}
-          onSelect={setActiveSession}
-          onClose={closePane}
-          onToggleSplit={handleToggleSplit}
-          onNew={onCreate}
-        />
-      )}
       {effectiveSplitId ? (
         <ResizablePanelGroup orientation="horizontal" className="min-h-0 flex-1">
           <ResizablePanel defaultSize="50%" minSize="25%" className="flex min-h-0 flex-col">
@@ -219,13 +190,17 @@ export function ChatPaneGroup({
           </ResizablePanel>
           <ResizableHandle withHandle />
           <ResizablePanel defaultSize="50%" minSize="25%" className="flex min-h-0 flex-col">
-            {renderPane(effectiveSplitId, false)}
+            {renderPane(effectiveSplitId, false, undefined, () => setSplitSessionId(null))}
             <PaneApprovalGate sessionId={effectiveSplitId} onRespond={respondToApproval} />
           </ResizablePanel>
         </ResizablePanelGroup>
       ) : (
         <div className="flex min-h-0 flex-1 flex-col">
-          {renderPane(activeSessionId, true)}
+          {renderPane(
+            activeSessionId,
+            true,
+            splitTargetId ? () => setSplitSessionId(splitTargetId) : undefined
+          )}
           {activeSessionId && (
             <PaneApprovalGate sessionId={activeSessionId} onRespond={respondToApproval} />
           )}

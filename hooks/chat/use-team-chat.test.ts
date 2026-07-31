@@ -6,7 +6,7 @@
  * by send() in the cases below. Internal event routing is intentionally
  * mocked at the IPC boundary so tests stay deterministic.
  */
-import { act, renderHook } from "@testing-library/react"
+import { act, renderHook, waitFor } from "@testing-library/react"
 
 const isTauriMock = jest.fn().mockReturnValue(true)
 jest.mock("@/lib/tauri", () => ({
@@ -61,6 +61,13 @@ const resolveSendOptionsMock = jest.fn<Promise<{ model: string; systemPrompt: st
 jest.mock("@/lib/claude/build-options", () => ({
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   resolveSendOptions: (ctx: any) => resolveSendOptionsMock(ctx),
+}))
+
+const resolveProviderAttemptOptionsMock = jest.fn().mockResolvedValue({
+  providerCredentials: { apiKey: "fallback-key", protocol: "openai" },
+})
+jest.mock("@/lib/claude/provider-attempt-options", () => ({
+  resolveProviderAttemptOptions: (...args: unknown[]) => resolveProviderAttemptOptionsMock(...args),
 }))
 
 jest.mock("@cognia/provider-embedding/embedding", () => ({
@@ -300,6 +307,9 @@ beforeEach(() => {
   listCharactersByIdsMock.mockReset().mockResolvedValue([])
   getTeamMock.mockReset()
   resolveSendOptionsMock.mockReset().mockResolvedValue({ model: "sonnet", systemPrompt: "sys" })
+  resolveProviderAttemptOptionsMock.mockReset().mockResolvedValue({
+    providerCredentials: { apiKey: "fallback-key", protocol: "openai" },
+  })
   runTurnMemoryMock.mockReset().mockResolvedValue(undefined)
   ;(jest.requireMock("@cognia/provider-embedding/embedding").generateEmbedding as jest.Mock)
     .mockReset()
@@ -442,6 +452,57 @@ describe("useTeamChat — actions", () => {
       await result.current.stop()
     })
     expect(uiState.clearMemberStatusFor).toHaveBeenCalledWith("team-1")
+  })
+
+  it("stop() releases team GUI state before a slow sub-session interrupt returns", async () => {
+    const alice = { id: "alice-stop", name: "Alice" }
+    getSessionMock.mockResolvedValue({
+      id: "team-1",
+      kind: "team",
+      teamId: "t-1",
+      title: "Team",
+    })
+    getTeamMock.mockResolvedValue({
+      id: "t-1",
+      orchestration: "round_robin",
+      members: [{ characterId: alice.id }],
+      supervisorCharacterId: null,
+    })
+    listCharactersByIdsMock.mockResolvedValue([alice])
+    routeTurnMock.mockReturnValue([alice])
+    sendPromptMock.mockResolvedValue(undefined)
+
+    let acknowledgeInterrupt: (() => void) | undefined
+    interruptSessionMock.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          acknowledgeInterrupt = resolve
+        })
+    )
+
+    const { result } = renderHook(() => useTeamChat())
+    await flush()
+    let sendPromise: Promise<void> | undefined
+    act(() => {
+      sendPromise = result.current.send("hello")
+    })
+    await waitFor(() => expect(sendPromptMock).toHaveBeenCalled())
+    chatState.setSessionStatus.mockClear()
+    chatState.setStatus.mockClear()
+
+    let stopPromise: Promise<void> | undefined
+    act(() => {
+      stopPromise = result.current.stop()
+    })
+
+    expect(chatState.setSessionStatus).toHaveBeenCalledWith("team-1", "idle")
+    expect(uiState.clearMemberStatusFor).toHaveBeenCalledWith("team-1")
+
+    acknowledgeInterrupt?.()
+    await act(async () => {
+      await stopPromise
+      await sendPromise
+    })
   })
 
   it("regenerate is a no-op when there is no last user message", async () => {
@@ -793,6 +854,125 @@ function makeLinearTeam(members: Array<{ id: string; name: string }>) {
 }
 
 describe("useTeamChat — send coverage", () => {
+  const routingPlan = {
+    decisionId: "team-chat-route",
+    surface: "chat",
+    requested: { kind: "auto" },
+    strategy: "reliability",
+    selected: {
+      providerId: "anthropic",
+      modelId: "claude-sonnet-4-6",
+      deploymentId: "anthropic::claude-sonnet-4-6",
+      reasonCodes: [],
+    },
+    orderedCandidates: [
+      {
+        providerId: "anthropic",
+        modelId: "claude-sonnet-4-6",
+        deploymentId: "anthropic::claude-sonnet-4-6",
+        reasonCodes: [],
+      },
+      {
+        providerId: "openai",
+        modelId: "gpt-5.6",
+        deploymentId: "openai::gpt-5.6",
+        reasonCodes: [],
+      },
+    ],
+    reasonCodes: [],
+    rejected: [],
+    replayPolicy: "pre-commit-only",
+    createdAt: 1,
+  }
+
+  it("retries a Team Chat member on the next planned provider before commitment", async () => {
+    let emitTeamEvent: ((evt: unknown) => void) | null = null
+    onClaudeMessageMock.mockImplementationOnce(async (cb: (evt: unknown) => void) => {
+      emitTeamEvent = cb
+      return onClaudeUnsub
+    })
+    makeLinearTeam([{ id: "alice", name: "Alice" }])
+    resolveSendOptionsMock.mockResolvedValue({
+      model: "claude-sonnet-4-6",
+      systemPrompt: "sys",
+      provider: "anthropic",
+      routingPlan,
+    } as never)
+    sendPromptMock.mockImplementation(async (subId: string) => {
+      const attempt = sendPromptMock.mock.calls.length
+      Promise.resolve().then(() =>
+        emitTeamEvent?.({
+          type: "session_ended",
+          sessionId: subId,
+          error: attempt === 1 ? "primary unavailable" : null,
+        })
+      )
+    })
+
+    const { result } = renderHook(() => useTeamChat())
+    await flush()
+    await act(async () => {
+      await result.current.send("route this")
+    })
+
+    expect(sendPromptMock).toHaveBeenCalledTimes(2)
+    expect(resolveProviderAttemptOptionsMock).toHaveBeenCalledWith("openai", settingsState.settings)
+    expect(sendPromptMock.mock.calls[1]?.[2]).toEqual(
+      expect.objectContaining({
+        provider: "openai",
+        model: "gpt-5.6",
+        providerCredentials: expect.objectContaining({ apiKey: "fallback-key" }),
+      })
+    )
+  })
+
+  it("does not replay a Team Chat member after an assistant frame commits it", async () => {
+    let emitTeamEvent: ((evt: unknown) => void) | null = null
+    onClaudeMessageMock.mockImplementationOnce(async (cb: (evt: unknown) => void) => {
+      emitTeamEvent = cb
+      return onClaudeUnsub
+    })
+    makeLinearTeam([{ id: "alice", name: "Alice" }])
+    resolveSendOptionsMock.mockResolvedValue({
+      model: "claude-sonnet-4-6",
+      systemPrompt: "sys",
+      provider: "anthropic",
+      routingPlan,
+    } as never)
+    const { applySdkEvent } = jest.requireMock("@/lib/claude/adapter") as {
+      applySdkEvent: jest.Mock
+    }
+    applySdkEvent.mockImplementationOnce(() => ({
+      messages: [
+        {
+          id: "assistant-1",
+          role: "assistant",
+          parts: [{ type: "text", text: "partial" }],
+        },
+      ],
+      turnComplete: false,
+    }))
+    sendPromptMock.mockImplementation(async (subId: string) => {
+      Promise.resolve().then(() => {
+        emitTeamEvent?.({ type: "event", sessionId: subId, event: { type: "assistant" } })
+        emitTeamEvent?.({
+          type: "session_ended",
+          sessionId: subId,
+          error: "failed after output",
+        })
+      })
+    })
+
+    const { result } = renderHook(() => useTeamChat())
+    await flush()
+    await act(async () => {
+      await result.current.send("route this")
+    })
+
+    expect(sendPromptMock).toHaveBeenCalledTimes(1)
+    expect(resolveProviderAttemptOptionsMock).not.toHaveBeenCalled()
+  })
+
   it("preserves attachment provenance on the optimistic team user message", async () => {
     const { makeUserMessage } = jest.requireMock("@/lib/claude/adapter") as {
       makeUserMessage: jest.Mock

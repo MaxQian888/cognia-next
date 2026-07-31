@@ -23,7 +23,6 @@ import type { ChatStatus as PromptStatus, UIMessage } from "ai"
 import {
   ArrowUpIcon,
   FileTextIcon,
-  FolderIcon,
   Loader2Icon,
   SparklesIcon,
   SquareIcon,
@@ -44,7 +43,7 @@ import {
   useState,
 } from "react"
 import { useTranslations } from "next-intl"
-import { useChatStore } from "@/stores/chat"
+import { useChatStore, type ChatStatus as StoreChatStatus } from "@/stores/chat"
 import { useSettingsStore } from "@/stores/settings"
 import { search, formatSearchResultsForLLM } from "@/lib/search/search-service"
 import { formatContextSelectionsForLLM } from "@/lib/artifacts/format-selection-context"
@@ -192,6 +191,12 @@ import { SkillPicker } from "./skill-picker"
 
 interface Props {
   session?: ChatSession | null
+  /**
+   * Status of the pane that owns this composer. Multi-pane chat passes this
+   * explicitly so a background stream does not inherit the focused pane's
+   * Send/Stop state.
+   */
+  status?: StoreChatStatus
   onStartNewSession: () => void | Promise<void>
   onOpenSettings: (tab: SettingsTab) => void
   /**
@@ -359,7 +364,11 @@ function ComposerInner(props: InnerProps) {
   const [ocrBubbleImageSrc, setOcrBubbleImageSrc] = useState<string | null>(null)
   const capabilityMenu =
     props.session?.kind === "workflow-editor" ? null : (
-      <ComposerCapabilityMenu session={props.session} disabled={props.disabled} />
+      <ComposerCapabilityMenu
+        session={props.session}
+        status={props.status}
+        disabled={props.disabled}
+      />
     )
 
   // Composer attachment OCR. It used to live on a hover menu on the chip and
@@ -702,7 +711,20 @@ function ComposerInner(props: InnerProps) {
   const onPickPopoverItem = useCallback(
     async (item: PopoverItem) => {
       if (!trigger) return
-      if (item.kind === "slash") {
+      if (item.kind === "slashArgument") {
+        const currentValue = controller.textInput.value
+        const result = spliceToken(currentValue, item.replaceStart, item.replaceEnd, item.value)
+        controller.textInput.setInput(result.value)
+        setCaret(result.caret)
+        requestAnimationFrame(() => {
+          const textarea = textareaRef.current
+          if (textarea) {
+            textarea.setSelectionRange(result.caret, result.caret)
+            textarea.focus()
+          }
+        })
+        dismissPopover()
+      } else if (item.kind === "slash") {
         const cmd = item.command
         if (cmd.disabled) {
           toast.info(tCommands("unavailable", { name: cmd.name }))
@@ -1742,7 +1764,7 @@ function ComposerInner(props: InnerProps) {
           // re-forms the single-row [attach | textarea | send] layout; the
           // flex-1 textarea (basis-0) then prevents any further wrapping.
           // Mobile (Capacitor) keeps the stack at every width.
-          "relative flex flex-wrap items-end gap-2 rounded-2xl border border-input/60 bg-background/70 px-2 py-2 shadow-sm transition-shadow",
+          "relative flex flex-wrap items-end gap-2 rounded-2xl border border-input/60 bg-background/70 px-2 py-2 shadow-sm transition-[border-color,box-shadow,background-color] duration-200 motion-reduce:transition-none",
           "focus-within:border-primary/40 focus-within:shadow-md focus-within:ring-2 focus-within:ring-ring/15",
           compactLayout &&
             "gap-1.5 rounded-[1.75rem] border-border/70 bg-background/85 px-3 py-2.5 shadow-md",
@@ -1839,8 +1861,9 @@ function ComposerInner(props: InnerProps) {
           <Textarea
             aria-label={t("ariaMessage")}
             className={cn(
-              "field-sizing-content relative z-[1] block min-h-6 w-full resize-none border-0 bg-transparent shadow-none outline-none ring-0 placeholder:text-muted-foreground focus-visible:ring-0 focus-visible:ring-offset-0",
+              "field-sizing-content relative z-[1] block min-h-9 w-full resize-none break-words overflow-y-auto overscroll-contain border-0 bg-transparent shadow-none outline-none ring-0 [scrollbar-width:none] placeholder:text-muted-foreground focus-visible:ring-0 focus-visible:ring-offset-0 [&::-webkit-scrollbar]:hidden",
               compactLayout && "min-h-14 py-1.5",
+              !compactLayout && controller.textInput.value.length === 0 && "h-9 overflow-hidden",
               TEXTAREA_TYPOGRAPHY
             )}
             disabled={props.disabled}
@@ -1932,6 +1955,7 @@ function ComposerInner(props: InnerProps) {
                   onClick={() => (isStreaming ? void props.onStop() : void submit())}
                   size="icon"
                   type="button"
+                  variant={isStreaming ? "destructive" : "default"}
                 >
                   {/* Icon swap genuinely cross-fades + zooms on each state
                       change (send → running → stop): AnimatePresence keeps the
@@ -1976,42 +2000,6 @@ function ComposerInner(props: InnerProps) {
       </div>
 
       <PluginExtensionSlot point="chat.input.below" className="px-1 pt-1 empty:hidden" />
-
-      {/* Inbox-only composer actions (IM-completion §C). Mounted only when
-       * the active session is bound to an external platform conversation;
-       * keeps the inbox extension surface separate from the generic
-       * chat.input.actions one so a regular chat session never sees them.
-       */}
-      {props.session?.platformBinding && (
-        <div className="flex flex-wrap items-center gap-1 px-1 pt-1">
-          <CannedResponsePicker
-            conversationKey={props.session.platformBinding.conversationKey}
-            context={{
-              conversation: {
-                title: props.session.title,
-                platform: props.session.platformBinding.platform,
-              },
-              contact: { platform: props.session.platformBinding.platform },
-            }}
-          />
-          <InboxComposerActionsHost
-            conversationKey={props.session.platformBinding.conversationKey}
-            adapterId={props.session.platformBinding.adapterId}
-            platform={props.session.platformBinding.platform}
-            sessionId={props.session.id}
-            className="flex flex-wrap items-center gap-1 empty:hidden"
-          />
-        </div>
-      )}
-
-      {cwd && (
-        <div className="flex items-center gap-1 px-2 pb-1 text-[11px] text-muted-foreground">
-          <FolderIcon className="size-3 shrink-0" />
-          <span className="truncate font-mono" title={cwd}>
-            {cwd}
-          </span>
-        </div>
-      )}
 
       <ComposerPopover
         ref={popoverRef}
@@ -2117,13 +2105,14 @@ function ComposerAppendBridge({ sessionId }: { sessionId?: string }) {
 
 function ComposerCapabilityMenu({
   session,
+  status,
   disabled,
 }: {
   session?: ChatSession | null
+  status: PromptStatus
   disabled?: boolean
 }) {
   const controller = usePromptInputController()
-  const status = useChatStore((s) => s.status)
   const ephemeralSkillIds = useChatStore((s) => s.ephemeralSkillIds) ?? []
   const setEphemeralSkillIds = useChatStore((s) => s.setEphemeralSkillIds) ?? (() => {})
   const enhanceEnabled = useSettingsStore(
@@ -2132,7 +2121,7 @@ function ComposerCapabilityMenu({
   const tSkill = useTranslations("skills.composer.skillPicker")
   const [pickerOpen, setPickerOpen] = useState(false)
   const isMobile = usePlatform() === "mobile"
-  const isStreaming = status === "streaming" || status === "awaiting_approval"
+  const isStreaming = status === "streaming"
   const controlsDisabled = disabled || isStreaming
 
   return (
@@ -2175,6 +2164,7 @@ function ComposerCapabilityMenu({
 export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
   {
     session,
+    status: paneStatus,
     onStartNewSession,
     onOpenSettings,
     onSend,
@@ -2197,7 +2187,8 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
   const compactLayout = useSettingsStore(
     (s) => s.settings?.composerBehavior?.compactLayout === true
   )
-  const status = useChatStore((s) => s.status)
+  const focusedStatus = useChatStore((s) => s.status)
+  const status = paneStatus ?? focusedStatus
   const setPermissionMode = useChatStore((s) => s.setPermissionMode)
   const appendMessage = useChatStore((s) => s.appendMessage)
   const clearReferencedPaths = useChatStore((s) => s.clearReferencedPaths)
@@ -2620,11 +2611,39 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
               compactLayout={compactLayout}
               toolbar={
                 compactLayout ? (
-                  <BottomToolbar session={session ?? null} variant="embedded" />
+                  <BottomToolbar session={session ?? null} status={status} variant="embedded" />
                 ) : null
               }
             />
-            {compactLayout ? null : <BottomToolbar session={session ?? null} />}
+            {compactLayout ? null : (
+              <BottomToolbar
+                session={session ?? null}
+                status={status}
+                leading={
+                  session?.platformBinding ? (
+                    <>
+                      <CannedResponsePicker
+                        conversationKey={session.platformBinding.conversationKey}
+                        context={{
+                          conversation: {
+                            title: session.title,
+                            platform: session.platformBinding.platform,
+                          },
+                          contact: { platform: session.platformBinding.platform },
+                        }}
+                      />
+                      <InboxComposerActionsHost
+                        conversationKey={session.platformBinding.conversationKey}
+                        adapterId={session.platformBinding.adapterId}
+                        platform={session.platformBinding.platform}
+                        sessionId={session.id}
+                        className="flex shrink-0 items-center gap-1 empty:hidden"
+                      />
+                    </>
+                  ) : null
+                }
+              />
+            )}
             <HelperHints />
           </StagedAttachmentsProvider>
         </PromptInputProvider>

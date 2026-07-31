@@ -10,6 +10,7 @@
 // pointer.
 
 import { transport } from "@/lib/tauri"
+import { isStandaloneChatMode } from "@/lib/runtime/standalone-mode"
 import { useAccountStore } from "@/stores/account/account-store"
 import type { AppSettings, Character, ChatSession } from "@cognia/agent-config-types"
 
@@ -52,6 +53,7 @@ export async function resolveAccountEnv(
   providerId: string,
   accountId: string | null
 ): Promise<Record<string, string>> {
+  if (isStandaloneChatMode()) return {}
   if (!accountId) return {}
   const localAccountId = useAccountStore.getState().unlockedAccountId
   if (!localAccountId) return {}
@@ -86,6 +88,7 @@ export async function resolveAccountEnv(
 export async function resolveProxyEnv(
   sessionId: string | null | undefined
 ): Promise<Record<string, string>> {
+  if (isStandaloneChatMode()) return {}
   try {
     const entries = await transport.call<Array<{ key: string; value: string }>>(
       "claude_proxy_env_for_session",

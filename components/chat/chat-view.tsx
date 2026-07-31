@@ -90,6 +90,8 @@ interface ChatPaneProps {
    * member-list rail.
    */
   composerRef?: Ref<ComposerHandle>
+  /** Keep cached history readable while runtime writes are unavailable. */
+  composerDisabled?: boolean
   /** When provided, opens the mobile inline @-mention popover on `@`. */
   mobileMentionMembers?: readonly Character[]
   /**
@@ -112,6 +114,10 @@ interface ChatPaneProps {
    * (session stays in plan mode). Optional — keep-planning works without it.
    */
   onSendPlanFeedback?: (feedback: string) => void | Promise<void>
+  /** Compact split-view entry action rendered in the focused pane header. */
+  onSplitView?: () => void
+  /** Compact split-view exit action rendered in the secondary pane header. */
+  onExitSplit?: () => void
   /**
    * When false, the internal `<ChatHeader>` is omitted. The Inbox detail
    * panel uses this so its own `<ConversationHeader>` (mode + policy +
@@ -161,9 +167,12 @@ export function ChatPane({
   recentSessions,
   onResumeSession,
   composerRef,
+  composerDisabled,
   mobileMentionMembers,
   onResumeAfterPlanApproval,
   onSendPlanFeedback,
+  onSplitView,
+  onExitSplit,
   showHeader = true,
   emptyState,
   welcomeExtras,
@@ -311,12 +320,13 @@ export function ChatPane({
         onOpenSettings={(tab) => onOpenSettings(tab)}
         onSend={handleSend}
         onStop={() => void onStop()}
+        status={status}
         // Only the concurrent-stream cap blocks the composer (this pane isn't
         // one of the streamers, so there is nothing to steer). Awaiting approval
         // stays writable on purpose: that is exactly when the user wants to say
         // "don't use that tool, do it another way", and `send` already routes a
         // message in that state into the steer queue rather than a new turn.
-        disabled={atCapacity}
+        disabled={atCapacity || composerDisabled}
         mobileMentionMembers={mobileMentionMembers}
         workflowMention={workflowMention}
       />
@@ -384,7 +394,12 @@ export function ChatPane({
   return (
     <>
       {showHeader && (
-        <ChatHeader session={activeSession} onOpenSettings={() => onOpenSettings("api-key")} />
+        <ChatHeader
+          session={activeSession}
+          onOpenSettings={() => onOpenSettings("api-key")}
+          onSplitView={onSplitView}
+          onExitSplit={onExitSplit}
+        />
       )}
       {/* ADR-0030 — surfaces a destructive Alert when session.characterId
           no longer resolves (plugin disabled, local pack deleted). Renders

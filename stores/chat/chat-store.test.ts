@@ -827,6 +827,17 @@ describe("useChatStore", () => {
       expect(result.current.lastSendBySession.s2).toBeDefined()
     })
 
+    it("marks a cached routed send committed exactly once", () => {
+      const { result } = renderHook(() => useChatStore())
+      act(() => result.current.setLastSend("s1", makeEntry()))
+      act(() => result.current.markLastSendCommitted("s1"))
+      const first = result.current.lastSendBySession.s1
+      act(() => result.current.markLastSendCommitted("s1"))
+
+      expect(first?.routingCommitted).toBe(true)
+      expect(result.current.lastSendBySession.s1).toBe(first)
+    })
+
     it("clearLastSend is a no-op when session has no cache", () => {
       const { result } = renderHook(() => useChatStore())
       act(() => result.current.clearLastSend("nope"))

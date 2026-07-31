@@ -52,6 +52,12 @@ import userEvent from "@testing-library/user-event"
 jest.mock("@/lib/tauri", () => ({
   isTauri: jest.fn().mockReturnValue(true),
 }))
+// This suite exercises the desktop sidecar boundary specifically. Runtime
+// target resolution otherwise classifies jsdom as an unpaired web browser and
+// correctly takes the standalone in-renderer path instead of `sendPrompt`.
+jest.mock("@/lib/runtime/standalone-mode", () => ({
+  isStandaloneChatMode: jest.fn(() => false),
+}))
 
 const onClaudeUnsub = jest.fn()
 let messageCallback: ((evt: unknown) => void) | null = null
@@ -638,7 +644,7 @@ describe("plugin tool hooks (W3.1 integration)", () => {
     })
 
     await waitFor(() =>
-      expect(toolResultDecisionMock).toHaveBeenCalledWith(SID, "rev-1", "REDACTED")
+      expect(toolResultDecisionMock).toHaveBeenCalledWith(SID, "rev-1", "REDACTED", undefined)
     )
     expect(onPostToolUse).toHaveBeenCalledWith(
       "Read",

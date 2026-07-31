@@ -581,6 +581,7 @@ describe("resolveSendOptions — opt-in Auto routing", () => {
     const opts = await resolveSendOptions({
       appSettings: settings({
         enabled: true,
+        defaultSelection: "auto",
         thresholds: { balanced: 0.34, powerful: 0.67 },
         candidateAliases: ["fast", "balanced", "powerful"],
       }),
@@ -597,6 +598,7 @@ describe("resolveSendOptions — opt-in Auto routing", () => {
     const opts = await resolveSendOptions({
       appSettings: settings({
         enabled: true,
+        defaultSelection: "auto",
         thresholds: { balanced: 0.34, powerful: 0.67 },
         candidateAliases: ["fast", "balanced", "powerful"],
       }),
@@ -637,14 +639,13 @@ describe("resolveSendOptions — opt-in Auto routing", () => {
   it("falls back to the concrete model when an auto tier has no eligible deployment", async () => {
     // Force the alias engine to report zero candidates for the auto-picked tier.
     const spy = jest
-      .spyOn(ProviderRoutingEngine.prototype, "selectProvider")
-      .mockImplementation(() => {
-        throw new RoutingNoCandidatesError("powerful")
-      })
+      .spyOn(ProviderRoutingEngine.prototype, "planRoute")
+      .mockRejectedValue(new RoutingNoCandidatesError("powerful"))
     try {
       const opts = await resolveSendOptions({
         appSettings: settings({
           enabled: true,
+          defaultSelection: "auto",
           thresholds: { balanced: 0.34, powerful: 0.67 },
           candidateAliases: ["fast", "balanced", "powerful"],
         }),
@@ -662,10 +663,8 @@ describe("resolveSendOptions — opt-in Auto routing", () => {
 
   it("rethrows for an explicitly-typed alias with no eligible deployment", async () => {
     const spy = jest
-      .spyOn(ProviderRoutingEngine.prototype, "selectProvider")
-      .mockImplementation(() => {
-        throw new RoutingNoCandidatesError("fast")
-      })
+      .spyOn(ProviderRoutingEngine.prototype, "planRoute")
+      .mockRejectedValue(new RoutingNoCandidatesError("fast"))
     try {
       await expect(
         resolveSendOptions({

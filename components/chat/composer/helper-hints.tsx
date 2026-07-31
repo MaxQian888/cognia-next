@@ -22,8 +22,9 @@ export function HelperHints() {
   return (
     // Stacked media + container variant: show only when BOTH the viewport is
     // ≥sm (keyboard hints are useless on touch) AND the composer container is
-    // ≥@sm (a narrow right-sidebar shouldn't burn rows on hint chips).
-    <div className="mt-1.5 hidden sm:@sm/composer:flex flex-wrap items-center justify-center gap-1.5 text-[10px] text-muted-foreground/70">
+    // ≥@lg (a medium-width sidebar still uses the stacked composer and
+    // shouldn't burn another row on hint chips).
+    <div className="mt-1.5 hidden sm:@lg/composer:flex flex-wrap items-center justify-center gap-1.5 text-[10px] text-muted-foreground/70">
       <Hint>{t("send")}</Hint>
       <Hint>{t("dropImages")}</Hint>
       <Hint>

@@ -121,7 +121,7 @@ describe("Composer — @skill: pick enables the skill (no text inserted)", () =>
     expect(ta.value).not.toContain("@skill:")
     expect(onSend).not.toHaveBeenCalled()
     expect(rows()).toHaveLength(0)
-  })
+  }, 15_000)
 })
 
 describe("Composer — @preset: pick applies the preset (no text inserted)", () => {

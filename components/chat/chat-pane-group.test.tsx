@@ -1,4 +1,4 @@
-import { render, fireEvent } from "@testing-library/react"
+import { render, screen } from "@testing-library/react"
 import type { ChatSession } from "@cognia/agent-config-types"
 
 // ── Mocks ────────────────────────────────────────────────────────────────
@@ -61,7 +61,6 @@ function makeProps(over: Partial<Parameters<typeof ChatPaneGroup>[0]> = {}) {
     regenerate: jest.fn(),
     editResend: jest.fn(),
     respondToApproval: jest.fn(),
-    closePane: jest.fn(),
     onCreate: jest.fn(),
     onUseSample: jest.fn(),
     onOpenSettings: jest.fn(),
@@ -81,27 +80,10 @@ beforeEach(() => {
 })
 
 describe("ChatPaneGroup", () => {
-  // A one-tab strip is a band of chrome that says nothing — the tab repeats the
-  // chat header's title, and close / split / new all have other homes.
-  it("hides the tab strip for a single, unsplit conversation", () => {
-    chatState.openSessionIds = ["a"]
-    const { queryByTestId } = render(<ChatPaneGroup {...makeProps()} />)
-    expect(queryByTestId("chat-tab-a")).toBeNull()
-  })
-
-  it("shows the tab strip as soon as a second conversation is open", () => {
-    const { getByTestId } = render(<ChatPaneGroup {...makeProps()} />)
-    expect(getByTestId("chat-tab-a")).toBeTruthy()
-    expect(getByTestId("chat-tab-b")).toBeTruthy()
-  })
-
-  it("shows the tab strip while split, even though only one session is open", () => {
-    // Split points at the single open session's pane pair; without this the
-    // strip's split toggle would be the control you need and cannot reach.
+  it("does not render a duplicate conversation tab strip", () => {
     chatState.openSessionIds = ["a", "b"]
-    chatState.splitSessionId = "b"
-    const { getByTestId } = render(<ChatPaneGroup {...makeProps()} />)
-    expect(getByTestId("chat-tab-a")).toBeTruthy()
+    render(<ChatPaneGroup {...makeProps()} />)
+    expect(screen.queryByRole("tablist")).toBeNull()
   })
 
   it("renders a single focused pane when not split", () => {
@@ -109,6 +91,14 @@ describe("ChatPaneGroup", () => {
     expect(getByTestId("pane-a")).toBeTruthy()
     expect(queryByTestId("pane-b")).toBeNull()
     expect(queryByTestId("rpg")).toBeNull()
+  })
+
+  it("disables the composer in every pane while keeping conversation panes mounted", () => {
+    chatState.splitSessionId = "b"
+    render(<ChatPaneGroup {...makeProps({ composerDisabled: true })} />)
+
+    expect(paneRenders).toHaveLength(2)
+    expect(paneRenders.every((pane) => pane.composerDisabled === true)).toBe(true)
   })
 
   it("renders two panes side by side when split is active", () => {
@@ -172,30 +162,18 @@ describe("ChatPaneGroup", () => {
     ).toBe(true)
   })
 
-  it("toggles split to a different open session and back", () => {
-    const { getByLabelText } = render(<ChatPaneGroup {...makeProps()} />)
-    // tab strip is rendered (2 open tabs); clicking split picks the other session.
-    fireEvent.click(getByLabelText("splitView"))
-    expect(chatState.setSplitSessionId).toHaveBeenCalledWith("b")
-  })
-
-  it("exits split when the toggle is pressed while split is open", () => {
+  it("keeps a compact exit action when split view is open", () => {
     chatState.splitSessionId = "b"
-    const { getByLabelText } = render(<ChatPaneGroup {...makeProps()} />)
-    fireEvent.click(getByLabelText("exitSplit"))
+    render(<ChatPaneGroup {...makeProps()} />)
+    const splitPane = paneRenders.find((pane) => pane.sessionId === "b")!
+    ;(splitPane.onExitSplit as () => void)()
     expect(chatState.setSplitSessionId).toHaveBeenCalledWith(null)
   })
 
-  it("selecting + closing a tab routes to the store / closePane", () => {
-    const closePane = jest.fn()
-    const { getByTestId, getAllByLabelText } = render(
-      <ChatPaneGroup {...makeProps({ closePane })} />
-    )
-    fireEvent.click(getByTestId("chat-tab-b"))
-    expect(chatState.setActiveSession).toHaveBeenCalledWith("b")
-    // Two tabs each expose a close button (i18n interpolation is stubbed); the
-    // second corresponds to session "b".
-    fireEvent.click(getAllByLabelText("closeTab")[1])
-    expect(closePane).toHaveBeenCalledWith("b")
+  it("keeps a compact split action when another conversation is open", () => {
+    render(<ChatPaneGroup {...makeProps()} />)
+    const activePane = paneRenders.find((pane) => pane.sessionId === "a")!
+    ;(activePane.onSplitView as () => void)()
+    expect(chatState.setSplitSessionId).toHaveBeenCalledWith("b")
   })
 })

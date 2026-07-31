@@ -25,6 +25,31 @@ export type ConversationDropAction =
   | { type: "assign"; sessionId: string; folderId: string | null }
   | { type: "reorder"; ids: string[] }
 
+export interface ConversationDropPreview {
+  targetId: string
+  position: "before" | "after"
+}
+
+/**
+ * Resolve the insertion edge to show while a sortable row is hovering another
+ * row. The cue is intentionally limited to a single section, matching the
+ * persistence rule in {@link resolveConversationDrop}.
+ */
+export function resolveConversationDropPreview(
+  activeId: string,
+  overId: string,
+  siblingIds: readonly string[]
+): ConversationDropPreview | null {
+  if (activeId === overId) return null
+  const from = siblingIds.indexOf(activeId)
+  const to = siblingIds.indexOf(overId)
+  if (from === -1 || to === -1) return null
+  return {
+    targetId: overId,
+    position: from < to ? "after" : "before",
+  }
+}
+
 /**
  * Resolve a drag-end into a concrete action, or `null` for a no-op.
  *

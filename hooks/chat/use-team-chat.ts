@@ -79,6 +79,8 @@ import { useUIStore } from "@/stores/ui"
 import { isTauri } from "@/lib/tauri"
 import { isCapacitor } from "@/lib/platform/detect"
 import { hasWebCompanionTarget } from "@/lib/platform/web-companion"
+import { RoutingAttemptController } from "@cognia/provider-routing"
+import { DEFAULT_ROUTING_CONFIG } from "@cognia/provider-types/model-mapping"
 
 const MAX_SUPERVISOR_ROUNDS = 2
 
@@ -628,9 +630,13 @@ export function useTeamChat() {
     // steering — and disarms the drain so the settle doesn't replay it.
     useChatStore.getState().clearSteerQueue(teamSessionId)
     steerArmed.delete(teamSessionId)
-    await interruptTeamTurn(teamSessionId, resolvers.current)
+    // Release the visible team state before waiting for every sub-session's
+    // interrupt acknowledgement. A slow sidecar must not strand the composer
+    // in its streaming state or leave member spinners running.
     useChatStore.getState().setSessionStatus(teamSessionId, "idle")
     useUIStore.getState().clearMemberStatusFor(teamSessionId)
+    useUIStore.getState().clearStopRequestsFor(teamSessionId)
+    await interruptTeamTurn(teamSessionId, resolvers.current)
   }, [])
 
   // "Interrupt & steer now": cut the running team turn short so its settle
@@ -1102,15 +1108,26 @@ async function runMemberSubSession(args: RunMemberArgs): Promise<void> {
     memoryUserMessage: turnMemoryDeps ? turnUserMessage : undefined,
     twinInjectSource: "team",
     postCompaction: teamRecoveryPhase !== null ? { phaseNumber: teamRecoveryPhase } : undefined,
+    routingSurface: "chat",
+    routingContextHint: { promptText: turnUserMessage },
   })
   const transcript = await buildTranscript(sessionId, character.id, members, session.scratchpad)
   const finalSystemPrompt = [baseOpts.systemPrompt, promptAddendum, transcript]
     .filter((p) => p && p.trim())
     .join("\n\n---\n\n")
-  const opts = {
+  let opts = {
     ...baseOpts,
     ...(finalSystemPrompt ? { systemPrompt: finalSystemPrompt } : {}),
   }
+  const plan = baseOpts.routingPlan
+  const settings = useSettingsStore.getState().settings
+  const controller = plan
+    ? new RoutingAttemptController(
+        plan,
+        settings?.routingConfig?.maxFallbackAttempts ?? DEFAULT_ROUTING_CONFIG.maxFallbackAttempts
+      )
+    : undefined
+  let candidate = controller?.begin()
 
   // Stash extras on the resolver so the event handler can apply them.
   const ctx: SubResolverCtx = {
@@ -1122,15 +1139,54 @@ async function runMemberSubSession(args: RunMemberArgs): Promise<void> {
     // message's SourcesPart at turnComplete; the team path seals per member in
     // `handleTeamEvent`, so thread the context through the resolver ctx.
     memoryContext: baseOpts.memoryContext,
+    onRoutingCommit: () => controller?.commit(),
   }
   subResolverCtx.set(sub, ctx)
 
-  const done = new Promise<void>((resolve, reject) => {
-    resolvers.set(sub, { resolve, reject })
-  })
+  let lastError: unknown
   try {
-    await sendPrompt(sub, sendContent, opts)
-    await done
+    do {
+      const done = new Promise<void>((resolve, reject) => {
+        resolvers.set(sub, { resolve, reject })
+      })
+      try {
+        await sendPrompt(sub, sendContent, opts)
+        await done
+        controller?.complete()
+        return
+      } catch (error) {
+        lastError = error
+        if (error instanceof Error && error.message === "Interrupted") {
+          controller?.cancel()
+          throw error
+        }
+        const next = controller?.failAndAdvance() ?? null
+        if (!next || !settings) throw error
+        candidate = next
+        const { resolveProviderAttemptOptions } =
+          await import("@/lib/claude/provider-attempt-options")
+        const attempt = await resolveProviderAttemptOptions(next.providerId, settings)
+        opts = {
+          ...opts,
+          provider: next.providerId,
+          model: next.modelId,
+          providerCredentials: attempt.providerCredentials,
+          protocolAdapterSpec: attempt.protocolAdapterSpec,
+          modelParams: attempt.modelParams,
+          fallbackModel: undefined,
+          aliasResolution: opts.aliasResolution
+            ? {
+                ...opts.aliasResolution,
+                resolvedTo: { providerId: next.providerId, modelId: next.modelId },
+              }
+            : undefined,
+        }
+        ctx.model = next.modelId
+      } finally {
+        resolvers.delete(sub)
+      }
+    } while (candidate)
+    throw lastError instanceof Error ? lastError : new Error("Team chat has no routing candidate")
   } finally {
     resolvers.delete(sub)
     subResolverCtx.delete(sub)
@@ -1152,6 +1208,8 @@ interface SubResolverCtx {
   postProcessText?: (text: string) => string
   /** Recalled long-term memories for this member's turn (SourcesPart merge). */
   memoryContext?: MemorySourcesContext
+  /** Marks the first visible assistant frame/tool dispatch as replay-unsafe. */
+  onRoutingCommit?: () => void
 }
 const subResolverCtx = new Map<string, SubResolverCtx>()
 
@@ -1288,6 +1346,13 @@ async function handleTeamEvent(
       }
 
       if (nextMessages !== teamMsgs) {
+        if (
+          nextMessages.some(
+            (message) => message.role === "assistant" && !existingIds.has(message.id)
+          )
+        ) {
+          ctx?.onRoutingCommit?.()
+        }
         const pendingBranch = pendingTeamBranchTags.get(teamSessionId)
         let tagged = nextMessages.map((m) => {
           if (existingIds.has(m.id)) return m

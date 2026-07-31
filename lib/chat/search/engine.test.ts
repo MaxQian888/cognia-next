@@ -256,6 +256,38 @@ describe("searchChatHistory", () => {
     expect(outcome.moreOlderHistory).toBe(true)
   })
 
+  it("collapses sidebar results to the best hit per conversation", async () => {
+    const outcome = await searchChatHistory(
+      { query: "needle", limit: 2, collapseBySession: true },
+      deps(
+        [
+          row("a long prefix makes this old needle less relevant", {
+            messageId: "old",
+            sessionId: "s1",
+            createdAt: NOW - 10_000,
+          }),
+          row("needle", { messageId: "fresh", sessionId: "s1", createdAt: NOW }),
+          row("other needle", { messageId: "other", sessionId: "s2", createdAt: NOW - 1 }),
+        ],
+        [session({ id: "s1" }), session({ id: "s2" })]
+      )
+    )
+
+    expect(outcome.results.map((result) => result.messageId)).toEqual(["fresh", "other"])
+  })
+
+  it("uses the owning session workspace for legacy projections", async () => {
+    const outcome = await searchChatHistory(
+      { query: "needle" },
+      deps(
+        [row("needle", { projectId: "" })],
+        [session({ id: "s1", projectId: "project-current" })]
+      )
+    )
+
+    expect(outcome.results[0].projectId).toBe("project-current")
+  })
+
   // ---- ranking ----
 
   it("ranks a title match above a plain body match", async () => {

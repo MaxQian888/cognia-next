@@ -93,7 +93,9 @@ function renderComposer(onSend = jest.fn()) {
 
 // Type a value into the textarea and let the trigger memo + popover render flush.
 async function typeValue(ta: HTMLTextAreaElement, value: string) {
-  fireEvent.change(ta, { target: { value } })
+  fireEvent.change(ta, {
+    target: { value, selectionStart: value.length, selectionEnd: value.length },
+  })
   await new Promise((r) => setTimeout(r, 0))
 }
 
@@ -274,4 +276,37 @@ describe("Composer — slash popover (keyboard, end-to-end)", () => {
     await typeValue(ta, "co")
     await waitFor(() => expect(rows()).toHaveLength(0))
   })
+
+  it("offers and inserts a matching first-argument completion", async () => {
+    const { ta, onSend } = renderComposer()
+    ta.focus()
+    await typeValue(ta, "/permission-mode p")
+    await waitFor(() =>
+      expect(rowTexts()).toEqual(expect.arrayContaining(["plan", "bypassPermissions"]))
+    )
+
+    fireEvent.keyDown(ta, { key: "Enter" })
+    await waitFor(() => expect(ta.value).toBe("/permission-mode plan "))
+
+    expect(onSend).not.toHaveBeenCalled()
+    expect(rows()).toHaveLength(0)
+    expect(ta).toHaveFocus()
+    expect(ta.selectionStart).toBe(ta.value.length)
+  })
+
+  it("composes multiple picked commands on separate lines", async () => {
+    const { ta, onSend } = renderComposer()
+    await typeValue(ta, "/compact")
+    await waitFor(() => expect(rows()).toHaveLength(1))
+    fireEvent.keyDown(ta, { key: "Enter" })
+    await waitFor(() => expect(ta.value.trimEnd()).toBe("/compact"))
+    await new Promise((resolve) => requestAnimationFrame(resolve))
+
+    await typeValue(ta, `${ta.value}\n/help`)
+    await waitFor(() => expect(rowTexts().some((text) => text.includes("/help"))).toBe(true))
+    fireEvent.keyDown(ta, { key: "Enter" })
+    await waitFor(() => expect(ta.value.trimEnd()).toBe("/compact \n/help"))
+
+    expect(onSend).not.toHaveBeenCalled()
+  }, 15_000)
 })

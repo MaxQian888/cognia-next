@@ -48,6 +48,12 @@ export interface ComposerTrigger {
   tokenEnd: number
   /** Text after the trigger char up to the caret (never includes the trigger). */
   query: string
+  /** Inclusive start of the first slash-command argument, when the caret is in it. */
+  argumentStart?: number
+  /** Exclusive end of the first slash-command argument token. */
+  argumentEnd?: number
+  /** First argument text up to the caret, used for inline option completion. */
+  argumentQuery?: string
 }
 
 export interface DetectTriggerOptions {
@@ -140,11 +146,28 @@ export function detectTrigger(
       const nextNewline = value.indexOf("\n", lineStart)
       const lineEnd = nextNewline === -1 ? value.length : nextNewline
       const tokenEnd = findTokenEnd(value, slashPos + 1, lineEnd)
+      let argumentFields: Pick<ComposerTrigger, "argumentStart" | "argumentEnd" | "argumentQuery"> =
+        {}
+      if (caret > tokenEnd) {
+        let argumentStart = tokenEnd
+        while (argumentStart < lineEnd && /\s/.test(value[argumentStart])) {
+          argumentStart++
+        }
+        const argumentEnd = findTokenEnd(value, argumentStart, lineEnd)
+        if (caret <= argumentEnd) {
+          argumentFields = {
+            argumentStart,
+            argumentEnd,
+            argumentQuery: value.slice(argumentStart, caret),
+          }
+        }
+      }
       return {
         kind: SLASH_TRIGGER,
         tokenStart: slashPos,
         tokenEnd,
         query: value.slice(slashPos + 1, Math.min(caret, tokenEnd)),
+        ...argumentFields,
       }
     }
   }

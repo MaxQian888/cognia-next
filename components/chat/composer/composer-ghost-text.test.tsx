@@ -10,6 +10,7 @@ describe("ComposerGhostText", () => {
   it("paints the dim ghost suffix after a transparent copy of the value", () => {
     render(<ComposerGhostText value="hello" ghost=" world" />)
     const overlay = screen.getByTestId("composer-ghost-text")
+    expect(overlay.firstElementChild).toHaveClass("min-h-9")
     expect(overlay).toHaveAttribute("data-ghost", " world")
     expect(overlay).toHaveTextContent("hello world")
     expect(overlay).toHaveAttribute("aria-hidden", "true")

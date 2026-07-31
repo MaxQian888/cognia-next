@@ -3,7 +3,7 @@
  */
 
 import { createRef } from "react"
-import { render, screen, act } from "@testing-library/react"
+import { render, screen, act, fireEvent, waitFor } from "@testing-library/react"
 import { ComposerPopover, type ComposerPopoverHandle } from "./composer-popover"
 import type { SlashCommand } from "@/lib/slash-commands/builtin"
 import type { ComposerTrigger, MentionableWorkflowElement } from "./composer-trigger"
@@ -21,22 +21,62 @@ jest.mock("next-intl", () => {
 // can't pull extra commands into a short-query result — keeps name-ranking
 // assertions deterministic. The "diff" test exercises the description path.
 const commands = [
-  { name: "clear", description: "", scope: "builtin" },
+  { name: "clear", description: "", scope: "builtin", category: "chat" },
   { name: "compact", description: "", scope: "builtin" },
   { name: "cost", description: "", scope: "builtin" },
   { name: "model", description: "", scope: "builtin" },
-  { name: "review", description: "Inspect the diff", scope: "builtin" },
+  {
+    name: "review",
+    description: "Inspect the diff",
+    scope: "builtin",
+    category: "template",
+    argumentHint: "<focus area?>",
+  },
+  {
+    name: "permission-mode",
+    description: "Set the permission mode",
+    scope: "builtin",
+    category: "system",
+    argumentHint: "<default | acceptEdits | plan | bypassPermissions>",
+    argumentOptions: ["default", "acceptEdits", "plan", "bypassPermissions"],
+  },
+  {
+    name: "enum-only",
+    description: "Uses a structured enum",
+    scope: "builtin",
+    params: [
+      {
+        name: "mode",
+        label: "Mode",
+        type: "enum",
+        options: ["alpha", "beta"],
+      },
+    ],
+  },
 ] as SlashCommand[]
 
 function slashTrigger(query: string): ComposerTrigger {
   return { kind: "slash", tokenStart: 0, tokenEnd: query.length + 1, query }
 }
 
-function setup(trigger: ComposerTrigger | null, onPick = jest.fn()) {
+function slashArgumentTrigger(command: string, query: string): ComposerTrigger {
+  const argumentStart = command.length + 2
+  return {
+    kind: "slash",
+    tokenStart: 0,
+    tokenEnd: command.length + 1,
+    query: command,
+    argumentStart,
+    argumentEnd: argumentStart + query.length,
+    argumentQuery: query,
+  }
+}
+
+function setup(trigger: ComposerTrigger | null, onPick = jest.fn(), onDismiss = jest.fn()) {
   const anchor = document.createElement("div")
   document.body.appendChild(anchor)
   const ref = createRef<ComposerPopoverHandle>()
-  render(
+  const view = render(
     <ComposerPopover
       ref={ref}
       trigger={trigger}
@@ -44,10 +84,10 @@ function setup(trigger: ComposerTrigger | null, onPick = jest.fn()) {
       slashCommands={commands}
       anchor={anchor}
       onPick={onPick}
-      onDismiss={jest.fn()}
+      onDismiss={onDismiss}
     />
   )
-  return { ref, onPick }
+  return { ref, onPick, onDismiss, unmount: view.unmount }
 }
 
 function rowTexts(): string[] {
@@ -84,11 +124,85 @@ describe("ComposerPopover — slash fuzzy ranking", () => {
     expect(screen.getByText(/noCommandMatches/)).toBeInTheDocument()
   })
 
-  it("caps the popover width at 480px so it can't spill past a narrow panel", () => {
+  it("matches the composer width without an arbitrary desktop cap", () => {
     setup(slashTrigger(""))
     const content = screen.getByRole("dialog")
-    expect(content.className).toContain("max-w-[480px]")
     expect(content.className).toContain("var(--radix-popper-anchor-width)")
+    expect(content.className).not.toContain("max-w-[480px]")
+  })
+
+  it("offers a dedicated search that matches command descriptions", async () => {
+    setup(slashTrigger(""))
+
+    const search = screen.getByRole("searchbox", { name: "searchAria" })
+    fireEvent.change(search, { target: { value: "diff" } })
+
+    await waitFor(() => expect(rowTexts()).toHaveLength(1))
+    expect(rowTexts()[0]).toContain("/review")
+  })
+
+  it("supports navigation, selection, and dismissal from the search field", async () => {
+    const onPick = jest.fn()
+    const onDismiss = jest.fn()
+    setup(slashTrigger(""), onPick, onDismiss)
+
+    const search = screen.getByRole("searchbox", { name: "searchAria" })
+    fireEvent.change(search, { target: { value: "co" } })
+    await waitFor(() => expect(rowTexts()).toHaveLength(2))
+
+    fireEvent.keyDown(search, { key: "ArrowDown" })
+    fireEvent.keyDown(search, { key: "Enter" })
+    expect(onPick).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: "slash",
+        command: expect.objectContaining({ name: "compact" }),
+      })
+    )
+
+    fireEvent.keyDown(search, { key: "Escape" })
+    expect(onDismiss).toHaveBeenCalledTimes(1)
+  })
+
+  it("keeps entrance motion decorative under reduced-motion preferences", () => {
+    setup(slashTrigger(""))
+    expect(screen.getByRole("dialog").className).toContain("motion-reduce:animate-none")
+  })
+
+  it("explains how to compose multiple commands", () => {
+    setup(slashTrigger(""))
+    expect(screen.getByText("multiCommandHint")).toBeInTheDocument()
+  })
+
+  it("uses category-specific command icons and structured argument tokens", () => {
+    setup(slashTrigger("review"))
+    expect(document.querySelector('[data-command-icon="template"]')).not.toBeNull()
+    expect(screen.getByText("focus area?")).toHaveAttribute("data-slot", "command-argument")
+  })
+
+  it("suggests and keyboard-selects matching options for the first command argument", async () => {
+    const onPick = jest.fn()
+    const { ref } = setup(slashArgumentTrigger("permission-mode", "p"), onPick)
+
+    await waitFor(() => expect(rowTexts()).toEqual(["plan", "bypassPermissions", "acceptEdits"]))
+    act(() => ref.current?.confirm())
+    expect(onPick).toHaveBeenCalledWith({
+      kind: "slashArgument",
+      command: expect.objectContaining({ name: "permission-mode" }),
+      value: "plan",
+      replaceStart: 17,
+      replaceEnd: 18,
+    })
+  })
+
+  it("falls back to enum param options and shows a useful no-match state", () => {
+    const { unmount } = setup(slashArgumentTrigger("enum-only", "b"))
+    expect(rowTexts()).toEqual(["beta"])
+    unmount()
+
+    setup(slashArgumentTrigger("permission-mode", "zzz"))
+    expect(
+      screen.getByText((content) => content.startsWith("noArgumentMatches"))
+    ).toBeInTheDocument()
   })
 })
 
@@ -367,6 +481,11 @@ describe("ComposerPopover — @skill: / @preset: namespaced pickers", () => {
     )
     return { ref, onPick }
   }
+
+  it("explains that multiple skills can be attached", () => {
+    setupNamespaced("skill", "")
+    expect(screen.getByText("multiSkillHint")).toBeInTheDocument()
+  })
 
   it("lists enabled skills and fuzzy-filters by name", () => {
     setupNamespaced("skill", "")

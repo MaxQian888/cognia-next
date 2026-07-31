@@ -29,6 +29,39 @@ describe("detectTrigger — slash mode", () => {
     expect(detectTrigger("hello\n!ls", 9)).toBeNull()
     expect(detectTrigger("hello\n#note", 11)).toBeNull()
   })
+
+  it("exposes the first argument fragment for inline command completion", () => {
+    const value = "/permission-mode pl"
+    const tg = detectTrigger(value, value.length)
+    expect(tg).toEqual({
+      kind: "slash",
+      tokenStart: 0,
+      tokenEnd: 16,
+      query: "permission-mode",
+      argumentStart: 17,
+      argumentEnd: 19,
+      argumentQuery: "pl",
+    })
+  })
+
+  it("offers an empty argument query immediately after the command space", () => {
+    const value = "/pet "
+    const tg = detectTrigger(value, value.length)
+    expect(tg).toMatchObject({
+      kind: "slash",
+      query: "pet",
+      argumentStart: value.length,
+      argumentEnd: value.length,
+      argumentQuery: "",
+    })
+  })
+
+  it("does not keep first-argument completion open after the caret moves to later args", () => {
+    const value = "/goal update improve tests"
+    const tg = detectTrigger(value, value.length)
+    expect(tg?.query).toBe("goal")
+    expect(tg?.argumentQuery).toBeUndefined()
+  })
 })
 
 describe("detectTrigger — bash + memory", () => {

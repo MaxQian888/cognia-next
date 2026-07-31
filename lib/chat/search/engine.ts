@@ -91,6 +91,8 @@ export interface ChatSearchQuery {
   projectId?: string
   /** Include archived conversations. */
   includeArchived?: boolean
+  /** Return only the highest-ranked message hit from each conversation. */
+  collapseBySession?: boolean
 }
 
 export interface ChatSearchDeps {
@@ -266,7 +268,13 @@ function pendingHits(rows: readonly ChatSearchTextRow[], needle: string): Corpus
  * quietly dropped that.
  */
 export async function searchChatHistory(
-  { query, limit = DEFAULT_SEARCH_LIMIT, projectId, includeArchived = false }: ChatSearchQuery,
+  {
+    query,
+    limit = DEFAULT_SEARCH_LIMIT,
+    projectId,
+    includeArchived = false,
+    collapseBySession = false,
+  }: ChatSearchQuery,
   overrides: Partial<ChatSearchDeps> & ScoreOptions = {}
 ): Promise<ChatSearchOutcome> {
   const deps = { ...defaultDeps(), ...overrides }
@@ -336,7 +344,7 @@ export async function searchChatHistory(
         messageId: hit.row.messageId,
         sessionId: hit.row.sessionId,
         sessionTitle: session.title,
-        projectId: hit.row.projectId,
+        projectId: session.projectId ?? hit.row.projectId,
         role: hit.row.role,
         createdAt: hit.row.createdAt,
         count: hit.count,
@@ -353,8 +361,20 @@ export async function searchChatHistory(
   // Dedupe before projecting to results: the fold needs the full text, and
   // building snippets for rows about to be discarded is wasted work.
   const deduped = dedupeBranchCopies(rankHits(scorable, overrides), roots)
+  const surfaced = collapseBySession
+    ? deduped.filter(
+        (() => {
+          const seenSessionIds = new Set<string>()
+          return ({ hit }) => {
+            if (seenSessionIds.has(hit.sessionId)) return false
+            seenSessionIds.add(hit.sessionId)
+            return true
+          }
+        })()
+      )
+    : deduped
 
-  const results = deduped.slice(0, limit).map(({ hit, otherBranchCount }): ChatSearchResult => ({
+  const results = surfaced.slice(0, limit).map(({ hit, otherBranchCount }): ChatSearchResult => ({
     messageId: hit.messageId,
     sessionId: hit.sessionId,
     sessionTitle: hit.sessionTitle,
@@ -371,7 +391,7 @@ export async function searchChatHistory(
 
   return {
     results,
-    moreOlderHistory: moreOlderHistory || deduped.length > limit,
+    moreOlderHistory: moreOlderHistory || surfaced.length > limit,
     indexIncomplete,
   }
 }

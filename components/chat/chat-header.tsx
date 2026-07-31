@@ -2,7 +2,7 @@
 
 import { useState } from "react"
 import { useTranslations } from "next-intl"
-import { KeyRoundIcon, Settings2Icon } from "lucide-react"
+import { Columns2Icon, KeyRoundIcon, Settings2Icon } from "lucide-react"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Button } from "@/components/ui/button"
 import { ArtifactDockToggle } from "@/components/artifacts/artifact-dock-toggle"
@@ -21,6 +21,8 @@ import type { ChatSession } from "@cognia/agent-config-types"
 interface Props {
   session: ChatSession
   onOpenSettings?: () => void
+  onSplitView?: () => void
+  onExitSplit?: () => void
 }
 
 /**
@@ -38,8 +40,9 @@ interface Props {
  * owner of a frequent action: `⚙` for this session's settings, and the toggle
  * for the pane on the right.
  */
-export function ChatHeader({ session, onOpenSettings }: Props) {
+export function ChatHeader({ session, onOpenSettings, onSplitView, onExitSplit }: Props) {
   const t = useTranslations("chat.header")
+  const tConcurrent = useTranslations("chat.concurrent")
   const character = useCharacter(session.characterId)
   // Reactive credential status (api key OR subscription bearer). Re-reads on
   // profile unlock and subscription-changed broadcasts, so the badge never
@@ -102,7 +105,31 @@ export function ChatHeader({ session, onOpenSettings }: Props) {
 
       <PluginExtensionSlot point="chat.header" className="flex items-center gap-1 empty:hidden" />
 
-      {/* Two buttons, down from six. The browser-dock opener moved into the
+      {onSplitView && (
+        <Button
+          variant="ghost"
+          size="icon"
+          className="size-7"
+          aria-label={tConcurrent("splitView")}
+          onClick={onSplitView}
+        >
+          <Columns2Icon className="size-4" />
+        </Button>
+      )}
+
+      {onExitSplit && (
+        <Button
+          variant="ghost"
+          size="icon"
+          className="size-7"
+          aria-label={tConcurrent("exitSplit")}
+          onClick={onExitSplit}
+        >
+          <Columns2Icon className="size-4" />
+        </Button>
+      )}
+
+      {/* Two persistent buttons, down from six. The browser-dock opener moved into the
           artifact dock's own menu, the agent-flow density switch already had a
           copy in the settings sheet and the appearance settings, and Insights
           became a row inside the sheet — none of the three is touched per turn.

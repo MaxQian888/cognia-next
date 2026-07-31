@@ -9,6 +9,7 @@ import type { UserProviderSettings, CustomProviderSettings } from "@cognia/provi
 import type { ChatSession } from "@cognia/agent-config-types"
 import { updateSession } from "@/lib/db/sessions"
 import { useSettingsStore } from "@/stores/settings"
+import enMessages from "@/i18n/messages/en.json"
 
 // The picker persists model switches through the Dexie sessions table —
 // irrelevant for trigger-rendering assertions.
@@ -404,7 +405,7 @@ describe("reasoning effort integration", () => {
   })
 })
 
-describe("auto routing toggle + badge", () => {
+describe("explicit Auto routing selection", () => {
   const session: ChatSession = {
     id: "ses_1",
     title: "t",
@@ -414,37 +415,96 @@ describe("auto routing toggle + badge", () => {
     createdAt: 0,
     updatedAt: 0,
   }
-  const renderPicker = () =>
+  const renderPicker = (value: ChatSession = session) =>
     render(
-      <NextIntlClientProvider locale="en" messages={{}}>
-        <ModelPicker session={session} />
+      <NextIntlClientProvider locale="en" messages={enMessages}>
+        <ModelPicker session={value} />
       </NextIntlClientProvider>
     )
 
-  afterEach(() => useSettingsStore.setState({ settings: undefined as never }))
+  beforeEach(() => {
+    mockedUpdateSession.mockClear()
+    mockCloseSession.mockClear()
+    mockIsTauri.mockReturnValue(false)
+  })
 
-  it("shows the Auto badge on the trigger when auto routing is enabled", () => {
+  afterEach(() => {
+    act(() => useSettingsStore.setState({ settings: undefined as never }))
+  })
+
+  it("shows the Auto badge only when the session explicitly selects Auto", () => {
     useSettingsStore.setState({ settings: { autoRouting: { enabled: true } } as never })
-    const { container } = renderPicker()
+    const { container } = renderPicker({
+      ...session,
+      model: "auto",
+      providerOverride: undefined,
+    })
     // The badge is the only primary-tinted chip in the trigger.
     expect(container.querySelector(".text-primary")).not.toBeNull()
   })
 
-  it("omits the badge when auto routing is off", () => {
-    useSettingsStore.setState({ settings: { autoRouting: { enabled: false } } as never })
+  it("omits the badge for a concrete model even when Auto is available", () => {
+    useSettingsStore.setState({ settings: { autoRouting: { enabled: true } } as never })
     const { container } = renderPicker()
     expect(container.querySelector(".text-primary")).toBeNull()
   })
 
-  it("toggling the popover switch persists the enabled flag through save", () => {
+  it("selecting the Auto row enables routing and stores a session-level selection", () => {
     const save = jest.fn(async () => undefined)
     useSettingsStore.setState({ settings: { autoRouting: { enabled: false } } as never, save })
     renderPicker()
     fireEvent.click(screen.getByRole("button")) // open the popover
-    fireEvent.click(screen.getByRole("switch"))
+    fireEvent.click(screen.getByText("Auto"))
     expect(save).toHaveBeenCalledWith({
       autoRouting: expect.objectContaining({ enabled: true }),
     })
+    expect(mockedUpdateSession).toHaveBeenCalledWith(
+      "ses_1",
+      expect.objectContaining({ model: "auto", providerOverride: undefined })
+    )
+  })
+
+  it("starts from the existing default Auto policy when no Auto block is stored", () => {
+    const save = jest.fn(async () => undefined)
+    useSettingsStore.setState({ settings: {} as never, save })
+    renderPicker()
+    fireEvent.click(screen.getByRole("button"))
+    fireEvent.click(screen.getByText("Auto"))
+
+    expect(save).toHaveBeenCalledWith({
+      autoRouting: expect.objectContaining({
+        enabled: true,
+        defaultSelection: "manual",
+        strategy: "reliability",
+      }),
+    })
+  })
+
+  it("closes the live desktop session after selecting Auto and swallows close failures", () => {
+    const save = jest.fn(async () => undefined)
+    mockIsTauri.mockReturnValue(true)
+    mockCloseSession.mockRejectedValueOnce(new Error("already closed"))
+    useSettingsStore.setState({ settings: { autoRouting: { enabled: false } } as never, save })
+    renderPicker()
+    fireEvent.click(screen.getByRole("button"))
+    fireEvent.click(screen.getByText("Auto"))
+
+    expect(mockCloseSession).toHaveBeenCalledWith("ses_1")
+    expect(mockedUpdateSession).toHaveBeenCalledWith(
+      "ses_1",
+      expect.objectContaining({ model: "auto", providerOverride: undefined })
+    )
+  })
+
+  it("switching to a concrete model leaves Auto available globally", () => {
+    const save = jest.fn(async () => undefined)
+    useSettingsStore.setState({ settings: { autoRouting: { enabled: true } } as never, save })
+    renderPicker()
+    fireEvent.click(screen.getByRole("button"))
+    const target = PROVIDERS.anthropic.models.find((model) => model.id !== session.model)?.id
+    if (!target) return
+    fireEvent.click(screen.getAllByText(target)[0])
+    expect(save).not.toHaveBeenCalled()
   })
 })
 

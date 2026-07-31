@@ -60,7 +60,7 @@ const ComposerChipOverlayBase = forwardRef<HTMLDivElement, ComposerChipOverlayPr
         <div
           ref={innerRef}
           className={cn(
-            "block min-h-6 w-full break-words whitespace-pre-wrap text-transparent",
+            "block min-h-9 w-full break-words whitespace-pre-wrap text-transparent",
             TEXTAREA_TYPOGRAPHY
           )}
           style={{ fontSize: OVERLAY_FONT_SIZE }}

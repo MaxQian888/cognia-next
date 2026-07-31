@@ -201,6 +201,26 @@ describe("ChatPane", () => {
     expect(props.onSend).toHaveBeenCalledWith("summarize", manifest)
   })
 
+  it("binds Composer to this pane's streaming status", () => {
+    storeState.status = "streaming"
+    try {
+      render(<ChatPane {...makeProps()} />)
+      expect(mockComposerProps.at(-1)).toEqual(
+        expect.objectContaining({
+          status: "streaming",
+        })
+      )
+    } finally {
+      storeState.status = "idle"
+    }
+  })
+
+  it("disables the Composer when runtime writes are unavailable", () => {
+    render(<ChatPane {...makeProps()} composerDisabled />)
+
+    expect(mockComposerProps.at(-1)).toEqual(expect.objectContaining({ disabled: true }))
+  })
+
   it("passes the effective session cwd to the message list", () => {
     render(<ChatPane {...makeProps()} />)
     expect(MessageList).toHaveBeenCalledWith(
@@ -390,6 +410,26 @@ describe("ChatPane", () => {
       ChatHeader.mockClear()
       render(<ChatPane {...makeProps()} />)
       expect(ChatHeader).toHaveBeenCalled()
+    })
+
+    it("forwards the compact split exit action to ChatHeader", () => {
+      const { ChatHeader } = jest.requireMock("./chat-header") as {
+        ChatHeader: jest.Mock
+      }
+      const onExitSplit = jest.fn()
+      ChatHeader.mockClear()
+      render(<ChatPane {...makeProps()} onExitSplit={onExitSplit} />)
+      expect(ChatHeader.mock.calls[0]?.[0]).toEqual(expect.objectContaining({ onExitSplit }))
+    })
+
+    it("forwards the compact split entry action to ChatHeader", () => {
+      const { ChatHeader } = jest.requireMock("./chat-header") as {
+        ChatHeader: jest.Mock
+      }
+      const onSplitView = jest.fn()
+      ChatHeader.mockClear()
+      render(<ChatPane {...makeProps()} onSplitView={onSplitView} />)
+      expect(ChatHeader.mock.calls[0]?.[0]).toEqual(expect.objectContaining({ onSplitView }))
     })
 
     it("omits ChatHeader when showHeader is false", () => {

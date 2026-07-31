@@ -9,8 +9,8 @@ import { resetStore } from "@/lib/storybook/seed-stores"
 import { useChatStore } from "@/stores/chat"
 import type { ChatSession } from "@cognia/agent-config-types"
 
-// Concurrent-chat pane layout: the open-session tab strip plus one or two live
-// ChatPanes (split view), each bound to its own session slice.
+// Concurrent-chat pane layout: one or two live ChatPanes (split view), each
+// bound to its own session slice.
 const mockAdapter: DataAdapter = {
   useCharacters: () => [],
   useCharacter: () => undefined,
@@ -65,7 +65,6 @@ const meta = {
     regenerate: fn(),
     editResend: fn(),
     respondToApproval: fn(),
-    closePane: fn(),
     onCreate: fn(),
     onUseSample: fn(),
     onOpenSettings: fn(),
@@ -76,7 +75,7 @@ const meta = {
 export default meta
 type Story = StoryObj<typeof meta>
 
-/** Two open tabs, single active pane. */
+/** Two open sessions, single active pane. */
 export const SinglePane: Story = {}
 
 /** Split view — two panes side by side, each its own session. */

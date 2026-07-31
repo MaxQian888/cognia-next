@@ -1,7 +1,7 @@
 import Dexie from "dexie"
 import type { ChatSession } from "@cognia/agent-config-types"
 import { loggers } from "@cognia/logging"
-import { getDb } from "./schema"
+import { getDb, withDbReopenRetry } from "./schema"
 import { getDefaultPreset, recordPresetUsage } from "./prompt-presets"
 import { buildAutoApplySessionPatch } from "@/lib/presets/apply-to-session"
 import { invalidatePersistSnapshot } from "./messages"
@@ -9,6 +9,7 @@ import { recordTombstones } from "@/lib/sync/tombstones"
 import { deleteLoopsForSession } from "./loops"
 import { deleteGoalsForSession } from "./goals"
 import { resolveScopeProjectId } from "./project-scope"
+import { markSessionRemoved } from "@/lib/chat/search/indexer"
 
 function newId() {
   return "s_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 8)
@@ -145,7 +146,11 @@ export async function updateSession(
   id: string,
   patch: Partial<Omit<ChatSession, "id" | "createdAt">>
 ): Promise<void> {
-  await getDb().sessions.update(id, { ...patch, updatedAt: Date.now() })
+  await withDbReopenRetry(() =>
+    getDb()
+      .sessions.update(id, { ...patch, updatedAt: Date.now() })
+      .then(() => undefined)
+  )
 }
 
 /**
@@ -392,6 +397,7 @@ export async function deleteSession(id: string): Promise<void> {
     }
   )
   invalidatePersistSnapshot(id)
+  markSessionRemoved(id)
   await cleanupSessionScopedLoops(id)
   await deleteGoalsForSession(id).catch(() => {})
   await purgeSessionStoreBuckets(id)
@@ -489,6 +495,7 @@ export async function bulkDeleteSessions(ids: readonly string[]): Promise<void> 
   )
   for (const id of ids) {
     invalidatePersistSnapshot(id)
+    markSessionRemoved(id)
     await cleanupSessionScopedLoops(id)
     await deleteGoalsForSession(id).catch(() => {})
     await purgeSessionStoreBuckets(id)

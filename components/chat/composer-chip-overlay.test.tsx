@@ -50,6 +50,7 @@ describe("ComposerChipOverlay", () => {
     const { getByTestId } = render(<ComposerChipOverlay value="/help" segments={segs("/help")} />)
     const layer = getByTestId("composer-chip-overlay").firstElementChild as HTMLElement
     expect(layer.style.fontSize).toBe("max(16px, 1rem)")
+    expect(layer.className).toContain("min-h-9")
   })
 
   it("forwards a ref to the scroll-transform inner element", () => {

@@ -10,6 +10,11 @@ jest.mock("@/lib/tauri", () => ({
   },
 }))
 
+let standaloneRuntime = false
+jest.mock("@/lib/runtime/standalone-mode", () => ({
+  isStandaloneChatMode: () => standaloneRuntime,
+}))
+
 let unlockedAccountId: string | null = "local_acct_a"
 
 jest.mock("@/stores/account/account-store", () => ({
@@ -25,6 +30,7 @@ const mockCall = transport.call as jest.MockedFunction<typeof transport.call>
 beforeEach(() => {
   mockCall.mockReset()
   unlockedAccountId = "local_acct_a"
+  standaloneRuntime = false
 })
 
 // Minimal-shape factories — only the fields the resolver reads. The full
@@ -106,6 +112,13 @@ describe("resolveAccountId — precedence chain", () => {
 })
 
 describe("resolveAccountEnv", () => {
+  it("does not call a host-only command in browser standalone mode", async () => {
+    standaloneRuntime = true
+
+    await expect(resolveAccountEnv("anthropic", "abc")).resolves.toEqual({})
+    expect(mockCall).not.toHaveBeenCalled()
+  })
+
   it("returns {} when accountId is null without calling the transport", async () => {
     const env = await resolveAccountEnv("anthropic", null)
     expect(env).toEqual({})
@@ -157,6 +170,13 @@ describe("resolveAccountEnv", () => {
 })
 
 describe("resolveProxyEnv", () => {
+  it("does not call a host-only command in browser standalone mode", async () => {
+    standaloneRuntime = true
+
+    await expect(resolveProxyEnv("session-x")).resolves.toEqual({})
+    expect(mockCall).not.toHaveBeenCalled()
+  })
+
   it("returns parsed pairs when proxy is active", async () => {
     mockCall.mockResolvedValueOnce([
       { key: "HTTPS_PROXY", value: "http://proxy:8080" },

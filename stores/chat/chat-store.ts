@@ -54,6 +54,8 @@ export interface LastSendCacheEntry {
    * routes through its dedicated chain.
    */
   specialAttempts?: Partial<Record<"contextWindowExceeded" | "contentPolicy", number>>
+  /** First visible assistant output or tool dispatch has made replay unsafe. */
+  routingCommitted?: boolean
 }
 
 /**
@@ -594,6 +596,7 @@ interface ChatState {
   removeEphemeralSkillIds: (ids: string[]) => void
   setLastSend: (sessionId: string, entry: LastSendCacheEntry) => void
   bumpLastSendAttempt: (sessionId: string) => void
+  markLastSendCommitted: (sessionId: string) => void
   clearLastSend: (sessionId: string) => void
   /** Set (or clear with `null`) the artifact edit target for a session's turn. */
   setPendingArtifactEditTarget: (sessionId: string, target: ArtifactEditTarget | null) => void
@@ -992,6 +995,17 @@ export const useChatStore = create<ChatState>((set) => ({
         lastSendBySession: {
           ...s.lastSendBySession,
           [sessionId]: { ...cur, attemptIndex: cur.attemptIndex + 1 },
+        },
+      }
+    }),
+  markLastSendCommitted: (sessionId) =>
+    set((s) => {
+      const cur = s.lastSendBySession[sessionId]
+      if (!cur || cur.routingCommitted) return s
+      return {
+        lastSendBySession: {
+          ...s.lastSendBySession,
+          [sessionId]: { ...cur, routingCommitted: true },
         },
       }
     }),

@@ -108,7 +108,7 @@ import { recordResultUsage } from "@/lib/db/session-usage"
 import { recordProviderOutcome } from "@/lib/claude/provider-telemetry"
 import { trackEvent } from "@/lib/telemetry/events/track-event"
 import { useInFlightStore } from "@/stores/settings/in-flight-store"
-import { endSpan, startSpan } from "@cognia/agent-trace/emitter"
+import { endSpan, recordEvent, startSpan } from "@cognia/agent-trace/emitter"
 import { toTraceparent } from "@/lib/agent-trace/trace-context"
 import {
   clearToolSpansForSession,
@@ -117,7 +117,10 @@ import {
 } from "@cognia/agent-trace/chat-tool-spans"
 import { emitSystemBusEvent, SystemEvents } from "@/lib/plugin/messaging/message-bus"
 import { beginCodeAdoptionTurn } from "@/lib/code-adoption/client"
-import { beginTaskWorkspaceTurn, runIdForTurn, taskIdForMessage } from "@/lib/task-workspace/client"
+import { markTaskWorkspaceTurnCancelled } from "@/lib/code-adoption/turn-tracker"
+import { runIdForTurn, taskIdForMessage } from "@/lib/task-workspace/client"
+import { openTaskWorkspaceRunLease } from "@/lib/task-workspace/run-lease"
+import { useTaskWorkspaceStore } from "@/stores/task-workspace-store"
 import { bumpUnread } from "@/lib/db/session-state"
 import { resolveSendOptions } from "@/lib/claude/build-options"
 import { useGitStore } from "@/stores/git/git-store"
@@ -218,7 +221,7 @@ import { routeAiRevision } from "@/lib/artifacts/route-ai-revision"
 import { isTauri } from "@/lib/tauri"
 import { isCapacitor } from "@/lib/platform/detect"
 import { hasWebCompanionTarget } from "@/lib/platform/web-companion"
-import { mark as perfMark } from "@/lib/perf"
+import { chatTurnPerformance } from "@/lib/perf/chat-turn-performance"
 import type { UIMessage } from "ai"
 
 /**
@@ -781,6 +784,7 @@ export function useClaudeChat() {
       void tail.finally(() => {
         if (queues.get(key) === tail) queues.delete(key)
       })
+      return tail
     },
     [registry]
   )
@@ -1255,7 +1259,7 @@ export function useClaudeChat() {
         console.warn("chat lease acquire failed; sending without admission", leaseErr)
       }
       store.getState().setSessionStatus(sessionId, "streaming")
-      perfMark("stream-start")
+      chatTurnPerformance.begin(sessionId)
       store.getState().setSessionError(sessionId, null)
       lastUserContentRef.current.set(sessionId, displayContent)
       if (callOptions?.resourceContext !== undefined) {
@@ -1293,14 +1297,18 @@ export function useClaudeChat() {
           taskId: taskIdForMessage(anchorMessage?.id ?? userMsg.id),
           sessionId,
           runId: runIdForTurn(sessionId, chatRunId),
+          executionRunId: runIdForTurn(sessionId, chatRunId),
+          turnId: anchorMessage?.id ?? userMsg.id,
+          attemptId: "a1",
+          surface: "chat",
           agentId: "built-in",
           agentKind: "in-app",
           workspaceRoot: sendOptions.cwd,
         }
-        const taskRun = await beginTaskWorkspaceTurn(taskEnvelope)
+        const taskLease = await openTaskWorkspaceRunLease(taskEnvelope)
         sendOptions = { ...sendOptions, taskWorkspace: taskEnvelope }
-        if (taskRun) {
-          sendOptions = { ...sendOptions, cwd: taskRun.executionRoot }
+        if (taskLease) {
+          sendOptions = { ...sendOptions, cwd: taskLease.run.executionRoot }
         }
       }
 
@@ -1372,6 +1380,7 @@ export function useClaudeChat() {
             })
           )
           store.getState().setSessionStatus(sessionId, "idle")
+          chatTurnPerformance.finish(sessionId, "failed")
           return
         }
         // Record the lane this session's turn is actually on, so a follow-up
@@ -1434,6 +1443,7 @@ export function useClaudeChat() {
               durationMs,
             })
           }
+          chatTurnPerformance.finish(sessionId, "failed")
           store.getState().replaceSessionMessages(sessionId, previousMessages)
           store.getState().setSessionDiagnostic(
             sessionId,
@@ -1476,6 +1486,7 @@ export function useClaudeChat() {
             store.getState().replaceSessionMessages(sessionId, [...baseList, assistantMsg])
           }
 
+          chatTurnPerformance.markDispatched(sessionId)
           const result = await executeOnExternalAgent(externalSendText, {
             agentId: extAgentId,
             workingDirectory: sendOptions.cwd,
@@ -1488,6 +1499,7 @@ export function useClaudeChat() {
               const nextParts = applyExternalAgentEventToParts(assistantParts, event)
               if (nextParts !== assistantParts) {
                 assistantParts = nextParts as UIMessage["parts"]
+                chatTurnPerformance.markFirstResponse(sessionId)
                 writeAssistant()
               }
             },
@@ -1516,6 +1528,7 @@ export function useClaudeChat() {
               ...(assistantParts as unknown as Array<Record<string, unknown>>),
               { type: "text", text: result.finalResponse, state: "done" },
             ] as unknown as UIMessage["parts"]
+            chatTurnPerformance.markFirstResponse(sessionId)
             writeAssistant()
           }
 
@@ -1532,8 +1545,11 @@ export function useClaudeChat() {
             ...baseList,
             finalAssistant,
           ]
+          chatTurnPerformance.beginFinalPersistence(sessionId)
           await persistMessages(sessionId, finalMessages)
+          chatTurnPerformance.endFinalPersistence(sessionId)
           store.getState().setSessionStatus(sessionId, "idle")
+          chatTurnPerformance.finish(sessionId, "completed")
           const durationMs = finishBehaviorTurn(sessionId)
           if (durationMs !== undefined) {
             void trackEvent("chat.turn.completed", {
@@ -1602,12 +1618,64 @@ export function useClaudeChat() {
             }),
           }
         }
+        if (sendOptions.traceId && sendOptions.spanId) {
+          useTaskWorkspaceStore
+            .getState()
+            .bindTrace(sessionId, sendOptions.traceId, sendOptions.spanId)
+        }
+        if (sendOptions.spanId && sendOptions.routingPlan) {
+          const plan = sendOptions.routingPlan
+          recordEvent(sendOptions.spanId, {
+            name: "routing.plan",
+            at: Date.now(),
+            attributes: {
+              decisionId: plan.decisionId,
+              surface: plan.surface,
+              strategy: plan.strategy,
+              providerId: plan.selected.providerId,
+              modelId: plan.selected.modelId,
+              candidateCount: plan.orderedCandidates.length,
+              reasonCodes: plan.reasonCodes,
+              ...(plan.classification
+                ? {
+                    category: plan.classification.category,
+                    complexity: plan.classification.complexity,
+                    difficultyScore: plan.classification.difficultyScore,
+                  }
+                : {}),
+            },
+          })
+          recordEvent(sendOptions.spanId, {
+            name: "routing.attempt",
+            at: Date.now(),
+            attributes: {
+              decisionId: plan.decisionId,
+              attemptIndex: 0,
+              providerId: plan.selected.providerId,
+              modelId: plan.selected.modelId,
+            },
+          })
+          if (plan.shadowComparison?.differs) {
+            recordEvent(sendOptions.spanId, {
+              name: "routing.shadow_diff",
+              at: Date.now(),
+              attributes: {
+                decisionId: plan.decisionId,
+                selectedProviderId: plan.selected.providerId,
+                selectedModelId: plan.selected.modelId,
+                shadowProviderId: plan.shadowComparison.selected.providerId,
+                shadowModelId: plan.shadowComparison.selected.modelId,
+              },
+            })
+          }
+        }
         if (isStandaloneChatMode()) {
           // Standalone (BYOK): run the turn in-renderer against the user's own
           // provider. Fire-and-forget like `sendPrompt` — streaming reaches the
           // store via the same event queue; the engine emits `session_ended`.
           const controller = new AbortController()
           standaloneAbortRef.current.set(sessionId, controller)
+          chatTurnPerformance.markDispatched(sessionId)
           void runStandaloneTurn({
             sessionId,
             messages: providerPayload.messages,
@@ -1620,6 +1688,7 @@ export function useClaudeChat() {
             }
           })
         } else {
+          chatTurnPerformance.markDispatched(sessionId)
           await sendPrompt(sessionId, effectiveContent, sendOptions)
         }
         // Conversation-branching: consume the one-shot context seed now that
@@ -1652,6 +1721,7 @@ export function useClaudeChat() {
           content: effectiveContent,
           options: sendOptions,
           attemptIndex: 0,
+          routingCommitted: false,
         })
         // Least-busy signal: this turn is now in flight against the resolved
         // deployment; `session_ended` (any flavor) settles it.
@@ -1679,6 +1749,7 @@ export function useClaudeChat() {
             errorMessage: error.message,
           })
         }
+        chatTurnPerformance.finish(sessionId, "failed")
         const durationMs = finishBehaviorTurn(sessionId)
         if (durationMs !== undefined) {
           void trackEvent("chat.turn.failed", {
@@ -1739,11 +1810,34 @@ export function useClaudeChat() {
       // steering — and disarms the drain so the settle doesn't replay it.
       useChatStore.getState().clearSteerQueue(sessionId)
       steerArmed.delete(sessionId)
+
+      // Seal the renderer state before waiting for the IPC acknowledgement.
+      // `claude_interrupt` is best-effort transport control; if its promise is
+      // delayed by a busy sidecar, the GUI must still leave the streaming
+      // state immediately and preserve the latest partial response.
+      const coalesce = registry.get(sessionId)
+      coalesce?.commit.flush()
+      coalesce?.persist.flush()
+      registry.release(sessionId)
+      messagesMirrorRef.current.delete(sessionId)
+      const chat = store.getState()
+      for (const approval of chat.sessions[sessionId]?.pendingApprovals ?? []) {
+        if (approval.status !== "interrupted") {
+          chat.markApprovalInterrupted(approval.requestId, approval.sessionId, "aborted")
+        }
+      }
+      const endingRunId = chat.sessions[sessionId]?.runId
+      if (typeof endingRunId === "number") {
+        markTaskWorkspaceTurnCancelled(sessionId, endingRunId)
+      }
+      chat.setSessionStatus(sessionId, "idle")
+      chatTurnPerformance.finish(sessionId, "cancelled")
+
       try {
         // Standalone (BYOK) turns are cancelled by aborting the renderer
         // streamText loop; the engine then emits its own `session_ended`. The
-        // sidecar path interrupts the host instead. Both fall through to the
-        // same local seal below (idempotent with the follow-up session_ended).
+        // sidecar path interrupts the host instead. The follow-up
+        // `session_ended` remains idempotent with the optimistic local seal.
         const standaloneController = standaloneAbortRef.current.get(sessionId)
         if (standaloneController) {
           standaloneController.abort()
@@ -1751,15 +1845,6 @@ export function useClaudeChat() {
         } else {
           await interruptSession(sessionId)
         }
-        // Commit + persist whatever partial we have, then drop this session's
-        // coalescing + mirror; the follow-up session_ended is also
-        // flush-safe (idempotent).
-        const coalesce = registry.get(sessionId)
-        coalesce?.commit.flush()
-        coalesce?.persist.flush()
-        registry.release(sessionId)
-        messagesMirrorRef.current.delete(sessionId)
-        store.getState().setSessionStatus(sessionId, "idle")
       } catch (err) {
         console.error("interrupt failed", err)
       }
@@ -1871,6 +1956,7 @@ export function useClaudeChat() {
       } finally {
         // Tear down this session's pane state: cancel its coalescing, drop its
         // streaming mirror, and remove its store slice / tab.
+        chatTurnPerformance.finish(sessionId, "cancelled")
         registry.release(sessionId)
         messagesMirrorRef.current.delete(sessionId)
         useChatStore.getState().closeSession(sessionId)
@@ -2164,6 +2250,7 @@ async function buildSendOptions(
     // Routing context-window pre-check input (B4): always pass the raw user
     // message (unlike twin/memory it needs no handshake gate).
     routingContextHint: userMessage ? { promptText: userMessage } : undefined,
+    routingSurface: "chat",
     ephemeralSkillIds,
     activeGoal,
     activeLoop,
@@ -2335,6 +2422,7 @@ async function handleEvent(
             errorMessage: SIDECAR_EXITED_TRACE_MESSAGE,
           })
         }
+        chatTurnPerformance.finish(sid, "failed")
         const durationMs = finishBehaviorTurn(sid)
         if (durationMs !== undefined) {
           void trackEvent("chat.turn.failed", {
@@ -2409,10 +2497,12 @@ async function handleEvent(
           // error class is transient. `attemptRoutingFallback` returns
           // `true` when a retry was scheduled — in that case suppress
           // the error toast so the UI stays in `streaming`.
-          const retried = await attemptRoutingFallback(evt.sessionId, evt.error, {
-            httpStatus: evt.httpStatus,
-            retryAfterMs: evt.retryAfterMs,
-          })
+          const retried = isStandaloneChatMode()
+            ? false
+            : await attemptRoutingFallback(evt.sessionId, evt.error, {
+                httpStatus: evt.httpStatus,
+                retryAfterMs: evt.retryAfterMs,
+              })
           if (!retried) {
             // Permanent failure — commit + persist the final partial and drop
             // the mirror. (A retry re-issues `send`, which clears it itself.)
@@ -2442,6 +2532,7 @@ async function handleEvent(
                 errorMessage: evt.error,
               })
             }
+            chatTurnPerformance.finish(evt.sessionId, "failed")
             const durationMs = finishBehaviorTurn(evt.sessionId)
             if (durationMs !== undefined) {
               void trackEvent("chat.turn.failed", {
@@ -2460,6 +2551,7 @@ async function handleEvent(
           // turn): flush pending streaming work and drop the mirror.
           sealSession(evt.sessionId)
           useChatStore.getState().setSessionStatus(evt.sessionId, "idle")
+          chatTurnPerformance.finish(evt.sessionId, "completed")
           const cached = useChatStore.getState().lastSendBySession[evt.sessionId]
           const durationMs = finishBehaviorTurn(evt.sessionId)
           if (durationMs !== undefined) {
@@ -2801,9 +2893,37 @@ async function handleEvent(
       }
 
       if (nextMessages !== current) {
+        const currentAssistant = [...current]
+          .reverse()
+          .find((message) => message.role === "assistant")
+        const nextAssistant = [...nextMessages]
+          .reverse()
+          .find((message) => message.role === "assistant")
+        if (nextAssistant && nextAssistant !== currentAssistant) {
+          chatTurnPerformance.markFirstResponse(sessionId)
+        }
         const grewWithAssistant =
           nextMessages.length > current.length &&
           nextMessages[nextMessages.length - 1]?.role === "assistant"
+        if (grewWithAssistant) {
+          // The first visible assistant frame (including tool_use) is the
+          // routing commit point. A later provider error must preserve the
+          // partial turn instead of replaying user-visible or side-effecting
+          // work against another deployment.
+          const cachedSend = useChatStore.getState().lastSendBySession[sessionId]
+          if (!cachedSend?.routingCommitted && cachedSend?.options.spanId) {
+            recordEvent(cachedSend.options.spanId, {
+              name: "routing.commit",
+              at: Date.now(),
+              attributes: {
+                providerId: cachedSend.options.provider,
+                modelId: cachedSend.options.model,
+                attemptIndex: cachedSend.attemptIndex,
+              },
+            })
+          }
+          useChatStore.getState().markLastSendCommitted?.(sessionId)
+        }
         if (isOpen) {
           // Mirror is the authoritative base for the next event (the slice
           // commit below may be coalesced a frame behind). Always write it
@@ -2829,7 +2949,9 @@ async function handleEvent(
           }
         } else {
           // No open pane — persist straight to Dexie (no live slice to feed).
+          if (turnComplete) chatTurnPerformance.beginFinalPersistence(sessionId)
           await persistMessages(sessionId, nextMessages)
+          if (turnComplete) chatTurnPerformance.endFinalPersistence(sessionId)
         }
         // A reply landing for any *non-focused* session (open background pane
         // or fully-backgrounded) bumps its unread badge.
@@ -2942,22 +3064,27 @@ async function handleEvent(
       }
 
       if (turnComplete && isOpen) {
-        // Streaming sealed. Flush any still-pending coalesced commit / debounced
-        // write (covers the no-delta seal where the commit block above was
-        // skipped because nextMessages === current), then drop the mirror +
-        // per-session coalescing so the next turn's first event reads a fresh
-        // base. Idempotent when the delta branch already committed + canceled.
+        // Streaming sealed. Commit the last visual frame, cancel the
+        // fire-and-forget debounced writer, and await one canonical durable
+        // snapshot before exposing the idle state. A result envelope commonly
+        // leaves `nextMessages === current`; merely flushing the debouncer in
+        // that case launched an unobserved Dexie promise, so a reload could
+        // terminate the page after the full reply appeared but before it was
+        // stored.
         registry.get(sessionId).commit.flush()
-        registry.get(sessionId).persist.flush()
+        registry.get(sessionId).persist.cancel()
+        chatTurnPerformance.beginFinalPersistence(sessionId)
+        await persistMessages(sessionId, nextMessages)
+        chatTurnPerformance.endFinalPersistence(sessionId)
         registry.release(sessionId)
         messagesMirrorRef.current.delete(sessionId)
+        chatTurnPerformance.finish(sessionId, "completed")
 
         // Don't immediately flip to idle if this session's approvals are still
         // pending; the store helper handles the precedence. Read the session's
         // own slice so a background pane's approval doesn't gate the focused one.
         const sessionPending = useChatStore.getState().sessions[sessionId]?.pendingApprovals ?? []
         if (sessionPending.length === 0) {
-          perfMark("stream-end")
           // Plugin bus: SDK-path agent run sealed successfully (ids only).
           emitSystemBusEvent(SystemEvents.MESSAGE_RECEIVED, { sessionId })
           emitSystemBusEvent(SystemEvents.AGENT_COMPLETED, { sessionId })
@@ -3316,6 +3443,9 @@ async function handleEvent(
             console.warn("goal turn-driver failed", err)
           }
         }
+      }
+      if (turnComplete && !isOpen) {
+        chatTurnPerformance.finish(sessionId, "completed")
       }
       return
     }

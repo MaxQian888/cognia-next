@@ -75,6 +75,15 @@ jest.mock("@/lib/db/chat-drafts", () => ({
 jest.mock("./composer/voice-controls", () => ({
   VoiceControls: () => null,
 }))
+jest.mock("./use-resolved-connector-mode", () => ({
+  useResolvedConnectorMode: () => "auto",
+}))
+jest.mock("@/components/inbox/canned-response-picker", () => ({
+  CannedResponsePicker: () => <button type="button" data-testid="canned-response-trigger" />,
+}))
+jest.mock("@/components/inbox/inbox-composer-actions-host", () => ({
+  InboxComposerActionsHost: () => null,
+}))
 // Platform is the gate for the mobile (Capacitor) Claude-style layout. Default
 // to "web" so the existing tests keep the desktop/web responsive layout.
 jest.mock("@/hooks/use-platform", () => ({ usePlatform: jest.fn(() => "web") }))
@@ -270,9 +279,56 @@ describe("Composer — data-hooks integration", () => {
     })
     expect(updateSession).not.toHaveBeenCalled()
   })
+
+  it("keeps IM actions and status controls in one footer row", () => {
+    const Wrapper = withAdapter(makeAdapter())
+    render(
+      <Wrapper>
+        <Composer
+          session={mkSession({
+            platformBinding: {
+              platform: "telegram",
+              adapterId: "adapter_1",
+              conversationKey: "telegram:adapter_1:chat_1",
+              conversationRef: { platform: "telegram", adapterId: "adapter_1" },
+            },
+          })}
+          onStartNewSession={async () => undefined}
+          onOpenSettings={() => undefined}
+          onSend={async () => undefined}
+          onStop={async () => undefined}
+        />
+      </Wrapper>
+    )
+
+    const footer = screen.getByTestId("composer-footer")
+    expect(footer.className).toContain("flex-nowrap")
+    expect(footer).toContainElement(screen.getByTestId("canned-response-trigger"))
+    expect(footer).toContainElement(screen.getByTestId("composer-toolbar-more"))
+  })
 })
 
 describe("Composer — send protection", () => {
+  it("uses the pane status for the Stop action instead of the focused session status", () => {
+    const onStop = jest.fn()
+    const Wrapper = withAdapter(makeAdapter())
+    render(
+      <Wrapper>
+        <Composer
+          session={mkSession()}
+          status="streaming"
+          onStartNewSession={async () => undefined}
+          onOpenSettings={() => undefined}
+          onSend={async () => undefined}
+          onStop={onStop}
+        />
+      </Wrapper>
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: "Stop" }))
+    expect(onStop).toHaveBeenCalledTimes(1)
+  })
+
   it("switches the send button to a disabled running state while a send is in flight", async () => {
     // onSend never resolves, holding the composer in its "sending" window —
     // before the chat store would flip to "streaming".
@@ -499,7 +555,7 @@ describe("Composer — mobile (Claude-style) layout", () => {
     expect(surface).toContainElement(screen.getByTestId("composer-toolbar-embedded"))
   })
 
-  it("wraps into the two-row stack below @sm and restores the row layout via container queries on web/desktop", () => {
+  it("restores one row at @sm without letting the placeholder increase its height", () => {
     mockUsePlatform.mockReturnValue("web")
     renderComposer()
     const cls = pillClass()
@@ -510,10 +566,35 @@ describe("Composer — mobile (Claude-style) layout", () => {
     expect(cls).toContain("flex-wrap")
     expect(cls).not.toContain("flex-col")
     // At @sm/composer the children reset their order / width to re-form the
-    // single-row [attach | textarea (flex-1) | send] layout.
+    // single-row [attach | textarea (flex-1) | send] layout. The placeholder
+    // stays on one line instead of increasing the textarea height when space
+    // is tight.
     const taWrapper = document.querySelector("textarea")?.parentElement
+    const textarea = document.querySelector("textarea")
     expect(taWrapper?.className ?? "").toContain("@sm/composer:flex-1")
     expect(taWrapper?.className ?? "").toContain("@sm/composer:w-auto")
+    expect(taWrapper?.className ?? "").not.toContain("@lg/composer:flex-1")
+    expect(textarea?.className ?? "").toContain("min-h-9")
+    expect(textarea?.className ?? "").toContain("h-9")
+    expect(textarea?.className ?? "").toContain("overflow-hidden")
+  })
+
+  it("keeps long unbroken text readable inside a capped, independently scrolling editor", () => {
+    mockUsePlatform.mockReturnValue("web")
+    renderComposer()
+    const textarea = document.querySelector("textarea") as HTMLTextAreaElement
+
+    fireEvent.change(textarea, { target: { value: "长".repeat(500) } })
+
+    expect(textarea.className).toContain("field-sizing-content")
+    expect(textarea.className).toContain("break-words")
+    expect(textarea.className).toContain("overflow-y-auto")
+    expect(textarea.className).toContain("overscroll-contain")
+    expect(textarea.className).toContain("[scrollbar-width:none]")
+    expect(textarea.className).toContain("[&::-webkit-scrollbar]:hidden")
+    expect(textarea.className).not.toContain("overflow-hidden")
+    expect(textarea.style.maxHeight).toBe("12rem")
+    expect(textarea.parentElement?.className ?? "").toContain("min-w-0")
   })
 })
 
@@ -669,10 +750,10 @@ describe("Composer — effective cwd (workspace fallback)", () => {
     return document.querySelector("textarea") as HTMLTextAreaElement
   }
 
-  it("shows the active workspace root in the cwd chip when the session has no workingDir", () => {
+  it("keeps the effective cwd contextual instead of rendering a separate directory row", () => {
     seedActiveWorkspace("/ws/root")
     renderComposer()
-    expect(screen.getByTitle("/ws/root")).toBeInTheDocument()
+    expect(screen.queryByTitle("/ws/root")).not.toBeInTheDocument()
   })
 
   it("runs a ! shell command in the active workspace root instead of erroring", async () => {
@@ -755,8 +836,10 @@ describe("Composer — effective cwd (workspace fallback)", () => {
     )
   })
 
-  it("still prefers a per-session workingDir over the workspace root", () => {
+  it("still prefers a per-session workingDir over the workspace root", async () => {
     seedActiveWorkspace("/ws/root")
+    const executeShellMock = executeShell as jest.Mock
+    executeShellMock.mockResolvedValue({ stdout: "ok", stderr: "", code: 0 })
     const Wrapper = withAdapter(makeAdapter())
     render(
       <Wrapper>
@@ -769,8 +852,15 @@ describe("Composer — effective cwd (workspace fallback)", () => {
         />
       </Wrapper>
     )
-    expect(screen.getByTitle("/session/dir")).toBeInTheDocument()
-    expect(screen.queryByTitle("/ws/root")).not.toBeInTheDocument()
+    const ta = document.querySelector("textarea") as HTMLTextAreaElement
+    await act(async () => {
+      fireEvent.change(ta, { target: { value: "!echo hi" } })
+    })
+    await act(async () => {
+      fireEvent.click(document.querySelector('button[aria-label="Send"]') as HTMLButtonElement)
+      await Promise.resolve()
+    })
+    await waitFor(() => expect(executeShellMock).toHaveBeenCalledWith("echo hi", "/session/dir"))
   })
 })
 

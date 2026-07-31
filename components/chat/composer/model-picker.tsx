@@ -42,8 +42,6 @@ import {
   CommandSeparator,
 } from "@/components/ui/command"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
-import { Label } from "@/components/ui/label"
-import { Switch } from "@/components/ui/switch"
 import { DEFAULT_AUTO_ROUTING } from "@/types/routing/tool-route"
 
 interface ModelPickerProps {
@@ -146,14 +144,16 @@ export function ModelPicker({ session, disabled, className }: ModelPickerProps) 
   const activeModel = optimisticModel ?? session?.model ?? defaultModel ?? "claude-sonnet-4-5"
   const activeProvider =
     optimisticProvider ?? session?.providerOverride ?? defaultProvider ?? "anthropic"
+  const autoActive = activeModel === "auto"
   // Friendly label for the active model — prefer the matching option's display
   // name (provider-scoped), else any option with that id, else the raw id.
   const activeModelName = useMemo(() => {
+    if (autoActive) return t("autoModel")
     const exact = options.find((o) => o.modelId === activeModel && o.providerId === activeProvider)
     return (
       exact?.modelName ?? options.find((o) => o.modelId === activeModel)?.modelName ?? activeModel
     )
-  }, [options, activeModel, activeProvider])
+  }, [options, activeModel, activeProvider, autoActive, t])
 
   // Only surfaced when the user has actually chosen a level AND the active
   // model honours it — an "Auto" suffix on every chip would be noise.
@@ -199,10 +199,21 @@ export function ModelPicker({ session, disabled, className }: ModelPickerProps) 
     }
   }
 
-  const toggleAuto = (checked: boolean) => {
+  const handleSelectAuto = () => {
+    setOpen(false)
+    if (!session?.id) return
     void saveSettings({
-      autoRouting: { ...(autoRouting ?? DEFAULT_AUTO_ROUTING), enabled: checked },
+      autoRouting: { ...(autoRouting ?? DEFAULT_AUTO_ROUTING), enabled: true },
     })
+    setOptimisticModel("auto")
+    setOptimisticProvider("")
+    void updateSession(session.id, {
+      model: "auto",
+      providerOverride: undefined,
+    })
+    if (isTauri()) {
+      void closeSession(session.id).catch(() => undefined)
+    }
   }
 
   // No session yet (composer rendered between sessions) — render a static
@@ -236,13 +247,13 @@ export function ModelPicker({ session, disabled, className }: ModelPickerProps) 
           className={cn(
             // Same shrink-to-fit treatment as the static chip above — long
             // model ids must ellipsize inside narrow composer containers.
-            "h-6 min-w-0 max-w-full gap-1.5 px-1.5 text-[11px] font-normal text-muted-foreground hover:text-foreground",
+            "h-7 min-w-0 max-w-full gap-1.5 rounded-lg border border-transparent bg-muted/35 px-2 text-[11px] font-normal text-muted-foreground shadow-none hover:border-border/70 hover:bg-muted/70 hover:text-foreground",
             className
           )}
           aria-label={t("switchModelAria")}
         >
           <CpuIcon className="size-3.5 shrink-0" />
-          {autoEnabled ? (
+          {autoActive ? (
             <span
               className="shrink-0 rounded-sm bg-primary/10 px-1 text-[10px] font-medium text-primary"
               title={t("autoBadgeHint")}
@@ -264,25 +275,33 @@ export function ModelPicker({ session, disabled, className }: ModelPickerProps) 
           <ChevronsUpDownIcon className="size-3 opacity-50" />
         </Button>
       </PopoverTrigger>
-      <PopoverContent align="start" className="w-[340px] max-w-[calc(100vw-2rem)] p-0">
-        <div className="flex items-center justify-between gap-2 border-b px-3 py-2">
-          <div className="flex min-w-0 flex-col">
-            <Label htmlFor="composer-auto-routing" className="text-xs">
-              {t("autoToggle")}
-            </Label>
-            <span className="truncate text-[10px] text-muted-foreground">
-              {t("autoToggleHint")}
-            </span>
-          </div>
-          <Switch
-            id="composer-auto-routing"
-            checked={autoEnabled}
-            onCheckedChange={(c) => toggleAuto(c === true)}
-          />
-        </div>
+      <PopoverContent
+        align="start"
+        sideOffset={8}
+        className="w-[360px] max-w-[calc(100vw-2rem)] overflow-hidden rounded-xl p-0 shadow-xl"
+      >
         <Command>
           <CommandInput placeholder={t("searchPlaceholder")} />
           <CommandList>
+            <CommandGroup heading={t("routingGroup")}>
+              <CommandItem
+                value={`auto ${t("autoModel")} ${t("autoToggleHint")}`}
+                onSelect={handleSelectAuto}
+                className="mx-1 rounded-lg"
+              >
+                <CheckIcon
+                  className={cn("mr-2 size-4 shrink-0", autoActive ? "opacity-100" : "opacity-0")}
+                />
+                <BrainIcon className="mr-2 size-4 shrink-0 text-primary" />
+                <span className="flex min-w-0 flex-col">
+                  <span className="text-xs">{t("autoModel")}</span>
+                  <span className="truncate text-[10px] text-muted-foreground">
+                    {autoEnabled ? t("autoToggleHint") : t("autoEnableHint")}
+                  </span>
+                </span>
+              </CommandItem>
+            </CommandGroup>
+            <CommandSeparator />
             {groups.length === 0 ? (
               <CommandEmpty>{t("noProviders")}</CommandEmpty>
             ) : (
@@ -306,6 +325,7 @@ export function ModelPicker({ session, disabled, className }: ModelPickerProps) 
                           // either the friendly name or the raw id the user types.
                           value={`${group.providerId} ${modelName} ${modelId}`}
                           onSelect={() => handleSelect(group.providerId, modelId)}
+                          className="mx-1 rounded-lg"
                         >
                           <CheckIcon
                             className={cn(

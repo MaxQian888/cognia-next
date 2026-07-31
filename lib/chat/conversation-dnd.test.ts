@@ -1,4 +1,8 @@
-import { resolveConversationDrop, type DndNode } from "./conversation-dnd"
+import {
+  resolveConversationDrop,
+  resolveConversationDropPreview,
+  type DndNode,
+} from "./conversation-dnd"
 
 const sess = (id: string, folderId: string | null = null): DndNode => ({
   id,
@@ -49,5 +53,26 @@ describe("resolveConversationDrop", () => {
     // isn't in the drop target's section, or vice versa → no manual-order meaning.
     expect(resolveConversationDrop(sess("x"), sess("a"), ["a", "b"])).toBeNull()
     expect(resolveConversationDrop(sess("a"), sess("x"), ["a", "b"])).toBeNull()
+  })
+})
+
+describe("resolveConversationDropPreview", () => {
+  it("places the cue before the target when moving upward", () => {
+    expect(resolveConversationDropPreview("c", "a", ["a", "b", "c"])).toEqual({
+      targetId: "a",
+      position: "before",
+    })
+  })
+
+  it("places the cue after the target when moving downward", () => {
+    expect(resolveConversationDropPreview("a", "c", ["a", "b", "c"])).toEqual({
+      targetId: "c",
+      position: "after",
+    })
+  })
+
+  it("does not preview a no-op or a cross-section drop", () => {
+    expect(resolveConversationDropPreview("a", "a", ["a", "b"])).toBeNull()
+    expect(resolveConversationDropPreview("outside", "a", ["a", "b"])).toBeNull()
   })
 })

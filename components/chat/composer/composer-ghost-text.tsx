@@ -37,7 +37,7 @@ const ComposerGhostTextBase = forwardRef<HTMLDivElement, ComposerGhostTextProps>
         <div
           ref={innerRef}
           className={cn(
-            "block min-h-6 w-full break-words whitespace-pre-wrap",
+            "block min-h-9 w-full break-words whitespace-pre-wrap",
             TEXTAREA_TYPOGRAPHY
           )}
           style={{ fontSize: OVERLAY_FONT_SIZE }}

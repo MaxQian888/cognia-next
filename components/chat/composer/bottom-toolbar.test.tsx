@@ -199,12 +199,12 @@ describe("BottomToolbar — session-kind branching", () => {
   it("renders the generic toolbar for a direct session", () => {
     render(<BottomToolbar session={session} />)
     expect(screen.queryByTestId("workflow-bottom-toolbar")).toBeNull()
-    // Permission is the only inline control besides the model chip; agent mode
-    // and runtime are behind "\u22ef", and the capability toggles left the
-    // toolbar entirely for the composer's `+`.
+    // The execution row keeps the model and Agent runtime visible. Detailed
+    // mode/agent configuration stays behind "\u22ef", and capability toggles
+    // live under the composer's `+`.
     expect(screen.getByTestId("permission-mode-indicator")).toBeInTheDocument()
+    expect(screen.getByTestId("agent-runtime-selector")).toBeInTheDocument()
     expect(screen.queryByTestId("agent-mode-selector")).toBeNull()
-    expect(screen.queryByTestId("agent-runtime-selector")).toBeNull()
     expect(screen.queryByTestId("web-search-toggle")).toBeNull()
     expect(screen.queryByTestId("enhance-button")).toBeNull()
   })
@@ -226,10 +226,10 @@ describe("BottomToolbar — session-kind branching", () => {
   // Regression: the row must wrap instead of pinning both ends with
   // `justify-between`, which let the left controls slide under the
   // right-aligned context indicator on a narrow (welcome) composer.
-  it("lays the generic toolbar out as a wrapping row so controls can't overlap", () => {
+  it("lays the generic toolbar out as one row so status controls stay aligned", () => {
     const { container } = render(<BottomToolbar session={session} />)
     const root = container.firstChild as HTMLElement
-    expect(root.className).toContain("flex-wrap")
+    expect(root.className).toContain("flex-nowrap")
     expect(root.className).not.toContain("justify-between")
   })
 
@@ -258,10 +258,9 @@ describe("BottomToolbar — narrow-width More menu", () => {
 
     expect(screen.getByTestId("composer-toolbar-embedded")).toBeInTheDocument()
     expect(screen.getByTestId("permission-mode-indicator")).toBeInTheDocument()
-    expect(screen.queryByTestId("agent-runtime-selector")).toBeNull()
+    expect(screen.getByTestId("agent-runtime-selector")).toBeInTheDocument()
 
     fireEvent.click(screen.getByTestId("composer-toolbar-more"))
-    expect(screen.getByTestId("agent-runtime-selector")).toBeInTheDocument()
     expect(screen.getByTestId("agent-mode-selector")).toBeInTheDocument()
   })
 
@@ -271,31 +270,42 @@ describe("BottomToolbar — narrow-width More menu", () => {
     mockToolbarWidth = 600
     const wide = render(<BottomToolbar session={session} />)
     expect(screen.getByTestId("permission-mode-indicator")).toBeInTheDocument()
-    expect(screen.queryByTestId("agent-mode-selector")).toBeNull()
-    expect(screen.queryByTestId("agent-runtime-selector")).toBeNull()
-    fireEvent.click(screen.getByTestId("composer-toolbar-more"))
     expect(screen.getByTestId("agent-runtime-selector")).toBeInTheDocument()
+    expect(screen.queryByTestId("agent-mode-selector")).toBeNull()
+    fireEvent.click(screen.getByTestId("composer-toolbar-more"))
+    expect(screen.getByTestId("agent-mode-selector")).toBeInTheDocument()
     wide.unmount()
 
     mockToolbarWidth = 300
     render(<BottomToolbar session={session} />)
     expect(screen.getByTestId("permission-mode-indicator")).toBeInTheDocument()
-    expect(screen.queryByTestId("agent-runtime-selector")).toBeNull()
-    fireEvent.click(screen.getByTestId("composer-toolbar-more"))
     expect(screen.getByTestId("agent-runtime-selector")).toBeInTheDocument()
+    expect(screen.queryByTestId("agent-mode-selector")).toBeNull()
+    fireEvent.click(screen.getByTestId("composer-toolbar-more"))
+    expect(screen.getByTestId("agent-mode-selector")).toBeInTheDocument()
+  })
+
+  it("keeps a medium-width toolbar on one row instead of splitting status chrome early", () => {
+    mockToolbarWidth = 420
+    const { container } = render(<BottomToolbar session={session} />)
+    const root = container.firstChild as HTMLElement
+    expect(root.className).toContain("flex-nowrap")
+    expect(root.className).not.toContain("flex-col")
   })
 
   // Regression: the compact toolbar must cap at TWO rows (Tier 1, then the
   // overflow menu + context indicator sharing the second row) instead of
   // letting `⋯` and the usage `%` each wrap onto their own line (three rows).
-  it("caps the compact toolbar at two rows via a flex-col root with a shared overflow row", () => {
+  it("caps the compact toolbar at two rows and groups secondary status controls at the end", () => {
     mockToolbarWidth = 300
     const { container } = render(<BottomToolbar session={session} />)
     const root = container.firstChild as HTMLElement
     expect(root.className).toContain("flex-col")
-    // The More trigger shares its row (justify-between) with the context usage.
+    // Context usage and More belong to one secondary cluster, not opposite
+    // edges of an otherwise empty row.
     const more = screen.getByTestId("composer-toolbar-more")
-    expect((more.parentElement as HTMLElement).className).toContain("justify-between")
+    expect((more.parentElement as HTMLElement).className).toContain("justify-end")
+    expect((more.parentElement as HTMLElement).className).not.toContain("justify-between")
   })
 })
 

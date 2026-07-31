@@ -11,6 +11,8 @@
 // handlers.
 
 import {
+  useCallback,
+  useDeferredValue,
   forwardRef,
   Fragment,
   memo,
@@ -22,19 +24,33 @@ import {
 } from "react"
 import { useTranslations } from "next-intl"
 import {
+  ActivityIcon,
   AtSignIcon,
+  BlocksIcon,
   BookMarkedIcon,
   BoxIcon,
+  CircleHelpIcon,
+  CornerDownRightIcon,
+  FileCode2Icon,
   FileIcon,
   FolderIcon,
+  ListPlusIcon,
+  MessageCircleMoreIcon,
   PinIcon,
   PinOffIcon,
-  SlashIcon,
+  Repeat2Icon,
+  SearchIcon,
+  SearchXIcon,
+  Settings2Icon,
   SparklesIcon,
   SplineIcon,
+  SquareTerminalIcon,
+  TargetIcon,
   TerminalIcon,
   WandSparklesIcon,
 } from "lucide-react"
+import { Badge } from "@/components/ui/badge"
+import { Kbd, KbdGroup } from "@/components/ui/kbd"
 import { Popover, PopoverAnchor, PopoverContent } from "@/components/ui/popover"
 import { searchWorkspace } from "@/lib/files/workspace-search"
 import type { WorkspaceEntry } from "@/lib/files/types"
@@ -69,6 +85,13 @@ export type PopoverItem =
       positions?: number[]
       /** Section tag for the empty-query grouped view. */
       group?: SlashGroup
+    }
+  | {
+      kind: "slashArgument"
+      command: SlashCommand
+      value: string
+      replaceStart: number
+      replaceEnd: number
     }
   | { kind: "file"; entry: WorkspaceEntry }
   | { kind: "memory"; scope: "project" | "user"; preview: string }
@@ -174,6 +197,7 @@ export const ComposerPopover = forwardRef<ComposerPopoverHandle, Props>(function
   const tMemory = useTranslations("chat.composer.memory")
   const tAgent = useTranslations("agentTeamsWorkspace.chat.composer")
   const [highlight, setHighlight] = useState(0)
+  const [slashSearch, setSlashSearch] = useState<string | null>(null)
   const listRef = useRef<HTMLUListElement>(null)
   // The async file-search produces an `ItemList` over time; for slash, memory
   // and bash kinds we derive the list synchronously below. The combined view
@@ -185,10 +209,14 @@ export const ComposerPopover = forwardRef<ComposerPopoverHandle, Props>(function
   // side-effect of the trigger identity changing.
   const triggerKind = trigger?.kind
   const triggerStart = trigger?.tokenStart
+  const slashQuery =
+    trigger?.kind === "slash" ? (slashSearch ?? trigger.argumentQuery ?? trigger.query) : ""
+  const deferredSlashQuery = useDeferredValue(slashQuery)
   useEffect(() => {
     if (triggerKind !== undefined) {
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setHighlight(0)
+      setSlashSearch(null)
     }
   }, [triggerKind, triggerStart])
 
@@ -250,7 +278,35 @@ export const ComposerPopover = forwardRef<ComposerPopoverHandle, Props>(function
       return { items: [], loading: false, error: null, emptyMessage: "" }
     }
     if (trigger.kind === "slash") {
-      const query = trigger.query.trim()
+      const query = deferredSlashQuery.trim()
+      const command = slashCommands.find((candidate) => candidate.name === trigger.query)
+      const argumentOptions = commandArgumentOptions(command)
+      if (
+        command &&
+        argumentOptions.length > 0 &&
+        trigger.argumentQuery !== undefined &&
+        trigger.argumentStart !== undefined &&
+        trigger.argumentEnd !== undefined
+      ) {
+        // Argument option sets are intentionally tiny and selection correctness
+        // matters more than deferral here: a quick "p" → Enter must never
+        // confirm an option from the previous empty-query frame.
+        const items = fuzzyFilterSort(argumentOptions, slashQuery, (value) => value).map(
+          (value) => ({
+            kind: "slashArgument" as const,
+            command,
+            value,
+            replaceStart: trigger.argumentStart as number,
+            replaceEnd: trigger.argumentEnd as number,
+          })
+        )
+        return {
+          items,
+          loading: false,
+          error: null,
+          emptyMessage: t("noArgumentMatches", { query: slashQuery }),
+        }
+      }
       // Empty query → grouped view: Pinned → Recent → per-category, each with a
       // section header. Non-empty → flat fuzzy-ranked list with matched-char
       // highlight (ranking wins; grouping would fight the relevance order).
@@ -261,7 +317,7 @@ export const ComposerPopover = forwardRef<ComposerPopoverHandle, Props>(function
               recentCommands ?? [],
               pinnedCommands ?? []
             ).map(({ command, group }) => ({ kind: "slash" as const, command, group }))
-          : fuzzyFilterSortRanked(slashCommands, trigger.query, (c) => c.name, {
+          : fuzzyFilterSortRanked(slashCommands, deferredSlashQuery, (c) => c.name, {
               secondaryText: (c) => c.description,
             }).map(({ item, positions }) => ({
               kind: "slash" as const,
@@ -275,7 +331,7 @@ export const ComposerPopover = forwardRef<ComposerPopoverHandle, Props>(function
         emptyMessage:
           slashCommands.length === 0
             ? t("noCommands")
-            : t("noCommandMatches", { query: trigger.query }),
+            : t("noCommandMatches", { query: deferredSlashQuery }),
       }
     }
     if (trigger.kind === "memory") {
@@ -379,6 +435,8 @@ export const ComposerPopover = forwardRef<ComposerPopoverHandle, Props>(function
     }
   }, [
     trigger,
+    slashQuery,
+    deferredSlashQuery,
     slashCommands,
     fileList,
     t,
@@ -392,6 +450,16 @@ export const ComposerPopover = forwardRef<ComposerPopoverHandle, Props>(function
     recentCommands,
     pinnedCommands,
   ])
+
+  // A changed search result set should always start from its most relevant
+  // command. Deferring the query keeps large plugin/custom registries from
+  // blocking keystrokes while preserving deterministic keyboard selection.
+  useEffect(() => {
+    if (triggerKind === "slash") {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setHighlight(0)
+    }
+  }, [slashQuery, deferredSlashQuery, triggerKind])
 
   // Clamp the highlight whenever the visible list shrinks below it. The
   // updater form means the clamp is idempotent if it fires multiple times.
@@ -422,28 +490,32 @@ export const ComposerPopover = forwardRef<ComposerPopoverHandle, Props>(function
     onHighlightElement(item && item.kind === "wfElement" ? item.element : null)
   }, [highlight, displayList.items, onHighlightElement])
 
-  useImperativeHandle(
-    ref,
-    () => ({
-      navigate: (delta) => {
-        setHighlight((h) => {
-          if (displayList.items.length === 0) return h
-          const next = (h + delta + displayList.items.length) % displayList.items.length
-          return next
-        })
-      },
-      confirm: () => {
-        const item = displayList.items[highlight]
-        if (!item) return false
-        onPick(item)
-        return true
-      },
-    }),
-    [displayList.items, highlight, onPick]
+  const navigate = useCallback(
+    (delta: number) => {
+      setHighlight((h) => {
+        if (displayList.items.length === 0) return h
+        return (h + delta + displayList.items.length) % displayList.items.length
+      })
+    },
+    [displayList.items.length]
   )
+  const confirm = useCallback(() => {
+    const item = displayList.items[highlight]
+    if (!item) return false
+    onPick(item)
+    return true
+  }, [displayList.items, highlight, onPick])
+
+  useImperativeHandle(ref, () => ({ navigate, confirm }), [navigate, confirm])
 
   const open = trigger !== null && anchor !== null
   const title = useMemo(() => triggerTitle(trigger?.kind, t, tAgent), [trigger?.kind, t, tAgent])
+  const argumentCommand =
+    trigger?.kind === "slash" && trigger.argumentQuery !== undefined
+      ? slashCommands.find((command) => command.name === trigger.query)
+      : undefined
+  const showingArgumentSuggestions =
+    argumentCommand !== undefined && commandArgumentOptions(argumentCommand).length > 0
   // O(1) pin lookups per row instead of a linear scan of pinnedCommands.
   const pinnedSet = useMemo(() => new Set(pinnedCommands ?? []), [pinnedCommands])
   // Hoisted out of the per-row header check so it isn't recomputed N times.
@@ -459,29 +531,99 @@ export const ComposerPopover = forwardRef<ComposerPopoverHandle, Props>(function
         side="top"
         align="start"
         sideOffset={8}
-        // Match the composer's width (the anchor) so the popover never spills
-        // past a narrow side panel (e.g. the workflow chat sidebar), while
-        // capping at 480px in a full-width chat pane.
-        className="w-[var(--radix-popper-anchor-width)] max-w-[480px] p-0"
+        // The command surface is a visual extension of the composer, so both
+        // share the exact anchor width at every reading-column/container size.
+        className="w-[var(--radix-popper-anchor-width)] overflow-hidden rounded-xl border-border/70 bg-popover/95 p-0 shadow-xl backdrop-blur-xl duration-200 ease-out motion-reduce:animate-none motion-reduce:duration-0"
         // Don't steal focus from the textarea.
         onOpenAutoFocus={(e) => e.preventDefault()}
         onCloseAutoFocus={(e) => e.preventDefault()}
       >
-        <div className="flex items-center gap-2 border-b px-3 py-2 text-xs text-muted-foreground">
-          {title.icon}
-          <span className="flex-1 truncate">{title.label}</span>
-          {displayList.loading ? <span>{t("searchingShort")}</span> : null}
-        </div>
+        {trigger?.kind === "slash" ? (
+          <div className="border-b bg-muted/20 p-2">
+            <div className="flex h-10 items-center gap-2 rounded-lg border border-input/70 bg-background/80 px-3 shadow-xs transition-[border-color,box-shadow] duration-200 focus-within:border-ring focus-within:ring-[3px] focus-within:ring-ring/20 motion-reduce:transition-none">
+              <SearchIcon className="size-4 shrink-0 text-muted-foreground" />
+              <input
+                aria-label={
+                  showingArgumentSuggestions && argumentCommand
+                    ? t("searchArgumentsAria", { name: argumentCommand.name })
+                    : t("searchAria")
+                }
+                autoComplete="off"
+                className="min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
+                onBlur={() => setSlashSearch(null)}
+                onChange={(event) => setSlashSearch(event.currentTarget.value)}
+                onFocus={() => setSlashSearch(trigger.argumentQuery ?? trigger.query)}
+                onKeyDown={(event) => {
+                  if (event.nativeEvent.isComposing) return
+                  if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+                    event.preventDefault()
+                    navigate(event.key === "ArrowDown" ? 1 : -1)
+                    return
+                  }
+                  if (event.key === "Enter" || event.key === "Tab") {
+                    if (confirm()) event.preventDefault()
+                    return
+                  }
+                  if (event.key === "Escape") {
+                    // Radix owns Escape dismissal and emits one onOpenChange(false).
+                    // Calling onDismiss here as well would double-fire the callback.
+                    return
+                  }
+                }}
+                placeholder={
+                  showingArgumentSuggestions
+                    ? t("searchArgumentsPlaceholder")
+                    : t("searchPlaceholder")
+                }
+                spellCheck={false}
+                type="search"
+                value={slashQuery}
+              />
+              <KbdGroup aria-hidden className="hidden sm:inline-flex">
+                <Kbd>↑</Kbd>
+                <Kbd>↓</Kbd>
+                <Kbd>↵</Kbd>
+              </KbdGroup>
+            </div>
+            <div className="flex items-center gap-2 px-1 pt-2 text-[11px] text-muted-foreground">
+              {title.icon}
+              <span className="font-medium">
+                {showingArgumentSuggestions && argumentCommand
+                  ? t("argumentTitle", { name: argumentCommand.name })
+                  : title.label}
+              </span>
+              <span className="ml-auto tabular-nums">
+                {t(showingArgumentSuggestions ? "suggestionCount" : "resultCount", {
+                  count: displayList.items.length,
+                })}
+              </span>
+            </div>
+          </div>
+        ) : (
+          <div className="flex items-center gap-2 border-b bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
+            {title.icon}
+            <span className="flex-1 truncate">{title.label}</span>
+            {displayList.loading ? <span>{t("searchingShort")}</span> : null}
+          </div>
+        )}
         {trigger?.kind === "bash" ? (
           <BashHint query={trigger.query} />
         ) : displayList.error ? (
           <div className="px-3 py-3 text-sm text-destructive">{displayList.error}</div>
         ) : displayList.items.length === 0 ? (
-          <div className="px-3 py-3 text-sm text-muted-foreground">
-            {displayList.loading ? t("searching") : displayList.emptyMessage}
+          <div className="flex min-h-28 flex-col items-center justify-center gap-2 px-6 py-7 text-center text-sm text-muted-foreground">
+            {!displayList.loading && trigger?.kind === "slash" ? (
+              <span className="rounded-full bg-muted p-2">
+                <SearchXIcon className="size-4" />
+              </span>
+            ) : null}
+            <span>{displayList.loading ? t("searching") : displayList.emptyMessage}</span>
           </div>
         ) : (
-          <ul ref={listRef} className="max-h-72 overflow-auto py-1">
+          <ul
+            ref={listRef}
+            className="max-h-80 scroll-py-2 overflow-y-auto overscroll-contain p-1.5"
+          >
             {displayList.items.map((item, idx) => {
               // Section headers are non-selectable (no `data-index`, absent from
               // the flat item array) so keyboard nav still walks every real row.
@@ -494,7 +636,7 @@ export const ComposerPopover = forwardRef<ComposerPopoverHandle, Props>(function
                   {header ? (
                     <li
                       aria-hidden
-                      className="px-3 pb-1 pt-2 text-[10px] font-medium uppercase tracking-wide text-muted-foreground"
+                      className="sticky top-0 bg-popover/95 px-2.5 pb-1 pt-2 text-[10px] font-medium uppercase tracking-wider text-muted-foreground backdrop-blur-sm"
                     >
                       {header}
                     </li>
@@ -503,8 +645,8 @@ export const ComposerPopover = forwardRef<ComposerPopoverHandle, Props>(function
                     data-index={idx}
                     data-active={idx === highlight ? "true" : undefined}
                     className={cn(
-                      "group/row flex cursor-pointer items-center gap-2 rounded-md px-3 py-1.5 text-sm",
-                      idx === highlight ? "bg-accent text-accent-foreground" : "hover:bg-accent/40"
+                      "group/row flex cursor-pointer items-center gap-2 rounded-lg px-2.5 py-2 text-sm transition-colors duration-150 motion-reduce:transition-none",
+                      idx === highlight ? "bg-accent text-accent-foreground" : "hover:bg-accent/50"
                     )}
                     onMouseEnter={() => setHighlight(idx)}
                     onMouseDown={(e) => {
@@ -524,6 +666,16 @@ export const ComposerPopover = forwardRef<ComposerPopoverHandle, Props>(function
             })}
           </ul>
         )}
+        {trigger?.kind === "slash" || trigger?.kind === "skill" ? (
+          <div className="flex items-center gap-2 border-t bg-muted/15 px-3 py-2 text-[11px] leading-4 text-muted-foreground">
+            {trigger.kind === "slash" ? (
+              <ListPlusIcon className="size-3.5 shrink-0" />
+            ) : (
+              <SparklesIcon className="size-3.5 shrink-0" />
+            )}
+            <span>{t(trigger.kind === "slash" ? "multiCommandHint" : "multiSkillHint")}</span>
+          </div>
+        ) : null}
       </PopoverContent>
     </Popover>
   )
@@ -539,7 +691,7 @@ function triggerTitle(
 } {
   switch (kind) {
     case "slash":
-      return { icon: <SlashIcon className="size-3.5" />, label: t("slashTitle") }
+      return { icon: <SquareTerminalIcon className="size-3.5" />, label: t("slashTitle") }
     case "file":
       return { icon: <FileIcon className="size-3.5" />, label: t("fileTitle") }
     case "memory":
@@ -607,8 +759,65 @@ function safeLookup(
   return fallback
 }
 
+function commandArgumentOptions(command: SlashCommand | undefined): readonly string[] {
+  if (!command) return []
+  if (command.argumentOptions && command.argumentOptions.length > 0) {
+    return command.argumentOptions
+  }
+  return command.params?.find((param) => param.type === "enum")?.options ?? []
+}
+
+function argumentHintParts(hint: string | undefined): string[] {
+  if (!hint) return []
+  const trimmed = hint.trim()
+  const hasWrapper =
+    (trimmed.startsWith("<") && trimmed.endsWith(">")) ||
+    (trimmed.startsWith("[") && trimmed.endsWith("]"))
+  const unwrapped = hasWrapper ? trimmed.slice(1, -1) : trimmed
+  return unwrapped
+    .split("|")
+    .map((part) => part.trim())
+    .filter(Boolean)
+}
+
+function commandIconKey(command: SlashCommand): string {
+  if (command.name === "loop") return "loop"
+  if (command.scope === "plugin" || command.category === "plugins") return "plugins"
+  if (command.scope === "project" || command.scope === "user") return "custom"
+  return command.category ?? "other"
+}
+
+function CommandCategoryIcon({ command }: { command: SlashCommand }) {
+  const className = "size-4"
+  switch (commandIconKey(command)) {
+    case "chat":
+      return <MessageCircleMoreIcon className={className} />
+    case "diagnostics":
+      return <ActivityIcon className={className} />
+    case "system":
+      return <Settings2Icon className={className} />
+    case "goal":
+      return <TargetIcon className={className} />
+    case "help":
+      return <CircleHelpIcon className={className} />
+    case "plugins":
+      return <BlocksIcon className={className} />
+    case "template":
+      return <WandSparklesIcon className={className} />
+    case "loop":
+      return <Repeat2Icon className={className} />
+    case "custom":
+      return <FileCode2Icon className={className} />
+    default:
+      return <SquareTerminalIcon className={className} />
+  }
+}
+
 function itemKey(item: PopoverItem, idx: number): string {
   if (item.kind === "slash") return `slash-${item.command.name}`
+  if (item.kind === "slashArgument") {
+    return `slash-argument-${item.command.name}-${item.value}`
+  }
   if (item.kind === "file") return `file-${item.entry.absolutePath}`
   if (item.kind === "memory") return `memory-${item.scope}`
   if (item.kind === "agent") return `agent-${item.target.id}`
@@ -634,19 +843,55 @@ const ItemRow = memo(function ItemRow({
   const tMemory = useTranslations("chat.composer.memory")
   if (item.kind === "slash") {
     const c = item.command
+    const hintParts = argumentHintParts(c.argumentHint)
     return (
       <>
-        <SlashIcon className="size-4 shrink-0 text-muted-foreground" />
-        <span className={cn("font-mono text-xs", c.disabled && "opacity-60")}>
-          /<MatchHighlight text={c.name} positions={item.positions ?? []} />
-        </span>
-        {c.argumentHint ? (
-          <span className="text-xs text-muted-foreground">{c.argumentHint}</span>
-        ) : null}
         <span
-          className={cn("ml-auto truncate text-xs text-muted-foreground", c.disabled && "italic")}
+          className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-muted/70 text-muted-foreground transition-colors group-data-[active=true]/row:bg-background/70 group-data-[active=true]/row:text-foreground motion-reduce:transition-none"
+          data-command-icon={commandIconKey(c)}
         >
-          {c.disabled ? t("comingSoon") : c.description}
+          <CommandCategoryIcon command={c} />
+        </span>
+        <span className="min-w-0 flex-1">
+          <span className="flex min-w-0 items-baseline gap-2">
+            <span
+              className={cn("shrink-0 font-mono text-xs font-medium", c.disabled && "opacity-60")}
+            >
+              /<MatchHighlight text={c.name} positions={item.positions ?? []} />
+            </span>
+            {hintParts.length > 0 ? (
+              <>
+                {" "}
+                <span
+                  className="flex min-w-0 items-center gap-1 overflow-hidden"
+                  title={c.argumentHint}
+                >
+                  {hintParts.slice(0, 4).map((part) => (
+                    <span
+                      key={part}
+                      className="shrink-0 rounded-md border border-border/70 bg-muted/50 px-1.5 py-0.5 font-mono text-[10px] leading-none text-muted-foreground"
+                      data-slot="command-argument"
+                    >
+                      {part}
+                    </span>
+                  ))}
+                  {hintParts.length > 4 ? (
+                    <span className="shrink-0 text-[10px] text-muted-foreground">
+                      +{hintParts.length - 4}
+                    </span>
+                  ) : null}
+                </span>
+              </>
+            ) : null}
+          </span>
+          <span
+            className={cn(
+              "block truncate text-xs leading-5 text-muted-foreground",
+              c.disabled && "italic"
+            )}
+          >
+            {c.disabled ? t("comingSoon") : c.description}
+          </span>
         </span>
         {onTogglePin ? (
           <button
@@ -672,7 +917,19 @@ const ItemRow = memo(function ItemRow({
             {pinned ? <PinOffIcon className="size-3.5" /> : <PinIcon className="size-3.5" />}
           </button>
         ) : null}
-        <span className="rounded border px-1 text-[10px] text-muted-foreground">{c.scope}</span>
+        <Badge variant="outline" className="shrink-0 px-1.5 text-[10px] font-normal">
+          {c.scope}
+        </Badge>
+      </>
+    )
+  }
+  if (item.kind === "slashArgument") {
+    return (
+      <>
+        <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-muted/70 text-muted-foreground">
+          <CornerDownRightIcon className="size-4" />
+        </span>
+        <span className="font-mono text-sm font-medium">{item.value}</span>
       </>
     )
   }

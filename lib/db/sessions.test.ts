@@ -49,7 +49,13 @@ jest.mock("@/stores/artifact/artifact-store", () => ({
   useArtifactStore: { getState: () => ({ clearSessionData: clearSessionDataMock }) },
 }))
 
+const markSessionRemovedMock = jest.fn()
+jest.mock("@/lib/chat/search/indexer", () => ({
+  markSessionRemoved: (sessionId: string) => markSessionRemovedMock(sessionId),
+}))
+
 beforeEach(async () => {
+  markSessionRemovedMock.mockClear()
   await getDb().delete()
   __resetDbForTesting()
   getDb()
@@ -290,6 +296,8 @@ describe("deletion tombstones (companion sync v61)", () => {
     expect(sessionTombs.map((t) => t.id)).toEqual([s.id])
     const messageTombs = await db.syncTombstones.where("table").equals("messages").toArray()
     expect(messageTombs.map((t) => t.id).sort()).toEqual(["m1", "m2"])
+    expect(markSessionRemovedMock).toHaveBeenCalledTimes(1)
+    expect(markSessionRemovedMock).toHaveBeenCalledWith(s.id)
   })
 
   it("records session tombstones on bulkDeleteSessions", async () => {
@@ -300,6 +308,7 @@ describe("deletion tombstones (companion sync v61)", () => {
       .map((t) => t.id)
       .sort()
     expect(ids).toEqual([a.id, b.id].sort())
+    expect(markSessionRemovedMock.mock.calls.map(([id]) => id).sort()).toEqual([a.id, b.id].sort())
   })
 })
 

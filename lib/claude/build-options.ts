@@ -81,8 +81,6 @@ import {
   createProviderSettingsSnapshot,
   resolveFeatureProvider,
 } from "@/lib/ai/provider-consumption"
-import { buildModelInferenceParams } from "@cognia/provider-core/providers/inference-params"
-import { selectApiKey, recordKeyUse } from "@cognia/provider-core/providers/api-key-rotation"
 import { isLocalProvider } from "@cognia/provider-core/providers/local-providers"
 import { modelSupportsEffort } from "@/lib/ai/reasoning-capability"
 import { resolveOpencodeVaultCredential } from "@/lib/subscription/opencode/chat-bridge"
@@ -103,7 +101,6 @@ import {
   scoreDifficulty,
   type RoutingEngineDeps,
 } from "@cognia/provider-routing"
-import { pickAutoAlias } from "@/lib/routing/auto-tier"
 import {
   applyCircuitBreakerSettings,
   buildRoutingEngineDeps,
@@ -113,6 +110,7 @@ import { estimateCJKTokenCount } from "@cognia/rag/cjk-tokenizer"
 import { estimateFallbackTokens } from "@/lib/ai/tokens/fallback-estimator"
 import { getPluginEventHooks } from "@/lib/plugin/messaging/hooks-system"
 import { PLAN_MODE_PROMPT, PLAN_MODE_STRUCTURED_STEPS_SNIPPET } from "./plan-mode-prompt"
+import { resolveProviderAttemptOptions } from "./provider-attempt-options"
 
 /**
  * Snippet appended to `appendSystemPrompt` when brief mode is on. Exported so
@@ -414,6 +412,12 @@ export interface BuildOptionsContext {
    * Absent → the check is skipped (no-info passthrough).
    */
   routingContextHint?: { promptText?: string }
+  /**
+   * Routing surface for non-chat callers that reuse the canonical send-option
+   * builder. Defaults to chat; Agent execution sets this to agent so plans,
+   * affinity, and traces stay attributed to the immutable Agent ticket.
+   */
+  routingSurface?: import("@cognia/provider-types/auto-router").RoutingSurface
   /**
    * Optional long-term memory runtime dependencies (ADR — autonomous memory).
    * When supplied AND `memoryUserMessage` is set AND `appSettings.memory` is
@@ -1064,60 +1068,35 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
     character?.providerId ??
     appSettings?.defaultProvider ??
     "anthropic"
+  const requestedEffort =
+    imOverrideRow?.reasoningOverride ??
+    session?.effort ??
+    imAdapterRow?.defaultReasoning ??
+    appSettings?.defaultEffort
 
   // Rough text of the outgoing prompt (CJK-aware sizing happens later). Only the
   // text the caller handed us — history/system additions are not counted, which
   // keeps auto-routing + the token estimate conservative-but-cheap.
   const promptText = ctx.routingContextHint?.promptText ?? ctx.twinUserMessage
 
-  // When auto routing rewrites `model` to a tier alias below, these hold the
-  // concrete model/provider it replaced so alias resolution can fall back to
-  // them instead of hard-failing the send when the tier has no live deployment.
-  let autoTierOriginalModel: string | undefined
-  let autoTierOriginalProvider: string | undefined
-
-  // --- Auto routing (opt-in tier selection) ---------------------------------
-  // Before alias resolution: when auto routing is on and `model` is a concrete
-  // id (NOT already an alias), score the prompt's difficulty and rewrite the
-  // model to a tier alias (fast/balanced/powerful) so the alias block below
-  // resolves it through the full engine (filters/strategy/fallback + stamping).
-  // Strict no-op unless enabled AND a matching alias is enabled in
-  // `modelMappings` — see `lib/routing/auto-tier.ts:pickAutoAlias`.
-  if (
-    model &&
-    promptText &&
-    promptText.length > 0 &&
+  // Concrete provider:model choices remain hard overrides, while still
+  // entering the planner once so declared capabilities and data policy are
+  // validated consistently with aliases and Auto.
+  const enabledAliases = new Set(
+    (appSettings?.modelMappings ?? [])
+      .filter((mapping) => mapping.enabled !== false)
+      .map((mapping) => mapping.alias.toLowerCase())
+  )
+  const autoRequested = Boolean(
     appSettings?.autoRouting?.enabled &&
-    appSettings.modelMappings &&
-    appSettings.modelMappings.length > 0
-  ) {
-    const enabledAliases = new Set(
-      appSettings.modelMappings.filter((m) => m.enabled !== false).map((m) => m.alias.toLowerCase())
-    )
-    // An explicitly-typed alias always wins over auto — never re-route it.
-    if (!enabledAliases.has(model.toLowerCase())) {
-      const score = scoreDifficulty(promptText)
-      const tier = pickAutoAlias(score, appSettings.autoRouting, enabledAliases)
-      if (tier) {
-        // Preserve the concrete model/provider so we can fall back to it if the
-        // tier alias resolves to zero eligible deployments (see below).
-        autoTierOriginalModel = model
-        autoTierOriginalProvider = providerId
-        opts.autoRouting = { score, tier }
-        model = tier
-      }
-    }
-  }
+    (model === "auto" || (!session?.model && appSettings.autoRouting.defaultSelection === "auto"))
+  )
+  const aliasRequested =
+    !autoRequested && model && enabledAliases.has(model.toLowerCase()) ? model : undefined
+  const manualRequested = Boolean(!autoRequested && !aliasRequested && model && providerId)
 
-  // --- Alias resolution (P4) ------------------------------------------------
-  // When `model` matches a registered alias (e.g., "fast", "coding"), run
-  // it through the routing engine to pick a concrete provider:model from
-  // the alias's fallback chain. The decision metadata is stamped on
-  // `opts.aliasResolution` + `opts.routingDecision` so the renderer
-  // adapter can retry on failure (P4 fallback path) and the message
-  // metadata badge can show what was actually used.
-  if (model && appSettings?.modelMappings && appSettings.modelMappings.length > 0) {
-    const registry = createMappingRegistry(appSettings.modelMappings)
+  if (appSettings && (autoRequested || aliasRequested || manualRequested)) {
+    const registry = createMappingRegistry(appSettings.modelMappings ?? [])
     const routingConfig = appSettings.routingConfig ?? DEFAULT_ROUTING_CONFIG
     // Persisted breaker settings (global enable + defaults) and per-provider
     // circuit overrides (allowed_fails / cooldown_time) apply before the
@@ -1134,51 +1113,90 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
     const estimatedInputTokens =
       promptText && promptText.length > 0 ? estimateCJKTokenCount(promptText) : undefined
     const engine = new ProviderRoutingEngine(registry, routingConfig, deps)
-    // May throw RoutingNoCandidatesError (alias matched, every deployment
-    // filtered out). For an EXPLICITLY-typed alias we surface it as the send
-    // error (passing the alias through as a model id would fail downstream with
-    // a worse message). But for an AUTO-selected tier alias, the user picked a
-    // concrete model — auto routing is a best-effort optimization, so fall back
-    // to that concrete model instead of hard-failing a send that would succeed.
-    let result: ReturnType<typeof engine.selectProvider> | null
+    const manualFallbackModel = autoRequested && model !== "auto" ? model : undefined
+    const manualFallbackProvider = providerId
+    let plan: import("@cognia/provider-types/auto-router").RoutingPlan | undefined
     try {
-      result = engine.selectProvider({
-        model,
+      plan = await engine.planRoute({
+        surface: ctx.routingSurface ?? "chat",
+        selection: autoRequested
+          ? { kind: "auto" }
+          : aliasRequested
+            ? { kind: "alias", alias: aliasRequested }
+            : { kind: "manual", providerId, modelId: model! },
         estimatedInputTokens,
         promptText,
+        candidateAliases: appSettings.autoRouting?.candidateAliases,
+        thresholds: appSettings.autoRouting?.thresholds,
+        requirements: manualRequested
+          ? undefined
+          : {
+              tools: Boolean(
+                character?.allowedTools?.length ||
+                activeMode?.tools?.length ||
+                skills.some((skill) => (skill.allowedTools?.length ?? 0) > 0)
+              ),
+              reasoning: Boolean(requestedEffort),
+              streaming: appSettings.streamPartialMessages !== false,
+            },
         sessionId: session?.id,
+        strategy: routingConfig.strategy,
+        dataPolicy: appSettings.autoRouting?.dataPolicy,
+        shadowMode: appSettings.autoRouting?.shadowMode,
       })
     } catch (err) {
-      if (err instanceof RoutingNoCandidatesError && autoTierOriginalModel) {
-        // Revert the auto-tier rewrite and continue with the concrete model.
-        model = autoTierOriginalModel
-        providerId = autoTierOriginalProvider ?? providerId
+      if (err instanceof RoutingNoCandidatesError && manualFallbackModel) {
+        model = manualFallbackModel
+        providerId = manualFallbackProvider
         delete opts.autoRouting
-        result = null
       } else {
         throw err
       }
     }
-    if (result?.fromAlias && result.alias) {
-      model = result.modelId
-      providerId = result.providerId
-      opts.aliasResolution = {
-        alias: result.alias,
-        resolvedTo: { providerId: result.providerId, modelId: result.modelId },
-        fallbackEntries: result.fallbackEntries,
-        // Flatten the strongly-typed ModelMappingParameterDefaults into the
-        // opaque map the SendOptions wire shape carries. The renderer + Rust
-        // struct treat this as metadata only; the sidecar ignores it.
-        parameterDefaults: result.parameterDefaults as Record<string, unknown> | undefined,
-        // Error-class routing metadata: the renderer retry path acts on
-        // these without a registry lookup.
-        ...(result.specialFallbacks ? { specialFallbacks: result.specialFallbacks } : {}),
-        ...(result.retryPolicy ? { retryPolicy: result.retryPolicy } : {}),
+    if (plan) {
+      const selected = plan.selected
+      const selectedAlias = appSettings.modelMappings?.find(
+        (mapping) =>
+          mapping.enabled !== false &&
+          mapping.providers.some(
+            (candidate) =>
+              candidate.providerId === selected.providerId && candidate.modelId === selected.modelId
+          )
+      )?.alias
+      const fallbackEntries = plan.orderedCandidates.slice(1).map((candidate) => ({
+        providerId: candidate.providerId,
+        modelId: candidate.modelId,
+        ...(candidate.weight !== undefined ? { weight: candidate.weight } : {}),
+        ...(candidate.conditions ? { conditions: candidate.conditions } : {}),
+      }))
+      model = selected.modelId
+      providerId = selected.providerId
+      opts.routingPlan = plan
+      if (autoRequested) {
+        opts.autoRouting = {
+          score: scoreDifficulty(promptText ?? ""),
+          tier: selectedAlias ?? plan.classification?.complexity ?? "auto",
+        }
+      }
+      if (!manualRequested) {
+        opts.aliasResolution = {
+          alias: aliasRequested ?? selectedAlias ?? "auto",
+          resolvedTo: { providerId: selected.providerId, modelId: selected.modelId },
+          fallbackEntries,
+          // Flatten the strongly-typed ModelMappingParameterDefaults into the
+          // opaque map the SendOptions wire shape carries. The renderer + Rust
+          // struct treat this as metadata only; the sidecar ignores it.
+          parameterDefaults: plan.parameterDefaults as Record<string, unknown> | undefined,
+          // Error-class routing metadata: the renderer retry path acts on
+          // these without a registry lookup.
+          ...(plan.specialFallbacks ? { specialFallbacks: plan.specialFallbacks } : {}),
+          ...(plan.retryPolicy ? { retryPolicy: plan.retryPolicy } : {}),
+        }
       }
       opts.routingDecision = {
-        strategy: result.strategy,
-        reason: result.reason,
-        ...(result.overBudgetWarning ? { overBudgetWarning: result.overBudgetWarning } : {}),
+        strategy: plan.strategy,
+        reason: plan.reasonCodes.join(", "),
+        ...(plan.overBudgetWarning ? { overBudgetWarning: plan.overBudgetWarning } : {}),
       }
       // Activate the Claude Agent SDK's NATIVE in-turn model fallback. When the
       // alias resolved to Anthropic and the chain has a sibling Anthropic model,
@@ -1188,9 +1206,9 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
       // failover; this is purely the cheap same-provider in-turn path. Only the
       // Anthropic dispatcher reads `fallbackModel`; the ai-sdk path ignores it,
       // so we skip non-Anthropic resolutions to keep the wire shape honest.
-      if (result.providerId === "anthropic") {
-        const sibling = result.fallbackEntries.find(
-          (e) => e.providerId === "anthropic" && e.modelId !== result.modelId
+      if (selected.providerId === "anthropic") {
+        const sibling = fallbackEntries.find(
+          (entry) => entry.providerId === "anthropic" && entry.modelId !== selected.modelId
         )
         if (sibling) opts.fallbackModel = sibling.modelId
       }
@@ -1201,172 +1219,11 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
   if (providerId) {
     opts.provider = providerId
     if (appSettings) {
-      const snapshot = createProviderSettingsSnapshot({
-        defaultProvider: appSettings.defaultProvider,
-        providerSettings: appSettings.providerSettings as
-          Record<string, import("@/lib/ai/provider-consumption").ProviderSettingsEntry> | undefined,
-        customProviders: appSettings.customProviders as
-          import("@/lib/ai/provider-consumption").RichCustomProviderEntry[] | undefined,
-      })
-      const resolution = resolveFeatureProvider(
-        {
-          featureId: "chat-send",
-          routeProfile: "general-text",
-          selectionMode: "explicit-provider",
-          providerId,
-          fallbackMode: "none",
-        },
-        snapshot
-      )
-      if (resolution.kind === "resolved") {
-        opts.providerCredentials = {
-          apiKey: resolution.apiKey,
-          baseURL: resolution.baseURL,
-          // Always forward the resolved protocol. The resolver is the single
-          // authority on which AI SDK family a provider speaks; relying on the
-          // sidecar to re-derive it from the id silently broke built-in local
-          // providers (ollama / lmstudio / …) and the openai-compat aggregators
-          // (xai / togetherai / fireworks). The Anthropic path selects by id,
-          // so forwarding "anthropic" is inert there.
-          protocol: resolution.protocol,
-          // Explicit OpenAI endpoint family (responses/chat/auto). Lets the user
-          // opt a gateway / Azure / custom URL into the Responses API; the
-          // sidecar's decideOpenAiEndpointFlavor honors it.
-          ...(resolution.apiFlavor ? { apiFlavor: resolution.apiFlavor } : {}),
-          ...(resolution.bedrock
-            ? {
-                bedrockAuthMode: resolution.bedrock.authMode,
-                region: resolution.bedrock.region,
-                accessKeyId: resolution.bedrock.accessKeyId,
-                secretAccessKey: resolution.bedrock.secretAccessKey,
-                sessionToken: resolution.bedrock.sessionToken,
-                profile: resolution.bedrock.profile,
-                roleArn: resolution.bedrock.roleArn,
-                roleSessionName: resolution.bedrock.roleSessionName,
-              }
-            : {}),
-        }
-        // Plugin-contributed protocol: ride the execution spec along. A
-        // declarative variant spec is forwarded verbatim (the sidecar serves
-        // it without ever loading plugin code); a code adapter forwards only
-        // {kind:"code", pluginId, adapterId} — the actual code runs in the
-        // renderer via the protocol_adapter_exec round-trip. Built-in
-        // protocols leave this undefined.
-        {
-          const { getProtocolAdapter } =
-            await import("@cognia/provider-core/providers/protocol-adapter-registry")
-          const adapterDef = getProtocolAdapter(resolution.protocol)
-          if (adapterDef) {
-            if (adapterDef.spec.kind === "code") {
-              const sep = resolution.protocol.indexOf(":")
-              opts.protocolAdapterSpec = {
-                kind: "code",
-                pluginId: sep > 0 ? resolution.protocol.slice(0, sep) : resolution.protocol,
-                adapterId: resolution.protocol,
-              }
-            } else {
-              opts.protocolAdapterSpec = adapterDef.spec
-            }
-          }
-        }
-        // Backfill model from the provider's default when the caller didn't
-        // pin one — keeps the resolver one-stop for "what should this turn
-        // run against?".
-        if (!opts.model && resolution.model) {
-          opts.model = resolution.model
-        }
-        // Carry the provider's configured inference defaults (temperature,
-        // maxOutputTokens, penalties, …) so the non-Anthropic ai-sdk dispatcher
-        // honours them instead of dropping every knob. The Anthropic path
-        // ignores `modelParams` (ADR-0043).
-        const providerCfg =
-          appSettings?.providerSettings?.[providerId] ??
-          appSettings?.customProviders?.find((p) => p.id === providerId)
-        const modelParams = buildModelInferenceParams(providerCfg)
-        if (modelParams) opts.modelParams = modelParams
-        // Multi-API-key rotation (ADR-0043 Phase 3): when the provider has a
-        // key pool with rotation enabled, override the single-key credential
-        // with the next key in rotation and persist the advance
-        // (currentKeyIndex + per-key usage stats) fire-and-forget — a
-        // persist failure must never block the turn.
-        if (providerCfg?.apiKeyRotationEnabled) {
-          const selection = selectApiKey(providerCfg)
-          if (selection.apiKey) {
-            opts.providerCredentials.apiKey = selection.apiKey
-          }
-          const persisted = recordKeyUse(providerCfg, selection)
-          if (persisted) {
-            void (async () => {
-              try {
-                const { useSettingsStore } = await import("@/stores/settings")
-                const store = useSettingsStore.getState()
-                if (resolution.isCustomProvider) {
-                  await store.updateCustomProvider(providerId, persisted)
-                } else {
-                  await store.setProviderConfig(providerId, persisted)
-                }
-              } catch (err) {
-                console.warn("api key rotation advance persist failed", err)
-              }
-            })()
-          }
-        }
-        // OpenCode managed plans: a provider entry with a base URL but no key
-        // resolves above — backfill the key from the subscription vault so a
-        // pasted Zen/Go key is usable without re-typing it in Settings.
-        if (!resolution.apiKey && isOpencodeChatProviderId(providerId)) {
-          const vaultCred = await resolveOpencodeVaultCredential(providerId)
-          if (vaultCred) opts.providerCredentials.apiKey = vaultCred.apiKey
-        }
-        // Codex: same idea — backfill the key (and the ChatGPT-backend base URL
-        // + headers, which differ from genuine OpenAI) from the subscription
-        // vault when Settings supplied no key.
-        if (!resolution.apiKey && isCodexChatProviderId(providerId)) {
-          const vaultCred = await resolveCodexVaultCredential(providerId)
-          if (vaultCred) {
-            opts.providerCredentials.apiKey = vaultCred.apiKey
-            opts.providerCredentials.baseURL = vaultCred.baseURL
-            if (vaultCred.headers) opts.providerCredentials.headers = vaultCred.headers
-          }
-        }
-      } else if (
-        isOpencodeChatProviderId(providerId) &&
-        resolution.nextAction !== "enable_provider"
-      ) {
-        // OpenCode auto-fallback (user decision 2026-06-07): when the provider
-        // isn't configured at all (or is missing both key and base URL), draw
-        // the credential from the active subscription-vault account. An
-        // explicitly DISABLED provider (nextAction "enable_provider") opts out.
-        const vaultCred = await resolveOpencodeVaultCredential(providerId)
-        if (vaultCred) {
-          opts.providerCredentials = {
-            apiKey: vaultCred.apiKey,
-            baseURL: vaultCred.baseURL,
-            protocol: "openai",
-          }
-          if (!opts.model) {
-            const fallbackModel = getBuiltInProviderDefaultModel(providerId)
-            if (fallbackModel) opts.model = fallbackModel
-          }
-        }
-      } else if (isCodexChatProviderId(providerId) && resolution.nextAction !== "enable_provider") {
-        // Codex auto-fallback: unconfigured Codex chat provider draws its
-        // credential from the active subscription-vault account. Carries the
-        // ChatGPT-backend base URL + headers when the account is ChatGPT-login.
-        const vaultCred = await resolveCodexVaultCredential(providerId)
-        if (vaultCred) {
-          opts.providerCredentials = {
-            apiKey: vaultCred.apiKey,
-            baseURL: vaultCred.baseURL,
-            protocol: "openai",
-            ...(vaultCred.headers ? { headers: vaultCred.headers } : {}),
-          }
-          if (!opts.model) {
-            const fallbackModel = getBuiltInProviderDefaultModel(providerId)
-            if (fallbackModel) opts.model = fallbackModel
-          }
-        }
-      }
+      const attemptOptions = await resolveProviderAttemptOptions(providerId, appSettings)
+      opts.providerCredentials = attemptOptions.providerCredentials
+      opts.protocolAdapterSpec = attemptOptions.protocolAdapterSpec
+      opts.modelParams = attemptOptions.modelParams
+      if (!opts.model && attemptOptions.defaultModel) opts.model = attemptOptions.defaultModel
       // Unresolved providers (no key, disabled, etc.) fall through with
       // `opts.provider` set but no credentials — for "anthropic" that means
       // the sidecar still works via the legacy ANTHROPIC_API_KEY env path
@@ -3002,11 +2859,7 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
   // the app default (same W1 layering as model/provider); the
   // `modelSupportsEffort` gate below covers a bot default set on a
   // non-reasoning model.
-  const effort =
-    imOverrideRow?.reasoningOverride ??
-    session?.effort ??
-    imAdapterRow?.defaultReasoning ??
-    appSettings?.defaultEffort
+  const effort = requestedEffort
   if (effort && (!opts.model || modelSupportsEffort(opts.provider, opts.model))) {
     opts.effort = effort
   } else if (effort && opts.model) {

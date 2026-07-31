@@ -58,7 +58,20 @@ describe("<EmptyChatState />", () => {
   it("renders the workspace illustration in the rich style", () => {
     render(<EmptyChatState {...baseProps()} />)
     expect(screen.getByTestId("welcome-illustration")).toBeInTheDocument()
-    expect(screen.getByRole("img", { name: "illustrationAlt" })).toBeInTheDocument()
+    expect(screen.getByRole("img", { name: "illustrationAlt" })).toHaveAttribute("loading", "eager")
+  })
+
+  it("adapts the rich hero to its pane width instead of the viewport width", () => {
+    const { container } = render(<EmptyChatState {...baseProps()} />)
+    const scroller = container.firstElementChild
+    const hero = screen.getByTestId("welcome-hero")
+
+    // Split view keeps the browser viewport wide while each ChatPane is narrow.
+    // The hero must therefore switch columns from its own container width;
+    // viewport `md:` classes collapse the copy to one CJK character per line.
+    expect(scroller).toHaveClass("@container")
+    expect(hero).toHaveClass("@3xl:grid-cols-[minmax(0,1fr)_minmax(16rem,0.9fr)]")
+    expect(hero).not.toHaveClass("md:grid-cols-[minmax(0,1fr)_minmax(16rem,0.9fr)]")
   })
 
   it("drops the workspace illustration in the minimal style", () => {

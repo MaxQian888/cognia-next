@@ -24,7 +24,7 @@ import { usePlatform } from "@/hooks/use-platform"
 import { cn } from "@/lib/utils"
 import { ContextUsageIndicator } from "@/components/chat/context-usage-indicator"
 import { useSdkContextUsage } from "@/hooks/chat/use-sdk-context-usage"
-import { useChatStore } from "@/stores/chat"
+import { useChatStore, type ChatStatus } from "@/stores/chat"
 import { useSettingsStore } from "@/stores/settings"
 import type { ChatSession } from "@cognia/agent-config-types"
 import { PermissionModeIndicator } from "../permission-mode-indicator"
@@ -41,10 +41,17 @@ import { WorkflowBottomToolbar } from "./workflow-bottom-toolbar"
 
 interface BottomToolbarProps {
   session: ChatSession | null
+  status?: ChatStatus
   variant?: "default" | "embedded"
+  leading?: ReactNode
 }
 
-export function BottomToolbar({ session, variant = "default" }: BottomToolbarProps) {
+export function BottomToolbar({
+  session,
+  status,
+  variant = "default",
+  leading,
+}: BottomToolbarProps) {
   // The workflow-editor session is the same discriminator that
   // `resolveSendOptions` keys on to inject workflow subagents + the graph
   // snapshot. The composer surface deserves the same scoping: the generic
@@ -60,13 +67,21 @@ export function BottomToolbar({ session, variant = "default" }: BottomToolbarPro
     }
     return <WorkflowBottomToolbar session={session} />
   }
-  return <GenericBottomToolbar session={session} variant={variant} />
+  return (
+    <GenericBottomToolbar session={session} status={status} variant={variant} leading={leading} />
+  )
 }
 
-function GenericBottomToolbar({ session, variant = "default" }: BottomToolbarProps) {
+function GenericBottomToolbar({
+  session,
+  status: paneStatus,
+  variant = "default",
+  leading,
+}: BottomToolbarProps) {
   const t = useTranslations("chat.composer.toolbar")
   const router = useRouter()
-  const status = useChatStore((s) => s.status)
+  const focusedStatus = useChatStore((s) => s.status)
+  const status = paneStatus ?? focusedStatus
   const setPermissionMode = useChatStore((s) => s.setPermissionMode)
   const rootRef = useRef<HTMLDivElement>(null)
   const toolbarWidth = useElementWidth(rootRef)
@@ -112,8 +127,6 @@ function GenericBottomToolbar({ session, variant = "default" }: BottomToolbarPro
   const compact = toolbarWidth > 0 && toolbarWidth < COMPACT_TOOLBAR_PX
   const tierActive = runtime !== "claude-sdk"
 
-  // Runtime is overflow-by-default: most sessions stay on `claude-sdk`, so the
-  // runtime switch lives in the "⋯ More" menu rather than the primary row.
   const runtimeControl = <AgentRuntimeSelector disabled={isStreaming} />
 
   const tier3 = (
@@ -168,14 +181,24 @@ function GenericBottomToolbar({ session, variant = "default" }: BottomToolbarPro
     </>
   )
 
-  // The permanent row: what this turn will run as, and nothing else. Model
-  // carries its effort qualifier inside its own picker; the sandbox shield,
-  // agent mode and runtime moved into "⋯". `flex-nowrap` + `min-w-0` lets a
-  // long provider model id ellipsize instead of wrapping the row.
-  const tier1Group = (
-    <div className="flex min-w-0 flex-nowrap items-center gap-x-2">
-      <ModelPicker session={session} disabled={isStreaming} />
+  // The permanent execution row answers the two highest-frequency questions:
+  // which model, and which Agent runtime. Permission remains adjacent because
+  // it changes what that runtime may do. Detailed mode/agent selection stays
+  // in More so the row remains compact.
+  const modelAndPermission = (
+    <div className="flex min-w-0 flex-nowrap items-center gap-1">
+      <ModelPicker session={session} disabled={isStreaming} className="max-w-[11rem]" />
       <PermissionModeIndicator onCycle={(next) => setPermissionMode(next)} disabled={isStreaming} />
+    </div>
+  )
+  const executionGroup = (
+    <div
+      className="flex min-w-0 flex-nowrap items-center gap-1 rounded-xl border border-border/50 bg-muted/20 p-0.5"
+      data-testid="composer-execution-controls"
+    >
+      {modelAndPermission}
+      <span aria-hidden className="h-4 w-px shrink-0 bg-border/60" />
+      {runtimeControl}
     </div>
   )
 
@@ -196,7 +219,6 @@ function GenericBottomToolbar({ session, variant = "default" }: BottomToolbarPro
     <ToolbarMoreMenu label={t("moreControls")} active={tierActive} disabled={isStreaming}>
       <div className="flex flex-col gap-2">
         <div className="flex flex-wrap items-center gap-2">{tier3}</div>
-        <div className="flex flex-wrap items-center gap-2">{runtimeControl}</div>
         <div className="flex flex-wrap items-center gap-2">{pluginSlots}</div>
       </div>
     </ToolbarMoreMenu>
@@ -211,7 +233,7 @@ function GenericBottomToolbar({ session, variant = "default" }: BottomToolbarPro
         className="flex min-w-0 flex-1 items-center justify-end gap-1 text-[11px] text-muted-foreground"
         data-testid="composer-toolbar-embedded"
       >
-        {tier1Group}
+        {executionGroup}
         {contextIndicator}
         {overflow}
       </div>
@@ -226,8 +248,12 @@ function GenericBottomToolbar({ session, variant = "default" }: BottomToolbarPro
         ref={rootRef}
         className="mt-2 flex flex-col gap-1 px-1 text-[11px] text-muted-foreground"
       >
-        {tier1Group}
-        <div className="flex items-center justify-between gap-x-2">
+        <div className="flex min-w-0 items-center gap-1">
+          {leading}
+          {modelAndPermission}
+        </div>
+        <div className="flex items-center justify-end gap-x-1">
+          {runtimeControl}
           {contextIndicator}
           {overflow}
         </div>
@@ -239,17 +265,19 @@ function GenericBottomToolbar({ session, variant = "default" }: BottomToolbarPro
   return (
     <div
       ref={rootRef}
-      className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 px-1 text-[11px] text-muted-foreground"
+      className="mt-2 flex min-w-0 flex-nowrap items-center gap-x-2 px-1 text-[11px] text-muted-foreground"
+      data-testid="composer-footer"
     >
-      <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">{tier1Group}</div>
+      {leading}
+      {executionGroup}
       {contextIndicator}
       {overflow}
     </div>
   )
 }
 
-/** Below this measured toolbar width, Tier 2 / 3 collapse into the More menu. */
-const COMPACT_TOOLBAR_PX = 448
+/** Below this measured width, split the status line into two compact rows. */
+const COMPACT_TOOLBAR_PX = 384
 
 /**
  * Compact "⋯ More" popover holding the toolbar controls that don't fit on a

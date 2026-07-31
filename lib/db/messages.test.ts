@@ -7,10 +7,10 @@ import "fake-indexeddb/auto"
 import type { UIMessage } from "ai"
 import {
   clearMessages,
+  deleteStoredMessage,
   listMessages,
   persistMessages,
   persistStreamingMessages,
-  searchSessionsByContent,
   truncateAfter,
   updateMessageMetadata,
 } from "./messages"
@@ -188,6 +188,20 @@ describe("clearMessages", () => {
   })
 })
 
+describe("deleteStoredMessage", () => {
+  it("deletes only the requested row", async () => {
+    await persistMessages("s1", [msg("a", "user", "1"), msg("b", "assistant", "2")])
+
+    await deleteStoredMessage("a")
+
+    expect((await listMessages("s1")).map((message) => message.id)).toEqual(["b"])
+  })
+
+  it("ignores an unknown message id", async () => {
+    await expect(deleteStoredMessage("missing")).resolves.toBeUndefined()
+  })
+})
+
 describe("updateMessageMetadata", () => {
   it("merges a patch into one row's metadata without touching siblings", async () => {
     await persistMessages("s1", [msg("a", "user", "hi", { foo: 1 }), msg("b", "assistant", "yo")])
@@ -291,52 +305,6 @@ describe("workspace (project) scoping", () => {
     } as never)
     await persistMessages("s-scoped", [msg("m1", "user", "hi")])
     expect((await getDb().messages.get("m1"))?.projectId).toBe("proj-A")
-  })
-})
-
-describe("searchSessionsByContent", () => {
-  it("returns distinct session ids whose message text matches (case-insensitive)", async () => {
-    await putSession("s1")
-    await putSession("s2")
-    await putSession("s3")
-    await persistMessages("s1", [
-      msg("a", "user", "Plan a Trip to Rome"),
-      msg("b", "assistant", "ok"),
-    ])
-    await persistMessages("s2", [msg("c", "user", "grocery list")])
-    await persistMessages("s3", [msg("d", "user", "another TRIP idea")])
-    const { ids, truncated } = await searchSessionsByContent("trip")
-    expect([...ids].sort()).toEqual(["s1", "s3"])
-    expect(truncated).toBe(false)
-  })
-
-  it("scopes the scan to a projectId when given", async () => {
-    await putSession("sA", "proj-A")
-    await putSession("sB", "proj-B")
-    await persistMessages("sA", [msg("a", "user", "shared keyword")])
-    await persistMessages("sB", [msg("b", "user", "shared keyword")])
-    const { ids } = await searchSessionsByContent("keyword", { projectId: "proj-A" })
-    expect([...ids]).toEqual(["sA"])
-  })
-
-  it("returns an empty result for a blank needle without scanning", async () => {
-    await putSession("s1")
-    await persistMessages("s1", [msg("a", "user", "anything")])
-    const { ids, truncated } = await searchSessionsByContent("   ")
-    expect(ids.size).toBe(0)
-    expect(truncated).toBe(false)
-  })
-
-  it("flags truncated when the scan hits the limit", async () => {
-    await putSession("s1")
-    await persistMessages("s1", [
-      msg("a", "user", "match one"),
-      msg("b", "assistant", "nope"),
-      msg("c", "user", "match two"),
-    ])
-    // limit=2 scans only the first two rows → cannot see "match two", truncated.
-    const { truncated } = await searchSessionsByContent("match", { limit: 2 })
-    expect(truncated).toBe(true)
   })
 })
 

@@ -197,9 +197,9 @@ jest.mock("@/components/mobile/chat/message-action-sheet", () => ({
 }))
 
 const dbDeleteMock = jest.fn(async (_id: string) => undefined)
-jest.mock("@/lib/db/schema", () => ({
-  ...jest.requireActual("@/lib/db/schema"),
-  getDb: () => ({ messages: { delete: (id: string) => dbDeleteMock(id) } }),
+jest.mock("@/lib/db/messages", () => ({
+  ...jest.requireActual("@/lib/db/messages"),
+  deleteStoredMessage: (id: string) => dbDeleteMock(id),
 }))
 
 const desktopDeleteMock = jest.fn(async (_sid: string, _mid: string) => undefined)

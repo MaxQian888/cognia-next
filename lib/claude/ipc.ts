@@ -45,6 +45,15 @@ export async function sendPrompt(
   prompt: SendContent,
   options?: SendOptions
 ): Promise<void> {
+  if (
+    !hasNoLeakingPiiDeep({
+      prompt,
+      systemPrompt: options?.systemPrompt,
+      appendSystemPrompt: options?.appendSystemPrompt,
+    })
+  ) {
+    throw new Error("prompt rejected by the renderer PII gate")
+  }
   // Sends carrying a frozen execution spec use the canonical command (same
   // impl body Rust-side; the alias split feeds the Phase 9 telemetry).
   const command = options?.execution ? "agent_send" : "claude_send"

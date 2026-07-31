@@ -1,0 +1,22 @@
+@keyframes hover-scroll-to-end {
+  from {
+    transform: translate3d(0, 0, 0);
+  }
+
+  to {
+    transform: translate3d(var(--hover-scroll-distance), 0, 0);
+  }
+}
+
+.scrolling {
+  width: var(--hover-scroll-content-width);
+  max-width: none;
+  overflow: visible;
+  text-overflow: clip;
+  animation-name: hover-scroll-to-end;
+  animation-duration: var(--hover-scroll-duration);
+  animation-timing-function: linear;
+  animation-delay: var(--hover-scroll-delay);
+  animation-fill-mode: forwards;
+  will-change: transform;
+}
