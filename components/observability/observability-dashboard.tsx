@@ -15,6 +15,7 @@
 import { useCallback, useMemo, useRef, useState } from "react"
 import { useTranslations } from "next-intl"
 import { GaugeIcon } from "lucide-react"
+import { FeaturePageHeader } from "@/components/feature-shell/feature-page-header"
 import {
   useObservabilityControls,
   useResolvedRange,
@@ -122,36 +123,34 @@ export function ObservabilityDashboard() {
 
   return (
     <div className="flex h-full min-h-0 flex-1 flex-col" data-testid="observability-dashboard">
-      <header className="flex shrink-0 flex-col gap-2 border-b px-4 py-3">
-        <div className="flex items-center gap-2">
-          <GaugeIcon className="size-5 text-muted-foreground" />
-          <div className="min-w-0">
-            <h1 className="text-sm font-semibold leading-tight">{t("title")}</h1>
-            <p className="truncate text-xs text-muted-foreground">{t("subtitle")}</p>
-          </div>
-        </div>
-        <ObservabilityToolbar
-          preset={controls.rangePreset}
-          customSince={controls.customSince}
-          customUntil={controls.customUntil}
-          refreshMs={controls.refreshMs}
-          filters={controls.filters}
-          editMode={controls.editMode}
-          windowSpans={windowSpans}
-          lastUpdated={lastUpdated}
-          traces={series.traces}
-          onPreset={controls.setRangePreset}
-          onCustom={controls.setCustomRange}
-          onRefreshMs={controls.setRefreshMs}
-          onRefresh={refresh}
-          onFilters={controls.setFilters}
-          onToggleEdit={() => controls.setEditMode(!controls.editMode)}
-          onResetLayout={controls.resetLayouts}
-          onOpenSettings={() => setSettingsOpen(true)}
-          buildConfig={buildConfig}
-          onImportConfig={controls.importConfig}
-        />
-      </header>
+      <FeaturePageHeader
+        icon={<GaugeIcon />}
+        title={t("title")}
+        description={t("subtitle")}
+        controls={
+          <ObservabilityToolbar
+            preset={controls.rangePreset}
+            customSince={controls.customSince}
+            customUntil={controls.customUntil}
+            refreshMs={controls.refreshMs}
+            filters={controls.filters}
+            editMode={controls.editMode}
+            windowSpans={windowSpans}
+            lastUpdated={lastUpdated}
+            traces={series.traces}
+            onPreset={controls.setRangePreset}
+            onCustom={controls.setCustomRange}
+            onRefreshMs={controls.setRefreshMs}
+            onRefresh={refresh}
+            onFilters={controls.setFilters}
+            onToggleEdit={() => controls.setEditMode(!controls.editMode)}
+            onResetLayout={controls.resetLayouts}
+            onOpenSettings={() => setSettingsOpen(true)}
+            buildConfig={buildConfig}
+            onImportConfig={controls.importConfig}
+          />
+        }
+      />
 
       {showEmpty ? (
         <ObservabilityEmptyState

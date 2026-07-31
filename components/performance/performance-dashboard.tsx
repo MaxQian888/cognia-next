@@ -17,6 +17,7 @@ import { ScrollArea } from "@/components/ui/scroll-area"
 import { usePerfStream } from "@/hooks/perf/use-perf-stream"
 import { exportPerfSnapshot, type PerfExportFormat } from "@/lib/perf/backend/export"
 import { PluginExtensionSlot } from "@/components/plugins/plugin-extension-slot"
+import { FeaturePageHeader } from "@/components/feature-shell/feature-page-header"
 import { PerfToolbar } from "./perf-toolbar"
 import { PerfOverviewTab } from "./perf-overview-tab"
 import { PerfProcessTable } from "./perf-process-table"
@@ -57,12 +58,10 @@ export function PerformanceDashboard() {
       data-bg-target="chat"
       data-testid="performance-dashboard"
     >
-      <header className="flex h-14 shrink-0 items-center gap-3 border-b px-4">
-        <ActivityIcon className="size-5 text-primary" />
-        <div className="min-w-0">
-          <h1 className="truncate text-sm font-semibold">{t("title")}</h1>
-        </div>
-        <div className="ml-auto">
+      <FeaturePageHeader
+        icon={<ActivityIcon />}
+        title={t("title")}
+        actions={
           <PerfToolbar
             paused={paused}
             intervalMs={intervalMs}
@@ -71,8 +70,8 @@ export function PerformanceDashboard() {
             onReset={reset}
             onExport={handleExport}
           />
-        </div>
-      </header>
+        }
+      />
 
       <Tabs defaultValue="overview" className="flex min-h-0 flex-1 flex-col">
         <TabsList className="mx-4 mt-3 w-fit">

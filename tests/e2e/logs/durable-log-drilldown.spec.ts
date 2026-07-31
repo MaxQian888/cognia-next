@@ -137,6 +137,7 @@ test.describe("logs — durable investigation", () => {
 
     await page.goto("/logs", { waitUntil: "domcontentloaded" })
     await expect(page.getByTestId("logs-page-header")).toBeVisible()
+    await expect(page.getByTestId("logs-page-header")).toHaveAttribute("data-variant", "management")
 
     const search = page.getByRole("combobox", { name: "Search logs..." })
     await search.fill(SEARCH_TERM)

@@ -31,9 +31,11 @@ type Handler = (event: Event) => void
 
 class FakeTarget {
   listeners = new Map<string, Handler[]>()
+  added: Array<{ type: string; handler: Handler; capture?: boolean }> = []
   removed: Array<{ type: string; handler: Handler }> = []
 
-  addEventListener(type: string, handler: Handler): void {
+  addEventListener(type: string, handler: Handler, capture?: boolean): void {
+    this.added.push({ type, handler, capture })
     const list = this.listeners.get(type) ?? []
     list.push(handler)
     this.listeners.set(type, list)
@@ -91,6 +93,46 @@ describe("installGlobalErrorHandlers", () => {
     expect(message).toContain("rejected")
     expect(error).toBe(reason)
     expect(data).toMatchObject({ source: "unhandledrejection" })
+  })
+
+  it.each([
+    new DOMException(
+      "The request is not allowed by the user agent or the platform in the current context, possibly because the user denied permission.",
+      "NotAllowedError"
+    ),
+    new DOMException("Canceled", "AbortError"),
+    new Error("Canceled"),
+  ])("suppresses the benign platform rejection %p", (reason) => {
+    const target = new FakeTarget()
+    const preventDefault = jest.fn()
+    const stopImmediatePropagation = jest.fn()
+    installGlobalErrorHandlers({ target })
+
+    expect(target.added).toContainEqual(
+      expect.objectContaining({ type: "unhandledrejection", capture: true })
+    )
+    target.fire("unhandledrejection", { reason, preventDefault, stopImmediatePropagation })
+
+    expect(preventDefault).toHaveBeenCalledTimes(1)
+    expect(stopImmediatePropagation).toHaveBeenCalledTimes(1)
+    expect(appLogger.error).not.toHaveBeenCalled()
+    expect(appLogger.fatal).not.toHaveBeenCalled()
+    expect(appLogger.warn).toHaveBeenCalledTimes(1)
+  })
+
+  it("still reports a real NotAllowedError with an unrelated message", () => {
+    const target = new FakeTarget()
+    const preventDefault = jest.fn()
+    installGlobalErrorHandlers({ target })
+
+    target.fire("unhandledrejection", {
+      reason: new DOMException("Policy invariant violated", "NotAllowedError"),
+      preventDefault,
+    })
+
+    expect(preventDefault).not.toHaveBeenCalled()
+    expect(appLogger.error).toHaveBeenCalledTimes(1)
+    expect(appLogger.warn).not.toHaveBeenCalled()
   })
 
   it("downgrades resource-load failures to warn", () => {

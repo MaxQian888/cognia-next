@@ -49,14 +49,48 @@ const BENIGN_ERROR_PATTERNS = [
   /^ResizeObserver loop limit exceeded/,
 ]
 
+const PLATFORM_DENIAL_PATTERN =
+  /request is not allowed by the user agent or the platform|user denied permission/i
+const CANCELLATION_PATTERN = /^cancel(?:ed|led)$/i
+
 function isBenignBrowserError(message: string): boolean {
   return BENIGN_ERROR_PATTERNS.some((pattern) => pattern.test(message))
+}
+
+function errorLikeFields(reason: unknown): { name: string; message: string } {
+  if (!reason || typeof reason !== "object") {
+    return { name: "", message: typeof reason === "string" ? reason : "" }
+  }
+  const candidate = reason as { name?: unknown; message?: unknown }
+  return {
+    name: typeof candidate.name === "string" ? candidate.name : "",
+    message: typeof candidate.message === "string" ? candidate.message : "",
+  }
+}
+
+/**
+ * User-dismissed platform prompts reject with browser/native error shapes even
+ * though cancellation is an expected control-flow outcome. Keep unrelated
+ * NotAllowedErrors visible: only the standard user-agent/platform denial text
+ * is suppressed.
+ */
+function isBenignPlatformRejection(reason: unknown): boolean {
+  const { name, message } = errorLikeFields(reason)
+  return (
+    name === "AbortError" ||
+    CANCELLATION_PATTERN.test(message) ||
+    (name === "NotAllowedError" && PLATFORM_DENIAL_PATTERN.test(message))
+  )
 }
 
 /** Normalise an arbitrary rejection reason / thrown value into a message + Error. */
 function describeReason(reason: unknown): DescribedReason {
   if (reason instanceof Error) {
     return { message: reason.message || reason.name || "Unknown error", error: reason }
+  }
+  const errorLike = errorLikeFields(reason)
+  if (errorLike.message || errorLike.name) {
+    return { message: errorLike.message || errorLike.name }
   }
   if (typeof reason === "string") {
     return { message: reason }
@@ -142,6 +176,17 @@ export function installGlobalErrorHandlers(
   const onRejection = (event: Event): void => {
     const rejectionEvent = event as PromiseRejectionEvent
     const described = describeReason(rejectionEvent.reason)
+    if (isBenignPlatformRejection(rejectionEvent.reason)) {
+      rejectionEvent.preventDefault()
+      rejectionEvent.stopImmediatePropagation()
+      emit(
+        "warn",
+        `Benign platform rejection: ${described.message}`,
+        undefined,
+        "unhandledrejection"
+      )
+      return
+    }
     emit(
       "error",
       `Unhandled promise rejection: ${described.message}`,
@@ -152,11 +197,13 @@ export function installGlobalErrorHandlers(
 
   // Capture phase so resource-load errors (which don't bubble) are seen too.
   target.addEventListener("error", onError, true)
-  target.addEventListener("unhandledrejection", onRejection)
+  // Rejections also use capture phase so expected platform cancellations can
+  // be stopped before framework dev-overlay listeners classify them as crashes.
+  target.addEventListener("unhandledrejection", onRejection, true)
 
   return () => {
     target.removeEventListener("error", onError, true)
-    target.removeEventListener("unhandledrejection", onRejection)
+    target.removeEventListener("unhandledrejection", onRejection, true)
     installed = false
   }
 }
