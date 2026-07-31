@@ -34,8 +34,10 @@ import {
 import { useTheme } from "next-themes"
 import { useTranslations } from "next-intl"
 import { useRouter } from "next/navigation"
-import { useEffect, useMemo, useState, useSyncExternalStore } from "react"
+import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react"
 import { useSessions } from "@/hooks/chat"
+import { useChatHistorySearch } from "@/hooks/chat/use-chat-history-search"
+import { useDebouncedCallback } from "@/hooks/workflow/use-debounced-callback"
 import { usePlatform } from "@/hooks/use-platform"
 import { getSidebarCatalog } from "@/lib/shell/sidebar-nav"
 import {
@@ -49,6 +51,8 @@ import { useSettingsStore } from "@/stores/settings"
 import { useUIStore } from "@/stores/ui"
 import { useProjectStore } from "@/stores/project/project-store"
 import { primaryRootOf } from "@/lib/workspace/roots"
+import { guildFromSession } from "@/lib/claude/guild"
+import { jumpToSessionMessage } from "@/lib/chat/cross-session-jump"
 import { openFolderAsWorkspace } from "@/lib/workspace/open-folder"
 import { useClientLiveQuery } from "@/hooks/data"
 import { listCharacters } from "@/lib/db/characters"
@@ -67,6 +71,8 @@ import {
   runQuickAction,
   type QuickActionEntry,
 } from "@/lib/plugin/registries/quick-action-registry"
+import { ChatHistorySearchResults } from "@/components/chat/search/chat-history-search-results"
+import type { ChatSearchResult } from "@/lib/chat/search/engine"
 
 const log = loggers.ui
 
@@ -77,7 +83,9 @@ interface Props {
 export function CommandPalette({ onOpenSettings }: Props) {
   const t = useTranslations("desktop.commandPalette")
   const [open, setOpen] = useState(false)
-  const { sessions, select, create } = useSessions()
+  const [searchInput, setSearchInput] = useState("")
+  const [searchQuery, setSearchQuery] = useState("")
+  const { sessions, select, create } = useSessions({ crossWorkspace: true })
   const messages = useChatStore((s) => s.messages)
   const settings = useSettingsStore((s) => s.settings)
   const setSelectedGuild = useUIStore((s) => s.setSelectedGuild)
@@ -92,6 +100,48 @@ export function CommandPalette({ onOpenSettings }: Props) {
   const platform = usePlatform()
   const railT = useTranslations("desktop.guildRail")
   const workbenchT = useTranslations()
+  const { call: debouncedSetSearchQuery, cancel: cancelSearchQuery } = useDebouncedCallback(
+    (next: string) => setSearchQuery(next),
+    150
+  )
+  const historySearch = useChatHistorySearch(searchQuery, {
+    enabled: open,
+    limit: 20,
+  })
+  const visibleSessions = useMemo(() => {
+    const needle = searchInput.trim().toLowerCase()
+    if (!needle) return sessions.slice(0, 12)
+    return sessions
+      .filter((session) => `${session.title} ${session.id}`.toLowerCase().includes(needle))
+      .slice(0, 20)
+  }, [sessions, searchInput])
+
+  const resetSearch = useCallback(() => {
+    setSearchInput("")
+    cancelSearchQuery()
+    setSearchQuery("")
+  }, [cancelSearchQuery])
+
+  const close = useCallback(() => {
+    setOpen(false)
+    resetSearch()
+  }, [resetSearch])
+
+  const handleOpenChange = useCallback(
+    (next: boolean) => {
+      if (next) setOpen(true)
+      else close()
+    },
+    [close]
+  )
+
+  const handleSearchChange = useCallback(
+    (next: string) => {
+      setSearchInput(next)
+      debouncedSetSearchQuery(next)
+    },
+    [debouncedSetSearchQuery]
+  )
 
   // The whole nav catalog, including what the user hid from the rail: the
   // palette is the fallback route to a destination they took off the rail, and
@@ -120,17 +170,15 @@ export function CommandPalette({ onOpenSettings }: Props) {
         // Plugin host: announce the global Ctrl/Cmd+K shortcut so plugins can
         // observe / extend the command palette opening flow.
         void getPluginEventHooks().dispatchShortcut("command-palette.toggle")
-        setOpen((v) => {
-          log.info("command-palette toggle", { next: !v, source: "shortcut" })
-          return !v
-        })
+        const next = !open
+        log.info("command-palette toggle", { next, source: "shortcut" })
+        if (next) setOpen(true)
+        else close()
       }
     }
     window.addEventListener("keydown", onKey)
     return () => window.removeEventListener("keydown", onKey)
-  }, [])
-
-  const close = () => setOpen(false)
+  }, [open, close])
 
   const handleNewChat = async () => {
     log.info("command-palette new-chat")
@@ -138,11 +186,34 @@ export function CommandPalette({ onOpenSettings }: Props) {
     await create()
   }
 
-  const handleSelect = (id: string) => {
-    log.info("command-palette select session", { sessionId: id })
-    close()
-    select(id)
-  }
+  const handleSelect = useCallback(
+    (id: string) => {
+      log.info("command-palette select session", { sessionId: id })
+      close()
+      const target = sessions.find((session) => session.id === id)
+      if (target?.projectId) {
+        const projectState = useProjectStore.getState()
+        if (target.projectId !== projectState.activeProjectId) {
+          projectState.setActiveProject(target.projectId)
+        }
+      }
+      if (target) setSelectedGuild(guildFromSession(target))
+      select(id)
+    },
+    [close, sessions, select, setSelectedGuild]
+  )
+
+  const handleHistorySelect = useCallback(
+    (result: ChatSearchResult) => {
+      handleSelect(result.sessionId)
+      void jumpToSessionMessage(result.sessionId, result.messageId, { align: "center" }).then(
+        (landed) => {
+          if (!landed) toast.error(t("search.jumpFailed"))
+        }
+      )
+    },
+    [handleSelect, t]
+  )
 
   const handleQuickAction = (action: QuickActionEntry) => {
     log.info("command-palette quick-action", { id: action.fullId })
@@ -291,13 +362,30 @@ export function CommandPalette({ onOpenSettings }: Props) {
   return (
     <CommandDialog
       open={open}
-      onOpenChange={setOpen}
+      onOpenChange={handleOpenChange}
       title={t("title")}
       description={t("description")}
     >
-      <CommandInput placeholder={t("placeholder")} />
+      <CommandInput
+        value={searchInput}
+        onValueChange={handleSearchChange}
+        placeholder={t("placeholder")}
+      />
       <CommandList>
         <CommandEmpty>{t("empty")}</CommandEmpty>
+
+        <ChatHistorySearchResults
+          query={searchQuery}
+          results={historySearch.results}
+          loading={historySearch.loading}
+          error={historySearch.error}
+          coverageIncomplete={historySearch.moreOlderHistory || historySearch.indexIncomplete}
+          heading={t("groups.messages")}
+          loadingLabel={t("search.loading")}
+          errorLabel={t("search.error")}
+          coverageLabel={t("search.coverage")}
+          onSelect={handleHistorySelect}
+        />
 
         <CommandGroup heading={t("groups.actions")}>
           <CommandItem onSelect={handleNewChat}>
@@ -474,11 +562,11 @@ export function CommandPalette({ onOpenSettings }: Props) {
           </>
         )}
 
-        {sessions.length > 0 && (
+        {visibleSessions.length > 0 && (
           <>
             <CommandSeparator />
             <CommandGroup heading={t("groups.sessions")}>
-              {sessions.slice(0, 12).map((s) => (
+              {visibleSessions.map((s) => (
                 <CommandItem
                   key={s.id}
                   onSelect={() => handleSelect(s.id)}

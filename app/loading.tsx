@@ -13,5 +13,12 @@ import { PageLoading } from "@/components/ui/loading-states"
 
 export default async function GlobalLoading() {
   const t = await getTranslations("loading.page")
-  return <PageLoading title={t("title")} description={t("description")} />
+  return (
+    <PageLoading
+      variant="workspace"
+      allowReload
+      title={t("title")}
+      description={t("description")}
+    />
+  )
 }

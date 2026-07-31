@@ -5,6 +5,7 @@ import { useTranslations } from "next-intl"
 import {
   ArchiveIcon,
   ArchiveRestoreIcon,
+  Link2Icon,
   PinIcon,
   PinOffIcon,
   Trash2Icon,
@@ -31,6 +32,7 @@ export interface ChannelListBulkToolbarProps {
   onUnpin: () => void | Promise<void>
   onArchive: () => void | Promise<void>
   onUnarchive: () => void | Promise<void>
+  onShare: () => void
   onClear: () => void
 }
 
@@ -48,6 +50,7 @@ export function ChannelListBulkToolbar({
   onUnpin,
   onArchive,
   onUnarchive,
+  onShare,
   onClear,
 }: ChannelListBulkToolbarProps) {
   const t = useTranslations("desktop.channelList.bulk")
@@ -70,6 +73,16 @@ export function ChannelListBulkToolbar({
           aria-label (a11y) and a title (hover tooltip) so the meaning is
           still discoverable. */}
       <div className="ml-auto flex shrink-0 items-center gap-0.5">
+        <Button
+          size="icon"
+          variant="ghost"
+          className="size-6"
+          onClick={onShare}
+          aria-label={t("share")}
+          title={t("share")}
+        >
+          <Link2Icon className="size-3.5" />
+        </Button>
         {archived ? (
           <Button
             size="icon"

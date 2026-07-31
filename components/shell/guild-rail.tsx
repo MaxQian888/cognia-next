@@ -202,7 +202,7 @@ export function GuildRail({ onCreateTeam, onOpenSettings, variant = "rail" }: Pr
         data-side={effectiveSide}
         data-bg-target="sidebar"
       >
-        <ScrollArea className="w-full flex-1">
+        <ScrollArea className="w-full flex-1 [&_[data-slot=scroll-area-scrollbar]]:hidden">
           <div className="flex flex-col items-center gap-2 px-2">
             <PluginExtensionSlot
               point="sidebar.left.top"

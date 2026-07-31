@@ -22,6 +22,7 @@ import { useTranslations } from "next-intl"
 import { toast } from "sonner"
 
 import { ChatPaneGroup } from "@/components/chat/chat-pane-group"
+import { Button } from "@/components/ui/button"
 import type { PlanResumeMode } from "@/components/agent/plan/plan-approval-card"
 import { CharacterPicker } from "@/components/chat/character-picker"
 import { ChannelList } from "@/components/desktop/channel-list"
@@ -41,7 +42,6 @@ import type {
 } from "@cognia/agent-config-types"
 import { decodeSubSession } from "@/lib/claude/team-session-id"
 import { useClaudeChat, useSessions, useTeamChat } from "@/hooks/chat"
-import { usePlatform } from "@/hooks/use-platform"
 import { useChatStore } from "@/stores/chat"
 import { useSettingsStore } from "@/stores/settings"
 import { useUIStore } from "@/stores/ui"
@@ -52,12 +52,25 @@ import { resolveConversationGroupBy } from "@/lib/chat/conversation-grouping"
 import { useProjectStore } from "@/stores/project/project-store"
 import { planGuildReconcile } from "@/lib/shell/guild-session-sync"
 import { loggers } from "@cognia/logging"
+import { useRuntimeSnapshot } from "@/hooks/use-runtime-snapshot"
+import {
+  resolveOperationAvailability,
+  type OperationAvailabilityState,
+} from "@/lib/runtime/operation-availability"
 
 const log = loggers.shell
 
 export function DesktopChatWorkspace() {
-  const platform = usePlatform()
   const router = useRouter()
+  const runtimeT = useTranslations("desktop.chatRuntime")
+  const runtimeSnapshot = useRuntimeSnapshot()
+  const chatAvailability = resolveOperationAvailability({
+    snapshot: runtimeSnapshot,
+    command: "claude_send",
+    localExecutorAvailable: runtimeSnapshot.target?.kind === "standalone",
+    readOnlyFallback: true,
+  })
+  const composerDisabled = chatAvailability.state !== "available"
   // Grouping by workspace is the one mode that needs conversations from every
   // workspace; every other mode keeps the sidebar workspace-isolated.
   const sidebarGroupBy = resolveConversationGroupBy(
@@ -228,7 +241,7 @@ export function DesktopChatWorkspace() {
   const handleNewDirect = useCallback(() => {
     log.info("new-direct (open character picker)")
     setCharacterPickerOpen(true)
-  }, [])
+  }, [setCharacterPickerOpen])
 
   const handleNewTeamConversation = useCallback(
     async (teamId: string) => {
@@ -330,17 +343,6 @@ export function DesktopChatWorkspace() {
         : directChat.editAndResend(messageId, content, sid),
     [directChat, teamChat, isTeamSessionId]
   )
-  const paneClose = useCallback(
-    (sid: string) => {
-      // Team sub-sessions are torn down per turn by useTeamChat; closing the
-      // pane only drops the store slice. Direct panes also close the sidecar
-      // session.
-      if (isTeamSessionId(sid)) useChatStore.getState().closeSession(sid)
-      else void directChat.close(sid)
-    },
-    [directChat, isTeamSessionId]
-  )
-
   // After a plan is approved in the plan-approval dock, switch the session's
   // permission mode and resume the turn. The store mode is set FIRST (so the
   // composer's persist effect can't clobber the row back to `plan`), the row is
@@ -574,17 +576,45 @@ export function DesktopChatWorkspace() {
               className="relative flex min-w-0 flex-1 flex-col overflow-hidden"
               data-bg-target="chat"
             >
-              {!mounted ? null : platform !== "tauri" ? (
-                <DesktopOnlyBanner />
-              ) : (
+              {!mounted ? null : (
                 <>
                   <WorkspaceTrustGate
                     sessionId={activeSession?.id ?? null}
                     promptNonce={trustPromptNonce}
                   />
+                  {composerDisabled ? (
+                    <div
+                      className="mx-3 mt-3 flex items-center justify-between gap-3 rounded-lg border border-border bg-muted/60 px-3 py-2 text-sm"
+                      role="status"
+                      data-testid="chat-runtime-notice"
+                    >
+                      <div className="min-w-0">
+                        <p className="font-medium">{runtimeT("title")}</p>
+                        <p className="text-muted-foreground">
+                          {runtimeT(
+                            `states.${runtimeAvailabilityMessageKey(chatAvailability.state)}`
+                          )}
+                        </p>
+                      </div>
+                      {runtimeRecoveryRoute(chatAvailability.state) ? (
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={() => router.push(runtimeRecoveryRoute(chatAvailability.state)!)}
+                        >
+                          {runtimeT(
+                            chatAvailability.state === "requires-pairing"
+                              ? "actions.pair"
+                              : "actions.connectionSettings"
+                          )}
+                        </Button>
+                      ) : null}
+                    </div>
+                  ) : null}
                   {/* Concurrent chat workspace (direct AND team sessions):
-                    tabs + optional split, each pane bound to its own session
-                    slice + inline approval gate, dispatched by session kind. */}
+                    optional split, each pane bound to its own session slice +
+                    inline approval gate, dispatched by session kind. */}
                   <ChatPaneGroup
                     sessions={sessions}
                     send={paneSend}
@@ -594,13 +624,13 @@ export function DesktopChatWorkspace() {
                     regenerate={paneRegenerate}
                     editResend={paneEditResend}
                     respondToApproval={handleApprovalRespond}
-                    closePane={paneClose}
                     onCreate={handleCreate}
                     onUseSample={handleUseSample}
                     onOpenSettings={openSettings}
                     recentSessions={recentSessions}
                     onResumeSession={handleSwitchToSession}
                     composerRef={composerRef}
+                    composerDisabled={composerDisabled}
                     onResumeAfterPlanApproval={resumeAfterPlanApproval}
                   />
                 </>
@@ -633,22 +663,14 @@ export function DesktopChatWorkspace() {
   )
 }
 
-function DesktopOnlyBanner() {
-  const t = useTranslations("desktop.shell")
-  return (
-    <div className="flex flex-1 items-center justify-center p-6">
-      <div className="max-w-md space-y-3 text-center">
-        <h2 className="text-xl font-semibold">{t("desktopOnlyTitle")}</h2>
-        <p className="text-sm text-muted-foreground">
-          {t("desktopOnlyBodyPrefix")}
-          {/* i18n-exempt: literal shell command */}
-          <code className="rounded bg-muted px-1 py-0.5">pnpm tauri dev</code>
-          {t("desktopOnlyBodyMiddle")}
-          {/* i18n-exempt: literal shell command */}
-          <code className="rounded bg-muted px-1 py-0.5">pnpm dev</code>
-          {t("desktopOnlyBodySuffix")}
-        </p>
-      </div>
-    </div>
-  )
+function runtimeAvailabilityMessageKey(state: OperationAvailabilityState): string {
+  return state.replace(/-([a-z])/g, (_, letter: string) => letter.toUpperCase())
+}
+
+function runtimeRecoveryRoute(state: OperationAvailabilityState): string | null {
+  if (state === "requires-pairing") return "/pair"
+  if (state === "requires-grant" || state === "incompatible" || state === "offline") {
+    return "/settings?section=remote-hosts"
+  }
+  return null
 }

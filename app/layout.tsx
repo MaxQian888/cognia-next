@@ -52,6 +52,7 @@ import { WebDavStartupPromptProvider } from "@/components/providers/webdav-start
 import { WebDavMobileAutosyncProvider } from "@/components/providers/webdav-mobile-autosync-provider"
 import { CompanionBootProvider } from "@/components/providers/companion-boot-provider"
 import { WebCompanionBootProvider } from "@/components/providers/web-companion-boot-provider"
+import { SurfaceAvailabilityBoundary } from "@/components/runtime/surface-availability-boundary"
 import { MobileShellWrapper } from "@/components/mobile/shell/mobile-shell-wrapper"
 import { DesktopOnlyInitializers } from "@/components/providers/initializers/desktop-only-initializers"
 import { MobileOnlyInitializers } from "@/components/providers/initializers/mobile-only-initializers"
@@ -299,7 +300,9 @@ export default async function RootLayout({
                                                           >
                                                             <MobileShellWrapper>
                                                               <DesktopAppShell>
-                                                                {children}
+                                                                <SurfaceAvailabilityBoundary>
+                                                                  {children}
+                                                                </SurfaceAvailabilityBoundary>
                                                               </DesktopAppShell>
                                                             </MobileShellWrapper>
                                                           </div>

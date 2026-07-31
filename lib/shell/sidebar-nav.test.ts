@@ -6,6 +6,7 @@ import {
   resolveSidebarLayout,
   type SidebarCatalogItem,
 } from "./sidebar-nav"
+import type { RuntimeSnapshot } from "@/lib/runtime/operation-availability"
 
 describe("SIDEBAR_NAV_ICONS", () => {
   it("maps every catalog id to an icon", () => {
@@ -39,6 +40,25 @@ describe("getSidebarCatalog", () => {
     expect(ids).not.toContain("source-control")
     expect(ids).not.toContain("browser")
     expect(ids).toContain("workflows")
+  })
+
+  it("restores a host-owned surface when the active Companion advertises it", () => {
+    const runtime: RuntimeSnapshot = {
+      target: {
+        id: "desktop",
+        kind: "companion",
+        hostKind: "desktop",
+        platform: "web",
+      },
+      vaultState: "unlocked",
+      connectionState: "online",
+      host: {
+        compatible: true,
+        operations: ["browser_session_ensure"],
+        grants: ["agent.run"],
+      },
+    }
+    expect(getSidebarCatalog("web", runtime).map((item) => item.id)).toContain("browser")
   })
 })
 

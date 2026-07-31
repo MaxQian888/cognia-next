@@ -104,9 +104,16 @@ jest.mock("@/stores/settings", () => ({
     selector({ settings: conversationSidebar ? { conversationSidebar } : null }),
 }))
 
-const searchSessionsByContent = jest.fn()
-jest.mock("@/lib/db/messages", () => ({
-  searchSessionsByContent: (...args: unknown[]) => searchSessionsByContent(...args),
+const useChatHistorySearch = jest.fn()
+let historySearchState = {
+  results: [] as Array<{ sessionId: string }>,
+  moreOlderHistory: false,
+  indexIncomplete: false,
+  loading: false,
+  error: null as Error | null,
+}
+jest.mock("@/hooks/chat/use-chat-history-search", () => ({
+  useChatHistorySearch: (...args: unknown[]) => useChatHistorySearch(...args),
 }))
 
 const baseSession = (id: string, overrides: Partial<ChatSession> = {}): ChatSession => ({
@@ -135,8 +142,15 @@ describe("<MobileChannelList />", () => {
     setGroupCollapsed.mockReset()
     useProjectStore.setState({ projects: [], activeProjectId: null, loaded: false })
     conversationSidebar = null
-    searchSessionsByContent.mockReset()
-    searchSessionsByContent.mockResolvedValue({ ids: new Set<string>(), truncated: false })
+    historySearchState = {
+      results: [],
+      moreOlderHistory: false,
+      indexIncomplete: false,
+      loading: false,
+      error: null,
+    }
+    useChatHistorySearch.mockReset()
+    useChatHistorySearch.mockImplementation(() => historySearchState)
   })
 
   it("groups pinned sessions and buckets the rest by date", () => {
@@ -612,7 +626,10 @@ describe("<MobileChannelList />", () => {
 
   it("surfaces content-only matches when searchScope is titleAndContent", async () => {
     conversationSidebar = { searchScope: "titleAndContent" }
-    searchSessionsByContent.mockResolvedValue({ ids: new Set(["s3"]), truncated: false })
+    historySearchState = {
+      ...historySearchState,
+      results: [{ sessionId: "s3" }],
+    }
     const user = userEvent.setup()
     render(
       <MobileChannelList
@@ -628,7 +645,12 @@ describe("<MobileChannelList />", () => {
     )
     // "zzz" matches no title; only the content set contains s3 (Side note).
     await user.type(screen.getByTestId("mobile-channel-search"), "zzz")
-    await waitFor(() => expect(searchSessionsByContent).toHaveBeenCalled())
+    await waitFor(() =>
+      expect(useChatHistorySearch).toHaveBeenLastCalledWith(
+        "zzz",
+        expect.objectContaining({ collapseBySession: true })
+      )
+    )
     await waitFor(() =>
       expect(screen.getByTestId("mobile-channel-row-s3")).toBeInTheDocument()
     )

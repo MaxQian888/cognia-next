@@ -1,7 +1,7 @@
 /**
  * @jest-environment jsdom
  */
-import { render, screen } from "@testing-library/react"
+import { fireEvent, render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import type { ChatSession } from "@cognia/agent-config-types"
 
@@ -76,6 +76,22 @@ test("renders title and clicking the row selects the session", async () => {
   )
 })
 
+test("scrolls a truncated conversation title without opening a native hover bubble", () => {
+  const title = "A conversation title that is much wider than the sidebar"
+  setup({ session: { ...baseSession, title } })
+
+  const text = screen.getByText(title)
+  const viewport = text.closest('[data-slot="hover-scroll-text"]')
+  expect(viewport).not.toBeNull()
+  Object.defineProperty(viewport, "clientWidth", { configurable: true, value: 100 })
+  Object.defineProperty(text, "scrollWidth", { configurable: true, value: 244 })
+
+  fireEvent.mouseEnter(viewport!)
+
+  expect(text).toHaveAttribute("data-scrolling", "true")
+  expect(screen.getByRole("button", { name: title })).not.toHaveAttribute("title")
+})
+
 test("focused rows carry data-focused for the keyboard-nav ring", () => {
   const { container } = setup({ focused: true })
   expect(container.querySelector("li[data-focused]")).toBeInTheDocument()
@@ -113,6 +129,13 @@ test("renders a drag grip handle when drag wiring is supplied", () => {
   expect(screen.getByLabelText("dragHandle")).toBeInTheDocument()
 })
 
+test("binds the sortable activator ref to the drag grip handle", () => {
+  const dragActivatorRef = jest.fn()
+  setup({ dragListeners: {}, dragAttributes: {}, dragActivatorRef })
+
+  expect(dragActivatorRef).toHaveBeenCalledWith(screen.getByLabelText("dragHandle"))
+})
+
 test("Ctrl-click forwards the modifier flag through onSelect", async () => {
   const user = userEvent.setup()
   const { onSelect } = setup()
@@ -139,6 +162,51 @@ test("applies the multi-select visual when `selected` is true", () => {
   const li = container.querySelector("li")
   expect(li?.getAttribute("data-selected")).toBe("true")
   expect(li?.className).toMatch(/ring-/)
+})
+
+test("renders an insertion cue at the pending drop edge", () => {
+  const { container, rerender } = setup({ dropPosition: "before" })
+  expect(container.querySelector("li")).toHaveAttribute("data-drop-position", "before")
+
+  rerender(
+    <ul>
+      <SessionRow
+        session={baseSession}
+        active={false}
+        dropPosition="after"
+        onSelect={jest.fn()}
+        onDelete={jest.fn()}
+        onRename={jest.fn()}
+      />
+    </ul>
+  )
+  expect(container.querySelector("li")).toHaveAttribute("data-drop-position", "after")
+})
+
+test("action menu toggles this row in the shared multi-selection", async () => {
+  const user = userEvent.setup()
+  const onToggleSelection = jest.fn()
+  const { rerender } = setup({ onToggleSelection })
+
+  await user.click(screen.getByRole("button", { name: "actionsMenu" }))
+  await user.click(await screen.findByText("select"))
+  expect(onToggleSelection).toHaveBeenCalledWith("s-1")
+
+  rerender(
+    <ul>
+      <SessionRow
+        session={baseSession}
+        active={false}
+        selected
+        onSelect={jest.fn()}
+        onToggleSelection={onToggleSelection}
+        onDelete={jest.fn()}
+        onRename={jest.fn()}
+      />
+    </ul>
+  )
+  await user.click(screen.getByRole("button", { name: "actionsMenu" }))
+  expect(await screen.findByText("deselect")).toBeInTheDocument()
 })
 
 test("pinned sessions render a pin glyph next to the title", () => {

@@ -29,11 +29,13 @@ beforeEach(() => {
   for (const k of cleanWindowKeys) {
     delete (window as unknown as Record<string, unknown>)[k as string]
   }
+  delete window.__cogniaPluginRuntimeReady
   window.localStorage.clear()
 })
 
 afterEach(() => {
   cleanup()
+  delete window.__cogniaPluginRuntimeReady
   process.env.NEXT_PUBLIC_E2E = originalEnv
 })
 
@@ -82,6 +84,23 @@ describe("ExposeTestGlobals", () => {
     expect(typeof window.__cogniaE2EWebRtc?.connect).toBe("function")
     expect(typeof window.__cogniaE2EWebRtc?.reconnectNow).toBe("function")
     expect(window.__cogniaE2EWebRtcEvents).toEqual({})
+  })
+
+  it("waits for an in-progress plugin schema upgrade before opening the fixture bridge", async () => {
+    process.env.NEXT_PUBLIC_E2E = "1"
+    window.__cogniaPluginRuntimeReady = false
+
+    render(<ExposeTestGlobals />)
+
+    await waitFor(() => {
+      expect(window.__cogniaE2EWebRtcReady).toBe(true)
+    })
+    expect(window.__cogniaTestGlobalsReady).not.toBe(true)
+
+    window.__cogniaPluginRuntimeReady = true
+    await waitFor(() => {
+      expect(window.__cogniaTestGlobalsReady).toBe(true)
+    })
   })
 
   it("__cogniaE2EWebRtc.getState returns 'idle' before connect and reconnectNow returns 'no-instance'", async () => {

@@ -22,7 +22,6 @@ import { useEffect, useMemo, useRef } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 
 import { MobileConsentSheet } from "@/components/mobile/automation/mobile-consent-sheet"
-import { MobileOutboundRunnerProvider } from "@/components/mobile/mobile-outbound-runner-provider"
 import { OfflineBanner } from "@/components/mobile/offline-banner"
 import { useKeyboardInsets } from "@/hooks/ui/use-keyboard-insets"
 import { usePlatform } from "@/hooks/use-platform"
@@ -93,6 +92,10 @@ export function MobileShellWrapper({ children, badges, className }: MobileShellW
     // own the whole viewport — hide the tab bar so it doesn't fight the
     // canvas FAB / inspector drawer. The `/workflows` list itself keeps it.
     if (pathname.startsWith("/workflows/")) return false
+    // The terminal owns its safe-area accessory row and, on tablets, its
+    // resizable project-workbench split. A second fixed tab bar would overlap
+    // both the PTY and software keyboard.
+    if (pathname === "/me/terminal") return false
     return !TAB_BAR_HIDDEN_PREFIXES.some(
       (prefix) => pathname === prefix || pathname.startsWith(prefix + "/")
     )
@@ -134,7 +137,10 @@ export function MobileShellWrapper({ children, badges, className }: MobileShellW
   // the rest; every other (scrollable) route keeps the document-scroll
   // `min-h-[100dvh]`.
   const fullViewport =
-    pathname.startsWith("/workflows/") || pathname === "/a2ui" || pathname.startsWith("/a2ui/")
+    pathname.startsWith("/workflows/") ||
+    pathname === "/a2ui" ||
+    pathname.startsWith("/a2ui/") ||
+    pathname === "/me/terminal"
 
   return (
     <div
@@ -163,7 +169,6 @@ export function MobileShellWrapper({ children, badges, className }: MobileShellW
         <OfflineBanner />
         {children}
       </div>
-      <MobileOutboundRunnerProvider />
       <MobileConsentSheet />
       {showTabBar ? <MobileTabBar badges={mergedBadges} keyboardHidden={keyboard.isVisible} /> : null}
     </div>

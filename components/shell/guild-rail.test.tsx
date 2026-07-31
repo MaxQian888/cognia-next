@@ -128,10 +128,15 @@ beforeEach(() => {
 })
 
 test("renders the DM, Canvas, and Settings rail buttons", () => {
-  render(withTooltipProvider(<GuildRail onCreateTeam={jest.fn()} onOpenSettings={jest.fn()} />))
+  const { container } = render(
+    withTooltipProvider(<GuildRail onCreateTeam={jest.fn()} onOpenSettings={jest.fn()} />)
+  )
   expect(screen.getByLabelText("directMessages")).toBeInTheDocument()
   expect(screen.getByLabelText("canvas")).toBeInTheDocument()
   expect(screen.getByLabelText("openSettings")).toBeInTheDocument()
+  expect(container.querySelector('[data-slot="scroll-area"]')).toHaveClass(
+    "[&_[data-slot=scroll-area-scrollbar]]:hidden"
+  )
 })
 
 test("does not render the account switcher in the rail", () => {

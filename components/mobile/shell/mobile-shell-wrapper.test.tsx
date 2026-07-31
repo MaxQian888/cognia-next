@@ -1,7 +1,7 @@
 /**
  * @jest-environment jsdom
  */
-import { render, screen } from "@testing-library/react"
+import { act, render, screen } from "@testing-library/react"
 
 import { MobileShellWrapper } from "./mobile-shell-wrapper"
 import { useSettingsStore as realSettingsStore } from "@/stores/settings/settings-store"
@@ -41,10 +41,6 @@ jest.mock("@/lib/capacitor/haptics", () => ({
 
 jest.mock("@/components/mobile/offline-banner", () => ({
   OfflineBanner: () => <div data-testid="offline-banner-stub" />,
-}))
-
-jest.mock("@/components/mobile/mobile-outbound-runner-provider", () => ({
-  MobileOutboundRunnerProvider: () => <div data-testid="outbound-runner-stub" />,
 }))
 
 const inboundUnreadRef = { value: 0 }
@@ -101,7 +97,9 @@ describe("<MobileShellWrapper />", () => {
   })
 
   function setTabLayout(layout: MobileTabLayout) {
-    realSettingsStore.setState({ settings: { mobileTabLayout: layout } } as never)
+    act(() => {
+      realSettingsStore.setState({ settings: { mobileTabLayout: layout } } as never)
+    })
   }
 
   it("renders the tab bar on mobile", () => {
@@ -183,7 +181,6 @@ describe("<MobileShellWrapper />", () => {
     )
     expect(screen.getByTestId("child")).toBeInTheDocument()
     expect(screen.queryByTestId("offline-banner-stub")).not.toBeInTheDocument()
-    expect(screen.queryByTestId("outbound-runner-stub")).not.toBeInTheDocument()
     expect(screen.queryByTestId("mobile-tab-bar")).not.toBeInTheDocument()
   })
 
@@ -195,10 +192,9 @@ describe("<MobileShellWrapper />", () => {
       </MobileShellWrapper>
     )
     expect(screen.queryByTestId("offline-banner-stub")).not.toBeInTheDocument()
-    expect(screen.queryByTestId("outbound-runner-stub")).not.toBeInTheDocument()
   })
 
-  it("mobile: mounts OfflineBanner and outbound runner", () => {
+  it("mobile: mounts OfflineBanner", () => {
     platformMock.mockReturnValue("mobile")
     render(
       <MobileShellWrapper>
@@ -206,7 +202,6 @@ describe("<MobileShellWrapper />", () => {
       </MobileShellWrapper>
     )
     expect(screen.getByTestId("offline-banner-stub")).toBeInTheDocument()
-    expect(screen.getByTestId("outbound-runner-stub")).toBeInTheDocument()
   })
 
   it("forwards badges to the tab bar", () => {
@@ -342,6 +337,19 @@ describe("<MobileShellWrapper />", () => {
     const inner = container.querySelector("[data-testid='mobile-shell-wrapper'] > div")
     expect(inner?.className).toContain("h-[100dvh]")
     expect(inner?.className).not.toContain("min-h-[100dvh]")
+  })
+
+  it("reserves the full viewport for the terminal and hides the mobile tab bar", () => {
+    pathnameMock.mockReturnValue("/me/terminal")
+    render(
+      <MobileShellWrapper>
+        <div>terminal</div>
+      </MobileShellWrapper>
+    )
+    const wrapper = screen.getByTestId("mobile-shell-wrapper")
+    expect(wrapper).toHaveAttribute("data-full-viewport", "true")
+    expect(wrapper).toHaveAttribute("data-tab-bar-visible", "false")
+    expect(screen.queryByTestId("mobile-tab-bar")).not.toBeInTheDocument()
   })
 
   it("gives the A2UI mini-apps route a definite full-viewport height while keeping the tab bar", () => {

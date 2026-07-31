@@ -34,8 +34,25 @@ jest.mock("@/components/desktop/title-bar-quick-actions", () => ({
   ),
 }))
 jest.mock("@/components/desktop/title-bar-layout-controls", () => ({
-  TitleBarLayoutControls: ({ className }: { className?: string }) => (
-    <div data-testid="seg-layoutControls" className={className} />
+  TitleBarLayoutControls: ({
+    className,
+    controls,
+  }: {
+    className?: string
+    controls?: string[]
+  }) => (
+    <div
+      data-testid={`seg-${
+        controls?.[0] === "sidebar"
+          ? "primarySidebarToggle"
+          : controls?.[0] === "panel"
+            ? "panelToggle"
+            : controls?.[0] === "rightSidebar"
+              ? "secondarySidebarToggle"
+              : "layoutControls"
+      }`}
+      className={className}
+    />
   ),
 }))
 jest.mock("@/components/account/account-bar-button", () => ({

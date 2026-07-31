@@ -22,5 +22,13 @@ export function useLoadingI18n() {
     /** Replaces the elapsed count when the device reports no connection. */
     offline: t("offline"),
     cancel: t("cancel"),
+    page: {
+      title: t("page.title"),
+      description: t("page.description"),
+      progressLabel: t("page.progressLabel"),
+      stages: [t("page.stages.interface"), t("page.stages.workspace"), t("page.stages.finalizing")],
+      reload: t("page.reload"),
+      reloadHint: t("page.reloadHint"),
+    },
   }
 }

@@ -23,11 +23,11 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { useClientLiveQuery, useDexieFirstQuery } from "@/hooks/data"
 import { useConversationListModel } from "@/hooks/chat/use-conversation-list-model"
+import { useChatHistorySearch } from "@/hooks/chat/use-chat-history-search"
 import { useDebouncedCallback } from "@/hooks/workflow/use-debounced-callback"
 import { listCharacters } from "@/lib/db/characters"
 import { listSessionStates } from "@/lib/db/session-state"
 import { updateSession } from "@/lib/db/sessions"
-import { searchSessionsByContent } from "@/lib/db/messages"
 import { avatarColor, avatarGlyph } from "@/lib/ui/avatar"
 import { STAGGER_CHILD, STAGGER_CONTAINER } from "@/lib/ui/motion"
 import { cn } from "@/lib/utils"
@@ -153,31 +153,6 @@ export function MobileChannelList({
   const showUnreadBadges = sidebarSettings?.showUnreadBadges !== false
   const contentScope = sidebarSettings?.searchScope === "titleAndContent"
 
-  // Opt-in message-content search (mirrors the desktop sidebar): resolve the
-  // set of session ids whose message text matches the debounced query.
-  const scopeProjectId = sessions.find((s) => s.projectId)?.projectId
-  const [contentMatchIds, setContentMatchIds] = useState<ReadonlySet<string> | undefined>(undefined)
-  const [contentTruncated, setContentTruncated] = useState(false)
-  useEffect(() => {
-    if (!contentScope || query.trim().length < 2) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      setContentMatchIds(undefined)
-      setContentTruncated(false)
-      return
-    }
-    let cancelled = false
-    void searchSessionsByContent(query, { projectId: scopeProjectId })
-      .then((res) => {
-        if (cancelled) return
-        setContentMatchIds(res.ids)
-        setContentTruncated(res.truncated)
-      })
-      .catch(() => {})
-    return () => {
-      cancelled = true
-    }
-  }, [contentScope, query, scopeProjectId])
-
   // Wave 4 / ADR-0026 — Dexie-first read so the chip list survives a
   // server drop; `table: "characters"` kicks the sync orchestrator on
   // mount so an offline-then-online transition refreshes the chips.
@@ -206,6 +181,21 @@ export function MobileChannelList({
   // Group axes the pure model can't resolve on its own.
   const projects = useProjectStore((s) => s.projects)
   const activeProjectId = useProjectStore((s) => s.activeProjectId)
+  const contentSearch = useChatHistorySearch(query, {
+    enabled: contentScope,
+    projectId: groupBy === "workspace" ? undefined : (activeProjectId ?? undefined),
+    includeArchived: view === "archived",
+    collapseBySession: true,
+    limit: 200,
+  })
+  const contentMatchIds = useMemo<ReadonlySet<string> | undefined>(() => {
+    if (!contentScope || query.trim().length < 2) return undefined
+    return new Set(contentSearch.results.map((result) => result.sessionId))
+  }, [contentScope, query, contentSearch.results])
+  const contentTruncated =
+    contentSearch.moreOlderHistory ||
+    contentSearch.indexIncomplete ||
+    contentSearch.error !== null
   const workspaceGroups = useMemo(
     () => projects.map((p) => ({ id: p.id, name: p.name })),
     [projects]

@@ -94,6 +94,7 @@ export function DesktopAppShell({ children }: { children: React.ReactNode }) {
   // dock's slice of the shell's vertical column. Hidden when closed.
   const terminalPanelOpen = useTerminalStore((s) => s.panelOpen)
   const terminalPanelHeightPct = useTerminalStore((s) => s.panelHeightPct)
+  const terminalMaximized = useTerminalStore((s) => s.maximized)
   // Slide the dock up from the bottom edge on open (and back down on close)
   // instead of popping. Only the wrapper's transform animates — the height is
   // reserved instantly so the editor above settles once and xterm fits once,
@@ -141,7 +142,7 @@ export function DesktopAppShell({ children }: { children: React.ReactNode }) {
   // desktop chrome — so they keep returning children. For ordinary routes,
   // cover the boot/hydration gap with a neutral loader instead of a
   // half-painted shell (the static-export HTML shows this until JS mounts).
-  if (!mounted) return bypass ? <>{children}</> : <PageLoading />
+  if (!mounted) return bypass ? <>{children}</> : <PageLoading variant="workspace" allowReload />
   if (isMobile || bypass) return <>{children}</>
 
   const handleCreateTeam = () => {
@@ -169,7 +170,7 @@ export function DesktopAppShell({ children }: { children: React.ReactNode }) {
       <TitleBar />
       <div className="flex flex-1 overflow-hidden">
         {sidebarSide === "left" ? guildRail : null}
-        <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
+        <div className="relative flex min-w-0 flex-1 flex-col overflow-hidden">
           <div data-find-scope className="flex min-h-0 flex-1 overflow-hidden">
             {children}
           </div>
@@ -178,8 +179,9 @@ export function DesktopAppShell({ children }: { children: React.ReactNode }) {
               <motion.div
                 key="terminal-dock-region"
                 data-testid="terminal-dock-region"
-                className="min-h-0 shrink-0"
-                style={{ height: `${terminalPanelHeightPct}%` }}
+                className={terminalMaximized ? "absolute inset-0 z-40 min-h-0" : "min-h-0 shrink-0"}
+                style={{ height: terminalMaximized ? "100%" : `${terminalPanelHeightPct}%` }}
+                data-maximized={terminalMaximized ? "true" : "false"}
                 initial={motionReduce ? false : { y: "100%" }}
                 animate={{ y: 0 }}
                 exit={{ y: motionReduce ? 0 : "100%", opacity: motionReduce ? 0 : 1 }}

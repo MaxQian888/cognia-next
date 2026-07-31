@@ -97,6 +97,19 @@ export const TITLE_BAR_ITEMS: readonly BarItemMeta[] = [
     minWidth: "xl",
   },
   { id: "accountTop", bar: "title", zone: "end", i18nKey: "accountTop", defaultHidden: true },
+  {
+    id: "primarySidebarToggle",
+    bar: "title",
+    zone: "end",
+    i18nKey: "primarySidebarToggle",
+  },
+  { id: "panelToggle", bar: "title", zone: "end", i18nKey: "panelToggle" },
+  {
+    id: "secondarySidebarToggle",
+    bar: "title",
+    zone: "end",
+    i18nKey: "secondarySidebarToggle",
+  },
   { id: "layoutControls", bar: "title", zone: "end", i18nKey: "layoutControls" },
 ] as const
 

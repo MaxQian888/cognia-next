@@ -1,15 +1,64 @@
 /**
  * @jest-environment jsdom
  */
-import { render, screen, waitFor } from "@testing-library/react"
+import { act, render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import type { Character, ChatSession, Team } from "@cognia/agent-config-types"
 import type { SelectedGuild } from "@/stores/ui"
 
 const logInfo = jest.fn()
 const logWarn = jest.fn()
+let mockDragEnd: ((event: unknown) => void) | undefined
+let mockDragOver: ((event: unknown) => void) | undefined
+let mockDragCancel: (() => void) | undefined
+const mockSensorOptions: unknown[] = []
+const mockSortableItems: string[][] = []
+const mockDroppableNodes = new Map<string, HTMLElement | null>()
+
+jest.mock("@dnd-kit/core", () => {
+  const actual = jest.requireActual<typeof import("@dnd-kit/core")>("@dnd-kit/core")
+  return {
+    ...actual,
+    DndContext: ({
+      children,
+      onDragEnd,
+      onDragOver,
+      onDragCancel,
+    }: {
+      children: React.ReactNode
+      onDragEnd: (event: unknown) => void
+      onDragOver?: (event: unknown) => void
+      onDragCancel?: () => void
+    }) => {
+      mockDragEnd = onDragEnd
+      mockDragOver = onDragOver
+      mockDragCancel = onDragCancel
+      return <>{children}</>
+    },
+    useSensor: (sensor: unknown, options: unknown) => {
+      mockSensorOptions.push(options)
+      return actual.useSensor(sensor as never, options as never)
+    },
+    useDroppable: ({ id }: { id: string }) => ({
+      setNodeRef: (node: HTMLElement | null) => mockDroppableNodes.set(id, node),
+      isOver: false,
+    }),
+  }
+})
+
+jest.mock("@dnd-kit/sortable", () => {
+  const actual = jest.requireActual<typeof import("@dnd-kit/sortable")>("@dnd-kit/sortable")
+  return {
+    ...actual,
+    SortableContext: ({ items, ...props }: React.ComponentProps<typeof actual.SortableContext>) => {
+      mockSortableItems.push(items.map((item) => String(typeof item === "object" ? item.id : item)))
+      return <actual.SortableContext items={items} {...props} />
+    },
+  }
+})
 
 jest.mock("next-intl", () => ({
+  useLocale: () => "en",
   useTranslations: () => (key: string, vars?: Record<string, unknown>) =>
     vars ? `${key}:${JSON.stringify(vars)}` : key,
 }))
@@ -76,9 +125,16 @@ jest.mock("@/stores/settings", () => ({
     }),
 }))
 
-const searchSessionsByContent = jest.fn()
-jest.mock("@/lib/db/messages", () => ({
-  searchSessionsByContent: (...args: unknown[]) => searchSessionsByContent(...args),
+const useChatHistorySearch = jest.fn()
+let historySearchState = {
+  results: [] as Array<{ sessionId: string }>,
+  moreOlderHistory: false,
+  indexIncomplete: false,
+  loading: false,
+  error: null as Error | null,
+}
+jest.mock("@/hooks/chat/use-chat-history-search", () => ({
+  useChatHistorySearch: (...args: unknown[]) => useChatHistorySearch(...args),
 }))
 
 let isNarrow = false
@@ -93,6 +149,7 @@ jest.mock("@/hooks/ui", () => {
 import { ChannelList } from "./channel-list"
 import { useProjectStore } from "@/stores/project/project-store"
 import type { Project } from "@/types"
+import { sortableKeyboardCoordinates } from "@dnd-kit/sortable"
 
 const characters: Character[] = [
   { id: "c-1", name: "Alice", createdAt: 0, updatedAt: 0 } as unknown as Character,
@@ -137,6 +194,12 @@ function baseSession(id: string, overrides: Partial<ChatSession> = {}): ChatSess
 beforeEach(() => {
   logInfo.mockReset()
   logWarn.mockReset()
+  mockDragEnd = undefined
+  mockDragOver = undefined
+  mockDragCancel = undefined
+  mockSensorOptions.length = 0
+  mockSortableItems.length = 0
+  mockDroppableNodes.clear()
   callQueue.length = 0
   selectedGuild = { kind: "dm" }
   isNarrow = false
@@ -145,8 +208,15 @@ beforeEach(() => {
   setGroupCollapsed.mockReset()
   saveSettings.mockReset()
   saveSettings.mockResolvedValue(undefined)
-  searchSessionsByContent.mockReset()
-  searchSessionsByContent.mockResolvedValue({ ids: new Set<string>(), truncated: false })
+  historySearchState = {
+    results: [],
+    moreOlderHistory: false,
+    indexIncomplete: false,
+    loading: false,
+    error: null,
+  }
+  useChatHistorySearch.mockReset()
+  useChatHistorySearch.mockImplementation(() => historySearchState)
 })
 
 test("DM guild renders only direct sessions, grouped into date buckets", () => {
@@ -171,6 +241,144 @@ test("DM guild renders only direct sessions, grouped into date buckets", () => {
   expect(screen.queryByText("Squad meeting")).toBeNull()
   // updatedAt: 0 (epoch) → "Older" date-bucket header (no character grouping).
   expect(screen.getByText("bucketOlder")).toBeInTheDocument()
+})
+
+test("persists a drag-end reorder for the section that contains both conversations", () => {
+  conversationSidebar = { groupBy: "date" }
+  callQueue.push(characters, [], undefined)
+  const onReorderSessions = jest.fn()
+  const now = Date.now()
+
+  render(
+    <ChannelList
+      sessions={[
+        baseSession("first", { updatedAt: now }),
+        baseSession("second", { updatedAt: now - 1 }),
+      ]}
+      activeSessionId={null}
+      onSelect={jest.fn()}
+      onNewDirect={jest.fn()}
+      onNewTeamConversation={jest.fn()}
+      onDelete={jest.fn()}
+      onRename={jest.fn()}
+      onReorderSessions={onReorderSessions}
+    />
+  )
+
+  act(() => {
+    mockDragEnd?.({
+      active: { id: "second", data: { current: { type: "session", folderId: null } } },
+      over: { id: "first", data: { current: { type: "session", folderId: null } } },
+    })
+  })
+
+  expect(onReorderSessions).toHaveBeenCalledWith(["second", "first"], "date:today")
+})
+
+test("previews the pending insertion edge and clears it when the drag is cancelled", () => {
+  conversationSidebar = { groupBy: "date" }
+  callQueue.push(characters, [], undefined)
+  const now = Date.now()
+
+  const { container } = render(
+    <ChannelList
+      sessions={[
+        baseSession("first", { updatedAt: now }),
+        baseSession("second", { updatedAt: now - 1 }),
+      ]}
+      activeSessionId={null}
+      onSelect={jest.fn()}
+      onNewDirect={jest.fn()}
+      onNewTeamConversation={jest.fn()}
+      onDelete={jest.fn()}
+      onRename={jest.fn()}
+    />
+  )
+
+  act(() => {
+    mockDragOver?.({
+      active: { id: "second" },
+      over: { id: "first" },
+    })
+  })
+  expect(container.querySelector('[data-drop-position="before"]')).toBeInTheDocument()
+
+  act(() => mockDragCancel?.())
+  expect(container.querySelector("[data-drop-position]")).toBeNull()
+})
+
+test("registers each rendered conversation section as its own sortable list", () => {
+  conversationSidebar = { groupBy: "date" }
+  callQueue.push(characters, [], undefined)
+  const now = Date.now()
+
+  render(
+    <ChannelList
+      sessions={[
+        baseSession("pinned", { pinned: true, updatedAt: now }),
+        baseSession("first", { updatedAt: now - 1 }),
+        baseSession("second", { updatedAt: now - 2 }),
+      ]}
+      activeSessionId={null}
+      onSelect={jest.fn()}
+      onNewDirect={jest.fn()}
+      onNewTeamConversation={jest.fn()}
+      onDelete={jest.fn()}
+      onRename={jest.fn()}
+    />
+  )
+
+  expect(mockSortableItems).toContainEqual(["pinned"])
+  expect(mockSortableItems).toContainEqual(["first", "second"])
+  expect(mockSortableItems).not.toContainEqual(["pinned", "first", "second"])
+})
+
+test("configures the keyboard sensor with sortable coordinates", () => {
+  conversationSidebar = { groupBy: "date" }
+  callQueue.push(characters, [], undefined)
+
+  render(
+    <ChannelList
+      sessions={[dmSession]}
+      activeSessionId={null}
+      onSelect={jest.fn()}
+      onNewDirect={jest.fn()}
+      onNewTeamConversation={jest.fn()}
+      onDelete={jest.fn()}
+      onRename={jest.fn()}
+    />
+  )
+
+  expect(mockSensorOptions).toContainEqual({
+    coordinateGetter: sortableKeyboardCoordinates,
+  })
+})
+
+test("constrains long session titles to the history rail width", () => {
+  conversationSidebar = { groupBy: "team" }
+  callQueue.push(characters, [], undefined)
+  const longTitle =
+    "lark:cai_mrkkmfi6_r07xcp:oc_5a1f_really_long_conversation_identifier_without_breaks"
+
+  const { container } = render(
+    <ChannelList
+      sessions={[{ ...dmSession, title: longTitle }]}
+      activeSessionId={null}
+      onSelect={jest.fn()}
+      onNewDirect={jest.fn()}
+      onNewTeamConversation={jest.fn()}
+      onDelete={jest.fn()}
+      onRename={jest.fn()}
+    />
+  )
+
+  expect(screen.getByText(longTitle)).toHaveClass("truncate")
+  expect(container.querySelector('[data-slot="scroll-area"]')?.className).toContain(
+    "[&_[data-slot=scroll-area-viewport]>div]:!block"
+  )
+  expect(container.querySelector('[data-slot="scroll-area"]')?.className).toContain(
+    "[&_[data-slot=scroll-area-scrollbar]]:hidden"
+  )
 })
 
 test("desktop history rail opts into the chat wallpaper with sidebar tonality", () => {
@@ -620,6 +828,10 @@ describe("workspace grouping (the default axis)", () => {
     expect(screen.getByText("Here")).toBeInTheDocument()
     expect(screen.queryByText("There")).toBeNull()
     expect(screen.getByText("Nowhere")).toBeInTheDocument()
+    expect(screen.getByText("Here").closest('[data-slot="collapsible-content"]')).toHaveClass(
+      "data-[state=open]:animate-collapsible-down",
+      "motion-reduce:animate-none"
+    )
   })
 
   it("toggling a workspace header records an explicit collapse choice", async () => {
@@ -895,6 +1107,60 @@ describe("multi-select gestures", () => {
     expect(onBulkSetPinned.mock.calls[0][1]).toBe(true)
   })
 
+  test("bulk Share opens the selected conversations in visible order", async () => {
+    callQueue.push(characters, [], undefined)
+    const user = userEvent.setup()
+    render(
+      <ChannelList
+        sessions={[dmA, dmB, dmC]}
+        activeSessionId={null}
+        onSelect={jest.fn()}
+        onNewDirect={jest.fn()}
+        onNewTeamConversation={jest.fn()}
+        onDelete={jest.fn()}
+        onRename={jest.fn()}
+      />
+    )
+    await user.keyboard("{Control>}")
+    await user.click(screen.getByRole("button", { name: /Alpha/ }))
+    await user.click(screen.getByRole("button", { name: /Bravo/ }))
+    await user.keyboard("{/Control}")
+
+    await user.click(screen.getByRole("button", { name: "share" }))
+
+    const dialog = await screen.findByRole("dialog")
+    const summary = within(dialog).getByLabelText('summary:{"count":2}')
+    expect(
+      within(summary)
+        .getAllByRole("listitem")
+        .map((item) => item.textContent)
+    ).toEqual(["Alpha", "Bravo"])
+
+    await user.click(within(dialog).getByRole("button", { name: /close/i }))
+    expect(screen.queryByRole("toolbar")).toBeNull()
+  })
+
+  test("row action menu starts selection without a keyboard modifier", async () => {
+    callQueue.push(characters, [], undefined)
+    const user = userEvent.setup()
+    render(
+      <ChannelList
+        sessions={[dmA, dmB]}
+        activeSessionId={null}
+        onSelect={jest.fn()}
+        onNewDirect={jest.fn()}
+        onNewTeamConversation={jest.fn()}
+        onDelete={jest.fn()}
+        onRename={jest.fn()}
+      />
+    )
+
+    await user.click(screen.getAllByRole("button", { name: "actionsMenu" })[0])
+    await user.click(await screen.findByText("select"))
+
+    expect(await screen.findByRole("toolbar")).toHaveTextContent('selectedCount:{"count":1}')
+  })
+
   test("Escape clears the active multi-selection", async () => {
     callQueue.push(characters, [], undefined)
     const user = userEvent.setup()
@@ -1049,6 +1315,27 @@ test("renders a collapsible folder section for foldered sessions", async () => {
   expect(screen.queryByText("Inside work")).toBeNull()
 })
 
+test("limits a folder drop target to its header so child rows remain sortable targets", () => {
+  callQueue.push(characters, [], undefined)
+  render(
+    <ChannelList
+      sessions={[baseSession("in-folder", { title: "Inside work", folderId: "f1" })]}
+      activeSessionId={null}
+      onSelect={jest.fn()}
+      onNewDirect={jest.fn()}
+      onNewTeamConversation={jest.fn()}
+      onDelete={jest.fn()}
+      onRename={jest.fn()}
+      folders={[workFolder]}
+      onAssignToFolder={jest.fn()}
+    />
+  )
+
+  const folderDropTarget = mockDroppableNodes.get("folder:f1")
+  expect(folderDropTarget).toBeInstanceOf(HTMLElement)
+  expect(folderDropTarget).not.toContainElement(screen.getByText("Inside work"))
+})
+
 test("New folder button invokes onCreateFolder", async () => {
   callQueue.push(characters, [], undefined)
   const onCreateFolder = jest.fn()
@@ -1167,7 +1454,10 @@ describe("interaction upgrades", () => {
 
   test("content-scope search surfaces sessions matched only by message body", async () => {
     conversationSidebar = { searchScope: "titleAndContent" }
-    searchSessionsByContent.mockResolvedValue({ ids: new Set(["s-b"]), truncated: false })
+    historySearchState = {
+      ...historySearchState,
+      results: [{ sessionId: "s-b" }],
+    }
     callQueue.push(characters, [], undefined)
     const user = userEvent.setup()
     render(
@@ -1183,7 +1473,12 @@ describe("interaction upgrades", () => {
     )
     // "zzz" matches no title; only the content-search set contains s-b (Bravo).
     await user.type(screen.getByLabelText("searchAria"), "zzz")
-    await waitFor(() => expect(searchSessionsByContent).toHaveBeenCalled())
+    await waitFor(() =>
+      expect(useChatHistorySearch).toHaveBeenLastCalledWith(
+        "zzz",
+        expect.objectContaining({ collapseBySession: true })
+      )
+    )
     expect(await screen.findByText("Bravo")).toBeInTheDocument()
     expect(screen.queryByText("Alpha")).toBeNull()
   })

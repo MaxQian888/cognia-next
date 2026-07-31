@@ -164,12 +164,17 @@ test("renders members and clicking one fires onMention", async () => {
   queueQueries(sampleTeam, sampleMembers)
   const onMention = jest.fn()
   const user = userEvent.setup()
-  render(<MemberList teamSessionId="ts-1" teamId="t-1" onMention={onMention} />)
+  const { container } = render(
+    <MemberList teamSessionId="ts-1" teamId="t-1" onMention={onMention} />
+  )
   await user.click(screen.getByText("Alice"))
   expect(onMention).toHaveBeenCalledWith(sampleMembers[0])
   expect(logInfo).toHaveBeenCalledWith(
     "member-list mention",
     expect.objectContaining({ teamSessionId: "ts-1", characterId: "c-1" })
+  )
+  expect(container.querySelector('[data-slot="scroll-area"]')).toHaveClass(
+    "[&_[data-slot=scroll-area-scrollbar]]:hidden"
   )
 })
 

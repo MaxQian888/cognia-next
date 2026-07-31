@@ -214,11 +214,19 @@ jest.mock("@/lib/tauri", () => ({
   isTauri: () => false,
 }))
 
-// Render the real Tauri branch (ChatPaneGroup + trust gate) — the workspace
-// no longer has a separate team ChatPane fork to exercise.
+let mockPlatform: "tauri" | "web" = "tauri"
 jest.mock("@/hooks/use-platform", () => ({
-  usePlatform: () => "tauri",
+  usePlatform: () => mockPlatform,
   detectPlatform: () => "desktop",
+}))
+
+let mockRuntimeSnapshotRef: import("@/lib/runtime/operation-availability").RuntimeSnapshot = {
+  target: null,
+  vaultState: "unavailable",
+  connectionState: "offline",
+}
+jest.mock("@/hooks/use-runtime-snapshot", () => ({
+  useRuntimeSnapshot: () => mockRuntimeSnapshotRef,
 }))
 
 jest.mock("@/lib/db/session-state", () => ({
@@ -302,6 +310,12 @@ beforeEach(() => {
   selectedGuild = { kind: "dm" }
   errorMessageRef.current = null
   pendingSettingsRequestRef.current = null
+  mockPlatform = "tauri"
+  mockRuntimeSnapshotRef = {
+    target: null,
+    vaultState: "unavailable",
+    connectionState: "offline",
+  }
   channelListPropsLog.length = 0
   paneGroupPropsLog.length = 0
   closeSessionStoreMock.mockClear()
@@ -557,6 +571,43 @@ test("an active team session renders the shared ChatPaneGroup plus the MemberLis
   expect(screen.getByTestId("member-list")).toBeInTheDocument()
 })
 
+test("an ordinary Web browser renders the shared chat workspace", async () => {
+  mockPlatform = "web"
+  await act(async () => {
+    render(<DesktopChatWorkspace />)
+  })
+
+  expect(screen.getByTestId("chat-pane-group")).toBeInTheDocument()
+  expect(screen.queryByText("desktopOnlyTitle")).not.toBeInTheDocument()
+})
+
+test("an offline Companion keeps cached chat visible and disables sending with an explanation", async () => {
+  mockPlatform = "web"
+  mockRuntimeSnapshotRef = {
+    target: {
+      id: "desktop-studio",
+      kind: "companion",
+      platform: "web",
+      hostKind: "desktop",
+    },
+    vaultState: "unlocked",
+    connectionState: "offline",
+    host: {
+      compatible: true,
+      operations: ["claude_send"],
+      grants: ["agent.run"],
+    },
+  }
+
+  await act(async () => {
+    render(<DesktopChatWorkspace />)
+  })
+
+  expect(screen.getByTestId("chat-pane-group")).toBeInTheDocument()
+  expect(screen.getByTestId("chat-runtime-notice")).toHaveTextContent("states.offline")
+  expect(paneGroupPropsLog.at(-1)?.composerDisabled).toBe(true)
+})
+
 test("the pane group's onCreate starts a team conversation while a team guild is selected", async () => {
   create.mockResolvedValue({ id: "fresh" })
   sessionsRef.current = [
@@ -620,7 +671,6 @@ test("pane callbacks dispatch by session kind (team → useTeamChat, direct → 
     steerFlush: (sid: string) => unknown
     regenerate: (sid: string) => unknown
     editResend: (id: string, content: unknown, sid: string) => unknown
-    closePane: (sid: string) => void
     respondToApproval: (approval: unknown, decision: string) => unknown
   }
 
@@ -632,7 +682,6 @@ test("pane callbacks dispatch by session kind (team → useTeamChat, direct → 
     props.steerFlush("t-1")
     props.regenerate("t-1")
     props.editResend("m1", "edited", "t-1")
-    props.closePane("t-1")
   })
   expect(teamChatMock.send).toHaveBeenCalledWith("hi", {
     sessionId: "t-1",
@@ -643,11 +692,6 @@ test("pane callbacks dispatch by session kind (team → useTeamChat, direct → 
   expect(teamChatMock.flushSteer).toHaveBeenCalledWith("t-1")
   expect(teamChatMock.regenerate).toHaveBeenCalledWith("t-1")
   expect(teamChatMock.editAndResend).toHaveBeenCalledWith("m1", "edited", "t-1")
-  // Team pane close only drops the store slice — sub-sessions are torn down
-  // per turn by useTeamChat.
-  expect(closeSessionStoreMock).toHaveBeenCalledWith("t-1")
-  expect(directChatMock.close).not.toHaveBeenCalled()
-
   await act(async () => {
     props.send("hi", "d-1", manifest)
     props.stop("d-1")
@@ -655,7 +699,6 @@ test("pane callbacks dispatch by session kind (team → useTeamChat, direct → 
     props.steerFlush("d-1")
     props.regenerate("d-1")
     props.editResend("m2", "edited", "d-1")
-    props.closePane("d-1")
   })
   expect(directChatMock.send).toHaveBeenCalledWith("hi", undefined, {
     sessionId: "d-1",
@@ -666,8 +709,6 @@ test("pane callbacks dispatch by session kind (team → useTeamChat, direct → 
   expect(directChatMock.flushSteer).toHaveBeenCalledWith("d-1")
   expect(directChatMock.regenerate).toHaveBeenCalledWith("d-1")
   expect(directChatMock.editAndResend).toHaveBeenCalledWith("m2", "edited", "d-1")
-  expect(directChatMock.close).toHaveBeenCalledWith("d-1")
-
   // Approval routing: sub-session ids go to the team hook, plain ids direct.
   const teamApproval = { sessionId: "t-1::char::alice::turn", requestId: "r1" }
   const directApproval = { sessionId: "d-1", requestId: "r2" }

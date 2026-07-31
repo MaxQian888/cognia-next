@@ -27,6 +27,10 @@ jest.mock("@cognia/logging", () => ({
   }),
 }))
 
+jest.mock("sonner", () => ({
+  toast: { error: jest.fn() },
+}))
+
 const select = jest.fn()
 const create = jest.fn(async () => ({ id: "new-s", title: "" }))
 const sessionsRef: { current: ChatSession[] } = { current: [] }
@@ -34,10 +38,40 @@ jest.mock("@/hooks/chat", () => ({
   useSessions: () => ({ sessions: sessionsRef.current, select, create }),
 }))
 
+const historySearchRef = {
+  current: {
+    results: [] as Array<Record<string, unknown>>,
+    moreOlderHistory: false,
+    indexIncomplete: false,
+    loading: false,
+    error: null as Error | null,
+  },
+}
+jest.mock("@/hooks/chat/use-chat-history-search", () => ({
+  useChatHistorySearch: () => historySearchRef.current,
+}))
+
+const jumpToSessionMessage = jest.fn(
+  async (..._args: unknown[]) => true
+)
+jest.mock("@/lib/chat/cross-session-jump", () => ({
+  jumpToSessionMessage: (...args: unknown[]) => jumpToSessionMessage(...args),
+}))
+
 const setSelectedGuild = jest.fn()
 jest.mock("@/stores/ui", () => ({
   useUIStore: <T,>(selector: (s: { setSelectedGuild: typeof setSelectedGuild }) => T): T =>
     selector({ setSelectedGuild }),
+}))
+
+const projectState = {
+  activeProjectId: null as string | null,
+  setActiveProject: jest.fn(),
+}
+jest.mock("@/stores/project/project-store", () => ({
+  useProjectStore: {
+    getState: () => projectState,
+  },
 }))
 
 const charactersRef: { current: Character[] } = { current: [] }
@@ -82,7 +116,17 @@ beforeEach(() => {
   select.mockReset()
   create.mockReset().mockResolvedValue({ id: "new-s", title: "" })
   setSelectedGuild.mockReset()
+  projectState.activeProjectId = null
+  projectState.setActiveProject.mockReset()
   sessionsRef.current = []
+  historySearchRef.current = {
+    results: [],
+    moreOlderHistory: false,
+    indexIncomplete: false,
+    loading: false,
+    error: null,
+  }
+  jumpToSessionMessage.mockReset().mockResolvedValue(true)
   charactersRef.current = []
   teamsRef.current = []
   workflowsRef.current = []
@@ -141,5 +185,38 @@ describe("MobileCommandPalette", () => {
     const props = renderPalette()
     await user.click(screen.getByText("Yesterday"))
     expect(props.onSelectSession).toHaveBeenCalledWith("s-1")
+  })
+
+  it("searches message history and lands on the selected hit", async () => {
+    sessionsRef.current = [{ id: "s-1", title: "Other", kind: "direct" } as ChatSession]
+    historySearchRef.current = {
+      ...historySearchRef.current,
+      results: [
+        {
+          messageId: "m-1",
+          sessionId: "s-1",
+          sessionTitle: "Planning",
+          projectId: "p1",
+          role: "user",
+          createdAt: 1,
+          count: 1,
+          at: 0,
+          snippet: { text: "needle in the plan", positions: [0, 1, 2, 3, 4, 5] },
+          score: 1,
+          archived: false,
+          otherBranchCount: 0,
+        },
+      ],
+    }
+    const user = userEvent.setup()
+    const props = renderPalette()
+
+    await user.type(screen.getByPlaceholderText("placeholder"), "needle")
+    await user.click(await screen.findByText("Planning"))
+
+    expect(props.onSelectSession).toHaveBeenCalledWith("s-1")
+    expect(jumpToSessionMessage).toHaveBeenCalledWith("s-1", "m-1", {
+      align: "center",
+    })
   })
 })

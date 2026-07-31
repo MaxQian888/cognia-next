@@ -227,6 +227,16 @@ export function ExposeTestGlobals(): null {
         window.__cogniaE2EWebRtcReady = true
       }
 
+      // Plugin discovery can add dynamic Dexie tables. If its E2E initializer
+      // has started, do not import the broad fixture bridge (which opens the
+      // account DB at the current schema) until that upgrade has settled.
+      // Otherwise the two same-page connections can deadlock each other at
+      // adjacent versions and make the prescribed recovery Reload repeat.
+      while (window.__cogniaPluginRuntimeReady === false && !cancelled) {
+        await new Promise((resolve) => window.setTimeout(resolve, 25))
+      }
+      if (cancelled) return
+
       const [
         { __resetDbForTesting, getDb, whenSeeded, activateAccountDatabase },
         // Route through the transport module, NOT companionStorage() directly:

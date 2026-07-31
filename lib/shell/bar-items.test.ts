@@ -21,6 +21,19 @@ describe("BAR_ITEM_ICONS", () => {
       expect(BAR_ITEM_ICONS[m.id]).toBeDefined()
     }
   })
+
+  it("uses distinct directional icons for the three layout controls", () => {
+    expect(BAR_ITEM_ICONS.primarySidebarToggle).toBeDefined()
+    expect(BAR_ITEM_ICONS.panelToggle).toBeDefined()
+    expect(BAR_ITEM_ICONS.secondarySidebarToggle).toBeDefined()
+    expect(
+      new Set([
+        BAR_ITEM_ICONS.primarySidebarToggle,
+        BAR_ITEM_ICONS.panelToggle,
+        BAR_ITEM_ICONS.secondarySidebarToggle,
+      ])
+    ).toHaveProperty("size", 3)
+  })
 })
 
 describe("getBarCatalog", () => {

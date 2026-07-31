@@ -105,8 +105,14 @@ function TitleBarSegment({ item, ctx }: { item: BarCatalogItem; ctx: TitleBarIte
       return <TitleBarQuickActions className={minWidthClass(item.minWidth)} />
     case "accountTop":
       return <AccountBarButton className="mx-0.5" />
+    case "primarySidebarToggle":
+      return <TitleBarLayoutControls controls={["sidebar"]} />
+    case "panelToggle":
+      return <TitleBarLayoutControls controls={["panel"]} />
+    case "secondarySidebarToggle":
+      return <TitleBarLayoutControls controls={["rightSidebar"]} />
     case "layoutControls":
-      return <TitleBarLayoutControls className="px-1" />
+      return <TitleBarLayoutControls className="px-1" controls={["customize"]} />
     default:
       // Unreachable for catalog ids — `title-bar-zone.test.tsx` pins that every
       // entry in `TITLE_BAR_ITEMS` has a case above.

@@ -112,6 +112,18 @@ describe("BarCustomizer", () => {
     expect(saveMock.mock.calls.at(-1)?.[0]).not.toHaveProperty("statusBarLayout")
   })
 
+  it("customizes each title-bar layout control independently", () => {
+    renderCustomizer("title")
+    for (const id of [
+      "primarySidebarToggle",
+      "panelToggle",
+      "secondarySidebarToggle",
+      "layoutControls",
+    ]) {
+      expect(screen.getByTestId(`bar-customizer-title-list-pinned-${id}`)).toBeInTheDocument()
+    }
+  })
+
   it("disables Restore defaults at the shipped layout and enables it after an edit", () => {
     const { rerender } = renderCustomizer("status")
     expect(screen.getByTestId("bar-customizer-status-list-reset")).toBeDisabled()

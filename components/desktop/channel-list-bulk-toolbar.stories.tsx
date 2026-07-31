@@ -4,8 +4,8 @@ import { fn } from "storybook/test"
 import { ChannelListBulkToolbar } from "./channel-list-bulk-toolbar"
 
 // Toolbar shown above the channel list during a multi-selection: a count, the
-// destructive delete (gated by an AlertDialog), batch pin/unpin/archive toggles,
-// and a clear button.
+// share, destructive delete (gated by an AlertDialog), batch
+// pin/unpin/archive toggles, and a clear button.
 const meta = {
   title: "Desktop/ChannelListBulkToolbar",
   component: ChannelListBulkToolbar,
@@ -17,6 +17,7 @@ const meta = {
     onUnpin: fn(),
     onArchive: fn(),
     onUnarchive: fn(),
+    onShare: fn(),
     onClear: fn(),
   },
   decorators: [

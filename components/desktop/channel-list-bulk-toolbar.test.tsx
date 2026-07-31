@@ -17,6 +17,7 @@ function setup(overrides: Partial<Parameters<typeof ChannelListBulkToolbar>[0]> 
   const onUnpin = jest.fn()
   const onArchive = jest.fn()
   const onUnarchive = jest.fn()
+  const onShare = jest.fn()
   const onClear = jest.fn()
   const utils = render(
     <ChannelListBulkToolbar
@@ -26,11 +27,12 @@ function setup(overrides: Partial<Parameters<typeof ChannelListBulkToolbar>[0]> 
       onUnpin={onUnpin}
       onArchive={onArchive}
       onUnarchive={onUnarchive}
+      onShare={onShare}
       onClear={onClear}
       {...overrides}
     />
   )
-  return { ...utils, onDelete, onPin, onUnpin, onArchive, onUnarchive, onClear }
+  return { ...utils, onDelete, onPin, onUnpin, onArchive, onUnarchive, onShare, onClear }
 }
 
 test("renders the i18n'd count with the selection size", () => {
@@ -46,6 +48,16 @@ test("clicking Pin and Unpin invokes their callbacks", async () => {
   expect(onPin).toHaveBeenCalledTimes(1)
   await user.click(screen.getByRole("button", { name: "unpin" }))
   expect(onUnpin).toHaveBeenCalledTimes(1)
+})
+
+test("clicking Share invokes the selected-conversation share callback", async () => {
+  const user = userEvent.setup()
+  const onShare = jest.fn()
+  setup({ onShare })
+
+  await user.click(screen.getByRole("button", { name: "share" }))
+
+  expect(onShare).toHaveBeenCalledTimes(1)
 })
 
 test("clicking Cancel (X) invokes onClear", async () => {

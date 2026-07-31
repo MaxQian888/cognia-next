@@ -7,6 +7,11 @@ import { act, renderHook } from "@testing-library/react"
 import { useSidebarLayout } from "./use-sidebar-layout"
 import { useSettingsStore } from "@/stores/settings/settings-store"
 import { DEFAULT_SIDEBAR_LAYOUT, DEFAULT_SIDEBAR_SIDE } from "@/types/shell/sidebar"
+import { getCommandDescriptor } from "@/lib/tauri/command-descriptors"
+import {
+  __resetRuntimeSnapshotForTesting,
+  setRuntimeSnapshot,
+} from "@/lib/runtime/runtime-snapshot-store"
 
 interface SavePatch {
   sidebarLayout?: { pinned: string[]; hidden: string[] }
@@ -21,6 +26,15 @@ beforeEach(() => {
     settings: { sidebarLayout: { pinned: ["workflows", "inbox"], hidden: [] } } as never,
     save: saveMock as never,
   })
+  setRuntimeSnapshot({
+    target: { id: "web-standalone", kind: "standalone", platform: "web" },
+    vaultState: "unlocked",
+    connectionState: "online",
+  })
+})
+
+afterEach(() => {
+  __resetRuntimeSnapshotForTesting()
 })
 
 const lastPatch = () => saveMock.mock.calls[saveMock.mock.calls.length - 1]?.[0] as SavePatch
@@ -44,6 +58,31 @@ describe("useSidebarLayout", () => {
     useSettingsStore.setState({ settings: {} as never })
     const { result } = renderHook(() => useSidebarLayout())
     expect(result.current.layout.pinned).toEqual(DEFAULT_SIDEBAR_LAYOUT.pinned)
+  })
+
+  it("restores a host-only surface only when the active Companion advertises and grants it", () => {
+    const operation = "browser_session_ensure"
+    const capability = getCommandDescriptor(operation)?.capability
+    expect(capability).toBeDefined()
+    setRuntimeSnapshot({
+      target: {
+        id: "desktop-studio",
+        kind: "companion",
+        platform: "web",
+        hostKind: "desktop",
+      },
+      vaultState: "unlocked",
+      connectionState: "online",
+      host: {
+        compatible: true,
+        operations: [operation],
+        grants: [capability!],
+      },
+    })
+
+    const { result } = renderHook(() => useSidebarLayout())
+
+    expect(result.current.catalog.map((item) => item.id)).toContain("browser")
   })
 
   it("pins an item to the end and unhides it", async () => {

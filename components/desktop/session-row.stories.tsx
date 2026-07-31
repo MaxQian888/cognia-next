@@ -62,6 +62,18 @@ export const TeamSession: Story = {
   args: { session: makeSession({ kind: "team", title: "Release squad", teamId: "t1" }) },
 }
 
+export const LongTitle: Story = {
+  args: {
+    session: makeSession({
+      title: "Plan the complete cross-platform release workflow and verification strategy",
+      pinned: true,
+      lastMessagePreview: "Review the remaining launch checks",
+    }),
+    unread: 12,
+    showPreview: true,
+  },
+}
+
 export const Branched: Story = {
   args: {
     session: makeSession({ title: "Branch: alt approach", parentSessionId: "ses_parent" }),

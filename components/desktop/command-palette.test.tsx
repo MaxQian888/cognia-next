@@ -69,6 +69,24 @@ jest.mock("@/hooks/chat", () => ({
   }),
 }))
 
+const historySearchRef = {
+  current: {
+    results: [] as Array<Record<string, unknown>>,
+    moreOlderHistory: false,
+    indexIncomplete: false,
+    loading: false,
+    error: null as Error | null,
+  },
+}
+jest.mock("@/hooks/chat/use-chat-history-search", () => ({
+  useChatHistorySearch: () => historySearchRef.current,
+}))
+
+const jumpToSessionMessage = jest.fn(async (..._args: unknown[]) => true)
+jest.mock("@/lib/chat/cross-session-jump", () => ({
+  jumpToSessionMessage: (...args: unknown[]) => jumpToSessionMessage(...args),
+}))
+
 const messagesRef: { current: unknown[] } = { current: [] }
 const setSelectedGuild = jest.fn()
 const replaceMessages = jest.fn()
@@ -156,6 +174,14 @@ beforeEach(() => {
   setTheme.mockReset()
   replaceMessages.mockReset()
   sessionsRef.current = []
+  historySearchRef.current = {
+    results: [],
+    moreOlderHistory: false,
+    indexIncomplete: false,
+    loading: false,
+    error: null,
+  }
+  jumpToSessionMessage.mockReset().mockResolvedValue(true)
   messagesRef.current = []
   activeSessionIdRef.current = null
   settingsRef.current = { apiKey: "k" }
@@ -295,6 +321,47 @@ test("Cleanup removes the keydown listener on unmount", () => {
   unmount()
   expect(removeSpy).toHaveBeenCalledWith("keydown", expect.any(Function))
   removeSpy.mockRestore()
+})
+
+test("searches message history and jumps to the selected message hit", async () => {
+  sessionsRef.current = [
+    {
+      id: "s-search",
+      title: "Other title",
+      kind: "direct",
+      createdAt: 1,
+      updatedAt: 1,
+    } as ChatSession,
+  ]
+  historySearchRef.current = {
+    ...historySearchRef.current,
+    results: [
+      {
+        messageId: "m-search",
+        sessionId: "s-search",
+        sessionTitle: "Planning",
+        projectId: "p1",
+        role: "user",
+        createdAt: 1,
+        count: 1,
+        at: 0,
+        snippet: { text: "needle in the plan", positions: [0, 1, 2, 3, 4, 5] },
+        score: 1,
+        archived: false,
+        otherBranchCount: 0,
+      },
+    ],
+  }
+
+  render(<CommandPalette onOpenSettings={jest.fn()} />)
+  const user = await openWithShortcut()
+  await user.type(screen.getByPlaceholderText("placeholder"), "needle")
+  await user.click(await screen.findByText("Planning"))
+
+  expect(select).toHaveBeenCalledWith("s-search")
+  expect(jumpToSessionMessage).toHaveBeenCalledWith("s-search", "m-search", {
+    align: "center",
+  })
 })
 
 // React 19 doesn't expose `act` directly from imports for our use, but we keep

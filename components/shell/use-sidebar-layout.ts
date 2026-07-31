@@ -16,6 +16,7 @@
 import { useCallback, useMemo } from "react"
 
 import { usePlatform } from "@/hooks/use-platform"
+import { useRuntimeSnapshot } from "@/hooks/use-runtime-snapshot"
 import { useSettingsStore } from "@/stores/settings/settings-store"
 import {
   getSidebarCatalog,
@@ -57,10 +58,14 @@ export interface UseSidebarLayout {
 
 export function useSidebarLayout(): UseSidebarLayout {
   const platform = usePlatform()
+  const runtimeSnapshot = useRuntimeSnapshot()
   const settings = useSettingsStore((s) => s.settings)
   const save = useSettingsStore((s) => s.save)
 
-  const catalog = useMemo(() => getSidebarCatalog(platform), [platform])
+  const catalog = useMemo(
+    () => getSidebarCatalog(platform, runtimeSnapshot),
+    [platform, runtimeSnapshot]
+  )
   const validIds = useMemo(() => new Set(catalog.map((c) => c.id)), [catalog])
 
   // Key on `settings.sidebarLayout` (not the whole `settings` object): every

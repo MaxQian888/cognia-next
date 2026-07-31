@@ -90,7 +90,9 @@ jest.mock("@/hooks/desktop/use-menu-event-router", () => ({
   useMenuEventRouter: jest.fn(),
 }))
 jest.mock("@/components/ui/loading-states", () => ({
-  PageLoading: () => <div data-testid="page-loading" />,
+  PageLoading: ({ variant, allowReload }: { variant?: string; allowReload?: boolean }) => (
+    <div data-testid="page-loading" data-variant={variant} data-allow-reload={allowReload} />
+  ),
 }))
 
 const uiStateRef = {
@@ -201,6 +203,8 @@ test("pre-hydration paint on an ordinary route shows a neutral loader (no chrome
   // Covers the boot/hydration gap with a neutral loader instead of a
   // half-painted shell or bare (empty) client children.
   expect(html).toContain("page-loading")
+  expect(html).toContain('data-variant="workspace"')
+  expect(html).toContain('data-allow-reload="true"')
   expect(html).not.toContain("route-content")
   expect(html).not.toContain("title-bar")
   expect(html).not.toContain("guild-rail-stub")

@@ -207,26 +207,33 @@ beforeEach(() => {
 })
 
 describe("TitleBarLayoutControls", () => {
-  // The four always-on quick buttons are gone: they drove the very toggles the
-  // dropdown already lists as checkboxes, so the title bar rendered the same
-  // state twice. One trigger is the whole in-window surface now.
-  it("exposes exactly one trigger, with no standalone panel buttons beside it", () => {
-    const { container } = render(<TitleBarLayoutControls />)
+  it("matches VS Code with one-click primary sidebar, panel, and secondary sidebar toggles", () => {
+    render(<TitleBarLayoutControls />)
     expect(screen.getByTestId("title-bar-customize-layout")).toBeInTheDocument()
-    for (const id of [
-      "title-bar-toggle-guild-rail",
-      "title-bar-toggle-sidebar",
-      "title-bar-toggle-right-sidebar",
-      "title-bar-toggle-terminal",
-    ]) {
-      expect(screen.queryByTestId(id)).not.toBeInTheDocument()
-    }
-    // The quick buttons were `aria-pressed` toggles; nothing in the cluster
-    // carries that any more, because panel state is expressed by the menu's
-    // checkboxes alone. (The mock inlines menu content, so counting buttons
-    // here would also count the zoom stepper that really lives inside the menu.)
-    const cluster = container.querySelector('[data-testid="title-bar-layout-controls"]')
-    expect(cluster?.querySelectorAll("[aria-pressed]")).toHaveLength(0)
+
+    const sidebar = screen.getByTestId("title-bar-toggle-sidebar")
+    const panel = screen.getByTestId("title-bar-toggle-panel")
+    const secondarySidebar = screen.getByTestId("title-bar-toggle-right-sidebar")
+
+    expect(sidebar).toHaveAttribute("aria-pressed", "true")
+    expect(panel).toHaveAttribute("aria-pressed", "false")
+    expect(secondarySidebar).toHaveAttribute("aria-pressed", "false")
+    expect(screen.queryByTestId("title-bar-toggle-guild-rail")).not.toBeInTheDocument()
+
+    fireEvent.click(sidebar)
+    fireEvent.click(panel)
+    fireEvent.click(secondarySidebar)
+    expect(mockUiState.toggleSidebar).toHaveBeenCalled()
+    expect(mockTerminalState.togglePanel).toHaveBeenCalled()
+    expect(mockArtifactDockState.toggleDock).toHaveBeenCalled()
+  })
+
+  it("can render one independently-customizable title-bar control", () => {
+    render(<TitleBarLayoutControls controls={["panel"]} />)
+    expect(screen.getByTestId("title-bar-toggle-panel")).toBeInTheDocument()
+    expect(screen.queryByTestId("title-bar-toggle-sidebar")).toBeNull()
+    expect(screen.queryByTestId("title-bar-toggle-right-sidebar")).toBeNull()
+    expect(screen.queryByTestId("title-bar-customize-layout")).toBeNull()
   })
 
   it("renders a Customize Layout dropdown wiring every panel toggle", () => {
@@ -242,7 +249,7 @@ describe("TitleBarLayoutControls", () => {
     fireEvent.click(screen.getByText("toggleSidebar"))
     fireEvent.click(screen.getByText("toggleRightSidebar"))
     fireEvent.click(screen.getByText("toggleStatusBar"))
-    fireEvent.click(screen.getByText("toggleTerminal"))
+    fireEvent.click(screen.getByText("togglePanel"))
     expect(mockToggleGuildRail).toHaveBeenCalled()
     expect(mockUiState.toggleSidebar).toHaveBeenCalled()
     expect(mockArtifactDockState.toggleDock).toHaveBeenCalled()

@@ -1,5 +1,7 @@
 import type { Meta, StoryObj } from "@storybook/nextjs"
+import { PlugIcon, SparklesIcon, WorkflowIcon } from "lucide-react"
 
+import { FeaturePageHeader } from "./feature-page-header"
 import { FeaturePageShell } from "./feature-page-shell"
 
 function Pane({ label, tone }: { label: string; tone: string }) {
@@ -9,7 +11,7 @@ function Pane({ label, tone }: { label: string; tone: string }) {
 }
 
 // The Canvas-style 3-pane layout every top-level feature route renders inside:
-// a sticky toolbar, optional left rail + right inspector, and a resizable center.
+// a sticky header, optional left rail + right inspector, and a resizable center.
 const meta = {
   title: "FeatureShell/FeaturePageShell",
   component: FeaturePageShell,
@@ -29,7 +31,13 @@ type Story = StoryObj<typeof meta>
 export const ThreePane: Story = {
   args: {
     storageId: "story-three-pane",
-    toolbar: <span className="text-sm font-medium">Workflows</span>,
+    header: (
+      <FeaturePageHeader
+        icon={<WorkflowIcon />}
+        title="Workflows"
+        description="Build and run repeatable automations"
+      />
+    ),
     leftPane: {
       content: <Pane label="Left rail" tone="text-muted-foreground" />,
       label: "Navigation",
@@ -52,11 +60,25 @@ export const CenterOnly: Story = {
 export const WithLeftRail: Story = {
   args: {
     storageId: "story-left-rail",
-    toolbar: <span className="text-sm font-medium">Skills</span>,
+    header: (
+      <FeaturePageHeader
+        icon={<SparklesIcon />}
+        title="Skills"
+        description="Reusable capabilities for every agent"
+      />
+    ),
     leftPane: {
       content: <Pane label="Left rail" tone="text-muted-foreground" />,
       label: "Navigation",
     },
     children: <Pane label="Center content" tone="text-foreground" />,
+  },
+}
+
+export const CompactHeader: Story = {
+  args: {
+    storageId: "story-compact",
+    header: <FeaturePageHeader variant="compact" icon={<PlugIcon />} title="Plugin devtools" />,
+    children: <Pane label="Workspace content" tone="text-foreground" />,
   },
 }

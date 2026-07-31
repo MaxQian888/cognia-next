@@ -20,6 +20,18 @@ describe("useLoadingI18n", () => {
       loading: "loading.loading",
       offline: "loading.offline",
       cancel: "loading.cancel",
+      page: {
+        title: "loading.page.title",
+        description: "loading.page.description",
+        progressLabel: "loading.page.progressLabel",
+        stages: [
+          "loading.page.stages.interface",
+          "loading.page.stages.workspace",
+          "loading.page.stages.finalizing",
+        ],
+        reload: "loading.page.reload",
+        reloadHint: "loading.page.reloadHint",
+      },
     })
   })
 

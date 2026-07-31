@@ -4,10 +4,9 @@
  * Before the de-crowding pass the five bands below mounted 65 controls between
  * them (rail 17, status bar 16, title bar 13, composer toolbar 11, chat header
  * 8) — plus a tab strip that rendered even for a single session — all of it
- * before the user typed a character. They now mount 32, and the tab strip only
- * appears once there is something to switch between. Not one feature was
- * deleted to get there: every control moved to the single surface that owns its
- * concern, most of them one click away in a menu.
+ * before the user typed a character. The shell now keeps only the high-value
+ * permanent controls, and the tab strip appears only once there is something
+ * to switch between.
  *
  * Nothing stops the next feature from putting its button straight back on the
  * default surface, so each band asserts against {@link CHROME_BUDGET} from its
@@ -119,8 +118,13 @@ function isHiddenFromTree(el: HTMLElement, root: ParentNode): boolean {
  * reasoning for why that band earned another permanent control.
  */
 export const CHROME_BUDGET = {
-  /** `components/desktop/title-bar.tsx` — macOS (no in-window menubar). */
-  titleBar: 7,
+  /**
+   * `components/desktop/title-bar.tsx` — macOS (no in-window menubar).
+   * Includes the VS Code-style Primary Side Bar / Panel / Secondary Side Bar
+   * quick toggles; the lower-value Activity Bar and Status Bar toggles stay in
+   * the adjacent Customize Layout dropdown.
+   */
+  titleBar: 10,
   /**
    * `components/desktop/status-bar.tsx`. The live bar sits one below this: its
    * test stubs `AttentionPanel` as a plain button, while the real one renders
@@ -131,8 +135,13 @@ export const CHROME_BUDGET = {
   guildRail: 9,
   /** `components/chat/chat-header.tsx` */
   chatHeader: 2,
-  /** `components/chat/composer/bottom-toolbar.tsx` — wide (non-compact) branch. */
-  composerToolbar: 5,
+  /**
+   * `components/chat/composer/bottom-toolbar.tsx` — wide (non-compact) branch.
+   * Six intentionally includes the Agent runtime selector: model + runtime are
+   * the two execution-shape choices users need before sending, while detailed
+   * Agent mode and external-agent configuration remain in the overflow.
+   */
+  composerToolbar: 6,
   /**
    * `components/inbox/conversation-header.tsx`, desktop branch. Five of these
    * are the strip proper — platform badge, mode switcher, `⋯` overflow,

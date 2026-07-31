@@ -38,10 +38,14 @@ describe("bar item catalogs", () => {
 
   it("keeps the title bar's centre free of end-zone-only controls", () => {
     // The window buttons and drag regions are not in the catalog at all, so
-    // the end zone is exactly the three optional trailing controls.
+    // the end zone is exactly the optional actions followed by the four
+    // independently-customizable VS Code-style layout controls.
     expect(TITLE_BAR_ITEMS.filter((m) => m.zone === "end").map((m) => m.id)).toEqual([
       "quickActions",
       "accountTop",
+      "primarySidebarToggle",
+      "panelToggle",
+      "secondarySidebarToggle",
       "layoutControls",
     ])
   })

@@ -4,6 +4,7 @@ import { useLiveQuery } from "dexie-react-hooks"
 import { listSessionBranches } from "@/lib/db/sessions"
 import { Button, buttonVariants } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { HoverScrollText } from "@/components/chat/ui/hover-scroll-text"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -37,6 +38,7 @@ import {
   GitBranchIcon,
   GripVerticalIcon,
   HashIcon,
+  ListChecksIcon,
   MessageSquareIcon,
   MoreHorizontalIcon,
   PencilIcon,
@@ -80,6 +82,8 @@ export interface SessionRowProps {
    * session in the chat panel.
    */
   onSelect: (id: string, e: ReactMouseEvent) => void
+  /** Toggle this row in the channel-list multi-selection (menu/touch entry point). */
+  onToggleSelection?: (id: string) => void
   onDelete: (id: string) => void | Promise<void>
   onRename: (id: string, title: string) => void | Promise<void>
   /** Toggle the pinned state for this row. */
@@ -110,10 +114,14 @@ export interface SessionRowProps {
   dragListeners?: Record<string, unknown>
   /** @dnd-kit a11y attributes for the grip handle. */
   dragAttributes?: Record<string, unknown>
+  /** @dnd-kit activator ref, applied to the dedicated grip handle. */
+  dragActivatorRef?: (el: HTMLElement | null) => void
   /** Transform/transition style from the Sortable wrapper. */
   dragStyle?: CSSProperties
   /** True while this row is being dragged. */
   dragging?: boolean
+  /** Pending insertion edge while another row is dragged over this one. */
+  dropPosition?: "before" | "after"
 }
 
 /**
@@ -134,6 +142,7 @@ function SessionRowImpl({
   unread,
   selected = false,
   onSelect,
+  onToggleSelection,
   onDelete,
   onRename,
   onTogglePinned,
@@ -148,8 +157,10 @@ function SessionRowImpl({
   dragRef,
   dragListeners,
   dragAttributes,
+  dragActivatorRef,
   dragStyle,
   dragging = false,
+  dropPosition,
 }: SessionRowProps) {
   const t = useTranslations("desktop.sessionRow")
   const [editing, setEditing] = useState(false)
@@ -302,31 +313,39 @@ function SessionRowImpl({
 
   const Icon =
     session.kind === "team" ? UsersIcon : session.characterId ? HashIcon : MessageSquareIcon
+  const displayTitle = session.title || t("untitled")
 
   return (
     <li
       ref={setLiRef}
       style={dragStyle}
       className={cn(
-        "group flex items-center gap-2 rounded-md px-2 text-sm transition-colors hover:bg-accent",
+        "group relative flex items-center gap-2 rounded-md px-2 text-sm transition-colors hover:bg-accent",
         density === "compact" ? "py-1" : "py-1.5",
         active && "bg-accent",
         selected && "bg-accent/60 ring-1 ring-primary/50",
         focused && "ring-2 ring-ring",
-        dragging && "opacity-50"
+        dragging && "opacity-40",
+        dropPosition === "before" &&
+          "before:absolute before:inset-x-2 before:-top-0.5 before:h-0.5 before:rounded-full before:bg-primary before:shadow-[0_0_0_1px_color-mix(in_oklab,var(--primary)_25%,transparent)] before:content-['']",
+        dropPosition === "after" &&
+          "after:absolute after:inset-x-2 after:-bottom-0.5 after:h-0.5 after:rounded-full after:bg-primary after:shadow-[0_0_0_1px_color-mix(in_oklab,var(--primary)_25%,transparent)] after:content-['']"
       )}
       data-selected={selected || undefined}
       data-focused={focused || undefined}
+      data-drop-position={dropPosition}
     >
       {dragListeners && !editing ? (
-        <span
+        <button
+          type="button"
+          ref={dragActivatorRef}
           {...dragAttributes}
           {...dragListeners}
           className="flex size-4 shrink-0 cursor-grab touch-none items-center justify-center text-muted-foreground opacity-0 group-hover:opacity-100"
           aria-label={t("dragHandle")}
         >
           <GripVerticalIcon className="size-3.5" />
-        </span>
+        </button>
       ) : null}
       {editing ? (
         <div className="flex flex-1 items-center gap-2">
@@ -346,7 +365,6 @@ function SessionRowImpl({
           onClick={handleSelect}
           onDoubleClick={() => setEditing(true)}
           className="flex min-w-0 flex-1 items-center gap-2 text-left"
-          title={session.title}
         >
           {accentColor ? (
             <span
@@ -361,7 +379,7 @@ function SessionRowImpl({
             <PinIcon className="size-3 shrink-0 text-muted-foreground" aria-label={t("pinned")} />
           ) : null}
           <span className="flex min-w-0 flex-1 flex-col">
-            <span className="truncate">{session.title || t("untitled")}</span>
+            <HoverScrollText text={displayTitle} />
             {showPreview && session.lastMessagePreview ? (
               <span className="truncate text-xs text-muted-foreground">
                 {session.lastMessagePreview}
@@ -400,6 +418,12 @@ function SessionRowImpl({
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
+            {onToggleSelection ? (
+              <DropdownMenuItem onSelect={() => onToggleSelection(session.id)}>
+                <ListChecksIcon className="mr-2 size-4" />
+                {selected ? t("deselect") : t("select")}
+              </DropdownMenuItem>
+            ) : null}
             <DropdownMenuItem onSelect={() => setEditing(true)}>
               <PencilIcon className="mr-2 size-4" />
               {t("rename")}

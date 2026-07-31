@@ -27,16 +27,17 @@ import { buttonVariants } from "@/components/ui/button"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Separator } from "@/components/ui/separator"
 import { Kbd } from "@/components/ui/kbd"
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import { SessionListLoading } from "@/components/ui/loading-states"
 import { PluginViewContainerPanel } from "@/components/shell/plugin-view-container-panel"
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet"
 import { useIsNarrow, useRangeSelection, useEdgeResize } from "@/hooks/ui"
 import { useDebouncedCallback } from "@/hooks/workflow/use-debounced-callback"
 import { useConversationListModel } from "@/hooks/chat/use-conversation-list-model"
+import { useChatHistorySearch } from "@/hooks/chat/use-chat-history-search"
 import { useClientLiveQuery } from "@/hooks/data"
 import { listCharacters } from "@/lib/db/characters"
 import { listSessionStates } from "@/lib/db/session-state"
-import { searchSessionsByContent } from "@/lib/db/messages"
 import { getTeam } from "@/lib/db/teams"
 import { loggers } from "@cognia/logging"
 import { avatarColor } from "@/lib/ui/avatar"
@@ -51,7 +52,11 @@ import {
 import { useSettingsStore } from "@/stores/settings"
 import { useProjectStore } from "@/stores/project/project-store"
 import { PerfBoundary } from "@/lib/perf"
-import { resolveConversationDrop } from "@/lib/chat/conversation-dnd"
+import {
+  resolveConversationDrop,
+  resolveConversationDropPreview,
+  type ConversationDropPreview,
+} from "@/lib/chat/conversation-dnd"
 import {
   DndContext,
   PointerSensor,
@@ -61,8 +66,14 @@ import {
   useSensors,
   useDroppable,
   type DragEndEvent,
+  type DragOverEvent,
 } from "@dnd-kit/core"
-import { SortableContext, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable"
+import {
+  SortableContext,
+  sortableKeyboardCoordinates,
+  useSortable,
+  verticalListSortingStrategy,
+} from "@dnd-kit/sortable"
 import { CSS } from "@dnd-kit/utilities"
 import type {
   ConversationGroupBy,
@@ -109,7 +120,7 @@ import {
   type MouseEvent as ReactMouseEvent,
   type ReactNode,
 } from "react"
-import { ChannelListBulkToolbar } from "./channel-list-bulk-toolbar"
+import { ChannelListBulkActions } from "./channel-list-bulk-actions"
 import { SessionRow } from "./session-row"
 
 const log = loggers.ui
@@ -503,36 +514,6 @@ function ChannelListBody({
     setPersistedCollapsed([...collapsedFolderIds])
   }, [collapsedFolderIds, setPersistedCollapsed])
 
-  // Opt-in message-content search: when enabled, resolve the set of session ids
-  // whose message text matches the (debounced) query. Bounded scan; a truncated
-  // result surfaces a "may be incomplete" note rather than silently dropping
-  // matches. Scoped to the current workspace via any visible session's project.
-  const scopeProjectId = filtered.find((s) => s.projectId)?.projectId
-  const [contentMatchIds, setContentMatchIds] = useState<ReadonlySet<string> | undefined>(undefined)
-  const [contentTruncated, setContentTruncated] = useState(false)
-  useEffect(() => {
-    if (searchScope !== "titleAndContent" || query.trim().length < 2) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      setContentMatchIds(undefined)
-      setContentTruncated(false)
-      return
-    }
-    let cancelled = false
-    void searchSessionsByContent(query, { projectId: scopeProjectId })
-      .then((res) => {
-        if (cancelled) return
-        setContentMatchIds(res.ids)
-        setContentTruncated(res.truncated)
-        if (res.truncated) log.warn("channel-list content-search truncated", { query })
-      })
-      .catch((err) => {
-        if (!cancelled) log.warn("channel-list content-search failed", { error: String(err) })
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [searchScope, query, scopeProjectId])
-
   // Folders only group the active view (archived chats stay in date buckets).
   const modelFolders = view === "archived" ? undefined : folders
 
@@ -540,6 +521,22 @@ function ChannelListBody({
   // display names come from here.
   const projects = useProjectStore((s) => s.projects)
   const activeProjectId = useProjectStore((s) => s.activeProjectId)
+  // The workspace grouping intentionally spans every project; every other
+  // grouping stays scoped to the active one.
+  const scopeProjectId = groupBy === "workspace" ? undefined : (activeProjectId ?? undefined)
+  const contentSearch = useChatHistorySearch(query, {
+    enabled: searchScope === "titleAndContent",
+    projectId: scopeProjectId,
+    includeArchived: view === "archived",
+    collapseBySession: true,
+    limit: 200,
+  })
+  const contentMatchIds = useMemo<ReadonlySet<string> | undefined>(() => {
+    if (searchScope !== "titleAndContent" || query.trim().length < 2) return undefined
+    return new Set(contentSearch.results.map((result) => result.sessionId))
+  }, [searchScope, query, contentSearch.results])
+  const contentTruncated =
+    contentSearch.moreOlderHistory || contentSearch.indexIncomplete || contentSearch.error !== null
   const workspaceGroups = useMemo(
     () => projects.map((p) => ({ id: p.id, name: p.name })),
     [projects]
@@ -616,6 +613,12 @@ function ChannelListBody({
     },
     [handleClick, onSelect]
   )
+  const handleToggleSelection = useCallback(
+    (id: string) => {
+      handleClick(id, { ctrlKey: true, metaKey: false, shiftKey: false })
+    },
+    [handleClick]
+  )
 
   // Branched sessions show a small lineage chip; clicking it activates the
   // parent conversation in the chat panel (no selection-mutation).
@@ -679,7 +682,7 @@ function ChannelListBody({
   // a folder. A short activation distance keeps plain clicks from starting drags.
   const dndSensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
-    useSensor(KeyboardSensor)
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
   )
   // Maps each session id to the ordered ids of the section it renders in (and
   // that section's stable key), so a drop can reorder that section (pinned /
@@ -696,8 +699,23 @@ function ChannelListBody({
     }
     return map
   }, [sections])
+  const [dropPreview, setDropPreview] = useState<ConversationDropPreview | null>(null)
+  const handleDragOver = useCallback(
+    (e: DragOverEvent) => {
+      const activeId = String(e.active.id)
+      const overId = e.over ? String(e.over.id) : null
+      const overSection = overId ? sectionIdsBySession.get(overId) : undefined
+      setDropPreview(
+        overId && overSection
+          ? resolveConversationDropPreview(activeId, overId, overSection.ids)
+          : null
+      )
+    },
+    [sectionIdsBySession]
+  )
   const handleDragEnd = useCallback(
     (e: DragEndEvent) => {
+      setDropPreview(null)
       // Reorder is scoped to the section the drop target lives in.
       const overId = e.over ? String(e.over.id) : null
       const overSection = overId ? sectionIdsBySession.get(overId) : undefined
@@ -719,37 +737,6 @@ function ChannelListBody({
   // single click — the normal "open this conversation" gesture — never
   // pops the toolbar so it stays out of the way.
   const toolbarVisible = selected.size >= 2 || (selected.size === 1 && lastInteractionWasModified)
-
-  const handleBulkDeleteClick = useCallback(async () => {
-    if (!onBulkDelete || selected.size === 0) return
-    const ids = [...selected]
-    await onBulkDelete(ids)
-    clear()
-  }, [onBulkDelete, selected, clear])
-
-  const handleBulkSetPinnedClick = useCallback(
-    async (pinned: boolean) => {
-      if (!onBulkSetPinned || selected.size === 0) return
-      const ids = [...selected]
-      await onBulkSetPinned(ids, pinned)
-      clear()
-    },
-    [onBulkSetPinned, selected, clear]
-  )
-
-  const handleBulkArchiveClick = useCallback(async () => {
-    if (!onBulkArchive || selected.size === 0) return
-    const ids = [...selected]
-    await onBulkArchive(ids)
-    clear()
-  }, [onBulkArchive, selected, clear])
-
-  const handleBulkUnarchiveClick = useCallback(async () => {
-    if (!onBulkUnarchive || selected.size === 0) return
-    const ids = [...selected]
-    await onBulkUnarchive(ids)
-    clear()
-  }, [onBulkUnarchive, selected, clear])
 
   // Canvas guild has its own dedicated rail; do not render the chat
   // session list when the user is in canvas mode.
@@ -827,25 +814,25 @@ function ChannelListBody({
             )}
           </div>
         </div>
-        {toolbarVisible ? (
-          <ChannelListBulkToolbar
-            count={selected.size}
-            archived={view === "archived"}
-            onDelete={handleBulkDeleteClick}
-            onPin={() => handleBulkSetPinnedClick(true)}
-            onUnpin={() => handleBulkSetPinnedClick(false)}
-            onArchive={handleBulkArchiveClick}
-            onUnarchive={handleBulkUnarchiveClick}
-            onClear={clear}
-          />
-        ) : null}
+        <ChannelListBulkActions
+          visible={toolbarVisible}
+          selected={selected}
+          orderedIds={orderedIds}
+          sessions={filtered}
+          archived={view === "archived"}
+          onDelete={onBulkDelete}
+          onSetPinned={onBulkSetPinned}
+          onArchive={onBulkArchive}
+          onUnarchive={onBulkUnarchive}
+          onClear={clear}
+        />
         {contentTruncated && query.trim() ? (
           <p className="px-3 pb-1 text-[11px] text-muted-foreground" role="status">
             {t("searchTruncated")}
           </p>
         ) : null}
         <Separator className="opacity-60" />
-        <ScrollArea className="flex-1">
+        <ScrollArea className="flex-1 [&_[data-slot=scroll-area-scrollbar]]:hidden [&_[data-slot=scroll-area-viewport]>div]:!block">
           {loading && total === 0 ? (
             <SessionListLoading />
           ) : total === 0 ? (
@@ -864,17 +851,20 @@ function ChannelListBody({
             <DndContext
               sensors={dndSensors}
               collisionDetection={closestCenter}
+              onDragOver={handleDragOver}
               onDragEnd={handleDragEnd}
+              onDragCancel={() => setDropPreview(null)}
             >
               <ConversationSections
                 sections={sections}
-                orderedIds={orderedIds}
+                dropPreview={dropPreview}
                 activeSessionId={activeSessionId}
                 focusedId={focusedId}
                 density={density}
                 showPreview={showPreview}
                 unreadById={unreadById}
                 isSelected={isSelected}
+                onToggleSelection={handleToggleSelection}
                 accentFor={accentFor}
                 folders={folders ?? EMPTY_FOLDERS}
                 onSelect={handleSessionSelect}
@@ -1057,13 +1047,14 @@ function Header({
 
 function ConversationSections({
   sections,
-  orderedIds,
+  dropPreview,
   activeSessionId,
   focusedId,
   density,
   showPreview,
   unreadById,
   isSelected,
+  onToggleSelection,
   accentFor,
   folders,
   onSelect,
@@ -1080,13 +1071,14 @@ function ConversationSections({
   onJumpToParent,
 }: {
   sections: import("@/lib/chat/conversation-list-model").ConversationSection[]
-  orderedIds: string[]
+  dropPreview: ConversationDropPreview | null
   activeSessionId: string | null
   focusedId: string | null
   density: ConversationSidebarDensity
   showPreview: boolean
   unreadById: Map<string, number>
   isSelected: (id: string) => boolean
+  onToggleSelection: (id: string) => void
   accentFor: (session: ChatSession) => string | undefined
   folders: SessionFolder[]
   onSelect: (id: string, e: ReactMouseEvent) => void
@@ -1104,92 +1096,112 @@ function ConversationSections({
 }) {
   const t = useTranslations("desktop.channelList")
 
-  const renderRow = (s: ChatSession) => (
+  const rowProps = (s: ChatSession): ComponentProps<typeof SessionRow> => ({
+    session: s,
+    active: s.id === activeSessionId,
+    selected: isSelected(s.id),
+    focused: s.id === focusedId,
+    density,
+    showPreview,
+    accentColor: accentFor(s),
+    unread: unreadById.get(s.id),
+    folders,
+    onSelect,
+    onToggleSelection,
+    onDelete,
+    onRename,
+    onTogglePinned,
+    onArchive,
+    onUnarchive,
+    onAssignToFolder,
+    onJumpToParent,
+  })
+  const renderSortableRow = (s: ChatSession) => (
     <SortableSessionRow
       key={s.id}
-      session={s}
-      active={s.id === activeSessionId}
-      selected={isSelected(s.id)}
-      focused={s.id === focusedId}
-      density={density}
-      showPreview={showPreview}
-      accentColor={accentFor(s)}
-      unread={unreadById.get(s.id)}
-      folders={folders}
-      onSelect={onSelect}
-      onDelete={onDelete}
-      onRename={onRename}
-      onTogglePinned={onTogglePinned}
-      onArchive={onArchive}
-      onUnarchive={onUnarchive}
-      onAssignToFolder={onAssignToFolder}
-      onJumpToParent={onJumpToParent}
+      {...rowProps(s)}
+      dropPosition={dropPreview?.targetId === s.id ? dropPreview.position : undefined}
     />
   )
+  const renderStaticRow = (s: ChatSession) => <SessionRow key={s.id} {...rowProps(s)} />
 
   return (
-    <SortableContext items={orderedIds} strategy={verticalListSortingStrategy}>
-      <div className="flex flex-col gap-3 p-2">
-        {sections.map((section) => {
-          if (section.kind === "folder") {
-            const { folder, collapsed } = section
-            return (
-              <FolderSection
-                key={`folder:${folder.id}`}
-                folder={folder}
-                collapsed={collapsed}
-                sessions={section.sessions}
-                onToggle={() => onToggleFolder(folder.id)}
-                onRename={onRenameFolder}
-                onDelete={onDeleteFolder}
-                renderRow={renderRow}
-              />
-            )
-          }
-
-          if (section.kind === "group") {
-            const key = conversationSectionKey(section)
-            return (
-              <GroupSection
-                key={key}
-                axis={section.axis}
-                name={
-                  section.group.id === UNGROUPED_ID
-                    ? t(section.axis === "workspace" ? "ungroupedWorkspace" : "ungroupedAgent")
-                    : section.group.name
-                }
-                collapsed={section.collapsed}
-                sessions={section.sessions}
-                onToggle={() => onToggleGroup(key, !section.collapsed)}
-                renderRow={renderRow}
-              />
-            )
-          }
-
-          const label =
-            section.kind === "pinned"
-              ? t("sectionPinned")
-              : section.kind === "recent"
-                ? t("sectionRecent")
-                : section.kind === "date"
-                  ? t(BUCKET_LABEL_KEY[section.bucket])
-                  : null
-          const key = section.kind === "date" ? `date:${section.bucket}` : section.kind
+    <div className="flex flex-col gap-3 p-2">
+      {sections.map((section) => {
+        if (section.kind === "folder") {
+          const { folder, collapsed } = section
           return (
-            <section key={key} aria-label={label ?? t("searchAria")}>
-              {label ? (
-                <div className="flex items-center gap-2 px-2 pb-1">
-                  <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-                    {label}
-                  </span>
-                </div>
-              ) : null}
-              <ul className="flex flex-col gap-0.5">{section.sessions.map(renderRow)}</ul>
-            </section>
+            <FolderSection
+              key={`folder:${folder.id}`}
+              folder={folder}
+              collapsed={collapsed}
+              sessions={section.sessions}
+              onToggle={() => onToggleFolder(folder.id)}
+              onRename={onRenameFolder}
+              onDelete={onDeleteFolder}
+              renderRow={renderSortableRow}
+            />
           )
-        })}
-      </div>
-    </SortableContext>
+        }
+
+        if (section.kind === "group") {
+          const key = conversationSectionKey(section)
+          return (
+            <GroupSection
+              key={key}
+              sectionKey={key}
+              axis={section.axis}
+              name={
+                section.group.id === UNGROUPED_ID
+                  ? t(section.axis === "workspace" ? "ungroupedWorkspace" : "ungroupedAgent")
+                  : section.group.name
+              }
+              collapsed={section.collapsed}
+              sessions={section.sessions}
+              onToggle={() => onToggleGroup(key, !section.collapsed)}
+              renderRow={renderSortableRow}
+            />
+          )
+        }
+
+        const label =
+          section.kind === "pinned"
+            ? t("sectionPinned")
+            : section.kind === "recent"
+              ? t("sectionRecent")
+              : section.kind === "date"
+                ? t(BUCKET_LABEL_KEY[section.bucket])
+                : null
+        const key = section.kind === "date" ? `date:${section.bucket}` : section.kind
+        const rows = (
+          <ul className="flex flex-col gap-0.5">
+            {section.sessions.map(section.kind === "search" ? renderStaticRow : renderSortableRow)}
+          </ul>
+        )
+        return (
+          <section key={key} aria-label={label ?? t("searchAria")}>
+            {label ? (
+              <div className="flex items-center gap-2 px-2 pb-1">
+                <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+                  {label}
+                </span>
+              </div>
+            ) : null}
+            {section.kind === "search" ? (
+              rows
+            ) : (
+              <SortableContext
+                id={key}
+                items={section.sessions.map((session) => session.id)}
+                strategy={verticalListSortingStrategy}
+              >
+                {rows}
+              </SortableContext>
+            )}
+          </section>
+        )
+      })}
+    </div>
   )
 }
 
@@ -1199,12 +1211,20 @@ function ConversationSections({
  * handled by that header's own droppable — see {@link FolderSection}.
  */
 function SortableSessionRow(props: ComponentProps<typeof SessionRow>) {
-  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    setActivatorNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({
     id: props.session.id,
     data: { type: "session", folderId: props.session.folderId ?? null },
   })
   const style: CSSProperties = {
-    transform: CSS.Translate.toString(transform),
+    transform: CSS.Transform.toString(transform),
     transition,
   }
   return (
@@ -1213,6 +1233,7 @@ function SortableSessionRow(props: ComponentProps<typeof SessionRow>) {
       dragRef={setNodeRef}
       dragListeners={listeners as unknown as Record<string, unknown>}
       dragAttributes={attributes as unknown as Record<string, unknown>}
+      dragActivatorRef={setActivatorNodeRef}
       dragStyle={style}
       dragging={isDragging}
     />
@@ -1225,6 +1246,7 @@ function SortableSessionRow(props: ComponentProps<typeof SessionRow>) {
  * (artifacts, terminals, memories), which is a move operation, not a reorder.
  */
 function GroupSection({
+  sectionKey,
   axis,
   name,
   collapsed,
@@ -1232,6 +1254,7 @@ function GroupSection({
   onToggle,
   renderRow,
 }: {
+  sectionKey: string
   axis: "workspace" | "agent"
   name: string
   collapsed: boolean
@@ -1241,31 +1264,44 @@ function GroupSection({
 }) {
   const Icon = axis === "workspace" ? FolderIcon : BotIcon
   return (
-    <section aria-label={name}>
-      <div className="flex items-center gap-1 px-2 pb-1">
-        <button
-          type="button"
-          onClick={onToggle}
-          className="flex min-w-0 flex-1 items-center gap-1.5 text-left"
-          aria-expanded={!collapsed}
-          aria-label={name}
-        >
-          {collapsed ? (
-            <ChevronRightIcon className="size-3 shrink-0 text-muted-foreground" />
-          ) : (
-            <ChevronDownIcon className="size-3 shrink-0 text-muted-foreground" />
-          )}
-          <Icon className="size-3 shrink-0 text-muted-foreground" aria-hidden />
-          <span className="truncate text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-            {name}
-            {sessions.length > 0 ? (
-              <span className="ml-1 normal-case opacity-60">{sessions.length}</span>
-            ) : null}
-          </span>
-        </button>
-      </div>
-      {collapsed ? null : <ul className="flex flex-col gap-0.5">{sessions.map(renderRow)}</ul>}
-    </section>
+    <Collapsible asChild open={!collapsed} onOpenChange={onToggle}>
+      <section
+        aria-label={name}
+        className="rounded-md transition-colors duration-200 data-[state=open]:bg-muted/10"
+      >
+        <div className="flex items-center gap-1 px-2 pb-1">
+          <CollapsibleTrigger asChild>
+            <button
+              type="button"
+              className="flex min-w-0 flex-1 items-center gap-1.5 text-left"
+              aria-label={name}
+            >
+              {collapsed ? (
+                <ChevronRightIcon className="size-3 shrink-0 text-muted-foreground" />
+              ) : (
+                <ChevronDownIcon className="size-3 shrink-0 text-muted-foreground" />
+              )}
+              <Icon className="size-3 shrink-0 text-muted-foreground" aria-hidden />
+              <span className="truncate text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+                {name}
+                {sessions.length > 0 ? (
+                  <span className="ml-1 normal-case opacity-60">{sessions.length}</span>
+                ) : null}
+              </span>
+            </button>
+          </CollapsibleTrigger>
+        </div>
+        <CollapsibleContent className="overflow-hidden data-[state=closed]:animate-collapsible-up data-[state=open]:animate-collapsible-down motion-reduce:animate-none">
+          <SortableContext
+            id={sectionKey}
+            items={sessions.map((session) => session.id)}
+            strategy={verticalListSortingStrategy}
+          >
+            <ul className="flex flex-col gap-0.5">{sessions.map(renderRow)}</ul>
+          </SortableContext>
+        </CollapsibleContent>
+      </section>
+    </Collapsible>
   )
 }
 
@@ -1296,29 +1332,40 @@ function FolderSection({
     data: { type: "folder", folderId: folder.id },
   })
   return (
-    <section
-      ref={setNodeRef}
-      aria-label={folder.name}
-      className={cn("rounded-md", isOver && "bg-primary/10 ring-1 ring-primary/40")}
-    >
-      <FolderSectionHeader
-        folder={folder}
-        collapsed={collapsed}
-        count={sessions.length}
-        onToggle={onToggle}
-        onRename={onRename}
-        onDelete={onDelete}
-      />
-      {collapsed ? null : (
-        <ul className="flex flex-col gap-0.5">
-          {sessions.length === 0 ? (
-            <li className="px-3 py-1 text-[11px] text-muted-foreground">{t("emptyFolder")}</li>
-          ) : (
-            sessions.map(renderRow)
-          )}
-        </ul>
-      )}
-    </section>
+    <Collapsible asChild open={!collapsed} onOpenChange={onToggle}>
+      <section
+        aria-label={folder.name}
+        className="rounded-md transition-colors duration-200 data-[state=open]:bg-muted/10"
+      >
+        <div
+          ref={setNodeRef}
+          className={cn("rounded-md", isOver && "bg-primary/10 ring-1 ring-primary/40")}
+        >
+          <FolderSectionHeader
+            folder={folder}
+            collapsed={collapsed}
+            count={sessions.length}
+            onRename={onRename}
+            onDelete={onDelete}
+          />
+        </div>
+        <CollapsibleContent className="overflow-hidden data-[state=closed]:animate-collapsible-up data-[state=open]:animate-collapsible-down motion-reduce:animate-none">
+          <SortableContext
+            id={`folder:${folder.id}`}
+            items={sessions.map((session) => session.id)}
+            strategy={verticalListSortingStrategy}
+          >
+            <ul className="flex flex-col gap-0.5">
+              {sessions.length === 0 ? (
+                <li className="px-3 py-1 text-[11px] text-muted-foreground">{t("emptyFolder")}</li>
+              ) : (
+                sessions.map(renderRow)
+              )}
+            </ul>
+          </SortableContext>
+        </CollapsibleContent>
+      </section>
+    </Collapsible>
   )
 }
 
@@ -1326,14 +1373,12 @@ function FolderSectionHeader({
   folder,
   collapsed,
   count,
-  onToggle,
   onRename,
   onDelete,
 }: {
   folder: SessionFolder
   collapsed: boolean
   count: number
-  onToggle: () => void
   onRename?: (id: string, name: string) => void | Promise<void>
   onDelete?: (id: string) => void | Promise<void>
 }) {
@@ -1350,46 +1395,46 @@ function FolderSectionHeader({
 
   return (
     <div className="group/folder flex items-center gap-1 px-2 pb-1">
-      <button
-        type="button"
-        onClick={onToggle}
-        className="flex min-w-0 flex-1 items-center gap-1.5 text-left"
-        aria-expanded={!collapsed}
-        aria-label={folder.name}
-      >
-        {collapsed ? (
-          <ChevronRightIcon className="size-3 shrink-0 text-muted-foreground" />
-        ) : (
-          <ChevronDownIcon className="size-3 shrink-0 text-muted-foreground" />
-        )}
-        <FolderIcon className="size-3 shrink-0 text-muted-foreground" aria-hidden />
-        {editing ? (
-          <Input
-            autoFocus
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            onClick={(e) => e.stopPropagation()}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") {
-                e.preventDefault()
-                commit()
-              } else if (e.key === "Escape") {
-                e.preventDefault()
-                setDraft(folder.name)
-                setEditing(false)
-              }
-            }}
-            onBlur={commit}
-            className="h-5 px-1 py-0 text-[11px]"
-            aria-label={t("renameFolder")}
-          />
-        ) : (
-          <span className="truncate text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-            {folder.name}
-            {count > 0 ? <span className="ml-1 normal-case opacity-60">{count}</span> : null}
-          </span>
-        )}
-      </button>
+      <CollapsibleTrigger asChild>
+        <button
+          type="button"
+          className="flex min-w-0 flex-1 items-center gap-1.5 text-left"
+          aria-label={folder.name}
+        >
+          {collapsed ? (
+            <ChevronRightIcon className="size-3 shrink-0 text-muted-foreground" />
+          ) : (
+            <ChevronDownIcon className="size-3 shrink-0 text-muted-foreground" />
+          )}
+          <FolderIcon className="size-3 shrink-0 text-muted-foreground" aria-hidden />
+          {editing ? (
+            <Input
+              autoFocus
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              onClick={(e) => e.stopPropagation()}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault()
+                  commit()
+                } else if (e.key === "Escape") {
+                  e.preventDefault()
+                  setDraft(folder.name)
+                  setEditing(false)
+                }
+              }}
+              onBlur={commit}
+              className="h-5 px-1 py-0 text-[11px]"
+              aria-label={t("renameFolder")}
+            />
+          ) : (
+            <span className="truncate text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+              {folder.name}
+              {count > 0 ? <span className="ml-1 normal-case opacity-60">{count}</span> : null}
+            </span>
+          )}
+        </button>
+      </CollapsibleTrigger>
       {(onRename || onDelete) && !editing ? (
         <DropdownMenu>
           <DropdownMenuTrigger asChild>

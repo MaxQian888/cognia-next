@@ -5,9 +5,9 @@ import { resetStores } from "@/lib/storybook/seed-stores"
 import { useUIStore } from "@/stores/ui/ui-store"
 import { useTerminalStore } from "@/stores/terminal/terminal-store"
 
-// Title-bar layout toggle cluster (guild rail / sidebar / terminal) + a
-// "Customize Layout" dropdown. Subscribes to the UI + terminal stores internally,
-// so reset both between stories.
+// VS Code-style Primary Side Bar / Panel / Secondary Side Bar toggle cluster
+// plus the full "Customize Layout" dropdown. Subscribes to the UI + terminal
+// stores internally, so reset both between stories.
 const meta = {
   title: "Desktop/TitleBarLayoutControls",
   component: TitleBarLayoutControls,

@@ -148,7 +148,7 @@ export function MemberList({ teamSessionId, teamId, onMention, variant = "rail" 
 
       <ScratchpadPanel teamSessionId={teamSessionId} />
 
-      <ScrollArea className="flex-1">
+      <ScrollArea className="flex-1 [&_[data-slot=scroll-area-scrollbar]]:hidden">
         <ul className="flex flex-col gap-0.5 px-2 pb-2">
           {orderedMembers.map((member) => (
             <MemberRow

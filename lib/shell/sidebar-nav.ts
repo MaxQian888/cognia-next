@@ -34,6 +34,8 @@ import { arrayMove } from "@dnd-kit/sortable"
 
 import type { Platform } from "@/hooks/use-platform"
 import { partitionByLayout } from "@/lib/shell/layout-partition"
+import type { RuntimeSnapshot } from "@/lib/runtime/operation-availability"
+import { getSurfaceContract, shouldShowSurface } from "@/lib/runtime/surface-contract"
 import { SIDEBAR_NAV_META, type SidebarLayout, type SidebarNavMeta } from "@/types/shell/sidebar"
 
 /** id → rail icon. Must cover every id in `SIDEBAR_NAV_META`. */
@@ -72,8 +74,18 @@ export interface SidebarCatalogItem extends SidebarNavMeta {
  * the customizer as dead ends. Falls back to a question-mark-free no-op icon
  * only if a mapping is missing (shouldn't happen — covered by tests).
  */
-export function getSidebarCatalog(platform: Platform): SidebarCatalogItem[] {
-  return SIDEBAR_NAV_META.filter((m) => !(platform !== "tauri" && m.desktopOnly)).map((m) => ({
+export function getSidebarCatalog(
+  platform: Platform,
+  runtimeSnapshot?: RuntimeSnapshot
+): SidebarCatalogItem[] {
+  return SIDEBAR_NAV_META.filter((meta) => {
+    if (platform === "tauri") return true
+    if (runtimeSnapshot) {
+      const contract = getSurfaceContract(meta.id)
+      return contract ? shouldShowSurface(contract, runtimeSnapshot) : false
+    }
+    return !meta.desktopOnly
+  }).map((m) => ({
     ...m,
     Icon: SIDEBAR_NAV_ICONS[m.id] ?? ActivityIcon,
   }))

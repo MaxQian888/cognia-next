@@ -5,7 +5,7 @@
  * feature route ( /workflows, /inbox, /twin, /discover, /skills, /plugins,
  * /agent-teams, /scheduler, /logs, /me, /settings ) renders inside.
  *
- *   ┌────────── toolbar (sticky) ───────────┐
+ *   ┌─────────── header (sticky) ───────────┐
  *   │ left │  center (children)  │  right   │
  *   │ rail │   ◀ resize ▶        │   rail   │
  *   └───────────────────────────────────────┘
@@ -49,8 +49,8 @@ export interface FeaturePaneConfig {
 export interface FeaturePageShellProps {
   /** Stable id used for `autoSaveId` (panel size persistence) and Sheet keys. */
   storageId: string
-  /** Optional sticky top bar that spans the full content width. */
-  toolbar?: React.ReactNode
+  /** Optional header that spans the full content width and owns its own chrome. */
+  header?: React.ReactNode
   /** Optional left rail. Omit to render only center+right (or just center). */
   leftPane?: FeaturePaneConfig
   /** Optional right inspector. Omit to render only left+center (or just center). */
@@ -71,7 +71,7 @@ const DEFAULT_CENTER_MIN = 30
 
 export function FeaturePageShell({
   storageId,
-  toolbar,
+  header,
   leftPane,
   rightPane,
   children,
@@ -83,7 +83,7 @@ export function FeaturePageShell({
     return (
       <FeaturePageShellMobile
         storageId={storageId}
-        toolbar={toolbar}
+        header={header}
         leftPane={leftPane}
         rightPane={rightPane}
         centerClassName={centerClassName}
@@ -98,12 +98,9 @@ export function FeaturePageShell({
       className="flex h-full min-h-0 w-full flex-1 flex-col overflow-hidden"
       data-testid={`feature-shell-${storageId}`}
     >
-      {toolbar ? (
-        <div
-          className="flex shrink-0 items-center gap-2 border-b bg-background/80 px-3 py-1.5 backdrop-blur"
-          data-testid={`feature-shell-${storageId}-toolbar`}
-        >
-          {toolbar}
+      {header ? (
+        <div className="shrink-0" data-testid={`feature-shell-${storageId}-header`}>
+          {header}
         </div>
       ) : null}
 
@@ -175,7 +172,7 @@ export function FeaturePageShell({
 
 function FeaturePageShellMobile({
   storageId,
-  toolbar,
+  header,
   leftPane,
   rightPane,
   children,
@@ -188,49 +185,60 @@ function FeaturePageShellMobile({
       className="flex h-full min-h-0 w-full flex-1 flex-col overflow-hidden"
       data-testid={`feature-shell-${storageId}`}
     >
-      <div className="flex shrink-0 items-center gap-2 border-b bg-background/80 px-2 py-1 backdrop-blur">
-        {leftPane ? (
-          <Sheet>
-            <SheetTrigger asChild>
-              <Button
-                variant="ghost"
-                size="icon"
-                aria-label={t("openLeft", { name: leftPane.label })}
-              >
-                <PanelLeftIcon className="size-4" />
-              </Button>
-            </SheetTrigger>
-            <SheetContent
-              side="left"
-              className={cn("p-0", leftPane.mobileWidthClass ?? "w-[280px]")}
-            >
-              <div className="flex h-full flex-col overflow-hidden">{leftPane.content}</div>
-            </SheetContent>
-          </Sheet>
-        ) : null}
+      {header ? (
+        <div className="shrink-0" data-testid={`feature-shell-${storageId}-header`}>
+          {header}
+        </div>
+      ) : null}
 
-        <div className="min-w-0 flex-1 truncate text-xs text-muted-foreground">{toolbar}</div>
-
-        {rightPane ? (
-          <Sheet>
-            <SheetTrigger asChild>
-              <Button
-                variant="ghost"
-                size="icon"
-                aria-label={t("openRight", { name: rightPane.label })}
+      {leftPane || rightPane ? (
+        <div
+          className="flex min-h-9 shrink-0 items-center justify-between border-b border-border/60 bg-muted/20 px-2"
+          data-testid={`feature-shell-${storageId}-pane-controls`}
+        >
+          {leftPane ? (
+            <Sheet>
+              <SheetTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  aria-label={t("openLeft", { name: leftPane.label })}
+                >
+                  <PanelLeftIcon className="size-4" />
+                </Button>
+              </SheetTrigger>
+              <SheetContent
+                side="left"
+                className={cn("p-0", leftPane.mobileWidthClass ?? "w-[280px]")}
               >
-                <PanelRightIcon className="size-4" />
-              </Button>
-            </SheetTrigger>
-            <SheetContent
-              side="right"
-              className={cn("p-0", rightPane.mobileWidthClass ?? "w-[320px]")}
-            >
-              <div className="flex h-full flex-col overflow-hidden">{rightPane.content}</div>
-            </SheetContent>
-          </Sheet>
-        ) : null}
-      </div>
+                <div className="flex h-full flex-col overflow-hidden">{leftPane.content}</div>
+              </SheetContent>
+            </Sheet>
+          ) : (
+            <span />
+          )}
+
+          {rightPane ? (
+            <Sheet>
+              <SheetTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  aria-label={t("openRight", { name: rightPane.label })}
+                >
+                  <PanelRightIcon className="size-4" />
+                </Button>
+              </SheetTrigger>
+              <SheetContent
+                side="right"
+                className={cn("p-0", rightPane.mobileWidthClass ?? "w-[320px]")}
+              >
+                <div className="flex h-full flex-col overflow-hidden">{rightPane.content}</div>
+              </SheetContent>
+            </Sheet>
+          ) : null}
+        </div>
+      ) : null}
 
       <div
         className={cn("flex min-h-0 flex-1 flex-col overflow-hidden", centerClassName)}
