@@ -59,6 +59,7 @@ import {
 } from "@/components/ui/alert-dialog"
 import { Switch } from "@/components/ui/switch"
 import { StatusBadge } from "@/components/status-badge"
+import { FeaturePageHeader } from "@/components/feature-shell/feature-page-header"
 import {
   Empty,
   EmptyContent,
@@ -368,42 +369,43 @@ export default function AgentTeamsListPage() {
       data-testid="agent-teams-list-page"
       data-bg-target="chat"
     >
-      {/* Header */}
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-        <div className="space-y-1">
-          <Label className="text-lg font-semibold">{t("listTitle")}</Label>
-          <p className="text-sm text-muted-foreground">{t("listDescription")}</p>
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={() => {
-              const { teamId } = createSampleTeam()
-              toast.success(t("sampleTeamCreated"))
-              log.info("sample_team_created", { teamId })
-              router.push(`/agent-teams/workspace?teamId=${teamId}`)
-            }}
-            data-testid="agent-teams-try-sample"
-          >
-            <SparklesIcon className="mr-2 size-4" />
-            {t("trySampleTeam")}
-          </Button>
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={() => setAutoComposeOpen(true)}
-            data-testid="agent-teams-auto-compose"
-          >
-            <SparklesIcon className="mr-2 size-4" />
-            {t("autoCompose.openButton")}
-          </Button>
-          <Button size="sm" onClick={() => setCreateOpen(true)}>
-            <PlusIcon className="mr-2 size-4" />
-            {t("createTeam")}
-          </Button>
-        </div>
-      </div>
+      <FeaturePageHeader
+        icon={<UsersIcon />}
+        title={t("listTitle")}
+        description={t("listDescription")}
+        className="rounded-xl border shadow-sm"
+        actions={
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => {
+                const { teamId } = createSampleTeam()
+                toast.success(t("sampleTeamCreated"))
+                log.info("sample_team_created", { teamId })
+                router.push(`/agent-teams/workspace?teamId=${teamId}`)
+              }}
+              data-testid="agent-teams-try-sample"
+            >
+              <SparklesIcon className="mr-2 size-4" />
+              {t("trySampleTeam")}
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => setAutoComposeOpen(true)}
+              data-testid="agent-teams-auto-compose"
+            >
+              <SparklesIcon className="mr-2 size-4" />
+              {t("autoCompose.openButton")}
+            </Button>
+            <Button size="sm" onClick={() => setCreateOpen(true)}>
+              <PlusIcon className="mr-2 size-4" />
+              {t("createTeam")}
+            </Button>
+          </div>
+        }
+      />
 
       {/* Stats. `grid-cols-3` with no breakpoint crushed three cards into a
           narrow window; stack them below `sm` instead. */}

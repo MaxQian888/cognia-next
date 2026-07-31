@@ -16,7 +16,11 @@ import { useChatStore } from "@/stores/chat/chat-store"
 
 import { endCodeAdoptionTurn } from "./client"
 import { persistCodeAdoptionTurn, pruneCodeAdoptionTurns } from "./persist"
-import { isSettleEdge, startCodeAdoptionTracker } from "./turn-tracker"
+import {
+  isSettleEdge,
+  markTaskWorkspaceTurnCancelled,
+  startCodeAdoptionTracker,
+} from "./turn-tracker"
 
 const mockSettleTaskWorkspace = settleTaskWorkspaceTurn as jest.Mock
 const mockSubscribe = useChatStore.subscribe as unknown as jest.Mock
@@ -92,6 +96,18 @@ describe("startCodeAdoptionTracker", () => {
     expect(mockPrune).not.toHaveBeenCalled()
   })
 
+  it("settles a user-aborted turn as cancelled", async () => {
+    mockEnd.mockResolvedValue(null)
+    const { fn } = wire()
+    markTaskWorkspaceTurnCancelled("s1", 5)
+    fn(
+      { sessions: { s1: { status: "idle", runId: 5 } } },
+      { sessions: { s1: { status: "streaming", runId: 5 } } }
+    )
+    await flush()
+    expect(mockSettleTaskWorkspace).toHaveBeenCalledWith("s1", 5, "cancelled")
+  })
+
   it("returns the store unsubscribe", () => {
     const { ret, storeUnsub } = wire()
     expect(ret).toBe(storeUnsub)
@@ -103,8 +119,17 @@ describe("startCodeAdoptionTracker", () => {
         path: "agent.ts",
         origin: "agent",
         kind: "modified",
+        captureClass: "source",
         insertions: 4,
         deletions: 1,
+      },
+      {
+        path: "dist/bundle.js",
+        origin: "agent",
+        kind: "created",
+        captureClass: "generated",
+        insertions: null,
+        deletions: null,
       },
       { path: "notes.txt", origin: "user", kind: "created", insertions: 2, deletions: 0 },
     ])

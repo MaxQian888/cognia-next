@@ -19,7 +19,9 @@
 
 import { getPluginLifecycleHooks } from "@/lib/plugin/messaging/hooks-system"
 import { emitSystemBusEvent, SystemEvents } from "@/lib/plugin/messaging/message-bus"
-import { startSpan, endSpan } from "@cognia/agent-trace/emitter"
+import { startSpan, endSpan, recordEvent } from "@cognia/agent-trace/emitter"
+import { RoutingAttemptController } from "@cognia/provider-routing"
+import { DEFAULT_ROUTING_CONFIG } from "@cognia/provider-types/model-mapping"
 import { trackEvent } from "@/lib/telemetry/events/track-event"
 import { recordTeamUsage, swallowUsageWrite } from "@/lib/db/session-usage"
 import type { SpanUsage } from "@/types/agent-trace/span"
@@ -35,12 +37,11 @@ import type { WorktreeHandle } from "./workspace/allocator"
 import type { CaptureStreamEvent } from "@/lib/claude/run-and-capture"
 import { createTeammateProgressReporter } from "./teammate-progress-coalescer"
 import { agendaFingerprint, parseRateLimitCooldown } from "./nudge-guard"
+import { runIdForTurn, taskIdForMessage } from "@/lib/task-workspace/client"
 import {
-  beginTaskWorkspaceTurn,
-  runIdForTurn,
-  settleTaskWorkspaceRun,
-  taskIdForMessage,
-} from "@/lib/task-workspace/client"
+  openTaskWorkspaceRunLease,
+  type TaskWorkspaceRunLease,
+} from "@/lib/task-workspace/run-lease"
 import { useSettingsStore } from "@/stores/settings"
 
 const DEFAULT_TEAMMATE_SYSTEM_PROMPT =
@@ -181,7 +182,8 @@ async function runToolEnabled(
   signal: AbortSignal,
   onCaptureEvent?: (event: CaptureStreamEvent) => void,
   maxSteps?: number,
-  cwdOverride?: string
+  cwdOverride?: string,
+  spanId?: string
 ): Promise<{ text: string; usage?: TokenUsage }> {
   const cwd = cwdOverride ?? teamCtx.team.config?.workingDir
   const character = teammateToCharacter({
@@ -225,13 +227,17 @@ async function runToolEnabled(
     runId: teamCtx.runId,
   })
   try {
-    const appSettings = await settingsDb.getSettings().catch(() => undefined)
+    const appSettings =
+      (await settingsDb.getSettings().catch(() => undefined)) ??
+      useSettingsStore.getState().settings
     const sessionRow = (await sessionsDb.getSession(session.id)) ?? session
     const sendOptions = await buildOpts.resolveSendOptions({
       session: sessionRow,
       character,
       appSettings: appSettings ?? null,
       ...(ceiling ? { permissionCeiling: ceiling } : {}),
+      routingSurface: "agent",
+      routingContextHint: { promptText: prompt },
       // Twin-backed teammate (ADR-0003): feed the per-run vector-store deps +
       // the task prompt so resolveSendOptions' twin branch injects the twin's
       // persona + per-task RAG. Guard is satisfied only when the teammate is
@@ -248,15 +254,146 @@ async function runToolEnabled(
     // sidecar dispatcher honors `maxTurns` (an explicit value takes precedence
     // over its default 256-turn budget).
     if (typeof maxSteps === "number" && maxSteps > 0) sendOptions.maxTurns = maxSteps
-    const result = await runner.runAndCaptureAssistantReply(session.id, prompt, sendOptions, {
-      signal,
-      ...(onCaptureEvent ? { onEvent: onCaptureEvent } : {}),
-      execution: {
-        kind: "team",
-        label: `Team ${session.id.slice(0, 8)}`,
-        ...(session.projectId ? { projectId: session.projectId } : {}),
-      },
-    })
+    const plan = sendOptions.routingPlan
+    const controller = plan
+      ? new RoutingAttemptController(
+          plan,
+          appSettings?.routingConfig?.maxFallbackAttempts ??
+            DEFAULT_ROUTING_CONFIG.maxFallbackAttempts
+        )
+      : undefined
+    let candidate = controller?.begin()
+    let attemptOptions = sendOptions
+    let result: Awaited<ReturnType<typeof runner.runAndCaptureAssistantReply>> | undefined
+    let lastError: unknown
+
+    if (plan && spanId) {
+      recordEvent(spanId, {
+        name: "routing.plan",
+        at: Date.now(),
+        attributes: {
+          decisionId: plan.decisionId,
+          surface: plan.surface,
+          strategy: plan.strategy,
+          providerId: plan.selected.providerId,
+          modelId: plan.selected.modelId,
+          candidateCount: plan.orderedCandidates.length,
+          reasonCodes: plan.reasonCodes,
+        },
+      })
+      if (plan.shadowComparison?.differs) {
+        recordEvent(spanId, {
+          name: "routing.shadow_diff",
+          at: Date.now(),
+          attributes: {
+            decisionId: plan.decisionId,
+            selectedProviderId: plan.selected.providerId,
+            selectedModelId: plan.selected.modelId,
+            shadowProviderId: plan.shadowComparison.selected.providerId,
+            shadowModelId: plan.shadowComparison.selected.modelId,
+          },
+        })
+      }
+    }
+
+    do {
+      const attemptIndex = controller?.state.candidateIndex ?? 0
+      if (plan && spanId && candidate) {
+        recordEvent(spanId, {
+          name: "routing.attempt",
+          at: Date.now(),
+          attributes: {
+            decisionId: plan.decisionId,
+            attemptIndex,
+            providerId: candidate.providerId,
+            modelId: candidate.modelId,
+          },
+        })
+      }
+      let committed = false
+      try {
+        result = await runner.runAndCaptureAssistantReply(session.id, prompt, attemptOptions, {
+          signal,
+          ...(plan || onCaptureEvent
+            ? {
+                onEvent: (event: CaptureStreamEvent) => {
+                  const commits =
+                    (event.type === "text-delta" && event.delta.length > 0) ||
+                    event.type === "tool-call"
+                  if (commits && !committed) {
+                    committed = true
+                    controller?.commit()
+                    if (plan && spanId) {
+                      recordEvent(spanId, {
+                        name: "routing.commit",
+                        at: Date.now(),
+                        attributes: {
+                          decisionId: plan.decisionId,
+                          attemptIndex,
+                          trigger: event.type,
+                        },
+                      })
+                    }
+                  }
+                  onCaptureEvent?.(event)
+                },
+              }
+            : {}),
+          execution: {
+            kind: "team",
+            label: `Team ${session.id.slice(0, 8)}`,
+            ...(session.projectId ? { projectId: session.projectId } : {}),
+          },
+        })
+        controller?.complete()
+        break
+      } catch (error) {
+        lastError = error
+        if (signal.aborted) {
+          controller?.cancel()
+          throw error
+        }
+        const next = controller?.failAndAdvance() ?? null
+        if (!next || !appSettings) throw error
+        candidate = next
+        const { resolveProviderAttemptOptions } =
+          await import("@/lib/claude/provider-attempt-options")
+        const resolvedAttempt = await resolveProviderAttemptOptions(next.providerId, appSettings)
+        attemptOptions = {
+          ...sendOptions,
+          provider: next.providerId,
+          model: next.modelId,
+          providerCredentials: resolvedAttempt.providerCredentials,
+          protocolAdapterSpec: resolvedAttempt.protocolAdapterSpec,
+          modelParams: resolvedAttempt.modelParams,
+          fallbackModel: undefined,
+          aliasResolution: sendOptions.aliasResolution
+            ? {
+                ...sendOptions.aliasResolution,
+                resolvedTo: { providerId: next.providerId, modelId: next.modelId },
+              }
+            : undefined,
+        }
+        if (plan && spanId) {
+          recordEvent(spanId, {
+            name: "routing.fallback",
+            at: Date.now(),
+            attributes: {
+              decisionId: plan.decisionId,
+              attemptIndex: controller?.state.candidateIndex ?? attemptIndex + 1,
+              providerId: next.providerId,
+              modelId: next.modelId,
+            },
+          })
+        }
+      }
+    } while (candidate)
+
+    if (!result) {
+      throw lastError instanceof Error
+        ? lastError
+        : new Error("dispatchTeammate: no routing candidate")
+    }
     return { text: result.text ?? "", usage: readUsage(result) }
   } finally {
     clearResolvedPermissionCeiling(session.id)
@@ -665,7 +802,7 @@ export async function dispatchTeammate(
 
   let turn: { text: string; usage?: TokenUsage }
   let workspace: WorktreeHandle | undefined
-  let taskWorkspaceRunId: string | undefined
+  let taskWorkspaceLease: TaskWorkspaceRunLease | undefined
   let taskWorkspaceExecutionRoot: string | undefined
   const recordWorkspace = (ok: boolean, output?: string, commitSha?: string): void => {
     if (workspace && teamCtx.workspaceLedger) {
@@ -686,20 +823,26 @@ export async function dispatchTeammate(
       useSettingsStore.getState().settings?.developer?.taskWorkspace === true &&
       taskWorkspaceRoot
     ) {
-      const taskRun = await beginTaskWorkspaceTurn({
+      const lease = await openTaskWorkspaceRunLease({
         taskId: taskIdForMessage(`team:${teamCtx.runId}`),
         sessionId: teamCtx.runId,
         runId: runIdForTurn(`${teamCtx.runId}:${teammate.id}:${args.taskId}`, 0),
+        executionRunId: teamCtx.runId,
+        traceId: span.traceId,
+        traceSpanId: span.spanId,
+        turnId: args.taskId,
+        attemptId: "a1",
+        surface: "team",
         agentId: teammate.id,
         agentKind: "agent-team",
         workspaceRoot: taskWorkspaceRoot,
         ...(args.workspaceKey ? { workspaceKey: args.workspaceKey } : {}),
       })
-      if (!taskRun) {
+      if (!lease) {
         throw new Error("task workspace host did not return an execution root for Agent Team")
       }
-      taskWorkspaceRunId = taskRun.runId
-      taskWorkspaceExecutionRoot = taskRun.executionRoot
+      taskWorkspaceLease = lease
+      taskWorkspaceExecutionRoot = lease.run.executionRoot
     } else if (teamCtx.workspaceAllocator) {
       workspace = await teamCtx.workspaceAllocator.allocate({
         runId: teamCtx.runId,
@@ -736,7 +879,8 @@ export async function dispatchTeammate(
         // channels surface start/terminal markers via the reporter instead.
         streamFull && reporter ? (event) => reporter.onCaptureEvent(event) : undefined,
         maxSteps,
-        taskWorkspaceExecutionRoot ?? workspace?.path
+        taskWorkspaceExecutionRoot ?? workspace?.path,
+        span.spanId
       )
     } else {
       // Twin-backed teammate on the text-only channel (web/mobile): executeAgent
@@ -758,7 +902,10 @@ export async function dispatchTeammate(
       turn = await runTextOnly(promptText, textSystemPrompt, modelHint, combinedSignal, maxSteps)
     }
   } catch (err) {
-    if (taskWorkspaceRunId) await settleTaskWorkspaceRun(taskWorkspaceRunId, "failed")
+    if (taskWorkspaceLease)
+      await taskWorkspaceLease.settle(
+        err instanceof Error && err.name === "AbortError" ? "cancelled" : "failed"
+      )
     reporter?.finalize("failed")
     endSpan(span.spanId, {
       errorType: err instanceof Error ? err.name : "Error",
@@ -811,7 +958,7 @@ export async function dispatchTeammate(
       }
       recordWorkspace(false)
       release("failure", empty)
-      if (taskWorkspaceRunId) await settleTaskWorkspaceRun(taskWorkspaceRunId, "failed")
+      if (taskWorkspaceLease) await taskWorkspaceLease.settle("failed")
       throw empty
     }
     const minChars = args.minOutputChars ?? teamCtx.team.config?.minOutputChars ?? 0
@@ -826,12 +973,12 @@ export async function dispatchTeammate(
       }
       recordWorkspace(false)
       release("failure", short)
-      if (taskWorkspaceRunId) await settleTaskWorkspaceRun(taskWorkspaceRunId, "failed")
+      if (taskWorkspaceLease) await taskWorkspaceLease.settle("failed")
       throw short
     }
   }
 
-  if (taskWorkspaceRunId) await settleTaskWorkspaceRun(taskWorkspaceRunId, "ready")
+  if (taskWorkspaceLease) await taskWorkspaceLease.settle("ready")
   teamCtx.pool.recordSuccess(teammate.id)
   if (turn.usage) {
     // One accounting authority: the governor's child account when present

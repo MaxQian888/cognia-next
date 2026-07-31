@@ -8,7 +8,7 @@ import type {
   RunEventVisibility,
   RunProjectionSnapshot,
 } from "@/types/execution/run"
-import { getDb } from "./schema"
+import { getDb, withDbReopenRetry } from "./schema"
 import { redactText } from "@cognia/redact"
 
 export type AppendRunEventInput = Omit<RunEvent, "id" | "runId" | "seq" | "projectId"> & {
@@ -40,8 +40,11 @@ function redactPayload(payload: Record<string, unknown>): Record<string, unknown
 }
 
 export async function createExecutionRun(run: ExecutionRun): Promise<ExecutionRun> {
-  const db = getDb()
-  await db.executionRuns.add(run)
+  await withDbReopenRetry(() =>
+    getDb()
+      .executionRuns.put(run)
+      .then(() => undefined)
+  )
   return run
 }
 
@@ -59,7 +62,11 @@ export async function createExecutionRunBinding(
 export async function putExecutionRunBinding(
   binding: ExecutionRunBinding
 ): Promise<ExecutionRunBinding> {
-  await getDb().executionRunBindings.put(binding)
+  await withDbReopenRetry(() =>
+    getDb()
+      .executionRunBindings.put(binding)
+      .then(() => undefined)
+  )
   return binding
 }
 
@@ -93,44 +100,50 @@ export async function getExecutionRunSnapshot(
   return (await getExecutionRun(runId))?.latestSnapshot
 }
 
-async function appendInsideTransaction(
+function appendInsideTransaction(
+  db: ReturnType<typeof getDb>,
   runId: string,
   input: AppendRunEventInput
 ): Promise<RunEvent> {
-  const db = getDb()
-  const run = await db.executionRuns.get(runId)
-  if (!run) throw new Error(`Execution run not found: ${runId}`)
-
   const id = eventId(runId, input)
-  const duplicate = await db.executionRunEvents.get(id)
-  if (duplicate) return duplicate
+  return db.executionRuns.get(runId).then((run) => {
+    if (!run) throw new Error(`Execution run not found: ${runId}`)
+    return db.executionRunEvents.get(id).then((duplicate) => {
+      if (duplicate) return duplicate
 
-  const event: RunEvent = {
-    id,
-    runId,
-    seq: run.currentRevision + 1,
-    ts: input.ts,
-    type: input.type,
-    visibility: input.visibility,
-    payload: redactPayload(input.payload),
-    ...(run.projectId ? { projectId: run.projectId } : {}),
-    ...(input.sourceEventId ? { sourceEventId: input.sourceEventId } : {}),
-  }
-  await db.executionRunEvents.add(event)
-
-  const events = await db.executionRunEvents
-    .where("[runId+seq]")
-    .between([runId, 0], [runId, Number.POSITIVE_INFINITY])
-    .toArray()
-  const snapshot = reduceRunEvents({ ...run, currentRevision: 0 }, events)
-  await db.executionRuns.update(runId, {
-    status: snapshot.status,
-    currentRevision: snapshot.revision,
-    latestSnapshot: snapshot,
-    updatedAt: snapshot.updatedAt,
-    ...(snapshot.endedAt !== undefined ? { endedAt: snapshot.endedAt } : {}),
+      const event: RunEvent = {
+        id,
+        runId,
+        seq: run.currentRevision + 1,
+        ts: input.ts,
+        type: input.type,
+        visibility: input.visibility,
+        payload: redactPayload(input.payload),
+        ...(run.projectId ? { projectId: run.projectId } : {}),
+        ...(input.sourceEventId ? { sourceEventId: input.sourceEventId } : {}),
+      }
+      return db.executionRunEvents
+        .add(event)
+        .then(() =>
+          db.executionRunEvents
+            .where("[runId+seq]")
+            .between([runId, 0], [runId, Number.POSITIVE_INFINITY])
+            .toArray()
+        )
+        .then((events) => {
+          const snapshot = reduceRunEvents({ ...run, currentRevision: 0 }, events)
+          return db.executionRuns
+            .update(runId, {
+              status: snapshot.status,
+              currentRevision: snapshot.revision,
+              latestSnapshot: snapshot,
+              updatedAt: snapshot.updatedAt,
+              ...(snapshot.endedAt !== undefined ? { endedAt: snapshot.endedAt } : {}),
+            })
+            .then(() => event)
+        })
+    })
   })
-  return event
 }
 
 export interface RunEventJournal {
@@ -146,18 +159,34 @@ export interface RunEventJournal {
 
 export const runEventJournal: RunEventJournal = {
   async append(runId, input) {
-    const db = getDb()
-    return db.transaction("rw", db.executionRuns, db.executionRunEvents, () =>
-      appendInsideTransaction(runId, input)
-    )
+    const idempotentInput = input.id ? input : { ...input, id: eventId(runId, input) }
+    return withDbReopenRetry(() => {
+      const db = getDb()
+      return db.transaction("rw", db.executionRuns, db.executionRunEvents, () =>
+        appendInsideTransaction(db, runId, idempotentInput)
+      )
+    })
   },
 
   async appendBatch(runId, inputs) {
-    const db = getDb()
-    return db.transaction("rw", db.executionRuns, db.executionRunEvents, async () => {
-      const out: RunEvent[] = []
-      for (const input of inputs) out.push(await appendInsideTransaction(runId, input))
-      return out
+    const idempotentInputs = inputs.map((input) =>
+      input.id ? input : { ...input, id: eventId(runId, input) }
+    )
+    return withDbReopenRetry(() => {
+      const db = getDb()
+      return db.transaction("rw", db.executionRuns, db.executionRunEvents, () => {
+        const initial = db.executionRuns.get(runId).then(() => [] as RunEvent[])
+        return idempotentInputs.reduce<Promise<RunEvent[]>>(
+          (pending, input) =>
+            pending.then((out) =>
+              appendInsideTransaction(db, runId, input).then((event) => {
+                out.push(event)
+                return out
+              })
+            ),
+          initial
+        )
+      })
     })
   },
 

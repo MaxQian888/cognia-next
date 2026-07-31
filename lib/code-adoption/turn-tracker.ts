@@ -19,6 +19,12 @@ import { endCodeAdoptionTurn } from "./client"
 import { persistCodeAdoptionTurn, pruneCodeAdoptionTurns } from "./persist"
 import type { CodeAdoptionTurnRow } from "./types"
 
+const cancelledTaskWorkspaceTurns = new Set<string>()
+
+export function markTaskWorkspaceTurnCancelled(sessionId: string, runId: number): void {
+  cancelledTaskWorkspaceTurns.add(`${sessionId}:${runId}`)
+}
+
 function projectTaskResources(
   sessionId: string,
   runId: number,
@@ -28,7 +34,7 @@ function projectTaskResources(
 ): CodeAdoptionTurnRow | null {
   if (!resources) return legacy
   const files = resources
-    .filter((resource) => resource.origin === "agent")
+    .filter((resource) => resource.origin === "agent" && resource.captureClass !== "generated")
     .map((resource) => ({
       path: resource.path,
       added: resource.insertions ?? 0,
@@ -60,13 +66,15 @@ export function isSettleEdge(before: ChatStatus | undefined, now: ChatStatus): b
 
 /** Best-effort: reconcile a settled turn, persist its record, and bound growth. */
 async function settleTurn(sessionId: string, runId: number, status: ChatStatus): Promise<void> {
+  const turnKey = `${sessionId}:${runId}`
+  const cancelled = cancelledTaskWorkspaceTurns.delete(turnKey)
   const active = useTaskWorkspaceStore.getState().activeBySession[sessionId]
   const resources = await settleTaskWorkspaceTurn(
     sessionId,
     runId,
-    status === "error" ? "failed" : "ready"
+    cancelled ? "cancelled" : status === "error" ? "failed" : "ready"
   )
-  const legacy = await endCodeAdoptionTurn(`${sessionId}:${runId}`)
+  const legacy = await endCodeAdoptionTurn(turnKey)
   const row = projectTaskResources(sessionId, runId, resources, legacy, active?.workspaceRoot)
   if (!row) return
   await persistCodeAdoptionTurn(row)

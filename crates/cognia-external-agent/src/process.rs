@@ -17,7 +17,7 @@ use std::process::Stdio;
 use std::sync::{Arc, Mutex as StdMutex};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{ChildStdin, Command};
-use tokio::sync::{oneshot, Mutex, RwLock};
+use tokio::sync::{oneshot, watch, Mutex, RwLock};
 
 /// Sink for process lifecycle events. The Tauri command layer implements this
 /// to emit `external-agent://*` events; unit tests pass a collector.
@@ -103,6 +103,9 @@ pub struct ExternalAgentProcess {
     /// `kill()`; dropping it (e.g. the process is removed from the manager)
     /// also triggers the supervisor's kill path.
     kill_tx: Option<oneshot::Sender<()>>,
+    /// Completion barrier published by the supervisor after it has removed the
+    /// process registration and emitted the exit event.
+    exit_rx: watch::Receiver<bool>,
     /// Shared runtime status, updated by the supervisor task on exit.
     runtime: Arc<StdMutex<RuntimeStatus>>,
 }
@@ -169,13 +172,18 @@ impl ExternalAgentProcess {
         })
     }
 
-    /// Request a kill. The supervisor task performs the actual `child.kill()`
-    /// and records the exit. Idempotent: a second call is a no-op.
-    pub fn kill(&mut self) {
-        self.with_runtime(|rt| rt.state = ExternalAgentProcessState::Stopping);
+    /// Request a kill and return a receiver for supervisor completion.
+    ///
+    /// Idempotent: every caller receives the same completion state, while only
+    /// the first caller sends the kill request.
+    pub fn kill(&mut self) -> watch::Receiver<bool> {
+        if !*self.exit_rx.borrow() {
+            self.with_runtime(|rt| rt.state = ExternalAgentProcessState::Stopping);
+        }
         if let Some(tx) = self.kill_tx.take() {
             let _ = tx.send(());
         }
+        self.exit_rx.clone()
     }
 
     /// Get process info as JSON-serializable value
@@ -214,7 +222,7 @@ fn exit_info_from_status(status: std::process::ExitStatus) -> (Option<i32>, Opti
 
 /// Manager for external agent processes
 pub struct ExternalAgentProcessManager {
-    processes: RwLock<HashMap<String, Arc<Mutex<ExternalAgentProcess>>>>,
+    processes: Arc<RwLock<HashMap<String, Arc<Mutex<ExternalAgentProcess>>>>>,
 }
 
 impl Default for ExternalAgentProcessManager {
@@ -227,7 +235,7 @@ impl ExternalAgentProcessManager {
     /// Create a new process manager
     pub fn new() -> Self {
         Self {
-            processes: RwLock::new(HashMap::new()),
+            processes: Arc::new(RwLock::new(HashMap::new())),
         }
     }
 
@@ -371,14 +379,37 @@ impl ExternalAgentProcessManager {
         }));
 
         let (kill_tx, kill_rx) = oneshot::channel::<()>();
+        let (exit_tx, exit_rx) = watch::channel(false);
+
+        // Register the process before starting the supervisor. A child that
+        // exits immediately is then still removed through the same supervised
+        // lifecycle as a long-running child.
+        let process = Arc::new(Mutex::new(ExternalAgentProcess {
+            pid,
+            config,
+            stdin,
+            kill_tx: Some(kill_tx),
+            exit_rx,
+            runtime: runtime.clone(),
+        }));
+        {
+            let mut processes = self.processes.write().await;
+            processes.insert(id.clone(), Arc::clone(&process));
+        }
 
         // Supervisor task: owns the child, awaits its exit (or a kill request),
-        // records the final status, and pushes the exit event. This is the
-        // single source of exit truth — there is no separate poll loop.
+        // removes the exact registered generation, records the final status,
+        // and pushes the exit event. This is the single source of exit truth —
+        // there is no separate poll loop.
         let supervisor_id = id.clone();
         let supervisor_runtime = runtime.clone();
         let supervisor_sink = sink.clone();
         let supervisor_pid = pid;
+        // A weak identity token lets the supervisor distinguish generations
+        // without keeping the process (and its kill sender) alive after the
+        // manager is dropped.
+        let supervisor_process = Arc::downgrade(&process);
+        let supervisor_processes = Arc::downgrade(&self.processes);
         tokio::spawn(async move {
             let (code, signal) = tokio::select! {
                 status = child.wait() => match status {
@@ -404,23 +435,23 @@ impl ExternalAgentProcessManager {
                 rt.last_exit_signal = signal.clone();
             }
 
+            // Remove only this generation. The identity check keeps a delayed
+            // supervisor from deleting a replacement that reused the stable id.
+            if let (Some(processes), Some(supervised)) =
+                (supervisor_processes.upgrade(), supervisor_process.upgrade())
+            {
+                let mut processes = processes.write().await;
+                if processes
+                    .get(&supervisor_id)
+                    .is_some_and(|registered| Arc::ptr_eq(registered, &supervised))
+                {
+                    processes.remove(&supervisor_id);
+                }
+            }
+
             supervisor_sink.exited(&supervisor_id, code, signal);
+            let _ = exit_tx.send(true);
         });
-
-        // Create process entry
-        let process = ExternalAgentProcess {
-            pid,
-            config,
-            stdin,
-            kill_tx: Some(kill_tx),
-            runtime,
-        };
-
-        // Store in manager
-        {
-            let mut processes = self.processes.write().await;
-            processes.insert(id.clone(), Arc::new(Mutex::new(process)));
-        }
 
         Ok(id)
     }
@@ -447,15 +478,16 @@ impl ExternalAgentProcessManager {
             .get(id)
             .await
             .ok_or(format!("Agent {} not found", id))?;
-        {
+        let mut exit_rx = {
             let mut process = process.lock().await;
-            process.kill();
+            process.kill()
+        };
+        while !*exit_rx.borrow() {
+            exit_rx
+                .changed()
+                .await
+                .map_err(|_| format!("Agent {} supervisor stopped before exit cleanup", id))?;
         }
-
-        // Remove from manager. The supervisor task keeps running off its own
-        // clones and still emits the exit event.
-        let mut processes = self.processes.write().await;
-        processes.remove(id);
 
         log::info!("External agent {} killed", id);
         Ok(())
@@ -723,16 +755,13 @@ mod tests {
         assert!(!mgr.list().await.contains(&id));
         assert!(mgr.get_info(&id).await.is_err());
 
-        // The supervisor records the kill as an exit event.
-        let mut got_exit = false;
-        for _ in 0..50 {
-            if sink.exited.lock().unwrap().is_some() {
-                got_exit = true;
-                break;
-            }
-            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-        }
-        assert!(got_exit, "expected supervisor to emit an exit event");
+        // A completed kill is a lifecycle barrier: callers may immediately
+        // reuse the stable agent id without a late exit from this generation
+        // being mistaken for the replacement process.
+        assert!(
+            sink.exited.lock().unwrap().is_some(),
+            "kill returned before the supervisor emitted the exit event"
+        );
         let exit = sink.exited.lock().unwrap().clone().unwrap();
         assert_eq!(exit.1.as_deref(), Some("killed"));
     }
@@ -762,6 +791,41 @@ mod tests {
         assert!(got_exit, "expected natural exit to emit an exit event");
         let exit = sink.exited.lock().unwrap().clone().unwrap();
         assert_eq!(exit.0, Some(0));
+
+        // Natural exits must release the stable process-manager key just like
+        // explicit kills; otherwise every restart collides with a dead entry.
+        assert!(mgr.get("quick").await.is_none());
+        mgr.spawn(echo_config("quick"), noop_sink())
+            .await
+            .expect("natural exit should release the id for restart");
+        mgr.kill("quick").await.expect("cleanup replacement");
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn dropping_manager_stops_registered_processes() {
+        let sink = Arc::new(CollectorSink::default());
+        {
+            let mgr = ExternalAgentProcessManager::new();
+            mgr.spawn(echo_config("drop-manager"), sink.clone())
+                .await
+                .expect("spawn");
+        }
+
+        let mut got_exit = false;
+        for _ in 0..50 {
+            if sink.exited.lock().unwrap().is_some() {
+                got_exit = true;
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+        assert!(
+            got_exit,
+            "dropping the manager must stop its child processes"
+        );
+        let exit = sink.exited.lock().unwrap().clone().unwrap();
+        assert_eq!(exit.1.as_deref(), Some("killed"));
     }
 
     #[cfg(unix)]

@@ -12,8 +12,10 @@
 
 import { useMemo } from "react"
 import { useTranslations } from "next-intl"
+import { ActivityIcon } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
+import { FeaturePageHeader } from "@/components/feature-shell/feature-page-header"
 import { InspectRow } from "@/components/scheduler/details/_shared/inspect-row"
 import { formatDuration, formatRelativeTime } from "@/lib/scheduler/format-utils"
 import { useAgentRuns } from "@/hooks/agent-runs/use-agent-runs"
@@ -57,34 +59,33 @@ export function AgentRunsPanel({
 
   return (
     <div className="flex h-full min-h-0 w-full flex-col">
-      <header className="border-b px-4 py-3">
-        <h1 className="text-lg font-semibold">{t("title")}</h1>
-        <p className="text-xs text-muted-foreground">{t("description")}</p>
-      </header>
-
-      <div
-        className="flex flex-wrap gap-1.5 border-b px-4 py-2"
-        role="tablist"
-        aria-label={t("title")}
-      >
-        {KIND_FILTERS.map((k) => (
-          <button
-            key={k}
-            type="button"
-            role="tab"
-            aria-selected={filterKind === k}
-            onClick={() => onFilterKind?.(k)}
-            className={cn(
-              "rounded-full px-3 py-1 text-xs font-medium transition-colors",
-              filterKind === k
-                ? "bg-primary text-primary-foreground"
-                : "bg-muted text-muted-foreground hover:bg-muted/70"
-            )}
-          >
-            {t(`filters.${FILTER_I18N[k]}`)}
-          </button>
-        ))}
-      </div>
+      <FeaturePageHeader
+        variant="compact"
+        icon={<ActivityIcon />}
+        title={t("title")}
+        description={t("description")}
+        controls={
+          <div className="flex gap-1.5" role="tablist" aria-label={t("title")}>
+            {KIND_FILTERS.map((k) => (
+              <button
+                key={k}
+                type="button"
+                role="tab"
+                aria-selected={filterKind === k}
+                onClick={() => onFilterKind?.(k)}
+                className={cn(
+                  "rounded-full px-3 py-1 text-xs font-medium transition-colors",
+                  filterKind === k
+                    ? "bg-primary text-primary-foreground"
+                    : "bg-muted text-muted-foreground hover:bg-muted/70"
+                )}
+              >
+                {t(`filters.${FILTER_I18N[k]}`)}
+              </button>
+            ))}
+          </div>
+        }
+      />
 
       <div className="flex min-h-0 flex-1">
         {/* List */}

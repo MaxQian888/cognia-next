@@ -181,11 +181,12 @@ export function startSpan(input: StartSpanInput): SpanHandle {
 
 /** Record a discrete mid-span event. Silently dropped when the span is no
  * longer active (already ended) — keeps async tool-result paths safe. */
-export function recordEvent(spanId: string, event: SpanEvent): void {
+export function recordEvent(spanId: string, event: SpanEvent): boolean {
   const span = activeSpans.get(spanId)
-  if (!span) return
+  if (!span) return false
   if (!span.events) span.events = []
   span.events.push(event)
+  return true
 }
 
 /** Finish a span. Idempotent on `spanId` — repeated calls are dropped. */

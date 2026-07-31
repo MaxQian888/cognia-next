@@ -1,6 +1,7 @@
 import { create } from "zustand"
 import { persist } from "zustand/middleware"
 import { persistLocalStorage } from "@/stores/persist-storage"
+import { registerProjectBucketPurger } from "@/lib/project/project-bucket-purge"
 import { DEFAULT_TEAM_CONFIG } from "@/types/agent/agent-team"
 import { initialState } from "./initial-state"
 import { createAgentTeamActionsSlice } from "./slices/actions.slice"
@@ -248,6 +249,10 @@ export const useAgentTeamStore = create<AgentTeamState>()(
     }
   )
 )
+
+registerProjectBucketPurger("agent-teams", (projectId) => {
+  useAgentTeamStore.getState().purgeProject(projectId)
+})
 
 export function activateAgentTeamAccountStorage(accountId: string): void {
   if (typeof window === "undefined") return

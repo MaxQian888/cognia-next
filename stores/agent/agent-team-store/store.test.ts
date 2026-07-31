@@ -38,6 +38,7 @@ import {
   useAgentTeamStore,
 } from "./store"
 import { initialState } from "./initial-state"
+import { purgeProjectBuckets } from "@/lib/project/project-bucket-purge"
 
 function persistedTeam(id: string, name: string) {
   return {
@@ -54,6 +55,15 @@ function persistedTeam(id: string, name: string) {
 beforeEach(() => {
   localStorage.clear()
   clearAgentTeamAccountStorage()
+})
+
+it("registers the live agent-team store with project bucket purge", () => {
+  const purge = jest
+    .spyOn(useAgentTeamStore.getState(), "purgeProject")
+    .mockImplementation(() => {})
+  purgeProjectBuckets("project-1")
+  expect(purge).toHaveBeenCalledWith("project-1")
+  purge.mockRestore()
 })
 
 describe("migrateAgentTeamPersisted", () => {

@@ -98,6 +98,7 @@ export const TeamComposer = forwardRef<ComposerHandle, TeamComposerProps>(functi
         ref={ref}
         onSend={handleSend}
         onStop={onStop ?? (() => undefined)}
+        status={isStreaming ? "streaming" : "idle"}
         onStartNewSession={() => undefined}
         onOpenSettings={() => undefined}
         disabled={disabled}

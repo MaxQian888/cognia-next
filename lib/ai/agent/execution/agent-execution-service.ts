@@ -54,6 +54,19 @@ export type AgentExecutionServiceResult = ExecuteAgentResult & {
     | "legacy-completion-fallback"
     | "external-agent-unavailable"
   legacyMigrated?: boolean
+  taskWorkspaceRunId?: string
+  trackingUnavailable?: boolean
+}
+
+export interface AgentExecutionTaskWorkspaceOptions {
+  enabled: boolean
+  agentId: string
+  agentKind: string
+  taskId?: string
+  parentRunId?: string
+  executionRunId?: string
+  traceSpanId?: string
+  trackingPolicy?: import("@/lib/task-workspace/types").ResourceTrackingPolicy
 }
 
 export interface AgentExecutionTurnOptions {
@@ -65,6 +78,8 @@ export interface AgentExecutionTurnOptions {
   requireTools?: boolean
   /** Caller-known identity (sessionId/runId/…); deterministic placeholders otherwise. */
   identity?: Partial<AgentExecutionIdentity>
+  /** Filesystem tracking policy for Cognia-managed execution surfaces. */
+  taskWorkspace?: AgentExecutionTaskWorkspaceOptions
 }
 
 /**
@@ -129,28 +144,94 @@ export async function executeAgentTurn(
     ...(spec.legacyMigrated ? { legacyMigrated: true } : {}),
   })
 
-  // Intentional completion (toolsEnabled false/absent, or explicit policy).
-  if (spec.executionKind === "completion") {
-    return stamp(await executor.runCompletionRail(prompt, config))
-  }
-
-  // Agent rail: requires a host. Host availability is resolver-environment
-  // truth (`isTauri` / headless host), NEVER re-probed ad hoc here.
   const hostAvailable = environment.isTauri || environment.isHeadlessHost
-  if (hostAvailable) {
-    return stamp(await executor.runAgentRail(prompt, config))
+
+  const executeResolved = async (
+    effectiveConfig: ExecuteAgentConfig
+  ): Promise<AgentExecutionServiceResult> => {
+    // Intentional completion (toolsEnabled false/absent, or explicit policy).
+    if (spec.executionKind === "completion") {
+      return stamp(await executor.runCompletionRail(prompt, effectiveConfig))
+    }
+
+    // Agent rail: requires a host. Host availability is resolver-environment
+    // truth (`isTauri` / headless host), NEVER re-probed ad hoc here.
+    if (hostAvailable) {
+      return stamp(await executor.runAgentRail(prompt, effectiveConfig))
+    }
+
+    // No host: only an EXPLICIT completion fallback may degrade — and the
+    // result says so. Everything else fails closed.
+    if (spec.fallbackPolicy === "completion") {
+      const result = stamp(await executor.runCompletionRail(prompt, effectiveConfig))
+      return {
+        ...result,
+        degradedReason: spec.legacyMigrated ? "legacy-completion-fallback" : "sidecar-unavailable",
+      }
+    }
+    throw new AgentHostUnavailableError(spec.hostRef)
   }
 
-  // No host: only an EXPLICIT completion fallback may degrade — and the
-  // result says so. Everything else fails closed.
-  if (spec.fallbackPolicy === "completion") {
-    const result = stamp(await executor.runCompletionRail(prompt, config))
+  const tracking =
+    options?.taskWorkspace ??
+    (config.cwd && (await taskWorkspaceFlagEnabled())
+      ? {
+          enabled: true,
+          agentId: spec.identity.runId,
+          agentKind: surface,
+        }
+      : undefined)
+  if (tracking?.enabled && config.cwd && spec.executionKind === "agent" && hostAvailable) {
+    const { withTaskWorkspaceRun } = await import("@/lib/task-workspace/run-lease")
+    const leased = await withTaskWorkspaceRun(
+      {
+        enabled: true,
+        workspaceRoot: config.cwd,
+        ...(tracking.taskId ? { taskId: tracking.taskId } : {}),
+        sessionId: spec.identity.sessionId,
+        runId: spec.identity.runId,
+        ...(tracking.parentRunId ? { parentRunId: tracking.parentRunId } : {}),
+        ...(spec.identity.turnId ? { turnId: spec.identity.turnId } : {}),
+        attemptId: spec.identity.attemptId,
+        ...(spec.identity.providerAttemptId
+          ? { providerAttemptId: spec.identity.providerAttemptId }
+          : {}),
+        executionRunId: tracking.executionRunId ?? spec.identity.runId,
+        traceId: resolution.trace.traceId,
+        ...(tracking.traceSpanId ? { traceSpanId: tracking.traceSpanId } : {}),
+        surface,
+        agentId: tracking.agentId,
+        agentKind: tracking.agentKind,
+        ...(tracking.trackingPolicy ? { trackingPolicy: tracking.trackingPolicy } : {}),
+      },
+      (executionRoot) => executeResolved({ ...config, cwd: executionRoot })
+    )
     return {
-      ...result,
-      degradedReason: spec.legacyMigrated ? "legacy-completion-fallback" : "sidecar-unavailable",
+      ...leased.value,
+      ...(leased.taskWorkspaceRunId ? { taskWorkspaceRunId: leased.taskWorkspaceRunId } : {}),
+      ...(leased.trackingUnavailable ? { trackingUnavailable: true } : {}),
     }
   }
-  throw new AgentHostUnavailableError(spec.hostRef)
+
+  const result = await executeResolved(config)
+  if (tracking?.enabled && (!config.cwd || !hostAvailable)) {
+    return { ...result, trackingUnavailable: true }
+  }
+  return result
+}
+
+async function taskWorkspaceFlagEnabled(): Promise<boolean> {
+  try {
+    const { useSettingsStore } = await import("@/stores/settings")
+    const enabled = useSettingsStore.getState().settings?.developer?.taskWorkspace
+    if (typeof enabled === "boolean") return enabled
+  } catch {}
+  try {
+    const { getSettings } = await import("@/lib/db/settings")
+    return (await getSettings())?.developer?.taskWorkspace === true
+  } catch {
+    return false
+  }
 }
 
 /**

@@ -5,11 +5,15 @@ import { __resetDbForTesting, getDb } from "./schema"
 import {
   createExecutionRun,
   createExecutionRunBinding,
+  getExecutionRun,
   getExecutionRunBinding,
   getExecutionRunSnapshot,
   listExecutionRunEvents,
+  listExecutionRunBindings,
+  putExecutionRunBinding,
   runEventJournal,
   sweepExecutionRunEventRetention,
+  semanticRunEvent,
   updateExecutionRunBinding,
 } from "./execution-runs"
 
@@ -85,6 +89,49 @@ describe("execution run journal", () => {
     expect((await getDb().executionRuns.get("run-dedupe"))?.currentRevision).toBe(1)
   })
 
+  it("rejects events for a run that does not exist", async () => {
+    await expect(
+      runEventJournal.append("missing-run", {
+        type: "run.started",
+        ts: 1,
+        visibility: "summary",
+        payload: {},
+      })
+    ).rejects.toThrow("Execution run not found: missing-run")
+  })
+
+  it("appends a batch sequentially and keeps explicit ids idempotent", async () => {
+    await createExecutionRun({
+      id: "run-batch",
+      kind: "workflow",
+      sourceId: "workflow-batch",
+      projectId: "project-a",
+      title: "Batch",
+      status: "running",
+      currentRevision: 0,
+      startedAt: 1,
+      updatedAt: 1,
+    })
+    const inputs = [
+      semanticRunEvent("run.started", {}, { ts: 2 }),
+      {
+        id: "explicit-step",
+        type: "step.added" as const,
+        ts: 3,
+        visibility: "detail" as const,
+        payload: { stepId: "step-a", title: "Step A" },
+      },
+    ]
+
+    const first = await runEventJournal.appendBatch("run-batch", inputs)
+    const duplicate = await runEventJournal.appendBatch("run-batch", [inputs[1]])
+
+    expect(first.map((event) => event.seq)).toEqual([1, 2])
+    expect(first.every((event) => event.projectId === "project-a")).toBe(true)
+    expect(duplicate[0]).toEqual(first[1])
+    expect(await runEventJournal.replay("run-batch")).toHaveLength(2)
+  })
+
   it("redacts sensitive strings before they enter the durable journal", async () => {
     await createExecutionRun({
       id: "run-redaction",
@@ -133,6 +180,55 @@ describe("execution run journal", () => {
       presentationState: { cardId: "card-1", sequence: 2 },
       lastProjectedRevision: 3,
     })
+  })
+
+  it("puts and lists bindings without duplicating their durable identity", async () => {
+    const binding = {
+      id: "binding-put",
+      runId: "run-put",
+      adapterId: "lark-1",
+      conversationKey: "lark:lark-1:chat-1",
+      status: "active" as const,
+      deliveryMode: "native" as const,
+      lastProjectedRevision: 0,
+      createdAt: 1,
+      updatedAt: 1,
+    }
+
+    await putExecutionRunBinding(binding)
+    await putExecutionRunBinding({ ...binding, lastProjectedRevision: 2, updatedAt: 2 })
+
+    expect(await listExecutionRunBindings(binding.runId)).toEqual([
+      expect.objectContaining({ id: binding.id, lastProjectedRevision: 2 }),
+    ])
+  })
+
+  it("returns the persisted run and applies semantic event defaults and overrides", async () => {
+    const run = {
+      id: "run-get",
+      kind: "agent-turn" as const,
+      sourceId: "turn-get",
+      title: "Get",
+      status: "running" as const,
+      currentRevision: 0,
+      startedAt: 1,
+      updatedAt: 1,
+    }
+    await createExecutionRun(run)
+
+    expect(await getExecutionRun(run.id)).toEqual(run)
+    expect(semanticRunEvent("run.started", {}).visibility).toBe("summary")
+    expect(
+      semanticRunEvent(
+        "run.started",
+        {},
+        {
+          ts: 42,
+          visibility: "internal",
+          sourceEventId: "source-42",
+        }
+      )
+    ).toMatchObject({ ts: 42, visibility: "internal", sourceEventId: "source-42" })
   })
 
   it("removes semantic events 30 days after terminal state while preserving the run snapshot", async () => {

@@ -236,6 +236,7 @@ export class ExternalAgentManager {
   private eventListeners: Map<string, Set<(event: ExternalAgentEvent) => void>> = new Map()
   private lifecycleListeners: Set<(event: ExternalAgentLifecycleEvent) => void> = new Set()
   private processExitUnlisten?: Promise<() => void>
+  private intentionalProcessStops = new Set<string>()
 
   private constructor(config: ExternalAgentManagerConfig = {}) {
     this.config = { ...DEFAULT_MANAGER_CONFIG, ...config }
@@ -261,21 +262,30 @@ export class ExternalAgentManager {
   private subscribeToProcessExits(): void {
     if (!isTauri()) return
     this.processExitUnlisten = onExternalAgentExit((event) => {
-      this.handleProcessExit(event.agentId)
+      // Adapter listeners receive the same event and synchronously move their
+      // transport to disconnected/reconnecting. Reconcile in the next
+      // microtask so listener registration order cannot produce a false
+      // "still connected" decision.
+      queueMicrotask(() => {
+        void this.handleProcessExit(event.agentId)
+      })
     })
   }
 
   /**
-   * A spawned external-agent process exited. Downgrade the manager's instance
-   * to `disconnected` only when it was an established `connected` link the
-   * adapter now confirms is gone — the guard skips reconnect races and adapters
-   * that self-healed. `updateInstanceState` is change-gated, so this is a no-op
-   * when nothing actually changed.
+   * A spawned external-agent process exited. Reconcile an established link to
+   * `disconnected`, then reconnect through the manager's existing retry path.
+   * Guards skip intentional stops, in-flight adapter reconnects, and adapters
+   * that already self-healed.
    */
-  private handleProcessExit(agentId: string): void {
+  private async handleProcessExit(agentId: string): Promise<void> {
     const instance = this.instances.get(agentId)
     const adapter = this.adapters.get(agentId)
     if (!instance || !adapter) return
+    if (this.intentionalProcessStops.has(agentId)) return
+    if (adapter.connectionStatus === "connecting" || adapter.connectionStatus === "reconnecting") {
+      return
+    }
     if (!shouldReconcileExitToDisconnected(instance.connectionStatus, adapter.isConnected())) {
       return
     }
@@ -283,6 +293,22 @@ export class ExternalAgentManager {
       connectionStatus: "disconnected",
       status: "idle",
     })
+    instance.sessions.clear()
+
+    if (!this.config.autoReconnect || !instance.config.enabled) {
+      return
+    }
+
+    externalAgentManagerLogger.warn("External agent process exited, reconnecting", { agentId })
+    try {
+      await this.connect(agentId)
+    } catch (error) {
+      // `connect()` already records the terminal error/validity state after
+      // exhausting the configured retry policy; this log preserves context.
+      externalAgentManagerLogger.error("External agent process reconnect failed", error, {
+        agentId,
+      })
+    }
   }
 
   // ==========================================================================
@@ -859,6 +885,7 @@ export class ExternalAgentManager {
       "unavailable",
       "reset by peer",
       "closed",
+      "process exited",
     ]
     return retryablePatterns.some((pattern) => message.includes(pattern))
   }
@@ -1297,7 +1324,12 @@ export class ExternalAgentManager {
   async removeAgent(agentId: string): Promise<void> {
     const adapter = this.adapters.get(agentId)
     if (adapter) {
-      await adapter.disconnect()
+      this.intentionalProcessStops.add(agentId)
+      try {
+        await adapter.disconnect()
+      } finally {
+        this.intentionalProcessStops.delete(agentId)
+      }
       this.adapters.delete(agentId)
     }
 
@@ -1598,7 +1630,12 @@ export class ExternalAgentManager {
     const instance = this.instances.get(agentId)
 
     if (adapter) {
-      await adapter.disconnect()
+      this.intentionalProcessStops.add(agentId)
+      try {
+        await adapter.disconnect()
+      } finally {
+        this.intentionalProcessStops.delete(agentId)
+      }
     }
 
     if (instance) {

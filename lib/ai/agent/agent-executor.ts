@@ -34,6 +34,19 @@ import type { CaptureStreamEvent } from "@/lib/claude/run-and-capture"
 import type { DispatchContext } from "@/lib/claude/agents/dispatch-context-registry"
 import type { ExternalSessionPermissionSpec } from "@/lib/ai/agent/external/permission-cascade"
 import { buildJsonInstruction, parseStructured } from "@/lib/workflow/nodes/ai/structured"
+import { estimateCJKTokenCount } from "@cognia/rag/cjk-tokenizer"
+import { hasNoLeakingPiiDeep } from "@cognia/redact"
+import { RoutingAttemptController } from "@cognia/provider-routing"
+import {
+  applyCircuitBreakerSettings,
+  buildRoutingEngine,
+} from "@cognia/provider-routing/build-preview-engine"
+import type { AutoRoutingSettings } from "@cognia/provider-types/auto-router"
+import {
+  DEFAULT_ROUTING_CONFIG,
+  type ModelMapping,
+  type RoutingConfig,
+} from "@cognia/provider-types/model-mapping"
 import type {
   PluginAgentOutputFormat,
   PluginToolPermissionFn,
@@ -96,6 +109,12 @@ export interface ExecuteAgentConfig {
    */
   customProviders?: RichCustomProviderEntry[]
   defaultProvider?: string
+  /** Existing alias registry used by Auto and explicit alias selections. */
+  modelMappings?: ModelMapping[]
+  /** Existing reliability, fallback, filter, and plugin routing policy. */
+  routingConfig?: RoutingConfig
+  /** Existing Auto policy; absent or disabled preserves the manual default. */
+  autoRouting?: AutoRoutingSettings
   /**
    * Per-run provider override (cross-provider subagents). When set, this run
    * targets THIS provider instead of the default — on the sidecar channel via
@@ -406,6 +425,8 @@ async function runToolEnabledStandalone(
       ...(config.dispatchContext ? { dispatchContext: config.dispatchContext } : {}),
       ...(config.isDispatchedSubagent ? { isDispatchedSubagent: true } : {}),
       ...(config.permissionCeiling ? { permissionCeiling: config.permissionCeiling } : {}),
+      routingSurface: "agent",
+      routingContextHint: { promptText: prompt },
     })
     // Append-style system extension + structured-output instruction ride
     // `appendSystemPrompt` so the resolved character/skill blocks survive.
@@ -415,6 +436,15 @@ async function runToolEnabledStandalone(
       structuredInstruction(config.outputFormat)
     )
     if (appended) sendOptions.appendSystemPrompt = appended
+    if (
+      !hasNoLeakingPiiDeep({
+        prompt,
+        systemPrompt: sendOptions.systemPrompt,
+        appendSystemPrompt: sendOptions.appendSystemPrompt,
+      })
+    ) {
+      throw new Error("executeAgent: outbound agent prompt rejected by the PII gate")
+    }
 
     // PostToolUse hook: opt into the sidecar tool-result review round-trip so
     // the ai-sdk channel can REWRITE tool output before the model sees it. The
@@ -428,20 +458,154 @@ async function runToolEnabledStandalone(
       ;(sendOptions as Record<string, unknown>).toolResultReviewEnabled = true
     }
 
-    const result = await runner.runAndCaptureAssistantReply(session.id, prompt, sendOptions, {
-      signal: config.abortSignal,
-      ...(typeof config.timeoutMs === "number" ? { timeoutMs: config.timeoutMs } : {}),
-      ...(config.onEvent ? { onEvent: config.onEvent } : {}),
-      execution: {
-        kind: "subagent",
-        label: `Subagent ${session.id.slice(0, 8)}`,
-        ...(session.projectId ? { projectId: session.projectId } : {}),
-      },
-      ...(permissionResponderFor(config.canUseTool, config.abortSignal)
-        ? { onPermissionRequest: permissionResponderFor(config.canUseTool, config.abortSignal) }
-        : {}),
-      ...(onToolResultReview ? { onToolResultReview } : {}),
-    })
+    const plan = sendOptions.routingPlan
+    const controller = plan
+      ? new RoutingAttemptController(
+          plan,
+          appSettings?.routingConfig?.maxFallbackAttempts ??
+            DEFAULT_ROUTING_CONFIG.maxFallbackAttempts
+        )
+      : undefined
+    let candidate = controller?.begin()
+    let attemptOptions = sendOptions
+    let lastError: unknown
+    let result: Awaited<ReturnType<typeof runner.runAndCaptureAssistantReply>> | undefined
+    const traceEmitter = sendOptions.spanId
+      ? await import("@cognia/agent-trace/emitter")
+      : undefined
+
+    if (plan && sendOptions.spanId && traceEmitter) {
+      traceEmitter.recordEvent(sendOptions.spanId, {
+        name: "routing.plan",
+        at: Date.now(),
+        attributes: {
+          decisionId: plan.decisionId,
+          surface: plan.surface,
+          strategy: plan.strategy,
+          providerId: plan.selected.providerId,
+          modelId: plan.selected.modelId,
+          candidateCount: plan.orderedCandidates.length,
+          reasonCodes: plan.reasonCodes,
+          ...(plan.classification
+            ? {
+                category: plan.classification.category,
+                complexity: plan.classification.complexity,
+                difficultyScore: plan.classification.difficultyScore,
+              }
+            : {}),
+        },
+      })
+      if (plan.shadowComparison?.differs) {
+        traceEmitter.recordEvent(sendOptions.spanId, {
+          name: "routing.shadow_diff",
+          at: Date.now(),
+          attributes: {
+            decisionId: plan.decisionId,
+            selectedProviderId: plan.selected.providerId,
+            selectedModelId: plan.selected.modelId,
+            shadowProviderId: plan.shadowComparison.selected.providerId,
+            shadowModelId: plan.shadowComparison.selected.modelId,
+          },
+        })
+      }
+    }
+
+    do {
+      const attemptIndex = controller?.state.candidateIndex ?? 0
+      if (plan && sendOptions.spanId && traceEmitter && candidate) {
+        traceEmitter.recordEvent(sendOptions.spanId, {
+          name: "routing.attempt",
+          at: Date.now(),
+          attributes: {
+            decisionId: plan.decisionId,
+            attemptIndex,
+            providerId: candidate.providerId,
+            modelId: candidate.modelId,
+          },
+        })
+      }
+      let committed = false
+      try {
+        result = await runner.runAndCaptureAssistantReply(session.id, prompt, attemptOptions, {
+          signal: config.abortSignal,
+          ...(typeof config.timeoutMs === "number" ? { timeoutMs: config.timeoutMs } : {}),
+          onEvent: (event) => {
+            const commits =
+              (event.type === "text-delta" && event.delta.length > 0) || event.type === "tool-call"
+            if (commits && !committed) {
+              committed = true
+              controller?.commit()
+              if (plan && sendOptions.spanId && traceEmitter) {
+                traceEmitter.recordEvent(sendOptions.spanId, {
+                  name: "routing.commit",
+                  at: Date.now(),
+                  attributes: {
+                    decisionId: plan.decisionId,
+                    attemptIndex,
+                    trigger: event.type,
+                  },
+                })
+              }
+            }
+            config.onEvent?.(event)
+          },
+          execution: {
+            kind: "subagent",
+            label: `Subagent ${session.id.slice(0, 8)}`,
+            ...(session.projectId ? { projectId: session.projectId } : {}),
+          },
+          ...(permissionResponderFor(config.canUseTool, config.abortSignal)
+            ? { onPermissionRequest: permissionResponderFor(config.canUseTool, config.abortSignal) }
+            : {}),
+          ...(onToolResultReview ? { onToolResultReview } : {}),
+        })
+        controller?.complete()
+        break
+      } catch (error) {
+        lastError = error
+        if (config.abortSignal?.aborted) {
+          controller?.cancel()
+          throw error
+        }
+        const next = controller?.failAndAdvance() ?? null
+        if (!next || !appSettings) throw error
+        candidate = next
+        const { resolveProviderAttemptOptions } =
+          await import("@/lib/claude/provider-attempt-options")
+        const resolvedAttempt = await resolveProviderAttemptOptions(next.providerId, appSettings)
+        attemptOptions = {
+          ...sendOptions,
+          provider: next.providerId,
+          model: next.modelId,
+          providerCredentials: resolvedAttempt.providerCredentials,
+          protocolAdapterSpec: resolvedAttempt.protocolAdapterSpec,
+          modelParams: resolvedAttempt.modelParams,
+          fallbackModel: undefined,
+          aliasResolution: sendOptions.aliasResolution
+            ? {
+                ...sendOptions.aliasResolution,
+                resolvedTo: { providerId: next.providerId, modelId: next.modelId },
+              }
+            : undefined,
+        }
+        if (plan && sendOptions.spanId && traceEmitter) {
+          traceEmitter.recordEvent(sendOptions.spanId, {
+            name: "routing.fallback",
+            at: Date.now(),
+            attributes: {
+              decisionId: plan.decisionId,
+              attemptIndex: controller?.state.candidateIndex ?? attemptIndex + 1,
+              providerId: next.providerId,
+              modelId: next.modelId,
+            },
+          })
+        }
+      }
+    } while (candidate)
+
+    if (!result) {
+      throw lastError instanceof Error ? lastError : new Error("executeAgent: no routing candidate")
+    }
     // Persist the SDK session id so the next send on this persistent session
     // resumes the conversation (resolveSendOptions reads it as resumeSessionId).
     if (persistent && result.sdkSessionId) {
@@ -531,79 +695,198 @@ export async function runCompletionRail(
   prompt: string,
   config: ExecuteAgentConfig = {}
 ): Promise<ExecuteAgentResult> {
+  // Renderer callers share one already-hydrated settings store. Reading that
+  // in-memory snapshot here closes every public Agent entrypoint without
+  // adding a Dexie/network operation or threading the same tuple through each
+  // plugin, dispatch, plan, team, and external-bridge adapter.
+  const liveSettings = await import("@/stores/settings")
+    .then(({ useSettingsStore }) => useSettingsStore.getState().settings)
+    .catch(() => undefined)
+  const providerSettings = config.providerSettings ?? liveSettings?.providerSettings
+  const customProviders = config.customProviders ?? liveSettings?.customProviders
+  const modelMappings = config.modelMappings ?? liveSettings?.modelMappings
+  const routingConfig = config.routingConfig ?? liveSettings?.routingConfig
+  const autoRouting = config.autoRouting ?? liveSettings?.autoRouting
+
   // A per-run `provider` override wins over the snapshot default so a
   // cross-provider subagent targets its own provider on the text channel too.
-  const overrideProvider = config.provider ?? config.defaultProvider
+  const overrideProvider =
+    config.provider ?? config.defaultProvider ?? liveSettings?.defaultProvider
   const snapshot = createProviderSettingsSnapshot({
     defaultProvider: overrideProvider,
-    providerSettings: config.providerSettings,
-    customProviders: config.customProviders,
+    providerSettings: providerSettings as ExecuteAgentConfig["providerSettings"],
+    customProviders: customProviders as ExecuteAgentConfig["customProviders"],
   })
-
-  const resolution = resolveFeatureProvider(
-    {
-      featureId: "plugin-agent-executor",
-      routeProfile: "general-text",
-      selectionMode: snapshot.defaultProvider ? "explicit-provider" : "any",
-      providerId: snapshot.defaultProvider,
-      fallbackMode: "first-eligible",
-    },
-    snapshot
+  const enabledAliases = new Set(
+    (modelMappings ?? [])
+      .filter((mapping) => mapping.enabled)
+      .map((mapping) => mapping.alias.toLowerCase())
   )
-
-  if (resolution.kind !== "resolved") {
-    throw new Error(`executeAgent: ${resolution.reason}`)
-  }
-
-  const model = createFeatureProviderModel({
-    ...resolution,
-    model: config.model ?? resolution.model,
-  })
-
-  const options: Record<string, unknown> = { model }
-  // Multi-turn on the text channel (Package D degradation): when prior turns
-  // are supplied, send them as a message list so the model has context the
-  // sidecar would otherwise carry via native resume. Single-shot otherwise.
+  const autoRequested = Boolean(
+    autoRouting?.enabled &&
+    (config.model === "auto" || (!config.model && autoRouting.defaultSelection === "auto"))
+  )
+  const aliasRequested =
+    !autoRequested && config.model && enabledAliases.has(config.model.toLowerCase())
+      ? config.model
+      : undefined
+  const providerVisiblePayload: Record<string, unknown> = {}
   if (config.priorMessages && config.priorMessages.length > 0) {
-    options.messages = [
-      ...config.priorMessages.map((m) => ({ role: m.role, content: m.content })),
+    providerVisiblePayload.messages = [
+      ...config.priorMessages.map((message) => ({
+        role: message.role,
+        content: message.content,
+      })),
       { role: "user", content: prompt },
     ]
   } else {
-    options.prompt = prompt
+    providerVisiblePayload.prompt = prompt
   }
-  // System prompt = base + append + structured instruction (preset-with-append).
   const system = composeSystem(
     config.systemPrompt,
     config.appendSystem,
     structuredInstruction(config.outputFormat)
   )
-  if (system) options.system = system
-  if (config.temperature !== undefined) options.temperature = config.temperature
-  if (config.abortSignal) options.abortSignal = config.abortSignal
+  if (system) providerVisiblePayload.system = system
+  if (!hasNoLeakingPiiDeep(providerVisiblePayload)) {
+    throw new Error("executeAgent: outbound prompt rejected by the PII gate")
+  }
 
-  const result = streamText(options as Parameters<typeof streamText>[0])
-  let text = ""
-  for await (const chunk of result.textStream) {
-    text += chunk
-    config.onDelta?.(chunk)
-    config.onEvent?.({ type: "text-delta", delta: chunk })
+  // A concrete provider/model is a hard manual selection. Resolve the current
+  // default once only to identify that selection; every actual attempt resolves
+  // credentials again immediately before dispatch.
+  let manualSelection: { providerId: string; modelId: string } | undefined
+  if (!autoRequested && !aliasRequested) {
+    const resolution = resolveFeatureProvider(
+      {
+        featureId: "plugin-agent-executor",
+        routeProfile: "general-text",
+        selectionMode: snapshot.defaultProvider ? "explicit-provider" : "any",
+        providerId: snapshot.defaultProvider,
+        fallbackMode: snapshot.defaultProvider ? "none" : "first-eligible",
+      },
+      snapshot
+    )
+    if (resolution.kind !== "resolved") {
+      throw new Error(`executeAgent: ${resolution.reason}`)
+    }
+    const modelId = config.model ?? resolution.model
+    if (!modelId) {
+      throw new Error("executeAgent: resolved provider has no default model")
+    }
+    manualSelection = {
+      providerId: resolution.providerId,
+      modelId,
+    }
   }
-  const finishReason = await result.finishReason
-  // `usage` is a promise on real streamText results; tolerate mocks that omit it.
-  const rawUsage = await Promise.resolve(result.usage).catch(() => undefined)
-  const inputTokens = Number(rawUsage?.inputTokens ?? 0) || 0
-  const outputTokens = Number(rawUsage?.outputTokens ?? 0) || 0
-  return {
-    text,
-    finishReason: typeof finishReason === "string" ? finishReason : undefined,
-    channel: "text",
-    toolsAvailable: false,
-    ...(rawUsage
-      ? { usage: { inputTokens, outputTokens, totalTokens: inputTokens + outputTokens } }
-      : {}),
-    ...finalizeStructured(text, config.outputFormat),
+
+  const engine = buildRoutingEngine({
+    providerSettings: providerSettings as ExecuteAgentConfig["providerSettings"],
+    customProviders: customProviders as ExecuteAgentConfig["customProviders"],
+    modelMappings,
+    routingConfig,
+  })
+  if (routingConfig) applyCircuitBreakerSettings(routingConfig)
+  const basePolicy = autoRouting?.dataPolicy
+  const dataPolicy = overrideProvider
+    ? {
+        locality: basePolicy?.locality ?? ("any" as const),
+        allowedProviderIds: basePolicy?.allowedProviderIds?.includes(overrideProvider)
+          ? [overrideProvider]
+          : basePolicy?.allowedProviderIds
+            ? []
+            : [overrideProvider],
+        ...(basePolicy?.excludedProviderIds
+          ? { excludedProviderIds: basePolicy.excludedProviderIds }
+          : {}),
+      }
+    : basePolicy
+  const plan = await engine.planRoute({
+    surface: "agent",
+    selection: autoRequested
+      ? { kind: "auto" }
+      : aliasRequested
+        ? { kind: "alias", alias: aliasRequested }
+        : { kind: "manual", ...manualSelection! },
+    promptText: prompt,
+    estimatedInputTokens: estimateCJKTokenCount(prompt),
+    requirements: {
+      streaming: true,
+      structuredOutput: Boolean(config.outputFormat),
+    },
+    sessionId: config.sessionId,
+    strategy: routingConfig?.strategy ?? autoRouting?.strategy,
+    candidateAliases: autoRouting?.candidateAliases,
+    thresholds: autoRouting?.thresholds,
+    dataPolicy,
+    shadowMode: autoRouting?.shadowMode,
+  })
+  const controller = new RoutingAttemptController(
+    plan,
+    routingConfig?.maxFallbackAttempts ?? DEFAULT_ROUTING_CONFIG.maxFallbackAttempts
+  )
+  let candidate = controller.begin()
+  let lastError: unknown
+
+  while (candidate) {
+    try {
+      const resolution = resolveFeatureProvider(
+        {
+          featureId: "plugin-agent-executor",
+          routeProfile: "general-text",
+          selectionMode: "explicit-provider",
+          providerId: candidate.providerId,
+          fallbackMode: "none",
+        },
+        snapshot
+      )
+      if (resolution.kind !== "resolved") {
+        throw new Error(`executeAgent: ${resolution.reason}`)
+      }
+      const model = createFeatureProviderModel({
+        ...resolution,
+        model: candidate.modelId,
+      })
+      const options: Record<string, unknown> = { model, ...providerVisiblePayload }
+      if (config.temperature !== undefined) options.temperature = config.temperature
+      if (config.abortSignal) options.abortSignal = config.abortSignal
+
+      const result = streamText(options as Parameters<typeof streamText>[0])
+      let text = ""
+      for await (const chunk of result.textStream) {
+        if (chunk.length > 0 && controller.state.phase === "inFlight") {
+          controller.commit()
+        }
+        text += chunk
+        config.onDelta?.(chunk)
+        config.onEvent?.({ type: "text-delta", delta: chunk })
+      }
+      const finishReason = await result.finishReason
+      const rawUsage = await Promise.resolve(result.usage).catch(() => undefined)
+      const inputTokens = Number(rawUsage?.inputTokens ?? 0) || 0
+      const outputTokens = Number(rawUsage?.outputTokens ?? 0) || 0
+      controller.complete()
+      return {
+        text,
+        finishReason: typeof finishReason === "string" ? finishReason : undefined,
+        channel: "text",
+        toolsAvailable: false,
+        ...(rawUsage
+          ? { usage: { inputTokens, outputTokens, totalTokens: inputTokens + outputTokens } }
+          : {}),
+        ...finalizeStructured(text, config.outputFormat),
+      }
+    } catch (error) {
+      lastError = error
+      if (config.abortSignal?.aborted) {
+        controller.cancel()
+        throw error
+      }
+      candidate = controller.failAndAdvance()
+    }
   }
+
+  throw lastError instanceof Error ? lastError : new Error("executeAgent: no routing candidate")
 }
 
 /**

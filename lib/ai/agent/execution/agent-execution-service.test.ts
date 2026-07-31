@@ -7,6 +7,19 @@ import {
   AgentHostUnavailableError,
 } from "./agent-execution-service"
 
+const workspaceLease = jest.fn(
+  async (_input: unknown, execute: (cwd: string) => Promise<unknown>) => ({
+    value: await execute("/isolated"),
+    taskWorkspaceRunId: "workspace-run-1",
+    executionRoot: "/isolated",
+  })
+)
+
+jest.mock("@/lib/task-workspace/run-lease", () => ({
+  withTaskWorkspaceRun: (...args: unknown[]) =>
+    workspaceLease(...(args as [unknown, (cwd: string) => Promise<unknown>])),
+}))
+
 jest.mock("@/lib/ai/agent/agent-executor", () => ({
   runAgentRail: jest.fn(async () => ({
     text: "agent-rail",
@@ -174,4 +187,30 @@ it("threads the caller session id into the resolved identity fingerprint determi
     { isTauri: true, isHeadlessHost: false }
   )
   expect(a.executionFingerprint).toBe(b.executionFingerprint)
+})
+
+it("runs managed filesystem work through one Task Workspace lease", async () => {
+  const result = await executeAgentTurn(
+    "p",
+    { sessionId: "session-1", cwd: "/repo", toolsEnabled: true },
+    { isTauri: true, isHeadlessHost: false },
+    {
+      surface: "workflow-agent-turn",
+      identity: { runId: "execution-1", attemptId: "attempt-1", turnId: "turn-1" },
+      taskWorkspace: { enabled: true, agentId: "workflow-agent", agentKind: "workflow" },
+    }
+  )
+
+  expect(workspaceLease).toHaveBeenCalledWith(
+    expect.objectContaining({
+      workspaceRoot: "/repo",
+      runId: "execution-1",
+      attemptId: "attempt-1",
+      surface: "workflow-agent-turn",
+    }),
+    expect.any(Function)
+  )
+  expect(agentRail).toHaveBeenCalledWith("p", expect.objectContaining({ cwd: "/isolated" }))
+  expect(result.taskWorkspaceRunId).toBe("workspace-run-1")
+  expect(result.trackingUnavailable).toBeUndefined()
 })

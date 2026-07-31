@@ -41,6 +41,8 @@ export type RunEventType =
   | "interrupt.resolved"
   | "interrupt.expired"
   | "artifact.created"
+  | "resource.changed"
+  | "resource.summary"
   | "milestone.created"
   | "control.accepted"
   | "control.rejected"

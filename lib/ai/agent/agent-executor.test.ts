@@ -16,7 +16,14 @@ import { createSession, getSession, deleteSession, setSdkSessionId } from "@/lib
 import { getSettings } from "@/lib/db/settings"
 import { resolveSendOptions } from "@/lib/claude/build-options"
 import { runAndCaptureAssistantReply } from "@/lib/claude/run-and-capture"
+import { buildRoutingEngine } from "@cognia/provider-routing/build-preview-engine"
 import { executeAgent } from "./agent-executor"
+
+const mockPlanRoute = jest.fn()
+const mockApplyCircuitBreakerSettings = jest.fn()
+const mockLiveSettingsState: { settings?: Record<string, unknown> } = {}
+const mockResolveProviderAttemptOptions = jest.fn()
+const mockHasNoLeakingPiiDeep = jest.fn((_value?: unknown) => true)
 
 jest.mock("ai", () => ({ streamText: jest.fn() }))
 jest.mock("@/lib/ai/provider-consumption", () => ({
@@ -35,6 +42,19 @@ jest.mock("@/lib/db/sessions", () => ({
 jest.mock("@/lib/db/settings", () => ({ getSettings: jest.fn() }))
 jest.mock("@/lib/claude/build-options", () => ({ resolveSendOptions: jest.fn() }))
 jest.mock("@/lib/claude/run-and-capture", () => ({ runAndCaptureAssistantReply: jest.fn() }))
+jest.mock("@cognia/provider-routing/build-preview-engine", () => ({
+  applyCircuitBreakerSettings: (...args: unknown[]) => mockApplyCircuitBreakerSettings(...args),
+  buildRoutingEngine: jest.fn(() => ({ planRoute: mockPlanRoute })),
+}))
+jest.mock("@/stores/settings", () => ({
+  useSettingsStore: { getState: () => mockLiveSettingsState },
+}))
+jest.mock("@/lib/claude/provider-attempt-options", () => ({
+  resolveProviderAttemptOptions: (...args: unknown[]) => mockResolveProviderAttemptOptions(...args),
+}))
+jest.mock("@cognia/redact", () => ({
+  hasNoLeakingPiiDeep: (value: unknown) => mockHasNoLeakingPiiDeep(value),
+}))
 
 const mockStreamText = streamText as jest.MockedFunction<typeof streamText>
 const mockResolveProvider = resolveFeatureProvider as jest.MockedFunction<
@@ -56,6 +76,31 @@ const mockResolveSendOptions = resolveSendOptions as jest.MockedFunction<typeof 
 const mockRunAndCapture = runAndCaptureAssistantReply as jest.MockedFunction<
   typeof runAndCaptureAssistantReply
 >
+const mockBuildRoutingEngine = buildRoutingEngine as jest.MockedFunction<typeof buildRoutingEngine>
+
+function routingPlan(
+  candidates: Array<{ providerId: string; modelId: string }> = [
+    { providerId: "openai", modelId: "gpt-4o" },
+  ]
+) {
+  const orderedCandidates = candidates.map((candidate, index) => ({
+    ...candidate,
+    deploymentId: `${candidate.providerId}::${candidate.modelId}`,
+    reasonCodes: index === 0 ? ["manual-override"] : ["fallback-transient"],
+  }))
+  return {
+    decisionId: "route-agent-1",
+    surface: "agent",
+    requested: { kind: "manual", providerId: "openai", modelId: "gpt-4o" },
+    strategy: "reliability",
+    selected: orderedCandidates[0],
+    orderedCandidates,
+    reasonCodes: ["manual-override"],
+    rejected: [],
+    replayPolicy: "pre-commit-only",
+    createdAt: 1,
+  }
+}
 
 function primeTextChannel(parts: string[] = ["hello"], finishReason = "stop") {
   mockResolveProvider.mockReturnValue({
@@ -85,7 +130,13 @@ function primeTextChannel(parts: string[] = ["hello"], finishReason = "stop") {
 describe("executeAgent", () => {
   beforeEach(() => {
     jest.clearAllMocks()
+    mockLiveSettingsState.settings = undefined
     mockIsTauri.mockReturnValue(false)
+    mockPlanRoute.mockResolvedValue(routingPlan())
+    mockHasNoLeakingPiiDeep.mockReturnValue(true)
+    mockResolveProviderAttemptOptions.mockResolvedValue({
+      providerCredentials: { apiKey: "sk-fallback", protocol: "anthropic" },
+    })
   })
 
   describe("text-only channel", () => {
@@ -97,6 +148,223 @@ describe("executeAgent", () => {
       expect(result.toolsAvailable).toBe(false)
       expect(result.finishReason).toBe("stop")
       expect(mockRunAndCapture).not.toHaveBeenCalled()
+      expect(mockPlanRoute).toHaveBeenCalledWith(
+        expect.objectContaining({
+          surface: "agent",
+          promptText: "hi",
+          selection: { kind: "manual", providerId: "openai", modelId: "gpt-4o" },
+        })
+      )
+    })
+
+    it("plans Auto from the existing settings contract", async () => {
+      primeTextChannel(["ok"])
+      await executeAgent("分析这段代码", {
+        autoRouting: {
+          enabled: true,
+          defaultSelection: "auto",
+          candidateAliases: ["fast", "balanced", "powerful"],
+          thresholds: { balanced: 0.35, powerful: 0.7 },
+          strategy: "reliability",
+          dataPolicy: { locality: "any" },
+          shadowMode: true,
+        } as never,
+      })
+      expect(mockBuildRoutingEngine).toHaveBeenCalled()
+      expect(mockPlanRoute).toHaveBeenCalledWith(
+        expect.objectContaining({
+          surface: "agent",
+          selection: { kind: "auto" },
+          promptText: "分析这段代码",
+          strategy: "reliability",
+          shadowMode: true,
+        })
+      )
+    })
+
+    it("fails closed before planning or dispatch when the full provider payload leaks PII", async () => {
+      primeTextChannel()
+      mockHasNoLeakingPiiDeep.mockReturnValue(false)
+
+      await expect(
+        executeAgent("contact alice@example.com", {
+          priorMessages: [{ role: "assistant", content: "context" }],
+          systemPrompt: "system",
+        })
+      ).rejects.toThrow("outbound prompt rejected by the PII gate")
+      expect(mockHasNoLeakingPiiDeep).toHaveBeenCalledWith({
+        messages: [
+          { role: "assistant", content: "context" },
+          { role: "user", content: "contact alice@example.com" },
+        ],
+        system: "system",
+      })
+      expect(mockPlanRoute).not.toHaveBeenCalled()
+      expect(mockStreamText).not.toHaveBeenCalled()
+    })
+
+    it("hydrates the existing in-memory routing policy for public Agent callers", async () => {
+      primeTextChannel(["ok"])
+      mockLiveSettingsState.settings = {
+        defaultProvider: "openai",
+        providerSettings: { openai: { enabled: true, apiKey: "sk-live" } },
+        modelMappings: [],
+        routingConfig: { strategy: "reliability", maxFallbackAttempts: 1 },
+        autoRouting: {
+          enabled: true,
+          defaultSelection: "auto",
+          candidateAliases: ["fast", "balanced", "powerful"],
+          thresholds: { balanced: 0.35, powerful: 0.7 },
+          strategy: "reliability",
+          dataPolicy: { locality: "any" },
+        },
+      }
+
+      await executeAgent("route from live settings")
+
+      expect(mockPlanRoute).toHaveBeenCalledWith(
+        expect.objectContaining({ surface: "agent", selection: { kind: "auto" } })
+      )
+      expect(mockApplyCircuitBreakerSettings).toHaveBeenCalledWith(
+        expect.objectContaining({ strategy: "reliability" })
+      )
+    })
+
+    it("plans an explicit alias without resolving it as a concrete model", async () => {
+      primeTextChannel(["ok"])
+
+      await executeAgent("review this", {
+        model: "coding",
+        modelMappings: [
+          {
+            id: "coding",
+            alias: "coding",
+            providers: [{ providerId: "openai", modelId: "gpt-4o" }],
+            distribution: "priority",
+            enabled: true,
+            createdAt: 1,
+            updatedAt: 1,
+          },
+        ],
+      })
+
+      expect(mockPlanRoute).toHaveBeenCalledWith(
+        expect.objectContaining({ selection: { kind: "alias", alias: "coding" } })
+      )
+    })
+
+    it("falls back only when a candidate fails before the first text delta", async () => {
+      primeTextChannel()
+      mockPlanRoute.mockResolvedValue(
+        routingPlan([
+          { providerId: "openai", modelId: "gpt-4o" },
+          { providerId: "anthropic", modelId: "claude-sonnet-4-5" },
+        ])
+      )
+      mockStreamText
+        .mockReturnValueOnce({
+          textStream: (async function* () {
+            throw new Error("connection reset")
+          })(),
+          finishReason: Promise.resolve("error"),
+        } as never)
+        .mockReturnValueOnce({
+          textStream: (async function* () {
+            yield "recovered"
+          })(),
+          finishReason: Promise.resolve("stop"),
+        } as never)
+
+      await expect(executeAgent("hi")).resolves.toMatchObject({ text: "recovered" })
+      expect(mockStreamText).toHaveBeenCalledTimes(2)
+      expect(mockCreateModel).toHaveBeenNthCalledWith(
+        2,
+        expect.objectContaining({ model: "claude-sonnet-4-5" })
+      )
+    })
+
+    it("never replays automatically after the first text delta is committed", async () => {
+      primeTextChannel()
+      mockPlanRoute.mockResolvedValue(
+        routingPlan([
+          { providerId: "openai", modelId: "gpt-4o" },
+          { providerId: "anthropic", modelId: "claude-sonnet-4-5" },
+        ])
+      )
+      const onDelta = jest.fn()
+      mockStreamText.mockReturnValue({
+        textStream: (async function* () {
+          yield "partial"
+          throw new Error("stream interrupted")
+        })(),
+        finishReason: Promise.resolve("error"),
+      } as never)
+
+      await expect(executeAgent("hi", { onDelta })).rejects.toThrow("stream interrupted")
+      expect(onDelta).toHaveBeenCalledWith("partial")
+      expect(mockStreamText).toHaveBeenCalledTimes(1)
+    })
+
+    it("cancels an aborted attempt without trying the next candidate", async () => {
+      primeTextChannel()
+      mockPlanRoute.mockResolvedValue(
+        routingPlan([
+          { providerId: "openai", modelId: "gpt-4o" },
+          { providerId: "anthropic", modelId: "claude-sonnet-4-5" },
+        ])
+      )
+      const controller = new AbortController()
+      controller.abort()
+      mockStreamText.mockReturnValue({
+        textStream: (async function* () {
+          throw new Error("aborted")
+        })(),
+        finishReason: Promise.resolve("error"),
+      } as never)
+
+      await expect(executeAgent("hi", { abortSignal: controller.signal })).rejects.toThrow(
+        "aborted"
+      )
+      expect(mockStreamText).toHaveBeenCalledTimes(1)
+    })
+
+    it("advances when a planned candidate cannot resolve credentials", async () => {
+      primeTextChannel()
+      mockPlanRoute.mockResolvedValue(
+        routingPlan([
+          { providerId: "openai", modelId: "gpt-4o" },
+          { providerId: "anthropic", modelId: "claude-sonnet-4-5" },
+        ])
+      )
+      const resolvedAttempt = {
+        kind: "resolved",
+        featureId: "plugin-agent-executor",
+        routeProfile: "general-text",
+        providerId: "anthropic",
+        model: "claude-sonnet-4-5",
+        apiKey: "sk-x",
+        baseURL: "https://api.anthropic.com",
+        protocol: "anthropic",
+        isCustomProvider: false,
+        executionMode: "direct-model",
+        useProxy: false,
+        attemptedProviderIds: ["anthropic"],
+        fallbackProviderIds: [],
+      } as never
+      mockResolveProvider
+        .mockReturnValueOnce(resolvedAttempt)
+        .mockReturnValueOnce({
+          kind: "blocked",
+          reason: "missing key",
+          nextAction: "add_api_key",
+        } as never)
+        .mockReturnValueOnce(resolvedAttempt)
+
+      await expect(executeAgent("hi")).resolves.toMatchObject({ text: "hello" })
+      expect(mockStreamText).toHaveBeenCalledTimes(1)
+      expect(mockCreateModel).toHaveBeenCalledWith(
+        expect.objectContaining({ model: "claude-sonnet-4-5" })
+      )
     })
 
     it("forwards systemPrompt/temperature/abortSignal and tolerates a non-string finishReason", async () => {
@@ -207,6 +475,94 @@ describe("executeAgent", () => {
         expect.objectContaining({ execution: expect.objectContaining({ kind: "subagent" }) })
       )
       expect(mockStreamText).not.toHaveBeenCalled()
+      expect(mockResolveSendOptions).toHaveBeenCalledWith(
+        expect.objectContaining({
+          routingSurface: "agent",
+          routingContextHint: { promptText: "do work" },
+        })
+      )
+    })
+
+    it("uses the shared plan to retry a tool rail failure before commitment", async () => {
+      const plan = routingPlan([
+        { providerId: "openai", modelId: "gpt-4o" },
+        { providerId: "anthropic", modelId: "claude-sonnet-4-5" },
+      ])
+      mockGetSettings.mockResolvedValue({
+        routingConfig: { maxFallbackAttempts: 1 },
+      } as never)
+      mockResolveSendOptions.mockResolvedValue({
+        model: "gpt-4o",
+        provider: "openai",
+        routingPlan: plan,
+      } as never)
+      mockRunAndCapture
+        .mockRejectedValueOnce(new Error("upstream unavailable"))
+        .mockResolvedValueOnce({
+          text: "fallback reply",
+          messageId: "m2",
+          a2uiSurfaces: {},
+          a2uiSurfaceOrder: [],
+        })
+
+      await expect(executeAgent("do work", { toolsEnabled: true })).resolves.toMatchObject({
+        text: "fallback reply",
+      })
+      expect(mockRunAndCapture).toHaveBeenCalledTimes(2)
+      expect(mockRunAndCapture.mock.calls[1][2]).toMatchObject({
+        provider: "anthropic",
+        model: "claude-sonnet-4-5",
+        providerCredentials: { apiKey: "sk-fallback", protocol: "anthropic" },
+      })
+      expect(mockResolveProviderAttemptOptions).toHaveBeenCalledWith(
+        "anthropic",
+        expect.any(Object)
+      )
+    })
+
+    it("fails closed before a tool rail attempt when prompt assembly leaks PII", async () => {
+      mockHasNoLeakingPiiDeep.mockReturnValue(false)
+      mockResolveSendOptions.mockResolvedValue({
+        model: "claude",
+        systemPrompt: "system alice@example.com",
+        appendSystemPrompt: "derived context",
+      } as never)
+
+      await expect(executeAgent("do work", { toolsEnabled: true })).rejects.toThrow(
+        "outbound agent prompt rejected by the PII gate"
+      )
+      expect(mockHasNoLeakingPiiDeep).toHaveBeenCalledWith({
+        prompt: "do work",
+        systemPrompt: "system alice@example.com",
+        appendSystemPrompt: "derived context",
+      })
+      expect(mockRunAndCapture).not.toHaveBeenCalled()
+      expect(mockResolveProviderAttemptOptions).not.toHaveBeenCalled()
+    })
+
+    it("never retries the tool rail after a tool dispatch commits the attempt", async () => {
+      const plan = routingPlan([
+        { providerId: "openai", modelId: "gpt-4o" },
+        { providerId: "anthropic", modelId: "claude-sonnet-4-5" },
+      ])
+      mockGetSettings.mockResolvedValue({
+        routingConfig: { maxFallbackAttempts: 1 },
+      } as never)
+      mockResolveSendOptions.mockResolvedValue({
+        model: "gpt-4o",
+        provider: "openai",
+        routingPlan: plan,
+      } as never)
+      mockRunAndCapture.mockImplementationOnce(async (_sessionId, _prompt, _options, capture) => {
+        capture?.onEvent?.({ type: "tool-call", toolName: "Read", input: {} })
+        throw new Error("failed after tool dispatch")
+      })
+
+      await expect(executeAgent("do work", { toolsEnabled: true })).rejects.toThrow(
+        "failed after tool dispatch"
+      )
+      expect(mockRunAndCapture).toHaveBeenCalledTimes(1)
+      expect(mockResolveProviderAttemptOptions).not.toHaveBeenCalled()
     })
 
     it("forwards a parent permissionCeiling into resolveSendOptions (child clamp)", async () => {
@@ -396,10 +752,10 @@ describe("executeAgent", () => {
       expect(capArg.onToolResultReview).toBeUndefined()
     })
 
-    it("does not attach onEvent when no onEvent is given", async () => {
+    it("attaches an internal event observer even when no external onEvent is given", async () => {
       await executeAgent("x", { toolsEnabled: true })
       const capArg = mockRunAndCapture.mock.calls[0][3] as { onEvent?: unknown }
-      expect(capArg.onEvent).toBeUndefined()
+      expect(typeof capArg.onEvent).toBe("function")
     })
 
     it("parses structured output from the sidecar reply onto result.object", async () => {

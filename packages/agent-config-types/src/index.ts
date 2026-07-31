@@ -684,6 +684,9 @@ export interface SendOptions {
     retryPolicy?: import("@cognia/provider-types/model-mapping").ModelMappingRetryPolicy
   }
 
+  /** Complete secret-free routing plan; primary is orderedCandidates[0]. */
+  routingPlan?: import("@cognia/provider-types/auto-router").RoutingPlan
+
   /**
    * Records which routing strategy made the decision and a human-readable
    * reason. Surfaced in the message metadata badge for debugging /
@@ -2539,6 +2542,18 @@ export interface AppSettings {
    * The other fields drive xterm.js rendering and OSC 633 enablement.
    */
   terminal?: {
+    host?: {
+      /** Host-wide gate; paired-device grants remain independently deny-by-default. */
+      allowRemoteAccess?: boolean
+      /** Install the current-user login service for the durable host. */
+      startAtLogin?: boolean
+      /** Consent to bounded lifecycle/error diagnostics; never terminal bytes or commands. */
+      diagnostics?: boolean
+      maxSessions?: number
+      maxRemoteSessionsPerDevice?: number
+      replayBytesPerSession?: number
+      totalReplayBytes?: number
+    }
     defaultShell?: string
     fontFamily?: string
     fontSize?: number
@@ -3492,7 +3507,7 @@ export interface AppSettings {
    * engine. Strict no-op until opted in and until matching aliases exist in
    * `modelMappings`. See `lib/routing/auto-tier.ts`.
    */
-  autoRouting?: import("@/types/routing/tool-route").AutoRoutingSettings
+  autoRouting?: import("@cognia/provider-types/auto-router").AutoRoutingSettings
   /**
    * When true, on a `session_ended.error` for a turn that resolved via an
    * alias with non-empty `aliasResolution.fallbackEntries`, the renderer

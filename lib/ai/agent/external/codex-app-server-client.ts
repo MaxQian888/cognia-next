@@ -403,7 +403,10 @@ export class CodexAppServerAdapter extends BaseProtocolAdapter {
       const env = await buildAgentEnv(config, config.process.env || {})
       this.processId = await this.spawnProcess(config, env)
 
-      this.registerProcessListeners()
+      // Listener registration is asynchronous in Tauri. Complete it before
+      // initialize so a fast response or exit cannot be lost between spawn
+      // and the JSON-RPC handshake.
+      await this.registerProcessListeners()
 
       // Handshake: initialize → store info → `initialized` notification.
       const result = await this.peer.sendRequest<{
@@ -456,9 +459,9 @@ export class CodexAppServerAdapter extends BaseProtocolAdapter {
         } catch (killError) {
           log.warn("Failed to kill Codex app-server process after a failed connect", { killError })
         }
-        this.processId = undefined
       }
-      this.peer = undefined
+      this.settlePendingServerRequests("Codex app-server connection failed")
+      this.resetLocalConnectionState("Codex app-server connection failed")
       this._connectionStatus = "error"
       log.error("Codex app-server connection failed", { error })
       throw error
@@ -486,33 +489,25 @@ export class CodexAppServerAdapter extends BaseProtocolAdapter {
   }
 
   async disconnect(): Promise<void> {
-    if (this._connectionStatus === "disconnected") return
+    if (
+      this._connectionStatus === "disconnected" &&
+      !this.processId &&
+      !this.peer &&
+      this.unsubscribers.length === 0 &&
+      this._sessions.size === 0
+    ) {
+      return
+    }
 
     // Resolve server-initiated requests while the peer/process is still live so
     // Codex receives a protocol-level cancellation instead of a dropped pipe.
-    for (const [, pending] of this.pendingApprovals) {
-      pending.resolve(this.cancelApprovalResponse(pending))
-    }
-    this.pendingApprovals.clear()
-    for (const [, pending] of this.pendingUserInputs) {
-      if (pending.timer) clearTimeout(pending.timer)
-      pending.resolve({ answers: emptyAnswersFor(pending.questions) })
-    }
-    this.pendingUserInputs.clear()
-    for (const [, pending] of this.pendingMcpElicitations) {
-      pending.resolve({ action: "cancel", content: null, _meta: null })
-    }
-    this.pendingMcpElicitations.clear()
-    for (const [, pending] of this.pendingCompactions) {
-      clearTimeout(pending.timer)
-      pending.reject(new Error("Disconnected while Codex context compaction was in progress"))
-    }
-    this.pendingCompactions.clear()
+    const disconnectReason = "Disconnected from Codex app-server"
+    this.settlePendingServerRequests(disconnectReason)
     await Promise.resolve()
     await Promise.resolve()
 
     this.cleanupListeners()
-    this.peer?.rejectAll("Disconnected from Codex app-server")
+    this.peer?.rejectAll(disconnectReason)
 
     if (this.processId && supportsExternalAgents()) {
       try {
@@ -522,16 +517,7 @@ export class CodexAppServerAdapter extends BaseProtocolAdapter {
       }
     }
 
-    this.processId = undefined
-    this.peer = undefined
-    this._sessions.clear()
-    this.activeTurns.clear()
-    this.lastTokenUsage.clear()
-    this.streamedItems.clear()
-    this.sentSystemPrompt.clear()
-    this.itemPhases.clear()
-    this.modelCache = []
-    this.clearSessionExtensionSupportCache()
+    this.resetLocalConnectionState(disconnectReason)
     this._connectionStatus = "disconnected"
     log.info("Disconnected from Codex app-server")
   }
@@ -580,26 +566,79 @@ export class CodexAppServerAdapter extends BaseProtocolAdapter {
     }
   }
 
-  private registerProcessListeners(): void {
-    void onExternalAgentStdout((event) => {
+  private async registerProcessListeners(): Promise<void> {
+    const unsubscribeStdout = await onExternalAgentStdout((event) => {
       if (event.agentId === this.processId) this.peer?.ingest(event.data)
-    }).then((un) => this.unsubscribers.push(un))
+    })
+    this.unsubscribers.push(unsubscribeStdout)
 
-    void onExternalAgentStderr((event) => {
+    const unsubscribeStderr = await onExternalAgentStderr((event) => {
       // Routine subprocess stderr, per-chunk on a chatty stream: keep it at
       // `debug` (below the Next dev server's forwarded warn+ threshold, so it
       // can't flood the forwarded-console buffer) and bound each chunk's size.
       if (event.agentId === this.processId)
         log.debug("Codex app-server stderr", { data: truncateForLog(event.data) })
-    }).then((un) => this.unsubscribers.push(un))
+    })
+    this.unsubscribers.push(unsubscribeStderr)
 
-    void onExternalAgentExit((event) => {
+    const unsubscribeExit = await onExternalAgentExit((event) => {
       if (event.agentId === this.processId) {
+        const reason = `Codex app-server process exited with code ${event.code}`
         log.info("Codex app-server process exited", { code: event.code })
-        this.peer?.rejectAll("Codex app-server process exited")
+        this.settlePendingServerRequests(reason)
+        this.resetLocalConnectionState(reason, true)
         this._connectionStatus = "disconnected"
       }
-    }).then((un) => this.unsubscribers.push(un))
+    })
+    this.unsubscribers.push(unsubscribeExit)
+  }
+
+  private settlePendingServerRequests(reason: string): void {
+    for (const [, pending] of this.pendingApprovals) {
+      pending.resolve(this.cancelApprovalResponse(pending))
+    }
+    this.pendingApprovals.clear()
+    for (const [, pending] of this.pendingUserInputs) {
+      if (pending.timer) clearTimeout(pending.timer)
+      pending.resolve({ answers: emptyAnswersFor(pending.questions) })
+    }
+    this.pendingUserInputs.clear()
+    for (const [, pending] of this.pendingMcpElicitations) {
+      pending.resolve({ action: "cancel", content: null, _meta: null })
+    }
+    this.pendingMcpElicitations.clear()
+    for (const [, pending] of this.pendingCompactions) {
+      clearTimeout(pending.timer)
+      pending.reject(new Error(reason))
+    }
+    this.pendingCompactions.clear()
+  }
+
+  private resetLocalConnectionState(reason: string, notifySessions = false): void {
+    if (notifySessions) {
+      for (const sessionId of this._sessions.keys()) {
+        this.emit(sessionId, {
+          type: "error",
+          sessionId,
+          timestamp: new Date(),
+          error: reason,
+          recoverable: true,
+        })
+      }
+    }
+    this.cleanupListeners()
+    this.peer?.rejectAll(reason)
+    this.processId = undefined
+    this.peer = undefined
+    this._sessions.clear()
+    this.sessionListeners.clear()
+    this.activeTurns.clear()
+    this.lastTokenUsage.clear()
+    this.streamedItems.clear()
+    this.sentSystemPrompt.clear()
+    this.itemPhases.clear()
+    this.modelCache = []
+    this.clearSessionExtensionSupportCache()
   }
 
   private cleanupListeners(): void {
@@ -1758,6 +1797,11 @@ export class CodexAppServerAdapter extends BaseProtocolAdapter {
         return
       }
       case "fileChange": {
+        if (item.status !== "failed") {
+          void import("@/lib/task-workspace/tool-evidence")
+            .then(({ recordToolFileChanges }) => recordToolFileChanges(sessionId, id, item.changes))
+            .catch(() => undefined)
+        }
         this.emit(sessionId, {
           type: "tool_use_end",
           sessionId,

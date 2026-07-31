@@ -2,6 +2,7 @@ import { dispatchTeammate } from "./dispatch-teammate"
 import type { TeamRunContext } from "./team-run-context"
 import type { AgentTeam, AgentTeammate } from "@/types/agent/agent-team"
 import { emitSystemBusEvent, SystemEvents } from "@/lib/plugin/messaging/message-bus"
+import type { RoutingPlan } from "@cognia/provider-types/auto-router"
 
 const mockedBusEmit = emitSystemBusEvent as jest.Mock
 const mockTrackEvent = jest.fn().mockResolvedValue(true)
@@ -26,10 +27,19 @@ jest.mock("@/stores/settings", () => ({
 const beginTaskWorkspaceTurnMock = jest.fn()
 const settleTaskWorkspaceRunMock = jest.fn()
 jest.mock("@/lib/task-workspace/client", () => ({
-  beginTaskWorkspaceTurn: (...args: unknown[]) => beginTaskWorkspaceTurnMock(...args),
-  settleTaskWorkspaceRun: (...args: unknown[]) => settleTaskWorkspaceRunMock(...args),
   taskIdForMessage: (value: string) => `task:${value}`,
   runIdForTurn: (sessionId: string, runId: number) => `run:${sessionId}:${runId}`,
+}))
+jest.mock("@/lib/task-workspace/run-lease", () => ({
+  openTaskWorkspaceRunLease: async (...args: unknown[]) => {
+    const run = await beginTaskWorkspaceTurnMock(...args)
+    return run
+      ? {
+          run,
+          settle: (state: unknown) => settleTaskWorkspaceRunMock(run.runId, state),
+        }
+      : null
+  },
 }))
 
 const resolveAcpMcpMock = jest.fn<Promise<unknown[]>, unknown[]>(async () => [])
@@ -61,6 +71,11 @@ jest.mock("@/lib/claude/build-options", () => ({
 const runAndCaptureMock = jest.fn()
 jest.mock("@/lib/claude/run-and-capture", () => ({
   runAndCaptureAssistantReply: (...a: unknown[]) => runAndCaptureMock(...a),
+}))
+
+const resolveProviderAttemptOptionsMock = jest.fn()
+jest.mock("@/lib/claude/provider-attempt-options", () => ({
+  resolveProviderAttemptOptions: (...a: unknown[]) => resolveProviderAttemptOptionsMock(...a),
 }))
 
 const hookFns = {
@@ -109,6 +124,35 @@ function makeTeammate(overrides: Partial<AgentTeammate> = {}): AgentTeammate {
     progress: 0,
     createdAt: new Date(0),
     ...overrides,
+  }
+}
+
+function routingPlan(): RoutingPlan {
+  const orderedCandidates = [
+    {
+      providerId: "anthropic",
+      modelId: "claude-sonnet-4-6",
+      deploymentId: "anthropic::claude-sonnet-4-6",
+      reasonCodes: [],
+    },
+    {
+      providerId: "openai",
+      modelId: "gpt-5.6",
+      deploymentId: "openai::gpt-5.6",
+      reasonCodes: [],
+    },
+  ]
+  return {
+    decisionId: "team-route",
+    surface: "agent",
+    requested: { kind: "auto" },
+    strategy: "reliability",
+    selected: orderedCandidates[0],
+    orderedCandidates,
+    reasonCodes: [],
+    rejected: [],
+    replayPolicy: "pre-commit-only",
+    createdAt: 1,
   }
 }
 
@@ -163,12 +207,16 @@ function makeCtx(
 
 beforeEach(() => {
   jest.clearAllMocks()
+  resolveSendOptionsMock.mockResolvedValue({})
   isTauriMock.mockReturnValue(false)
   taskWorkspaceEnabledMock.mockReturnValue(false)
   beginTaskWorkspaceTurnMock.mockResolvedValue(null)
   settleTaskWorkspaceRunMock.mockResolvedValue([])
   resolveExternalMock.mockResolvedValue(null)
   applyTeammateTwinContextMock.mockResolvedValue({ systemPrompt: "unused-default", applied: false })
+  resolveProviderAttemptOptionsMock.mockResolvedValue({
+    providerCredentials: { apiKey: "fallback-key", protocol: "openai" },
+  })
 })
 
 describe("dispatchTeammate — text-only fallback", () => {
@@ -435,6 +483,69 @@ describe("dispatchTeammate — tool-enabled sidecar path", () => {
     expect(runAndCaptureMock).toHaveBeenCalledWith("sess1", "edit code", {}, expect.any(Object))
     expect(deleteSessionMock).toHaveBeenCalledWith("sess1")
     expect(executeAgentMock).not.toHaveBeenCalled()
+  })
+
+  it("attributes teammate planning to agent and retries a pre-commit failure", async () => {
+    isTauriMock.mockReturnValue(true)
+    createSessionMock.mockResolvedValue({ id: "sess1" })
+    getSessionMock.mockResolvedValue({ id: "sess1", kind: "team" })
+    resolveSendOptionsMock.mockResolvedValue({
+      provider: "anthropic",
+      model: "claude-sonnet-4-6",
+      routingPlan: routingPlan(),
+    })
+    runAndCaptureMock
+      .mockRejectedValueOnce(new Error("primary unavailable"))
+      .mockResolvedValueOnce({ text: "fallback result" })
+    const { ctx } = makeCtx(makeTeammate())
+
+    const result = await dispatchTeammate(ctx, { taskId: "t1", prompt: "edit code" })
+
+    expect(resolveSendOptionsMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        routingSurface: "agent",
+        routingContextHint: { promptText: "edit code" },
+      })
+    )
+    expect(resolveProviderAttemptOptionsMock).toHaveBeenCalledWith("openai", {})
+    expect(runAndCaptureMock).toHaveBeenCalledTimes(2)
+    expect(runAndCaptureMock.mock.calls[1]?.[2]).toEqual(
+      expect.objectContaining({
+        provider: "openai",
+        model: "gpt-5.6",
+        providerCredentials: expect.objectContaining({ apiKey: "fallback-key" }),
+      })
+    )
+    expect(result.text).toBe("fallback result")
+  })
+
+  it("never retries a teammate turn after a tool dispatch commits it", async () => {
+    isTauriMock.mockReturnValue(true)
+    createSessionMock.mockResolvedValue({ id: "sess1" })
+    getSessionMock.mockResolvedValue({ id: "sess1", kind: "team" })
+    resolveSendOptionsMock.mockResolvedValue({
+      provider: "anthropic",
+      model: "claude-sonnet-4-6",
+      routingPlan: routingPlan(),
+    })
+    runAndCaptureMock.mockImplementation(
+      async (
+        _sessionId: string,
+        _prompt: string,
+        _options: unknown,
+        capture: { onEvent?: (event: { type: string; toolName?: string; input?: unknown }) => void }
+      ) => {
+        capture.onEvent?.({ type: "tool-call", toolName: "Write", input: {} })
+        throw new Error("failed after tool dispatch")
+      }
+    )
+    const { ctx } = makeCtx(makeTeammate())
+
+    await expect(dispatchTeammate(ctx, { taskId: "t1", prompt: "edit code" })).rejects.toThrow(
+      "failed after tool dispatch"
+    )
+    expect(runAndCaptureMock).toHaveBeenCalledTimes(1)
+    expect(resolveProviderAttemptOptionsMock).not.toHaveBeenCalled()
   })
 
   it("falls back to text-only when external backing does not resolve", async () => {

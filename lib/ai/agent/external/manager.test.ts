@@ -1,5 +1,7 @@
 // Mock heavyweight adapter modules so requiring manager.ts does not pull in
 // the real ACP/OpenCode adapters.
+let mockProcessExitCb: ((event: { agentId: string; code: number }) => void) | undefined
+
 jest.mock("./acp-client", () => ({
   AcpClientAdapter: class {
     readonly protocol = "acp"
@@ -17,7 +19,12 @@ jest.mock("./opencode-v2-client", () => ({
 }))
 jest.mock("@/lib/native/external-agent", () => ({
   checkExternalAgentCommandExists: jest.fn().mockResolvedValue(true),
-  onExternalAgentExit: jest.fn().mockResolvedValue(() => {}),
+  onExternalAgentExit: jest.fn(async (cb: (event: { agentId: string; code: number }) => void) => {
+    mockProcessExitCb = cb
+    return () => {
+      mockProcessExitCb = undefined
+    }
+  }),
   acpTerminalCreate: jest.fn(),
   acpTerminalKill: jest.fn(),
   acpTerminalOutput: jest.fn(),
@@ -26,6 +33,9 @@ jest.mock("@/lib/native/external-agent", () => ({
 }))
 jest.mock("@/lib/utils", () => ({
   ...jest.requireActual("@/lib/utils"),
+  isTauri: jest.fn(() => true),
+}))
+jest.mock("@/lib/tauri", () => ({
   isTauri: jest.fn(() => true),
 }))
 
@@ -252,6 +262,7 @@ function freshManager(): ExternalAgentManager {
 
 beforeEach(() => {
   ExternalAgentManager.resetInstance()
+  mockProcessExitCb = undefined
   currentMock = new MockAdapter()
 })
 
@@ -295,6 +306,57 @@ describe("addAgent / removeAgent / connect", () => {
     expect(m.getAgent("agent-1")).toBeDefined()
     expect(m.getConnectedAgents().length).toBe(1)
     expect(m.hasConnectedAgents()).toBe(true)
+  })
+
+  it("retries a connection when the managed process exits during startup", async () => {
+    const m = freshManager()
+    currentMock.connectImpl
+      .mockRejectedValueOnce(new Error("Codex app-server process exited with code 9"))
+      .mockResolvedValueOnce(undefined)
+
+    const instance = await m.addAgent(
+      buildBaseConfig({
+        retryConfig: {
+          maxRetries: 1,
+          retryDelay: 0,
+          exponentialBackoff: false,
+          maxRetryDelay: 0,
+          retryOnErrors: [],
+        },
+      })
+    )
+
+    expect(currentMock.connectImpl).toHaveBeenCalledTimes(2)
+    expect(instance.connectionStatus).toBe("connected")
+  })
+
+  it("auto-reconnects an established agent after an unexpected managed-process exit", async () => {
+    const m = freshManager()
+    await m.addAgent(buildBaseConfig())
+    ;(currentMock as unknown as { _connectionStatus: string })._connectionStatus = "disconnected"
+
+    expect(mockProcessExitCb).toBeDefined()
+    mockProcessExitCb?.({ agentId: "agent-1", code: 9 })
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    expect(currentMock.connectImpl).toHaveBeenCalledTimes(2)
+    expect(m.getAgent("agent-1")?.connectionStatus).toBe("connected")
+  })
+
+  it("does not auto-reconnect an exit emitted by an intentional disconnect", async () => {
+    const m = freshManager()
+    await m.addAgent(buildBaseConfig())
+    currentMock.disconnect = jest.fn(async () => {
+      ;(currentMock as unknown as { _connectionStatus: string })._connectionStatus = "disconnected"
+      mockProcessExitCb?.({ agentId: "agent-1", code: 0 })
+      await Promise.resolve()
+    })
+
+    await m.disconnect("agent-1")
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    expect(currentMock.connectImpl).toHaveBeenCalledTimes(1)
+    expect(m.getAgent("agent-1")?.connectionStatus).toBe("disconnected")
   })
 
   it("rejects adding the same agent twice", async () => {

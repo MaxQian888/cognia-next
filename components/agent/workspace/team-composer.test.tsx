@@ -25,6 +25,7 @@ jest.mock("@/components/chat/composer", () => {
               Array.isArray(props.mentionables) ? (props.mentionables as MentionTarget[]).length : 0
             }
             data-placeholder={typeof props.placeholder === "string" ? props.placeholder : ""}
+            data-status={String(props.status)}
           >
             <button
               type="button"
@@ -177,5 +178,15 @@ describe("TeamComposer", () => {
       </NextIntlClientProvider>
     )
     expect(screen.queryByTestId("team-composer-streaming-banner")).toBeNull()
+    expect(screen.getByTestId("mock-composer")).toHaveAttribute("data-status", "idle")
+  })
+
+  it("marks the underlying Composer as streaming", () => {
+    render(
+      <NextIntlClientProvider locale="en" messages={messages} timeZone="UTC">
+        <TeamComposer mentionables={targets} onSend={jest.fn()} isStreaming />
+      </NextIntlClientProvider>
+    )
+    expect(screen.getByTestId("mock-composer")).toHaveAttribute("data-status", "streaming")
   })
 })

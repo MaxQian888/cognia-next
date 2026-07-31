@@ -1498,6 +1498,21 @@ describe("CodexAppServerAdapter", () => {
       expect(adapter.connectionStatus).toBe("disconnected")
     })
 
+    it("tears down local process and session state when the process exits", async () => {
+      const adapter = await connectedAdapter()
+      await adapter.createSession()
+
+      exitCb?.({ agentId: "proc-1", code: 9 })
+
+      expect(adapter.getSessions()).toHaveLength(0)
+
+      const native = jest.requireMock("@/lib/native/external-agent") as {
+        killExternalAgent: jest.Mock
+      }
+      await adapter.disconnect()
+      expect(native.killExternalAgent).not.toHaveBeenCalled()
+    })
+
     it("resolves a pending approval to cancel on disconnect", async () => {
       const adapter = await connectedAdapter()
       const session = await adapter.createSession({ permissionMode: "default" })
