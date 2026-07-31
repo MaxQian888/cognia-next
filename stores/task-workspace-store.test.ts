@@ -66,4 +66,38 @@ describe("task workspace store", () => {
     expect(useTaskWorkspaceStore.getState().activeBySession).toEqual({})
     expect(useTaskWorkspaceStore.getState().resourcesByTask).toEqual({})
   })
+
+  it("binds a late-created trace span to the active workspace run", () => {
+    const state = useTaskWorkspaceStore.getState()
+    state.activate({
+      taskId: "task-1",
+      runId: "run-1",
+      sessionId: "session-1",
+      workspaceRoot: "/repo",
+      executionRoot: "/isolated",
+      state: "running",
+    })
+    state.bindTrace("session-1", "trace-1", "span-1")
+    expect(useTaskWorkspaceStore.getState().activeBySession["session-1"]).toEqual(
+      expect.objectContaining({ traceId: "trace-1", traceSpanId: "span-1" })
+    )
+    expect(useTaskWorkspaceStore.getState().activeByRun["run-1"]).toEqual(
+      expect.objectContaining({ traceId: "trace-1", traceSpanId: "span-1" })
+    )
+  })
+
+  it("retains metadata for parallel runs in one session", () => {
+    const state = useTaskWorkspaceStore.getState()
+    for (const runId of ["run-1", "run-2"]) {
+      state.activate({
+        taskId: "task-1",
+        runId,
+        sessionId: "session-1",
+        workspaceRoot: "/repo",
+        executionRoot: `/isolated/${runId}`,
+        state: "running",
+      })
+    }
+    expect(Object.keys(useTaskWorkspaceStore.getState().activeByRun)).toEqual(["run-1", "run-2"])
+  })
 })

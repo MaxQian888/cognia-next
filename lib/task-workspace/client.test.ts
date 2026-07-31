@@ -10,6 +10,10 @@ import { useTaskWorkspaceStore } from "@/stores/task-workspace-store"
 import {
   applyTaskWorkspace,
   beginTaskWorkspaceTurn,
+  exportTaskResourceManifest,
+  getTaskResourceSummary,
+  listTaskResourceEvents,
+  recordTaskResourceToolEvent,
   listTaskWorkspaces,
   resolveTaskWorkspaceConflict,
   runIdForTurn,
@@ -36,8 +40,6 @@ describe("task workspace client", () => {
       executionRoot: "/isolated",
       state: "running",
     })
-    call.mockResolvedValueOnce(null)
-
     const run = await beginTaskWorkspaceTurn({
       taskId: "task:message",
       sessionId: "session",
@@ -51,9 +53,7 @@ describe("task workspace client", () => {
     expect(call).toHaveBeenNthCalledWith(1, "task_workspace_begin", {
       input: expect.objectContaining({ workspaceRoot: "/repo" }),
     })
-    expect(call).toHaveBeenNthCalledWith(2, "task_workspace_watch", {
-      runId: "run:session:1",
-    })
+    expect(call).toHaveBeenCalledTimes(1)
   })
 
   it("settles only the matching active chat run", async () => {
@@ -73,6 +73,21 @@ describe("task workspace client", () => {
       runId: runIdForTurn("session", 3),
       finalState: "ready",
     })
+  })
+
+  it("does not create a fake complete run when tracking is unavailable", async () => {
+    call.mockRejectedValueOnce(new Error("unknown.command"))
+    await expect(
+      beginTaskWorkspaceTurn({
+        taskId: "task:message",
+        sessionId: "unavailable-session",
+        runId: "run:unavailable:1",
+        agentId: "built-in",
+        agentKind: "in-app",
+        workspaceRoot: "/repo",
+      })
+    ).resolves.toBeNull()
+    expect(useTaskWorkspaceStore.getState().activeBySession["unavailable-session"]).toBeUndefined()
   })
 
   it("lists persisted session tasks and forwards explicit conflict resolution", async () => {
@@ -103,6 +118,48 @@ describe("task workspace client", () => {
       runId: "run:session:1",
       selection: [],
       allowIrreversible: true,
+    })
+  })
+
+  it("exposes durable resource timeline, summary, and manifest commands", async () => {
+    call
+      .mockResolvedValueOnce([{ eventId: "event-1", seq: 8 }])
+      .mockResolvedValueOnce({ runId: "run:session:1", eventCount: 1 })
+      .mockResolvedValueOnce({ schemaVersion: 1, events: [] })
+
+    await expect(listTaskResourceEvents("run:session:1", 7, 25)).resolves.toEqual([
+      { eventId: "event-1", seq: 8 },
+    ])
+    await getTaskResourceSummary("run:session:1")
+    await exportTaskResourceManifest("task:message", "run:session:1")
+
+    expect(call).toHaveBeenNthCalledWith(1, "task_workspace_list_resource_events", {
+      runId: "run:session:1",
+      cursor: 7,
+      limit: 25,
+    })
+    expect(call).toHaveBeenNthCalledWith(2, "task_workspace_get_resource_summary", {
+      runId: "run:session:1",
+    })
+    expect(call).toHaveBeenNthCalledWith(3, "task_workspace_export_resource_manifest", {
+      taskId: "task:message",
+      runId: "run:session:1",
+    })
+  })
+
+  it("records tool evidence as a provisional causal hint", async () => {
+    call.mockResolvedValueOnce({ eventId: "event-tool", evidence: "tool" })
+    await recordTaskResourceToolEvent({
+      runId: "run:session:1",
+      path: "src/a.ts",
+      kind: "modified",
+      toolCallId: "tool-1",
+    })
+    expect(call).toHaveBeenCalledWith("task_workspace_record_tool_event", {
+      runId: "run:session:1",
+      path: "src/a.ts",
+      kind: "modified",
+      toolCallId: "tool-1",
     })
   })
 })

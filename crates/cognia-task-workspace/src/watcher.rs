@@ -1,5 +1,5 @@
 use ignore::gitignore::{Gitignore, GitignoreBuilder};
-use notify::{Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
+use notify::{event::ModifyKind, Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 use std::{
@@ -21,7 +21,10 @@ pub enum ResourceEventKind {
     Created,
     Modified,
     Deleted,
+    Renamed,
     Any,
+    Gap,
+    Resync,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -29,6 +32,8 @@ pub enum ResourceEventKind {
 pub struct ResourceEventChange {
     pub path: String,
     pub kind: ResourceEventKind,
+    #[serde(default)]
+    pub old_path: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -75,6 +80,7 @@ impl WatchManager {
         task_id: &str,
         run_id: &str,
         root: &Path,
+        generated_roots: &[String],
         sink: Arc<dyn TaskWorkspaceEventSink>,
     ) -> Result<(), String> {
         let root = root
@@ -99,6 +105,7 @@ impl WatchManager {
         let worker_root = root.clone();
         let worker_task_id = task_id.to_string();
         let worker_run_id = run_id.to_string();
+        let worker_generated_roots = generated_roots.to_vec();
         let worker = thread::Builder::new()
             .name(format!("task-workspace-watch-{run_id}"))
             .spawn(move || {
@@ -107,6 +114,7 @@ impl WatchManager {
                     &worker_root,
                     &worker_task_id,
                     &worker_run_id,
+                    &worker_generated_roots,
                     sink,
                     worker_echoes,
                 )
@@ -181,6 +189,7 @@ fn watch_loop(
     root: &Path,
     task_id: &str,
     run_id: &str,
+    generated_roots: &[String],
     sink: Arc<dyn TaskWorkspaceEventSink>,
     echoes: Arc<Mutex<HashMap<PathBuf, Instant>>>,
 ) {
@@ -215,6 +224,31 @@ fn watch_loop(
             for message in messages {
                 match message {
                     WatchMessage::Event(Ok(event)) => {
+                        if matches!(event.kind, EventKind::Modify(ModifyKind::Name(_)))
+                            && event.paths.len() >= 2
+                        {
+                            let old_path =
+                                relative_event_path(root, &event.paths[0], generated_roots);
+                            let new_path =
+                                relative_event_path(root, &event.paths[1], generated_roots);
+                            if let (Some(old_path), Some(new_path)) = (old_path, new_path) {
+                                path_bytes =
+                                    path_bytes.saturating_add(old_path.len() + new_path.len() + 32);
+                                if path_bytes > MAX_EVENT_PATH_BYTES {
+                                    overflow = true;
+                                } else {
+                                    record_change(
+                                        &mut changes,
+                                        ResourceEventChange {
+                                            path: new_path,
+                                            kind: ResourceEventKind::Renamed,
+                                            old_path: Some(old_path),
+                                        },
+                                    );
+                                }
+                            }
+                            continue;
+                        }
                         let kind = map_kind(&event.kind);
                         for path in event.paths {
                             if echoes
@@ -223,19 +257,23 @@ fn watch_loop(
                             {
                                 continue;
                             }
-                            let Ok(relative) = path.strip_prefix(root) else {
+                            let Some(rel_path) = relative_event_path(root, &path, generated_roots)
+                            else {
                                 continue;
                             };
-                            let rel_path = relative.to_string_lossy().replace('\\', "/");
-                            if rel_path.is_empty() || ignored(root, relative) {
-                                continue;
-                            }
                             path_bytes = path_bytes.saturating_add(rel_path.len() + 24);
                             if path_bytes > MAX_EVENT_PATH_BYTES {
                                 overflow = true;
                                 continue;
                             }
-                            changes.insert(rel_path, kind);
+                            record_change(
+                                &mut changes,
+                                ResourceEventChange {
+                                    path: rel_path,
+                                    kind,
+                                    old_path: None,
+                                },
+                            );
                         }
                     }
                     WatchMessage::Event(Err(_)) => overflow = true,
@@ -253,12 +291,27 @@ fn watch_loop(
             revision,
             changes: changes
                 .into_iter()
-                .map(|(path, kind)| ResourceEventChange { path, kind })
+                .flat_map(|(_, changes)| changes)
                 .collect(),
             overflow,
             resync_required: overflow,
         });
     }
+}
+
+fn record_change(
+    changes: &mut BTreeMap<String, Vec<ResourceEventChange>>,
+    change: ResourceEventChange,
+) {
+    let path_changes = changes.entry(change.path.clone()).or_default();
+    if path_changes.last().is_some_and(|previous| {
+        previous.kind == change.kind
+            || (previous.kind == ResourceEventKind::Created
+                && change.kind == ResourceEventKind::Modified)
+    }) {
+        return;
+    }
+    path_changes.push(change);
 }
 
 fn map_kind(kind: &EventKind) -> ResourceEventKind {
@@ -270,11 +323,17 @@ fn map_kind(kind: &EventKind) -> ResourceEventKind {
     }
 }
 
-fn ignored(root: &Path, relative: &Path) -> bool {
+fn relative_event_path(root: &Path, path: &Path, generated_roots: &[String]) -> Option<String> {
+    let relative = path.strip_prefix(root).ok()?;
+    let rel_path = relative.to_string_lossy().replace('\\', "/");
+    (!rel_path.is_empty() && !ignored(root, relative, generated_roots)).then_some(rel_path)
+}
+
+fn ignored(root: &Path, relative: &Path, generated_roots: &[String]) -> bool {
     if relative.components().any(|component| {
         matches!(
             component.as_os_str().to_str(),
-            Some(".git" | "node_modules" | ".next" | "dist" | "target")
+            Some(".git" | "node_modules")
         )
     }) || relative
         .file_name()
@@ -282,6 +341,12 @@ fn ignored(root: &Path, relative: &Path) -> bool {
         .is_some_and(|name| name.starts_with(".cognia-upload-") && name.ends_with(".tmp"))
     {
         return true;
+    }
+    if generated_roots
+        .iter()
+        .any(|generated| relative.starts_with(generated))
+    {
+        return false;
     }
     if root.join(".git").exists() {
         return Command::new("git")
@@ -369,6 +434,7 @@ mod tests {
                 "task-1",
                 "run-1",
                 root.path(),
+                &[],
                 Arc::new(ChannelSink(Mutex::new(tx))),
             )
             .unwrap();
@@ -397,6 +463,7 @@ mod tests {
                 "task-1",
                 "run-1",
                 root.path(),
+                &[],
                 Arc::new(ChannelSink(Mutex::new(tx))),
             )
             .unwrap();

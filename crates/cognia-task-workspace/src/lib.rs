@@ -9,6 +9,7 @@ mod resource;
 mod service;
 mod snapshot;
 mod store;
+mod tracking;
 mod transfer;
 mod types;
 mod watcher;
@@ -24,10 +25,27 @@ pub use transfer::{
 pub use types::{
     AppliedFile, ApplyOutcome, BeginTaskRun, ChangeKind, ConflictResolution, ContributionOrigin,
     IsolationKind, PatchConflict, PatchFile, PatchHunk, PatchSelection, PatchSet, PatchState,
-    PruneOutcome, ResourceChange, ResourceKind, RunState, TaskRun, TaskWorkspace,
+    PruneOutcome, ResourceCaptureClass, ResourceChange, ResourceEvent, ResourceEventCounts,
+    ResourceEventEvidence, ResourceKind, ResourceTimelineCompleteness, ResourceTrackingPolicy,
+    RunState, TaskResourceManifest, TaskResourceSummary, TaskRun, TaskWorkspace,
     TaskWorkspaceState,
 };
 pub use watcher::{
     ResourceEventChange, ResourceEventKind, TaskWorkspaceEventSink, TaskWorkspaceResourceEvent,
     WatchManager,
 };
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn tracking_contract_is_exported_from_the_crate_root() {
+        let policy = ResourceTrackingPolicy::default();
+        assert!(policy.auto_detect);
+        assert_eq!(
+            ResourceCaptureClass::default(),
+            ResourceCaptureClass::Source
+        );
+    }
+}

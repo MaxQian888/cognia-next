@@ -1,10 +1,13 @@
 use crate::{
     ledger,
     resource::{is_sensitive_resource, media_type_for},
-    snapshot::{capture, materialize, WorkspaceSnapshot},
+    snapshot::{capture_with_policy, materialize, GeneratedSnapshotEntry, WorkspaceSnapshot},
     store::WorkspaceStore,
-    BeginTaskRun, ChangeKind, ContributionOrigin, DownloadHandle, IsolationKind, ResourceChange,
-    RunState, TaskRun, TaskWorkspace, TaskWorkspaceEventSink, TaskWorkspaceState, TransferChunk,
+    tracking::resolve_tracking_policy,
+    BeginTaskRun, ChangeKind, ContributionOrigin, DownloadHandle, IsolationKind,
+    ResourceCaptureClass, ResourceChange, ResourceEvent, ResourceEventEvidence, ResourceEventKind,
+    ResourceKind, RunState, TaskResourceManifest, TaskResourceSummary, TaskRun, TaskWorkspace,
+    TaskWorkspaceEventSink, TaskWorkspaceResourceEvent, TaskWorkspaceState, TransferChunk,
     TransferRegistry, UploadHandle, WatchManager,
 };
 use parking_lot::Mutex;
@@ -13,8 +16,10 @@ use std::{
     fs,
     path::{Path, PathBuf},
     process::Command,
+    sync::Arc,
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
+use uuid::Uuid;
 
 #[derive(Debug, Clone)]
 pub struct ServiceConfig {
@@ -34,13 +39,21 @@ impl ServiceConfig {
 }
 
 pub struct TaskWorkspaceService {
-    store: Mutex<WorkspaceStore>,
+    store: Arc<Mutex<WorkspaceStore>>,
     execution_dir: PathBuf,
+    manifest_key: Vec<u8>,
     retention: Duration,
     transfers: TransferRegistry,
-    upload_owners: Mutex<HashMap<String, (String, String)>>,
+    upload_owners: Mutex<HashMap<String, UploadOwner>>,
     origin_hints: Mutex<HashMap<(String, String), ContributionOrigin>>,
     watchers: WatchManager,
+}
+
+#[derive(Clone)]
+struct UploadOwner {
+    run_id: String,
+    path: String,
+    existed: bool,
 }
 
 impl TaskWorkspaceService {
@@ -51,8 +64,12 @@ impl TaskWorkspaceService {
             format!("create execution dir {}: {error}", execution_dir.display())
         })?;
         let service = Self {
-            store: Mutex::new(WorkspaceStore::open(&service_dir, config.max_blob_bytes)?),
+            store: Arc::new(Mutex::new(WorkspaceStore::open(
+                &service_dir,
+                config.max_blob_bytes,
+            )?)),
             execution_dir,
+            manifest_key: load_or_create_manifest_key(&service_dir)?,
             retention: config.retention,
             transfers: TransferRegistry::new(Duration::from_secs(5 * 60)),
             upload_owners: Mutex::new(HashMap::new()),
@@ -75,6 +92,7 @@ impl TaskWorkspaceService {
         if !root.is_dir() {
             return Err(format!("workspace is not a directory: {}", root.display()));
         }
+        let tracking_policy = resolve_tracking_policy(&root, &input.tracking_policy)?;
         {
             let store = self.store.lock();
             if let Some((existing, _)) = store.get_run::<WorkspaceSnapshot>(&input.run_id)? {
@@ -86,6 +104,13 @@ impl TaskWorkspaceService {
                     && existing.agent_id == input.agent_id
                     && existing.agent_kind == input.agent_kind
                     && existing.workspace_key == input.workspace_key
+                    && existing.execution_run_id == input.execution_run_id
+                    && existing.trace_id == input.trace_id
+                    && existing.turn_id == input.turn_id
+                    && existing.attempt_id == input.attempt_id
+                    && existing.provider_attempt_id == input.provider_attempt_id
+                    && existing.surface == input.surface
+                    && existing.tracking_policy == tracking_policy
                     && task.session_id == input.session_id
                     && Path::new(&task.workspace_root) == root;
                 return matches_request.then_some(existing).ok_or_else(|| {
@@ -122,7 +147,7 @@ impl TaskWorkspaceService {
                         execution_root.display()
                     ));
                 }
-                let (baseline, blobs) = capture(&execution_root)?;
+                let (baseline, blobs) = capture_with_policy(&execution_root, &tracking_policy)?;
                 (
                     baseline,
                     blobs,
@@ -132,7 +157,11 @@ impl TaskWorkspaceService {
                     false,
                 )
             } else {
-                let (baseline, blobs) = capture(&root)?;
+                let (mut baseline, blobs) = capture_with_policy(&root, &tracking_policy)?;
+                // A fresh isolated execution root intentionally starts without
+                // ignored build outputs. Treat the generated baseline as empty
+                // so pre-existing host artifacts are not reported as deletions.
+                baseline.generated_entries.clear();
                 let execution_root = self
                     .execution_dir
                     .join(storage_key(&input.task_id))
@@ -199,6 +228,13 @@ impl TaskWorkspaceService {
             isolation_kind,
             isolation_ref,
             workspace_key: input.workspace_key,
+            execution_run_id: input.execution_run_id,
+            trace_id: input.trace_id,
+            turn_id: input.turn_id,
+            attempt_id: input.attempt_id,
+            provider_attempt_id: input.provider_attempt_id,
+            surface: input.surface,
+            tracking_policy,
             baseline_revision: task.revision,
             state: RunState::Running,
             created_at: now,
@@ -209,6 +245,9 @@ impl TaskWorkspaceService {
     }
 
     pub fn settle_run(&self, run_id: &str) -> Result<Vec<ResourceChange>, String> {
+        // Stop drains queued notifications and joins the watcher before the
+        // authoritative snapshot, preventing provisional events after settle.
+        let _ = self.watchers.stop(run_id);
         let now = now_ms();
         let mut store = self.store.lock();
         let (mut run, baseline): (TaskRun, WorkspaceSnapshot) = store
@@ -225,7 +264,8 @@ impl TaskWorkspaceService {
         }
         run.state = RunState::Settling;
         store.put_run(&run, &baseline)?;
-        let (current, blobs) = capture(Path::new(&run.execution_root))?;
+        let (current, blobs) =
+            capture_with_policy(Path::new(&run.execution_root), &run.tracking_policy)?;
         for (hash, bytes) in &blobs {
             store.put_blob(hash, bytes, now)?;
         }
@@ -242,7 +282,14 @@ impl TaskWorkspaceService {
             origin_hints: &origin_hints,
             now,
         };
-        let changes = reconcile(&baseline, &current, &mut context)?;
+        let mut changes = reconcile(&baseline, &current, &mut context)?;
+        changes.extend(reconcile_generated(
+            &baseline.generated_entries,
+            &current.generated_entries,
+            task.revision,
+            &run,
+        ));
+        changes.sort_by(|left, right| left.path.cmp(&right.path));
         drop(origin_hints);
         run.state = RunState::Ready;
         run.settled_at = Some(now);
@@ -253,16 +300,23 @@ impl TaskWorkspaceService {
             .parent()
             .unwrap_or(&self.execution_dir)
             .join("scratch");
+        let source_changes = changes
+            .iter()
+            .filter(|change| change.capture_class == ResourceCaptureClass::Source)
+            .cloned()
+            .collect::<Vec<_>>();
         let patch = ledger::build_patch_set(
             &task.task_id,
             &run.run_id,
             run.baseline_revision,
-            &changes,
+            &source_changes,
             &mut store,
             &scratch,
             now,
         )?;
         store.put_patch_set(&patch)?;
+        append_missing_reconcile_events(&mut store, &run, &changes, now)?;
+        store.reconcile_resource_events(&run.run_id)?;
         store.put_run(&run, &baseline)?;
         task.state = if store
             .list_runs(&task.task_id)?
@@ -349,6 +403,115 @@ impl TaskWorkspaceService {
         task.pinned = pinned;
         store.put_task(&task)?;
         Ok(task)
+    }
+
+    pub fn list_resource_events(
+        &self,
+        run_id: &str,
+        cursor: Option<u64>,
+        limit: u32,
+    ) -> Result<Vec<ResourceEvent>, String> {
+        self.store
+            .lock()
+            .list_resource_events(run_id, cursor, limit)
+    }
+
+    pub fn record_tool_event(
+        &self,
+        run_id: &str,
+        path: &str,
+        old_path: Option<&str>,
+        kind: ResourceEventKind,
+        tool_call_id: Option<&str>,
+    ) -> Result<ResourceEvent, String> {
+        if !matches!(
+            kind,
+            ResourceEventKind::Created
+                | ResourceEventKind::Modified
+                | ResourceEventKind::Deleted
+                | ResourceEventKind::Renamed
+        ) {
+            return Err(format!("invalid tool resource event kind: {kind:?}"));
+        }
+        validate_event_relative_path(path)?;
+        if let Some(old_path) = old_path {
+            validate_event_relative_path(old_path)?;
+        }
+        let run = self
+            .store
+            .lock()
+            .get_run::<WorkspaceSnapshot>(run_id)?
+            .map(|(run, _)| run)
+            .ok_or_else(|| format!("unknown task run: {run_id}"))?;
+        let change = crate::ResourceEventChange {
+            path: path.to_string(),
+            kind,
+            old_path: old_path.map(str::to_string),
+        };
+        let mut event = watcher_resource_event(&run, &change, now_ms());
+        event.evidence = ResourceEventEvidence::Tool;
+        event.tool_call_id = tool_call_id.map(str::to_string);
+        let mut events = vec![event];
+        self.store.lock().append_resource_events(&mut events)?;
+        Ok(events.remove(0))
+    }
+
+    pub fn get_resource_summary(&self, run_id: &str) -> Result<TaskResourceSummary, String> {
+        self.store.lock().resource_summary(run_id)
+    }
+
+    pub fn export_resource_manifest(
+        &self,
+        task_id: &str,
+        run_id: Option<&str>,
+    ) -> Result<TaskResourceManifest, String> {
+        let store = self.store.lock();
+        let mut task = store
+            .get_task(task_id)?
+            .ok_or_else(|| format!("unknown task workspace: {task_id}"))?;
+        task.workspace_root = ".".into();
+        let mut runs = store.list_runs(task_id)?;
+        if let Some(run_id) = run_id {
+            runs.retain(|run| run.run_id == run_id);
+            if runs.is_empty() {
+                return Err(format!("unknown task run: {run_id}"));
+            }
+        }
+        for run in &mut runs {
+            run.execution_root = ".".into();
+            run.isolation_ref = None;
+        }
+        let run_ids = runs
+            .iter()
+            .map(|run| run.run_id.clone())
+            .collect::<std::collections::HashSet<_>>();
+        let mut resources = store
+            .list_resources(task_id)?
+            .into_iter()
+            .filter(|resource| run_ids.contains(&resource.run_id))
+            .collect::<Vec<_>>();
+        for resource in &mut resources {
+            redact_resource_change(resource, &self.manifest_key);
+        }
+        let mut events = Vec::new();
+        let mut summaries = Vec::new();
+        for run in &runs {
+            let mut run_events = store.list_all_resource_events(&run.run_id)?;
+            for event in &mut run_events {
+                redact_resource_event(event, &self.manifest_key);
+            }
+            events.extend(run_events);
+            summaries.push(store.resource_summary(&run.run_id)?);
+        }
+        Ok(TaskResourceManifest {
+            schema_version: 1,
+            exported_at: now_ms(),
+            task,
+            runs,
+            resources,
+            events,
+            summaries,
+        })
     }
 
     pub fn prune(&self) -> Result<crate::PruneOutcome, String> {
@@ -660,7 +823,14 @@ impl TaskWorkspaceService {
         )?;
         self.upload_owners.lock().insert(
             handle.handle_id.clone(),
-            (run_id.to_string(), rel_path.to_string()),
+            UploadOwner {
+                run_id: run_id.to_string(),
+                path: rel_path.to_string(),
+                existed: Path::new(&run.execution_root)
+                    .join(rel_path)
+                    .symlink_metadata()
+                    .is_ok(),
+            },
         );
         Ok(handle)
     }
@@ -683,12 +853,33 @@ impl TaskWorkspaceService {
             .get(handle_id)
             .cloned()
             .ok_or_else(|| format!("unknown upload owner: {handle_id}"))?;
-        let _ = self.watchers.mark_echo(&owner.0, &owner.1);
+        let _ = self.watchers.mark_echo(&owner.run_id, &owner.path);
         let hash = self.transfers.commit_upload(handle_id)?;
         self.upload_owners.lock().remove(handle_id);
-        self.origin_hints
+        self.origin_hints.lock().insert(
+            (owner.run_id.clone(), owner.path.clone()),
+            ContributionOrigin::User,
+        );
+        let (run, _): (TaskRun, WorkspaceSnapshot) = self
+            .store
             .lock()
-            .insert(owner, ContributionOrigin::User);
+            .get_run(&owner.run_id)?
+            .ok_or_else(|| format!("unknown task run: {}", owner.run_id))?;
+        let change = crate::ResourceEventChange {
+            path: owner.path,
+            kind: if owner.existed {
+                ResourceEventKind::Modified
+            } else {
+                ResourceEventKind::Created
+            },
+            old_path: None,
+        };
+        let mut event = watcher_resource_event(&run, &change, now_ms());
+        event.origin = ContributionOrigin::User;
+        event.agent_id = None;
+        event.evidence = ResourceEventEvidence::Tool;
+        let mut events = vec![event];
+        self.store.lock().append_resource_events(&mut events)?;
         Ok(hash)
     }
 
@@ -707,17 +898,349 @@ impl TaskWorkspaceService {
             .lock()
             .get_run(run_id)?
             .ok_or_else(|| format!("unknown task run: {run_id}"))?;
+        let persistent_sink = Arc::new(PersistingEventSink {
+            store: Arc::clone(&self.store),
+            run: run.clone(),
+            downstream: sink,
+        });
         self.watchers.start(
             &run.task_id,
             &run.run_id,
             Path::new(&run.execution_root),
-            sink,
+            &run.tracking_policy.generated_output_roots,
+            persistent_sink,
         )
     }
 
     pub fn stop_watching_run(&self, run_id: &str) -> Result<(), String> {
         self.watchers.stop(run_id)
     }
+}
+
+struct PersistingEventSink {
+    store: Arc<Mutex<WorkspaceStore>>,
+    run: TaskRun,
+    downstream: Arc<dyn TaskWorkspaceEventSink>,
+}
+
+impl TaskWorkspaceEventSink for PersistingEventSink {
+    fn emit(&self, event: TaskWorkspaceResourceEvent) {
+        let observed_at = now_ms();
+        // The scan verifies that final state is readable immediately, but the
+        // timeline remains explicitly incomplete until settle persists the
+        // authoritative reconciliation. Never claim that a discarded watcher
+        // interval was reconstructed from a successful scan alone.
+        let resync_scan_succeeded = event.overflow
+            && capture_with_policy(
+                Path::new(&self.run.execution_root),
+                &self.run.tracking_policy,
+            )
+            .is_ok();
+        let mut detailed = event
+            .changes
+            .iter()
+            .map(|change| watcher_resource_event(&self.run, change, observed_at))
+            .collect::<Vec<_>>();
+        if event.overflow {
+            detailed.push(ResourceEvent {
+                event_id: Uuid::now_v7().to_string(),
+                task_id: self.run.task_id.clone(),
+                run_id: self.run.run_id.clone(),
+                seq: 0,
+                observed_at,
+                kind: ResourceEventKind::Gap,
+                path: None,
+                old_path: None,
+                capture_class: ResourceCaptureClass::Source,
+                origin: ContributionOrigin::Unknown,
+                agent_id: None,
+                evidence: ResourceEventEvidence::Watcher,
+                tool_call_id: None,
+                media_type: None,
+                size: None,
+                resource_kind: None,
+                sensitive: false,
+                provisional: true,
+                overflow: true,
+                resync_required: true,
+                reconciled: false,
+            });
+            if resync_scan_succeeded {
+                detailed.push(ResourceEvent {
+                    event_id: Uuid::now_v7().to_string(),
+                    task_id: self.run.task_id.clone(),
+                    run_id: self.run.run_id.clone(),
+                    seq: 0,
+                    observed_at,
+                    kind: ResourceEventKind::Resync,
+                    path: None,
+                    old_path: None,
+                    capture_class: ResourceCaptureClass::Source,
+                    origin: ContributionOrigin::Unknown,
+                    agent_id: None,
+                    evidence: ResourceEventEvidence::Reconcile,
+                    tool_call_id: None,
+                    media_type: None,
+                    size: None,
+                    resource_kind: None,
+                    sensitive: false,
+                    provisional: true,
+                    overflow: false,
+                    resync_required: true,
+                    reconciled: false,
+                });
+            }
+        }
+        if self
+            .store
+            .lock()
+            .append_resource_events(&mut detailed)
+            .is_ok()
+        {
+            self.downstream.emit(event);
+        }
+    }
+}
+
+fn watcher_resource_event(
+    run: &TaskRun,
+    change: &crate::ResourceEventChange,
+    observed_at: i64,
+) -> ResourceEvent {
+    let capture_class = capture_class_for_path(&run.tracking_policy, &change.path);
+    let target = Path::new(&run.execution_root).join(&change.path);
+    let metadata = target.symlink_metadata().ok();
+    let resource_kind = metadata.as_ref().map(|metadata| {
+        if metadata.file_type().is_symlink() {
+            ResourceKind::Symlink
+        } else {
+            ResourceKind::File
+        }
+    });
+    ResourceEvent {
+        event_id: Uuid::now_v7().to_string(),
+        task_id: run.task_id.clone(),
+        run_id: run.run_id.clone(),
+        seq: 0,
+        observed_at,
+        kind: change.kind,
+        path: Some(change.path.clone()),
+        old_path: change.old_path.clone(),
+        capture_class,
+        origin: ContributionOrigin::Agent,
+        agent_id: Some(run.agent_id.clone()),
+        evidence: ResourceEventEvidence::Watcher,
+        tool_call_id: None,
+        media_type: Some(media_type_for(&change.path, false).to_string()),
+        size: metadata.map(|metadata| metadata.len()),
+        resource_kind,
+        sensitive: is_sensitive_resource(&change.path)
+            || change
+                .old_path
+                .as_deref()
+                .is_some_and(is_sensitive_resource),
+        provisional: true,
+        overflow: false,
+        resync_required: false,
+        reconciled: false,
+    }
+}
+
+fn capture_class_for_path(
+    policy: &crate::ResourceTrackingPolicy,
+    path: &str,
+) -> ResourceCaptureClass {
+    if policy
+        .generated_output_roots
+        .iter()
+        .any(|generated| Path::new(path).starts_with(generated))
+    {
+        ResourceCaptureClass::Generated
+    } else {
+        ResourceCaptureClass::Source
+    }
+}
+
+fn append_missing_reconcile_events(
+    store: &mut WorkspaceStore,
+    run: &TaskRun,
+    changes: &[ResourceChange],
+    observed_at: i64,
+) -> Result<(), String> {
+    let existing = store.list_all_resource_events(&run.run_id)?;
+    let mut missing = changes
+        .iter()
+        .filter(|change| {
+            !existing.iter().any(|event| {
+                event.path.as_deref() == Some(change.path.as_str())
+                    && event_kind_for_change(change.kind) == event.kind
+            })
+        })
+        .map(|change| ResourceEvent {
+            event_id: Uuid::now_v7().to_string(),
+            task_id: run.task_id.clone(),
+            run_id: run.run_id.clone(),
+            seq: 0,
+            observed_at,
+            kind: event_kind_for_change(change.kind),
+            path: Some(change.path.clone()),
+            old_path: change.old_path.clone(),
+            capture_class: change.capture_class,
+            origin: change.origin,
+            agent_id: change.agent_id.clone(),
+            evidence: ResourceEventEvidence::Reconcile,
+            tool_call_id: None,
+            media_type: Some(change.media_type.clone()),
+            size: Some(change.size),
+            resource_kind: Some(change.resource_kind),
+            sensitive: change.sensitive,
+            provisional: false,
+            overflow: false,
+            resync_required: false,
+            reconciled: true,
+        })
+        .collect::<Vec<_>>();
+    store.append_resource_events(&mut missing)
+}
+
+fn event_kind_for_change(kind: ChangeKind) -> ResourceEventKind {
+    match kind {
+        ChangeKind::Created => ResourceEventKind::Created,
+        ChangeKind::Modified => ResourceEventKind::Modified,
+        ChangeKind::Deleted => ResourceEventKind::Deleted,
+        ChangeKind::Renamed => ResourceEventKind::Renamed,
+    }
+}
+
+fn reconcile_generated(
+    before: &std::collections::BTreeMap<String, GeneratedSnapshotEntry>,
+    after: &std::collections::BTreeMap<String, GeneratedSnapshotEntry>,
+    revision: u64,
+    run: &TaskRun,
+) -> Vec<ResourceChange> {
+    let mut changes = Vec::new();
+    for (path, entry) in after {
+        let kind = match before.get(path) {
+            None => Some(ChangeKind::Created),
+            Some(previous) if previous != entry => Some(ChangeKind::Modified),
+            Some(_) => None,
+        };
+        if let Some(kind) = kind {
+            changes.push(generated_change(
+                path,
+                kind,
+                before.get(path),
+                Some(entry),
+                revision,
+                run,
+            ));
+        }
+    }
+    for (path, entry) in before {
+        if !after.contains_key(path) {
+            changes.push(generated_change(
+                path,
+                ChangeKind::Deleted,
+                Some(entry),
+                None,
+                revision,
+                run,
+            ));
+        }
+    }
+    changes
+}
+
+fn generated_change(
+    path: &str,
+    kind: ChangeKind,
+    before: Option<&GeneratedSnapshotEntry>,
+    after: Option<&GeneratedSnapshotEntry>,
+    revision: u64,
+    run: &TaskRun,
+) -> ResourceChange {
+    let visible = after.or(before).expect("generated change has metadata");
+    ResourceChange {
+        run_id: run.run_id.clone(),
+        path: path.to_string(),
+        old_path: None,
+        kind,
+        origin: ContributionOrigin::Agent,
+        agent_id: Some(run.agent_id.clone()),
+        media_type: visible.media_type.clone(),
+        size: after.or(before).map(|entry| entry.size).unwrap_or(0),
+        hash: None,
+        before_hash: None,
+        insertions: None,
+        deletions: None,
+        binary: !visible.media_type.starts_with("text/")
+            && visible.media_type != "application/json",
+        resource_kind: visible.kind,
+        before_mode: before.and_then(|entry| entry.mode),
+        after_mode: after.and_then(|entry| entry.mode),
+        sensitive: visible.sensitive,
+        revision,
+        capture_class: ResourceCaptureClass::Generated,
+        content_captured: false,
+    }
+}
+
+fn redact_resource_change(resource: &mut ResourceChange, manifest_key: &[u8]) {
+    if is_sensitive_resource(&resource.path) {
+        resource.path = redacted_path(manifest_key, &resource.path);
+    }
+    if resource
+        .old_path
+        .as_deref()
+        .is_some_and(is_sensitive_resource)
+    {
+        resource.old_path = resource
+            .old_path
+            .as_deref()
+            .map(|path| redacted_path(manifest_key, path));
+    }
+}
+
+fn redact_resource_event(event: &mut ResourceEvent, manifest_key: &[u8]) {
+    if event.path.as_deref().is_some_and(is_sensitive_resource) {
+        event.path = event
+            .path
+            .as_deref()
+            .map(|path| redacted_path(manifest_key, path));
+    }
+    if event.old_path.as_deref().is_some_and(is_sensitive_resource) {
+        event.old_path = event
+            .old_path
+            .as_deref()
+            .map(|path| redacted_path(manifest_key, path));
+    }
+}
+
+fn redacted_path(manifest_key: &[u8], path: &str) -> String {
+    use sha2::{Digest, Sha256};
+
+    let mut digest = Sha256::new();
+    digest.update(manifest_key);
+    digest.update([0]);
+    digest.update(path.as_bytes());
+    format!("redacted:{}", &hex::encode(digest.finalize())[..24])
+}
+
+fn validate_event_relative_path(path: &str) -> Result<(), String> {
+    use std::path::Component;
+    let path_value = Path::new(path);
+    if path.is_empty()
+        || path_value.is_absolute()
+        || path_value.components().any(|component| {
+            matches!(
+                component,
+                Component::ParentDir | Component::RootDir | Component::Prefix(_)
+            )
+        })
+    {
+        return Err(format!("path escapes workspace: {path}"));
+    }
+    Ok(())
 }
 
 fn create_execution(
@@ -957,6 +1480,9 @@ fn change_from_entries(
     stats: Option<(u32, u32)>,
 ) -> ResourceChange {
     let visible = after.or(before);
+    let sensitive = visible.map(|entry| entry.sensitive).unwrap_or(false)
+        || is_sensitive_resource(path)
+        || old_path.as_deref().is_some_and(is_sensitive_resource);
     let origin = meta
         .origin_hints
         .get(&(meta.run_id.to_string(), path.to_string()))
@@ -984,10 +1510,10 @@ fn change_from_entries(
         },
         before_mode: before.and_then(|entry| entry.mode),
         after_mode: after.and_then(|entry| entry.mode),
-        sensitive: visible
-            .map(|entry| entry.sensitive)
-            .unwrap_or_else(|| is_sensitive_resource(path)),
+        sensitive,
         revision: meta.revision,
+        capture_class: ResourceCaptureClass::Source,
+        content_captured: true,
     }
 }
 
@@ -1041,6 +1567,25 @@ fn storage_key(value: &str) -> String {
     hex::encode(Sha256::digest(value.as_bytes()))[..24].to_string()
 }
 
+fn load_or_create_manifest_key(service_dir: &Path) -> Result<Vec<u8>, String> {
+    let path = service_dir.join("manifest-redaction.key");
+    if path.exists() {
+        let key = fs::read(&path).map_err(|error| format!("read {}: {error}", path.display()))?;
+        return (key.len() >= 16)
+            .then_some(key)
+            .ok_or_else(|| format!("invalid manifest redaction key: {}", path.display()));
+    }
+    let key = Uuid::new_v4().as_bytes().to_vec();
+    fs::write(&path, &key).map_err(|error| format!("write {}: {error}", path.display()))?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o600))
+            .map_err(|error| format!("protect {}: {error}", path.display()))?;
+    }
+    Ok(key)
+}
+
 fn now_ms() -> i64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -1051,9 +1596,25 @@ fn now_ms() -> i64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{ChangeKind, IsolationKind, RunState, TaskWorkspaceState};
-    use std::fs;
+    use crate::{
+        ChangeKind, IsolationKind, ResourceCaptureClass, ResourceEventKind, ResourceTrackingPolicy,
+        RunState, TaskWorkspaceState,
+    };
+    use parking_lot::Mutex;
+    use std::{
+        fs,
+        sync::{mpsc, Arc},
+        time::Duration,
+    };
     use tempfile::TempDir;
+
+    struct ChannelSink(Mutex<mpsc::Sender<TaskWorkspaceResourceEvent>>);
+
+    impl TaskWorkspaceEventSink for ChannelSink {
+        fn emit(&self, event: TaskWorkspaceResourceEvent) {
+            let _ = self.0.lock().send(event);
+        }
+    }
 
     fn input(root: &TempDir, task_id: &str, run_id: &str) -> BeginTaskRun {
         BeginTaskRun {
@@ -1065,7 +1626,169 @@ mod tests {
             agent_kind: "in-app".into(),
             workspace_root: root.path().to_string_lossy().into_owned(),
             workspace_key: None,
+            execution_run_id: None,
+            trace_id: None,
+            turn_id: None,
+            attempt_id: None,
+            provider_attempt_id: None,
+            surface: None,
+            tracking_policy: ResourceTrackingPolicy::default(),
         }
+    }
+
+    #[test]
+    fn persists_generated_lifecycle_without_storing_generated_content() {
+        let data = TempDir::new().unwrap();
+        let workspace = TempDir::new().unwrap();
+        fs::write(workspace.path().join("source.txt"), "before\n").unwrap();
+        let service = TaskWorkspaceService::open(ServiceConfig::new(data.path().into())).unwrap();
+        let mut request = input(&workspace, "task-events", "run-events");
+        request.tracking_policy = ResourceTrackingPolicy {
+            generated_output_roots: vec!["dist".into()],
+            auto_detect: false,
+        };
+        let run = service.begin_run(request).unwrap();
+        let execution = PathBuf::from(&run.execution_root);
+        fs::create_dir_all(execution.join("dist")).unwrap();
+
+        let (tx, rx) = mpsc::channel();
+        service
+            .watch_run("run-events", Arc::new(ChannelSink(Mutex::new(tx))))
+            .unwrap();
+        fs::write(execution.join("dist/transient.js"), "temporary").unwrap();
+        rx.recv_timeout(Duration::from_secs(3)).unwrap();
+        fs::remove_file(execution.join("dist/transient.js")).unwrap();
+        rx.recv_timeout(Duration::from_secs(3)).unwrap();
+        fs::write(execution.join("dist/bundle.js"), "generated body").unwrap();
+        fs::write(execution.join("source.txt"), "after\n").unwrap();
+        service
+            .record_tool_event(
+                "run-events",
+                "source.txt",
+                None,
+                ResourceEventKind::Modified,
+                Some("tool-call-1"),
+            )
+            .unwrap();
+        rx.recv_timeout(Duration::from_secs(3)).unwrap();
+        service.stop_watching_run("run-events").unwrap();
+
+        let events = service
+            .list_resource_events("run-events", None, 100)
+            .unwrap();
+        assert!(events.iter().any(|event| {
+            event.path.as_deref() == Some("dist/transient.js")
+                && event.kind == ResourceEventKind::Created
+                && event.capture_class == ResourceCaptureClass::Generated
+        }));
+        assert!(events.iter().any(|event| {
+            event.path.as_deref() == Some("source.txt")
+                && event.evidence == ResourceEventEvidence::Tool
+                && event.tool_call_id.as_deref() == Some("tool-call-1")
+        }));
+        assert!(events.iter().any(|event| {
+            event.path.as_deref() == Some("dist/transient.js")
+                && event.kind == ResourceEventKind::Deleted
+        }));
+
+        let changes = service.settle_run("run-events").unwrap();
+        let generated = changes
+            .iter()
+            .find(|change| change.path == "dist/bundle.js")
+            .unwrap();
+        assert_eq!(generated.capture_class, ResourceCaptureClass::Generated);
+        assert!(!generated.content_captured);
+        assert_eq!(generated.hash, None);
+        assert_eq!(generated.before_hash, None);
+        assert_eq!(generated.size, 14);
+
+        let source = changes
+            .iter()
+            .find(|change| change.path == "source.txt")
+            .unwrap();
+        assert_eq!(source.capture_class, ResourceCaptureClass::Source);
+        assert!(source.content_captured);
+        assert!(source.hash.is_some());
+
+        let patch = service.get_patch_set("run-events").unwrap().unwrap();
+        assert_eq!(patch.files.len(), 1);
+        assert_eq!(patch.files[0].path, "source.txt");
+    }
+
+    #[test]
+    fn exports_relative_metadata_and_redacts_sensitive_paths() {
+        let data = TempDir::new().unwrap();
+        let workspace = TempDir::new().unwrap();
+        fs::write(workspace.path().join(".env"), "TOKEN=before\n").unwrap();
+        let service = TaskWorkspaceService::open(ServiceConfig::new(data.path().into())).unwrap();
+        let request = input(&workspace, "task-export", "run-export");
+        let run = service.begin_run(request).unwrap();
+        fs::write(
+            Path::new(&run.execution_root).join(".env"),
+            "TOKEN=after-secret\n",
+        )
+        .unwrap();
+        service.settle_run("run-export").unwrap();
+
+        let manifest = service
+            .export_resource_manifest("task-export", Some("run-export"))
+            .unwrap();
+        assert_eq!(manifest.schema_version, 1);
+        assert_eq!(manifest.task.workspace_root, ".");
+        assert_eq!(manifest.runs[0].execution_root, ".");
+        assert!(manifest.resources[0].path.starts_with("redacted:"));
+        let opaque_path = manifest.resources[0].path.clone();
+        assert!(manifest.events[0]
+            .path
+            .as_deref()
+            .unwrap()
+            .starts_with("redacted:"));
+        let json = serde_json::to_string(&manifest).unwrap();
+        assert!(!json.contains(&workspace.path().to_string_lossy().to_string()));
+        assert!(!json.contains("after-secret"));
+        assert!(!json.contains(".env"));
+
+        drop(service);
+        let reopened = TaskWorkspaceService::open(ServiceConfig::new(data.path().into())).unwrap();
+        let reexported = reopened
+            .export_resource_manifest("task-export", Some("run-export"))
+            .unwrap();
+        assert_eq!(reexported.resources[0].path, opaque_path);
+    }
+
+    #[test]
+    fn export_redacts_only_the_sensitive_side_of_a_rename() {
+        let data = TempDir::new().unwrap();
+        let workspace = TempDir::new().unwrap();
+        fs::write(workspace.path().join(".env"), "TOKEN=secret\n").unwrap();
+        let service = TaskWorkspaceService::open(ServiceConfig::new(data.path().into())).unwrap();
+        let run = service
+            .begin_run(input(&workspace, "task-rename-export", "run-rename-export"))
+            .unwrap();
+        fs::rename(
+            Path::new(&run.execution_root).join(".env"),
+            Path::new(&run.execution_root).join("config.txt"),
+        )
+        .unwrap();
+        service.settle_run("run-rename-export").unwrap();
+
+        let manifest = service
+            .export_resource_manifest("task-rename-export", Some("run-rename-export"))
+            .unwrap();
+        let resource = manifest
+            .resources
+            .iter()
+            .find(|resource| resource.kind == ChangeKind::Renamed)
+            .unwrap();
+        assert_eq!(resource.path, "config.txt");
+        assert!(resource
+            .old_path
+            .as_deref()
+            .unwrap()
+            .starts_with("redacted:"));
+        let json = serde_json::to_string(&manifest).unwrap();
+        assert!(!json.contains(".env"));
+        assert!(!json.contains("TOKEN=secret"));
     }
 
     #[test]
@@ -1479,6 +2202,12 @@ mod tests {
         assert_eq!(changes.len(), 1);
         assert_eq!(changes[0].origin, ContributionOrigin::User);
         assert_eq!(changes[0].agent_id, None);
+        let events = service.list_resource_events("run-user", None, 10).unwrap();
+        assert!(events.iter().any(|event| {
+            event.path.as_deref() == Some("notes/user.txt")
+                && event.origin == ContributionOrigin::User
+                && event.evidence == ResourceEventEvidence::Tool
+        }));
     }
 
     #[test]

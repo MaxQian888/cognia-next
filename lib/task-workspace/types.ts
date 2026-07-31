@@ -2,6 +2,14 @@ export type TaskWorkspaceState = "active" | "ready" | "applied" | "conflict" | "
 export type TaskRunState = "running" | "settling" | "ready" | "failed" | "cancelled"
 export type ChangeKind = "created" | "modified" | "deleted" | "renamed"
 export type ContributionOrigin = "agent" | "user" | "unknown"
+export type ResourceCaptureClass = "source" | "generated"
+export type ResourceEventEvidence = "watcher" | "tool" | "reconcile"
+export type ResourceTimelineCompleteness = "complete" | "resyncRequired" | "reconciled"
+
+export interface ResourceTrackingPolicy {
+  generatedOutputRoots: string[]
+  autoDetect: boolean
+}
 
 export interface TaskWorkspace {
   taskId: string
@@ -24,6 +32,13 @@ export interface TaskRun {
   isolationKind: "gitWorktree" | "shadow"
   isolationRef: string | null
   workspaceKey: string | null
+  executionRunId: string | null
+  traceId: string | null
+  turnId: string | null
+  attemptId: string | null
+  providerAttemptId: string | null
+  surface: string | null
+  trackingPolicy: ResourceTrackingPolicy
   baselineRevision: number
   state: TaskRunState
   createdAt: number
@@ -49,6 +64,62 @@ export interface ResourceChange {
   afterMode: number | null
   sensitive: boolean
   revision: number
+  captureClass: ResourceCaptureClass
+  contentCaptured: boolean
+}
+
+export type ResourceEventKind =
+  "created" | "modified" | "deleted" | "renamed" | "any" | "gap" | "resync"
+
+export interface ResourceEvent {
+  eventId: string
+  taskId: string
+  runId: string
+  seq: number
+  observedAt: number
+  kind: ResourceEventKind
+  path: string | null
+  oldPath: string | null
+  captureClass: ResourceCaptureClass
+  origin: ContributionOrigin
+  agentId: string | null
+  evidence: ResourceEventEvidence
+  toolCallId: string | null
+  mediaType: string | null
+  size: number | null
+  resourceKind: "file" | "symlink" | null
+  sensitive: boolean
+  provisional: boolean
+  overflow: boolean
+  resyncRequired: boolean
+  reconciled: boolean
+}
+
+export interface ResourceEventCounts {
+  created: number
+  modified: number
+  deleted: number
+  renamed: number
+  source: number
+  generated: number
+}
+
+export interface TaskResourceSummary {
+  runId: string
+  counts: ResourceEventCounts
+  eventCount: number
+  overflowCount: number
+  completeness: ResourceTimelineCompleteness
+}
+
+export interface TaskResourceManifest {
+  schemaVersion: number
+  exportedAt: number
+  task: TaskWorkspace
+  runs: TaskRun[]
+  resources: ResourceChange[]
+  events: ResourceEvent[]
+  summaries: TaskResourceSummary[]
 }
 
 export interface ResourceRead {
@@ -95,7 +166,7 @@ export interface TaskWorkspaceResourceEvent {
   taskId: string
   runId: string
   revision: number
-  changes: Array<{ path: string; kind: "created" | "modified" | "deleted" | "any" }>
+  changes: Array<{ path: string; oldPath?: string; kind: ResourceEventKind }>
   overflow: boolean
   resyncRequired: boolean
 }

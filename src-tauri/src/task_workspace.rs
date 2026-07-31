@@ -2,9 +2,10 @@
 
 use cognia_task_workspace::{
     ApplyOutcome, BeginTaskRun, ConflictResolution, DownloadHandle, PatchSelection, PatchSet,
-    PruneOutcome, ResourceChange, ResourceRead, RunState, ServiceConfig, TaskRun, TaskWorkspace,
-    TaskWorkspaceEventSink, TaskWorkspaceResourceEvent, TaskWorkspaceService, TransferChunk,
-    UploadHandle,
+    PruneOutcome, ResourceChange, ResourceEvent, ResourceEventKind, ResourceRead,
+    ResourceTrackingPolicy, RunState, ServiceConfig, TaskResourceManifest, TaskResourceSummary,
+    TaskRun, TaskWorkspace, TaskWorkspaceEventSink, TaskWorkspaceResourceEvent,
+    TaskWorkspaceService, TransferChunk, UploadHandle,
 };
 use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
@@ -67,6 +68,14 @@ pub struct TaskWorkspaceTurnEnvelope {
     pub agent_id: String,
     pub agent_kind: String,
     pub workspace_key: Option<String>,
+    pub execution_run_id: Option<String>,
+    pub trace_id: Option<String>,
+    pub turn_id: Option<String>,
+    pub attempt_id: Option<String>,
+    pub provider_attempt_id: Option<String>,
+    pub surface: Option<String>,
+    #[serde(default)]
+    pub tracking_policy: ResourceTrackingPolicy,
 }
 
 pub fn begin_hosted_turn(
@@ -75,15 +84,7 @@ pub fn begin_hosted_turn(
     sink: Arc<dyn TaskWorkspaceEventSink>,
 ) -> Result<TaskRun, String> {
     let service = service()?;
-    if let Some(existing) = service
-        .list_runs(&envelope.task_id)?
-        .into_iter()
-        .find(|run| run.run_id == envelope.run_id)
-    {
-        service.watch_run(&existing.run_id, sink)?;
-        return Ok(existing);
-    }
-    let run = service.begin_run(BeginTaskRun {
+    let input = BeginTaskRun {
         task_id: envelope.task_id,
         session_id,
         run_id: envelope.run_id,
@@ -92,9 +93,17 @@ pub fn begin_hosted_turn(
         agent_kind: envelope.agent_kind,
         workspace_root: envelope.workspace_root,
         workspace_key: envelope.workspace_key,
-    })?;
-    service.watch_run(&run.run_id, sink)?;
-    Ok(run)
+        execution_run_id: envelope.execution_run_id,
+        trace_id: envelope.trace_id,
+        turn_id: envelope.turn_id,
+        attempt_id: envelope.attempt_id,
+        provider_attempt_id: envelope.provider_attempt_id,
+        surface: envelope.surface,
+        tracking_policy: envelope.tracking_policy,
+    };
+    begin_and_watch(&service, input, move |service, run| {
+        service.watch_run(&run.run_id, sink)
+    })
 }
 
 #[tauri::command]
@@ -109,8 +118,16 @@ pub fn task_workspace_status() -> TaskWorkspaceStatus {
 }
 
 #[tauri::command]
-pub async fn task_workspace_begin(input: BeginTaskRun) -> Result<TaskRun, String> {
-    blocking(move |service| service.begin_run(input)).await
+pub async fn task_workspace_begin(
+    input: BeginTaskRun,
+    app: tauri::AppHandle,
+) -> Result<TaskRun, String> {
+    blocking(move |service| {
+        begin_and_watch(service, input, move |service, run| {
+            service.watch_run(&run.run_id, Arc::new(TauriResourceEventSink(app)))
+        })
+    })
+    .await
 }
 
 #[tauri::command]
@@ -118,8 +135,7 @@ pub async fn task_workspace_settle(
     run_id: String,
     final_state: Option<RunState>,
 ) -> Result<Vec<ResourceChange>, String> {
-    let settled_run_id = run_id.clone();
-    let outcome = blocking(
+    blocking(
         move |service| match final_state.unwrap_or(RunState::Ready) {
             RunState::Ready => service.settle_run(&run_id),
             RunState::Failed => service.settle_failed_run(&run_id),
@@ -127,11 +143,7 @@ pub async fn task_workspace_settle(
             state => Err(format!("invalid settle state: {state:?}")),
         },
     )
-    .await;
-    if let Ok(service) = service() {
-        let _ = service.stop_watching_run(&settled_run_id);
-    }
-    outcome
+    .await
 }
 
 #[tauri::command]
@@ -152,6 +164,45 @@ pub fn task_workspace_list_runs(task_id: String) -> Result<Vec<TaskRun>, String>
 #[tauri::command]
 pub fn task_workspace_list_resources(task_id: String) -> Result<Vec<ResourceChange>, String> {
     service()?.list_resources(&task_id)
+}
+
+#[tauri::command]
+pub fn task_workspace_list_resource_events(
+    run_id: String,
+    cursor: Option<u64>,
+    limit: Option<u32>,
+) -> Result<Vec<ResourceEvent>, String> {
+    service()?.list_resource_events(&run_id, cursor, limit.unwrap_or(200))
+}
+
+#[tauri::command]
+pub fn task_workspace_get_resource_summary(run_id: String) -> Result<TaskResourceSummary, String> {
+    service()?.get_resource_summary(&run_id)
+}
+
+#[tauri::command]
+pub fn task_workspace_record_tool_event(
+    run_id: String,
+    path: String,
+    old_path: Option<String>,
+    kind: ResourceEventKind,
+    tool_call_id: Option<String>,
+) -> Result<ResourceEvent, String> {
+    service()?.record_tool_event(
+        &run_id,
+        &path,
+        old_path.as_deref(),
+        kind,
+        tool_call_id.as_deref(),
+    )
+}
+
+#[tauri::command]
+pub fn task_workspace_export_resource_manifest(
+    task_id: String,
+    run_id: Option<String>,
+) -> Result<TaskResourceManifest, String> {
+    service()?.export_resource_manifest(&task_id, run_id.as_deref())
 }
 
 #[tauri::command]
@@ -336,6 +387,24 @@ pub fn task_workspace_stop_watch(run_id: String) -> Result<(), String> {
     service()?.stop_watching_run(&run_id)
 }
 
+fn begin_and_watch<F>(
+    service: &TaskWorkspaceService,
+    input: BeginTaskRun,
+    watch: F,
+) -> Result<TaskRun, String>
+where
+    F: FnOnce(&TaskWorkspaceService, &TaskRun) -> Result<(), String>,
+{
+    let run = service.begin_run(input)?;
+    if matches!(run.state, RunState::Running | RunState::Settling) {
+        if let Err(error) = watch(service, &run) {
+            let _ = service.settle_failed_run(&run.run_id);
+            return Err(error);
+        }
+    }
+    Ok(run)
+}
+
 async fn blocking<T, F>(operation: F) -> Result<T, String>
 where
     T: Send + 'static,
@@ -352,8 +421,64 @@ mod tests {
     use super::*;
     use tempfile::TempDir;
 
+    static TEST_LOCK: OnceLock<std::sync::Mutex<()>> = OnceLock::new();
+
+    fn test_guard() -> std::sync::MutexGuard<'static, ()> {
+        TEST_LOCK
+            .get_or_init(|| std::sync::Mutex::new(()))
+            .lock()
+            .unwrap()
+    }
+
+    struct NoopSink;
+
+    impl TaskWorkspaceEventSink for NoopSink {
+        fn emit(&self, _event: TaskWorkspaceResourceEvent) {}
+    }
+
+    fn begin_input(workspace: &TempDir, run_id: &str) -> BeginTaskRun {
+        BeginTaskRun {
+            task_id: "task-test".into(),
+            session_id: "session-test".into(),
+            run_id: run_id.into(),
+            parent_run_id: None,
+            agent_id: "agent-test".into(),
+            agent_kind: "assistant".into(),
+            workspace_root: workspace.path().to_string_lossy().into_owned(),
+            workspace_key: None,
+            execution_run_id: None,
+            trace_id: None,
+            turn_id: None,
+            attempt_id: None,
+            provider_attempt_id: None,
+            surface: Some("test".into()),
+            tracking_policy: ResourceTrackingPolicy::default(),
+        }
+    }
+
+    fn turn_envelope(workspace: &TempDir, run_id: &str) -> TaskWorkspaceTurnEnvelope {
+        let input = begin_input(workspace, run_id);
+        TaskWorkspaceTurnEnvelope {
+            task_id: input.task_id,
+            run_id: input.run_id,
+            parent_run_id: input.parent_run_id,
+            workspace_root: input.workspace_root,
+            agent_id: input.agent_id,
+            agent_kind: input.agent_kind,
+            workspace_key: input.workspace_key,
+            execution_run_id: input.execution_run_id,
+            trace_id: input.trace_id,
+            turn_id: input.turn_id,
+            attempt_id: input.attempt_id,
+            provider_attempt_id: input.provider_attempt_id,
+            surface: input.surface,
+            tracking_policy: input.tracking_policy,
+        }
+    }
+
     #[test]
     fn status_reports_the_transport_contract() {
+        let _guard = test_guard();
         let data = TempDir::new().unwrap();
         install(data.path().to_path_buf()).unwrap();
 
@@ -363,5 +488,88 @@ mod tests {
         assert_eq!(status.max_transfer_chunk_bytes, 24 * 1024);
         assert_eq!(status.text_preview_bytes, 1024 * 1024);
         assert_eq!(status.editor_bytes, 5 * 1024 * 1024);
+    }
+
+    #[test]
+    fn hosted_turn_reattaches_to_the_same_running_run() {
+        let _guard = test_guard();
+        let data = TempDir::new().unwrap();
+        let workspace = TempDir::new().unwrap();
+        install(data.path().to_path_buf()).unwrap();
+
+        let first = begin_hosted_turn(
+            "session-test".into(),
+            turn_envelope(&workspace, "run-reattach"),
+            Arc::new(NoopSink),
+        )
+        .unwrap();
+        let second = begin_hosted_turn(
+            "session-test".into(),
+            turn_envelope(&workspace, "run-reattach"),
+            Arc::new(NoopSink),
+        )
+        .unwrap();
+
+        assert_eq!(first, second);
+        assert_eq!(second.state, RunState::Running);
+        task_workspace_stop_watch(second.run_id).unwrap();
+    }
+
+    #[test]
+    fn watcher_start_failure_marks_the_run_failed() {
+        let _guard = test_guard();
+        let data = TempDir::new().unwrap();
+        let workspace = TempDir::new().unwrap();
+        let service = install(data.path().to_path_buf()).unwrap();
+
+        let error = begin_and_watch(&service, begin_input(&workspace, "run-failed"), |_, _| {
+            Err("watcher unavailable".into())
+        })
+        .unwrap_err();
+
+        assert_eq!(error, "watcher unavailable");
+        let run = service
+            .list_runs("task-test")
+            .unwrap()
+            .into_iter()
+            .find(|run| run.run_id == "run-failed")
+            .unwrap();
+        assert_eq!(run.state, RunState::Failed);
+    }
+
+    #[test]
+    fn resource_commands_forward_events_summaries_and_manifests() {
+        let _guard = test_guard();
+        let data = TempDir::new().unwrap();
+        let workspace = TempDir::new().unwrap();
+        let service = install(data.path().to_path_buf()).unwrap();
+        service
+            .begin_run(begin_input(&workspace, "run-resource"))
+            .unwrap();
+
+        let event = task_workspace_record_tool_event(
+            "run-resource".into(),
+            "output/result.txt".into(),
+            None,
+            ResourceEventKind::Created,
+            Some("tool-call-1".into()),
+        )
+        .unwrap();
+        let events =
+            task_workspace_list_resource_events("run-resource".into(), None, Some(10)).unwrap();
+        let summary = task_workspace_get_resource_summary("run-resource".into()).unwrap();
+        let manifest = task_workspace_export_resource_manifest(
+            "task-test".into(),
+            Some("run-resource".into()),
+        )
+        .unwrap();
+
+        assert_eq!(event.path.as_deref(), Some("output/result.txt"));
+        assert_eq!(event.tool_call_id.as_deref(), Some("tool-call-1"));
+        assert!(events.iter().any(|candidate| candidate == &event));
+        assert_eq!(summary.event_count, 1);
+        assert_eq!(summary.counts.created, 1);
+        assert_eq!(manifest.events, vec![event]);
+        assert_eq!(manifest.summaries, vec![summary]);
     }
 }

@@ -1,4 +1,7 @@
-use crate::resource::{is_sensitive_resource, media_type_for};
+use crate::{
+    resource::{is_sensitive_resource, media_type_for},
+    ResourceKind, ResourceTrackingPolicy,
+};
 use ignore::WalkBuilder;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -28,12 +31,40 @@ pub struct SnapshotEntry {
     pub sensitive: bool,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GeneratedSnapshotEntry {
+    pub path: String,
+    pub kind: ResourceKind,
+    pub size: u64,
+    pub mode: Option<u32>,
+    pub modified_at: Option<i64>,
+    pub media_type: String,
+    pub sensitive: bool,
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WorkspaceSnapshot {
     pub entries: BTreeMap<String, SnapshotEntry>,
+    #[serde(default)]
+    pub generated_entries: BTreeMap<String, GeneratedSnapshotEntry>,
 }
 
+#[cfg(test)]
 pub fn capture(root: &Path) -> Result<(WorkspaceSnapshot, HashMap<String, Vec<u8>>), String> {
+    capture_with_policy(
+        root,
+        &ResourceTrackingPolicy {
+            generated_output_roots: Vec::new(),
+            auto_detect: false,
+        },
+    )
+}
+
+pub fn capture_with_policy(
+    root: &Path,
+    policy: &ResourceTrackingPolicy,
+) -> Result<(WorkspaceSnapshot, HashMap<String, Vec<u8>>), String> {
     let canonical_root = root
         .canonicalize()
         .map_err(|error| format!("canonicalize root {}: {error}", root.display()))?;
@@ -53,7 +84,8 @@ pub fn capture(root: &Path) -> Result<(WorkspaceSnapshot, HashMap<String, Vec<u8
     for item in builder.build() {
         let entry = item.map_err(|error| format!("walk {}: {error}", canonical_root.display()))?;
         let path = entry.path();
-        if path == canonical_root || excluded(path, &canonical_root) {
+        if path == canonical_root || excluded(path, &canonical_root, &policy.generated_output_roots)
+        {
             continue;
         }
         let file_type = entry
@@ -100,7 +132,99 @@ pub fn capture(root: &Path) -> Result<(WorkspaceSnapshot, HashMap<String, Vec<u8
         );
         blobs.entry(hash).or_insert(bytes);
     }
-    Ok((WorkspaceSnapshot { entries }, blobs))
+    let generated_entries = capture_generated(&canonical_root, &policy.generated_output_roots)?;
+    Ok((
+        WorkspaceSnapshot {
+            entries,
+            generated_entries,
+        },
+        blobs,
+    ))
+}
+
+fn capture_generated(
+    root: &Path,
+    generated_roots: &[String],
+) -> Result<BTreeMap<String, GeneratedSnapshotEntry>, String> {
+    let mut entries = BTreeMap::new();
+    for generated_root in generated_roots {
+        let scan_root = root.join(generated_root);
+        if !scan_root.exists() {
+            continue;
+        }
+        let canonical = scan_root.canonicalize().map_err(|error| {
+            format!(
+                "canonicalize generated root {}: {error}",
+                scan_root.display()
+            )
+        })?;
+        if !canonical.starts_with(root) {
+            return Err(format!(
+                "generated output root escapes workspace: {generated_root}"
+            ));
+        }
+        let mut builder = WalkBuilder::new(&scan_root);
+        builder
+            .hidden(false)
+            .git_ignore(false)
+            .git_exclude(false)
+            .git_global(false)
+            .ignore(false)
+            .parents(false)
+            .follow_links(false);
+        for item in builder.build() {
+            let entry = item.map_err(|error| format!("walk {}: {error}", scan_root.display()))?;
+            let path = entry.path();
+            if path == scan_root
+                || path
+                    .components()
+                    .any(|component| component.as_os_str() == "node_modules")
+            {
+                continue;
+            }
+            let file_type = entry
+                .file_type()
+                .ok_or_else(|| format!("missing file type: {}", path.display()))?;
+            if file_type.is_dir() {
+                continue;
+            }
+            let rel = path
+                .strip_prefix(root)
+                .map_err(|_| format!("generated path escapes workspace: {}", path.display()))?;
+            let rel_path = rel.to_string_lossy().replace('\\', "/");
+            let metadata = path
+                .symlink_metadata()
+                .map_err(|error| format!("stat {}: {error}", path.display()))?;
+            let (kind, size) = if file_type.is_symlink() {
+                let target = fs::read_link(path)
+                    .map_err(|error| format!("read link {}: {error}", path.display()))?;
+                validate_symlink_target(rel, &target)?;
+                (ResourceKind::Symlink, target.as_os_str().len() as u64)
+            } else if file_type.is_file() {
+                (ResourceKind::File, metadata.len())
+            } else {
+                continue;
+            };
+            let modified_at = metadata
+                .modified()
+                .ok()
+                .and_then(|value| value.duration_since(std::time::UNIX_EPOCH).ok())
+                .map(|value| value.as_millis() as i64);
+            entries.insert(
+                rel_path.clone(),
+                GeneratedSnapshotEntry {
+                    path: rel_path.clone(),
+                    kind,
+                    size,
+                    mode: file_mode(path),
+                    modified_at,
+                    media_type: media_type_for(&rel_path, false).to_string(),
+                    sensitive: is_sensitive_resource(&rel_path),
+                },
+            );
+        }
+    }
+    Ok(entries)
 }
 
 fn validate_symlink_target(link_path: &Path, target: &Path) -> Result<(), String> {
@@ -135,16 +259,19 @@ fn validate_symlink_target(link_path: &Path, target: &Path) -> Result<(), String
     Ok(())
 }
 
-fn excluded(path: &Path, root: &Path) -> bool {
+fn excluded(path: &Path, root: &Path, generated_roots: &[String]) -> bool {
     let Ok(rel) = path.strip_prefix(root) else {
         return true;
     };
-    rel.components().any(|component| {
-        matches!(
-            component.as_os_str().to_str(),
-            Some(".git" | "node_modules" | ".next" | "dist" | "target")
-        )
-    })
+    generated_roots
+        .iter()
+        .any(|generated| rel.starts_with(generated))
+        || rel.components().any(|component| {
+            matches!(
+                component.as_os_str().to_str(),
+                Some(".git" | "node_modules")
+            )
+        })
 }
 
 pub fn materialize(
@@ -218,7 +345,23 @@ fn create_symlink(path: &Path, bytes: &[u8]) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
     use tempfile::TempDir;
+
+    #[test]
+    fn captures_conventionally_named_directories_when_policy_does_not_classify_them() {
+        let root = TempDir::new().unwrap();
+        fs::create_dir(root.path().join("dist")).unwrap();
+        fs::write(
+            root.path().join("dist/source.ts"),
+            "export const source = true;\n",
+        )
+        .unwrap();
+
+        let (snapshot, _) = capture(root.path()).unwrap();
+        assert!(snapshot.entries.contains_key("dist/source.ts"));
+        assert!(snapshot.generated_entries.is_empty());
+    }
 
     #[cfg(unix)]
     #[test]

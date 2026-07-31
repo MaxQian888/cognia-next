@@ -1,4 +1,8 @@
-use crate::{PatchState, ResourceChange, RunState, TaskRun, TaskWorkspace};
+use crate::{
+    PatchState, ResourceCaptureClass, ResourceChange, ResourceEvent, ResourceEventCounts,
+    ResourceEventKind, ResourceTimelineCompleteness, RunState, TaskResourceSummary, TaskRun,
+    TaskWorkspace,
+};
 use flate2::{read::GzDecoder, write::GzEncoder, Compression};
 use rusqlite::{params, Connection, OptionalExtension};
 use std::{
@@ -52,6 +56,20 @@ impl WorkspaceStore {
                    FOREIGN KEY(task_id) REFERENCES task_workspaces(task_id) ON DELETE CASCADE
                  );
                  CREATE INDEX IF NOT EXISTS idx_task_resources_task ON task_resources(task_id, revision);
+                 CREATE TABLE IF NOT EXISTS task_resource_events (
+                   event_id TEXT PRIMARY KEY,
+                   task_id TEXT NOT NULL,
+                   run_id TEXT NOT NULL,
+                   seq INTEGER NOT NULL,
+                   payload TEXT NOT NULL,
+                   UNIQUE(run_id, seq),
+                   FOREIGN KEY(task_id) REFERENCES task_workspaces(task_id) ON DELETE CASCADE,
+                   FOREIGN KEY(run_id) REFERENCES task_runs(run_id) ON DELETE CASCADE
+                 );
+                 CREATE INDEX IF NOT EXISTS idx_task_resource_events_run
+                   ON task_resource_events(run_id, seq);
+                 CREATE INDEX IF NOT EXISTS idx_task_resource_events_task
+                   ON task_resource_events(task_id, run_id, seq);
                  CREATE TABLE IF NOT EXISTS task_patch_sets (
                    run_id TEXT PRIMARY KEY,
                    task_id TEXT NOT NULL,
@@ -353,6 +371,166 @@ impl WorkspaceStore {
         .collect()
     }
 
+    pub fn append_resource_events(&mut self, events: &mut [ResourceEvent]) -> Result<(), String> {
+        if events.is_empty() {
+            return Ok(());
+        }
+        let run_id = events[0].run_id.clone();
+        if events.iter().any(|event| event.run_id != run_id) {
+            return Err("resource event batch spans multiple runs".into());
+        }
+        let transaction = self
+            .connection
+            .transaction()
+            .map_err(|error| format!("begin resource events transaction: {error}"))?;
+        let mut seq: u64 = transaction
+            .query_row(
+                "SELECT COALESCE(MAX(seq), 0) FROM task_resource_events WHERE run_id=?1",
+                [&run_id],
+                |row| row.get(0),
+            )
+            .map_err(|error| format!("query resource event sequence: {error}"))?;
+        for event in events {
+            seq = seq.saturating_add(1);
+            event.seq = seq;
+            let payload = serde_json::to_string(event).map_err(|error| error.to_string())?;
+            transaction
+                .execute(
+                    "INSERT INTO task_resource_events(event_id,task_id,run_id,seq,payload)
+                     VALUES(?1,?2,?3,?4,?5)",
+                    params![
+                        event.event_id,
+                        event.task_id,
+                        event.run_id,
+                        event.seq,
+                        payload
+                    ],
+                )
+                .map_err(|error| format!("insert resource event: {error}"))?;
+        }
+        transaction
+            .commit()
+            .map_err(|error| format!("commit resource events: {error}"))
+    }
+
+    pub fn list_resource_events(
+        &self,
+        run_id: &str,
+        cursor: Option<u64>,
+        limit: u32,
+    ) -> Result<Vec<ResourceEvent>, String> {
+        let mut statement = self
+            .connection
+            .prepare(
+                "SELECT payload FROM task_resource_events
+                 WHERE run_id=?1 AND seq>?2 ORDER BY seq LIMIT ?3",
+            )
+            .map_err(|error| format!("prepare resource events: {error}"))?;
+        let rows = statement
+            .query_map(
+                params![run_id, cursor.unwrap_or(0), limit.clamp(1, 1000)],
+                |row| row.get::<_, String>(0),
+            )
+            .map_err(|error| format!("query resource events: {error}"))?;
+        rows.map(|row| {
+            let payload = row.map_err(|error| error.to_string())?;
+            serde_json::from_str(&payload).map_err(|error| error.to_string())
+        })
+        .collect()
+    }
+
+    pub fn list_all_resource_events(&self, run_id: &str) -> Result<Vec<ResourceEvent>, String> {
+        let mut events = Vec::new();
+        let mut cursor = None;
+        loop {
+            let page = self.list_resource_events(run_id, cursor, 1000)?;
+            if page.is_empty() {
+                break;
+            }
+            cursor = page.last().map(|event| event.seq);
+            events.extend(page);
+        }
+        Ok(events)
+    }
+
+    pub fn reconcile_resource_events(&mut self, run_id: &str) -> Result<(), String> {
+        let mut events = self.list_all_resource_events(run_id)?;
+        if events.is_empty() {
+            return Ok(());
+        }
+        let transaction = self
+            .connection
+            .transaction()
+            .map_err(|error| format!("begin resource event reconciliation: {error}"))?;
+        for event in &mut events {
+            event.provisional = false;
+            event.reconciled = true;
+            let payload = serde_json::to_string(event).map_err(|error| error.to_string())?;
+            transaction
+                .execute(
+                    "UPDATE task_resource_events SET payload=?2 WHERE event_id=?1",
+                    params![event.event_id, payload],
+                )
+                .map_err(|error| format!("reconcile resource event: {error}"))?;
+        }
+        transaction
+            .commit()
+            .map_err(|error| format!("commit resource event reconciliation: {error}"))
+    }
+
+    pub fn resource_summary(&self, run_id: &str) -> Result<TaskResourceSummary, String> {
+        let events = self.list_all_resource_events(run_id)?;
+        let mut counts = ResourceEventCounts::default();
+        let mut overflow_count = 0_u64;
+        for event in &events {
+            let is_change = match event.kind {
+                ResourceEventKind::Created => {
+                    counts.created += 1;
+                    true
+                }
+                ResourceEventKind::Modified => {
+                    counts.modified += 1;
+                    true
+                }
+                ResourceEventKind::Deleted => {
+                    counts.deleted += 1;
+                    true
+                }
+                ResourceEventKind::Renamed => {
+                    counts.renamed += 1;
+                    true
+                }
+                ResourceEventKind::Any | ResourceEventKind::Gap | ResourceEventKind::Resync => {
+                    false
+                }
+            };
+            if is_change {
+                match event.capture_class {
+                    ResourceCaptureClass::Source => counts.source += 1,
+                    ResourceCaptureClass::Generated => counts.generated += 1,
+                }
+            }
+            overflow_count += u64::from(event.overflow);
+        }
+        let completeness = if overflow_count == 0 {
+            ResourceTimelineCompleteness::Complete
+        } else if events
+            .iter()
+            .any(|event| event.resync_required && !event.reconciled)
+        {
+            ResourceTimelineCompleteness::ResyncRequired
+        } else {
+            ResourceTimelineCompleteness::Reconciled
+        };
+        Ok(TaskResourceSummary {
+            run_id: run_id.to_string(),
+            counts,
+            event_count: events.len() as u64,
+            overflow_count,
+            completeness,
+        })
+    }
+
     pub fn put_patch_set(&self, patch: &crate::PatchSet) -> Result<(), String> {
         let payload = serde_json::to_string(patch).map_err(|error| error.to_string())?;
         self.connection
@@ -499,4 +677,104 @@ fn json_optional<T: serde::de::DeserializeOwned>(
     payload
         .map(|payload| serde_json::from_str(&payload).map_err(|error| error.to_string()))
         .transpose()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{
+        ContributionOrigin, IsolationKind, ResourceEventEvidence, ResourceKind,
+        ResourceTrackingPolicy, TaskWorkspaceState,
+    };
+    use tempfile::TempDir;
+
+    #[test]
+    fn resource_events_are_sequenced_paged_and_reconciled() {
+        let dir = TempDir::new().unwrap();
+        let mut store = WorkspaceStore::open(dir.path(), 1024 * 1024).unwrap();
+        store
+            .put_task(&TaskWorkspace {
+                task_id: "task-1".into(),
+                session_id: "session-1".into(),
+                workspace_root: "/workspace".into(),
+                state: TaskWorkspaceState::Active,
+                revision: 0,
+                created_at: 1,
+                expires_at: 2,
+                pinned: false,
+            })
+            .unwrap();
+        store
+            .put_run(
+                &TaskRun {
+                    run_id: "run-1".into(),
+                    task_id: "task-1".into(),
+                    parent_run_id: None,
+                    agent_id: "agent-1".into(),
+                    agent_kind: "test".into(),
+                    execution_root: "/workspace".into(),
+                    isolation_kind: IsolationKind::Shadow,
+                    isolation_ref: None,
+                    workspace_key: None,
+                    execution_run_id: None,
+                    trace_id: None,
+                    turn_id: None,
+                    attempt_id: None,
+                    provider_attempt_id: None,
+                    surface: None,
+                    tracking_policy: ResourceTrackingPolicy::default(),
+                    baseline_revision: 0,
+                    state: RunState::Running,
+                    created_at: 1,
+                    settled_at: None,
+                },
+                &serde_json::json!({}),
+            )
+            .unwrap();
+        let event = |event_id: &str, kind: ResourceEventKind, overflow: bool| ResourceEvent {
+            event_id: event_id.into(),
+            task_id: "task-1".into(),
+            run_id: "run-1".into(),
+            seq: 0,
+            observed_at: 1,
+            kind,
+            path: (!overflow).then(|| "src/a.ts".into()),
+            old_path: None,
+            capture_class: ResourceCaptureClass::Source,
+            origin: ContributionOrigin::Agent,
+            agent_id: Some("agent-1".into()),
+            evidence: ResourceEventEvidence::Watcher,
+            tool_call_id: None,
+            media_type: Some("text/typescript".into()),
+            size: Some(1),
+            resource_kind: Some(ResourceKind::File),
+            sensitive: false,
+            provisional: true,
+            overflow,
+            resync_required: overflow,
+            reconciled: false,
+        };
+        let mut events = vec![
+            event("event-1", ResourceEventKind::Created, false),
+            event("event-2", ResourceEventKind::Gap, true),
+        ];
+        store.append_resource_events(&mut events).unwrap();
+        assert_eq!(
+            events.iter().map(|event| event.seq).collect::<Vec<_>>(),
+            [1, 2]
+        );
+        assert_eq!(
+            store.list_resource_events("run-1", None, 1).unwrap().len(),
+            1
+        );
+        assert_eq!(
+            store.resource_summary("run-1").unwrap().completeness,
+            ResourceTimelineCompleteness::ResyncRequired
+        );
+        store.reconcile_resource_events("run-1").unwrap();
+        assert_eq!(
+            store.resource_summary("run-1").unwrap().completeness,
+            ResourceTimelineCompleteness::Reconciled
+        );
+    }
 }

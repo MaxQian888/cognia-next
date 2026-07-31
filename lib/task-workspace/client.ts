@@ -1,12 +1,17 @@
 import { onTauriEvent, transport } from "@/lib/tauri"
 import { useTaskWorkspaceStore } from "@/stores/task-workspace-store"
+import { projectTaskWorkspaceRun } from "./projection"
 import type {
   ApplyOutcome,
   DownloadHandle,
   PatchSelection,
   PatchSet,
   ResourceChange,
+  ResourceEvent,
   ResourceRead,
+  ResourceTrackingPolicy,
+  TaskResourceManifest,
+  TaskResourceSummary,
   TaskRun,
   TaskWorkspace,
   TaskWorkspaceResourceEvent,
@@ -25,6 +30,14 @@ export interface BeginTaskWorkspaceTurn {
   agentKind: string
   workspaceRoot: string
   workspaceKey?: string
+  executionRunId?: string
+  traceId?: string
+  traceSpanId?: string
+  turnId?: string
+  attemptId?: string
+  providerAttemptId?: string
+  surface?: string
+  trackingPolicy?: ResourceTrackingPolicy
 }
 
 function safeId(prefix: string, value: string): string {
@@ -52,21 +65,16 @@ export async function beginTaskWorkspaceTurn(
       workspaceRoot: input.workspaceRoot,
       executionRoot: run.executionRoot,
       state: run.state,
+      ...(input.executionRunId ? { executionRunId: input.executionRunId } : {}),
+      ...(input.traceId ? { traceId: input.traceId } : {}),
+      ...(input.traceSpanId ? { traceSpanId: input.traceSpanId } : {}),
+      ...(input.surface ? { surface: input.surface } : {}),
     })
-    await transport.call("task_workspace_watch", { runId: run.runId }).catch(() => undefined)
     return run
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
     const hostDeferred = /remote.control|not authorized|unknown.command|forbidden/i.test(message)
     if (!hostDeferred) throw error
-    useTaskWorkspaceStore.getState().activate({
-      taskId: input.taskId,
-      runId: input.runId,
-      sessionId: input.sessionId,
-      workspaceRoot: input.workspaceRoot,
-      executionRoot: input.workspaceRoot,
-      state: "running",
-    })
     return null
   }
 }
@@ -83,10 +91,23 @@ export async function settleTaskWorkspaceTurn(
       runId: active.runId,
       finalState,
     })
+    if (active.executionRunId || active.traceSpanId) {
+      await getTaskResourceSummary(active.runId)
+        .then((summary) =>
+          projectTaskWorkspaceRun({
+            ...(active.executionRunId ? { executionRunId: active.executionRunId } : {}),
+            taskWorkspaceRunId: active.runId,
+            ...(active.traceSpanId ? { traceSpanId: active.traceSpanId } : {}),
+            ...(active.traceId ? { traceId: active.traceId } : {}),
+            sessionId: active.sessionId,
+            ...(active.surface ? { surface: active.surface } : {}),
+            resources,
+            summary,
+          })
+        )
+        .catch(() => undefined)
+    }
     useTaskWorkspaceStore.getState().reconcile(sessionId, resources)
-    await transport
-      .call("task_workspace_stop_watch", { runId: active.runId })
-      .catch(() => undefined)
     return resources
   } catch {
     return null
@@ -101,6 +122,31 @@ export async function settleTaskWorkspaceRun(
     runId,
     finalState,
   })
+}
+
+export async function settleTaskWorkspaceRunWithProjection(
+  runId: string,
+  finalState: "ready" | "failed" | "cancelled" = "ready"
+): Promise<ResourceChange[]> {
+  const resources = await settleTaskWorkspaceRun(runId, finalState)
+  const active = useTaskWorkspaceStore.getState().activeByRun[runId]
+  if (active?.executionRunId || active?.traceSpanId) {
+    await getTaskResourceSummary(runId)
+      .then((summary) =>
+        projectTaskWorkspaceRun({
+          ...(active.executionRunId ? { executionRunId: active.executionRunId } : {}),
+          taskWorkspaceRunId: runId,
+          ...(active.traceSpanId ? { traceSpanId: active.traceSpanId } : {}),
+          ...(active.traceId ? { traceId: active.traceId } : {}),
+          sessionId: active.sessionId,
+          ...(active.surface ? { surface: active.surface } : {}),
+          resources,
+          summary,
+        })
+      )
+      .catch(() => undefined)
+  }
+  return resources
 }
 
 export function installTaskWorkspaceEventListener(): Promise<() => void> {
@@ -123,6 +169,35 @@ export function listTaskRuns(taskId: string): Promise<TaskRun[]> {
 
 export function listTaskResources(taskId: string): Promise<ResourceChange[]> {
   return transport.call("task_workspace_list_resources", { taskId })
+}
+
+export function listTaskResourceEvents(
+  runId: string,
+  cursor?: number,
+  limit = 200
+): Promise<ResourceEvent[]> {
+  return transport.call("task_workspace_list_resource_events", { runId, cursor, limit })
+}
+
+export function getTaskResourceSummary(runId: string): Promise<TaskResourceSummary> {
+  return transport.call("task_workspace_get_resource_summary", { runId })
+}
+
+export function recordTaskResourceToolEvent(input: {
+  runId: string
+  path: string
+  oldPath?: string
+  kind: "created" | "modified" | "deleted" | "renamed"
+  toolCallId?: string
+}): Promise<ResourceEvent> {
+  return transport.call("task_workspace_record_tool_event", input)
+}
+
+export function exportTaskResourceManifest(
+  taskId: string,
+  runId?: string
+): Promise<TaskResourceManifest> {
+  return transport.call("task_workspace_export_resource_manifest", { taskId, runId })
 }
 
 export function pinTaskWorkspace(taskId: string, pinned: boolean): Promise<TaskWorkspace> {
